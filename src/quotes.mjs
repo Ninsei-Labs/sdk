@@ -354,9 +354,9 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
       // THE QUOTE'S OWN EXPIRY, checked against the clock the core already has. It is bound in the signature too,
       // but a stale quote is refused by its own code rather than looking like a signature failure.
       const validUntil = Number(quote.validUntil);
-      // ШКАЛА - СЕКУНДЫ: та же, что у сроков ордера и block.timestamp. Часы ядра в миллисекундах
-      // (Date.now), поэтому приводится ОДНА граница - «сейчас», а не само значение котировки: одна
-      // единица у значения, один перевод на входе.
+      // THE SCALE IS SECONDS: the same one the order deadlines and block.timestamp use. The core's clock is in
+      // milliseconds (Date.now), so exactly ONE boundary is converted - "now", not the quote's own value: one
+      // unit per value, one conversion at the entrance.
       const nowSec = Math.floor(now() / 1000);
       if (Number.isFinite(validUntil) && validUntil > 0 && validUntil <= nowSec) {
         fail("quote-expired", { step: "signature", validUntil });

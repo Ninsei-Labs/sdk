@@ -6,6 +6,16 @@
   "license": "MIT",
   "type": "module",
   "main": "src/index.mjs",
+  "scripts": {
+    "check": "node tools/check.mjs",
+    "check:syntax": "node tools/check.mjs --only=syntax",
+    "check:import": "node tools/check.mjs --only=import",
+    "check:surface": "node tools/check.mjs --only=surface",
+    "check:mirror": "node tools/check.mjs --only=mirror",
+    "check:language": "node tools/check.mjs --only=language",
+    "check:pack": "node tools/check.mjs --only=pack",
+    "check:secrets": "node tools/check.mjs --only=secrets"
+  },
   "types": "./index.d.ts",
   "exports": {
     ".": {

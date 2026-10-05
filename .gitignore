@@ -1,0 +1,11 @@
+# Installed dependencies.
+node_modules/
+
+# Build output and packer artefacts.
+dist/
+coverage/
+*.tgz
+
+# Editor and OS noise.
+.DS_Store
+Thumbs.db

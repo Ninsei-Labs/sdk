@@ -1,10 +1,11 @@
 name: CI
 
+# The checks run on every pull request and on every push to main. Each check is its own NAMED step, so a red run
+# says which agreement broke without opening the log: the failure carries the step's name.
 on:
   pull_request:
-    types: [opened, ready_for_review, reopened, labeled]
   push:
-    branches: ['release/*']
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -13,22 +14,48 @@ concurrency:
 
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
-  validate:
-    name: Validate demo
+  checks:
+    name: SDK checks
     runs-on: ubuntu-latest
-    if: >-
-      github.event_name != 'pull_request'
-      || (!github.event.pull_request.draft
-          && (github.event.action != 'labeled' || github.event.label.name == 'ci'))
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # pnpm comes from the `packageManager` field in package.json, not from a version pinned here: there is one
+      # place that says which package manager this package uses.
+      - name: Set up pnpm (from packageManager)
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
         with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '25.x'
-      - name: Install deps (root)
-        run: npm ci --no-audit --no-fund
+          node-version: '20.x'
+          cache: pnpm
+
+      # --frozen-lockfile: the lock file is the input, not something CI may rewrite.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check syntax (src and engine parse)
+        run: pnpm run check:syntax
+
+      - name: Check import (the entry point loads in bare Node)
+        run: pnpm run check:import
+
+      - name: Check surface (index.d.ts against the runtime, both ways)
+        run: pnpm run check:surface
+
+      - name: Check engine mirror (parses, no dangling imports)
+        run: pnpm run check:mirror
+
+      - name: Check language (no Cyrillic outside the engine mirror)
+        run: pnpm run check:language
+
+      - name: Check package contents (the tarball against `files`)
+        run: pnpm run check:pack
+
+      - name: Check for secrets
+        run: pnpm run check:secrets
