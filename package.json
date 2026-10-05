@@ -1,0 +1,61 @@
+{
+  "name": "@ninsei-labs/sdk",
+  "version": "0.38.0",
+  "packageManager": "pnpm@9.15.9",
+  "description": "XMR <-> EVM swap engine: quotes, guards, order steps, recovery (no DOM, no user-facing strings)",
+  "license": "MIT",
+  "type": "module",
+  "main": "src/index.mjs",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./src/index.mjs",
+      "default": "./src/index.mjs"
+    },
+    "./adapters": {
+      "default": "./src/adapters/index.mjs"
+    }
+  },
+  "files": [
+    "src",
+    "engine",
+    "index.d.ts",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "xmr",
+    "monero",
+    "evm",
+    "ethereum",
+    "atomic-swap",
+    "cross-chain",
+    "swap",
+    "sdk",
+    "quotes",
+    "guards",
+    "recovery",
+    "esm",
+    "typescript"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aleksraiden/arrakisswap-demo.git",
+    "directory": "sdk"
+  },
+  "homepage": "https://github.com/aleksraiden/arrakisswap-demo/tree/main/sdk#readme",
+  "bugs": {
+    "url": "https://github.com/aleksraiden/arrakisswap-demo/issues"
+  },
+  "dependencies": {
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
+    "keccak256": "^1.0.6"
+  },
+  "sideEffects": false
+}
