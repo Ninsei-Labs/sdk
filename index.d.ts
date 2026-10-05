@@ -174,6 +174,10 @@ export interface SdkConfig {
   readonly settlement: { readonly chain: ChainConfig; readonly vm: string };
   readonly chains: readonly ChainConfig[];
   readonly xmrNetworks: readonly string[];
+  /** The witness nodes per Monero network: the built-in defaults merged with the `nodes` and `addNodes` options. */
+  readonly xmrNodes: Readonly<Record<string, readonly (XmrNode | string)[]>>;
+  /** The witness nodes for one Monero network; a network with no nodes answers an empty list. */
+  nodesFor(network: string): readonly (XmrNode | string)[];
   readonly assetsBase: string;
   readonly apiBase: string;
   readonly mode: "live" | "sim";
@@ -1144,6 +1148,14 @@ export type ErrorCode =
   | "quote-provider-mismatch"
   /** The chain confirms the provider, but this interface's allow-list does not admit it (policy). */
   | "quote-provider-not-allowed"
+  /** There was no way to read the factory or its code: the claim stays unproven (issue #103). */
+  | "quote-factory-unchecked"
+  /** The provider's registry record names no factory (zero). */
+  | "quote-factory-unknown"
+  /** The signed quote names a different factory than the registry record. */
+  | "quote-factory-mismatch"
+  /** The factory's runtime code is not a build this interface knows (`extcodehash`). */
+  | "quote-factory-code-unknown"
   | "recovery-declined"
   | "recovery-failed"
   | "storage-unavailable"
@@ -1158,8 +1170,40 @@ export type ErrorCode =
    * the ready mark must not be signed under it.
    */
   | "xmr-locked"
+  /** A synced witness node disagrees about the block or the transaction (issue #85). */
+  | "xmr-nodes-disagree"
+  /** Every witness node is unreachable, so nothing can be confirmed. */
+  | "xmr-no-nodes"
+  /** The amount that arrived is below the expected one. */
+  | "xmr-underpaid"
+  /** Less time remains before the ready deadline than the required confirmations take. */
+  | "xmr-too-late"
   | "contract-reverted"
   | "insufficient-funds"
+  /** The maker declines to pay the claim gas; the refusal is shown before the deal (issue #78). */
+  | "gas-refused-by-maker"
+  /** The claim gas was ordered but the recipient's balance did not grow. */
+  | "gas-not-arrived"
+  /** Gas arrived, but below what a claim costs. */
+  | "gas-too-little"
   | "unknown";
+
+/**
+ * An SDK refusal or breakdown, raised with a code and params and NO human-facing text: the wording is the
+ * interface's. `message` is deliberately equal to `code`, so it reads cleanly in logs.
+ */
+export declare class SdkError extends Error {
+  readonly code: ErrorCode;
+  readonly params: Readonly<Record<string, unknown>>;
+  constructor(code: ErrorCode, params?: Readonly<Record<string, unknown>>);
+  toJSON(): { readonly code: ErrorCode; readonly params: Readonly<Record<string, unknown>> };
+}
+
+/** The step codes the SDK works with (`state.step`): the same list as the `StepCode` type. */
+export declare const STEP_CODES: readonly StepCode[];
+/** The check codes a preflight verdict names (`checks[].code`): the same list as the `CheckCode` type. */
+export declare const CHECK_CODES: readonly CheckCode[];
+/** The error codes the SDK refuses with (`error.code`, `SdkError.code`): the same list as the `ErrorCode` type. */
+export declare const ERROR_CODES: readonly ErrorCode[];
 
 export declare function createNinsei(options: NinseiOptions): Ninsei;

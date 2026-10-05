@@ -632,8 +632,8 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         edViewPointLocker: builtSide.own.viewPoint,
       } : {};
       const lockRequest = { ...request.order, ...derived, amountWei: request.order.amount };
-      // ПОДПИСАННАЯ КОТИРОВКА: комиссия, адрес реестра и провайдер живут в НЕЙ, а не в фабрике
-      // (решение #76). Её приносит вызывающий (интерфейс получил её от мейкера); без неё замок не подписывается.
+      // A SIGNED QUOTE: the fee, the registry address and the provider live in IT, not in the factory
+      // (decision #76). It is brought by the caller (the interface got it from the maker); without it the lock is not signed.
       lockRequest.quote = request.orderQuote || null;
       let funded = null;
       try { funded = await lock.send(lockRequest, wallet, { call: reader }); }
