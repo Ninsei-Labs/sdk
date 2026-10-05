@@ -31,7 +31,13 @@ export * as order from "../engine/atomic/order.js";
 export * as halfenc from "../engine/atomic/halfenc.js";
 // The engine's EVM layer: talking to the chain (order terms, sending, reading) - through this seam.
 export * as evm from "../engine/evm/index.js";
-export * as swapFlow from "../engine/core/swap-flow.js";
+// THE DEAL ENGINE NO LONGER LIVES IN www/js (#32, wave 3): the order flow moved into the package
+// (sdk/src/swap-flow.mjs) and is declared in sdk/index.d.ts. The page reaches it through the bridge, so the
+// mirror no longer carries core/swap-flow.js - what stays in the seam is the ORDER CLIENT (the half worker),
+// the ORDER QUOTE source and the shared CLAIM GAS LIMIT that the moved flow reads through this same seam.
+export * as orderClient from "../engine/atomic/order-client.js";
+export * as rfqSource from "../engine/core/rfqSource.js";
+export * as claimGas from "../engine/evm/claimGas.js";
 export * as escrow from "../engine/evm/escrow.js";
 export * as halvesSweep from "../engine/monero/halvesSweep.js";
 // MONERO ADDRESSES - THROUGH THE SAME MODULE THE DEMO USES. The format, the network prefixes and the address

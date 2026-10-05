@@ -75,14 +75,14 @@ const isPoint = (h) => /^0x[0-9a-f]{64}$/.test(String(h));
 // THE PROVEN POINT AND THE POINT IN THE ORDER MUST BE WRITTEN IDENTICALLY. The engine compares them AS STRINGS
 // (order.js, verifySide), so the record's form is part of the check, not cosmetics: without bringing both to one
 // form, a correct proof would look like a discrepancy. The page does the same
-// (core/swap-flow.js: it normalises both proof.XB and the point). One normalisation for both sides.
+// (sdk/src/swap-flow.mjs: it normalises both proof.XB and the point). One normalisation for both sides.
 const sameFormAsPoint = (proof) => (proof && typeof proof === "object" && proof.XB ? { ...proof, XB: norm(proof.XB) } : proof);
 // A POINT AT THE BOUNDARY IS IN CANONICAL FORM (0x + lowercase). The engine's points arrive WITHOUT the 0x prefix
 // (that is how www/js/atomic/halves.js stores them), while the proof check compares points AS STRINGS. The
 // normalisation must be SYMMETRIC: the proven point of the proof is already normalised by sameFormAsPoint, so the
 // counterparty's declared point is normalised the same way - otherwise the same number written once with 0x and
 // once without would give a false quote-refused { step: "proof" } on a matching proof. The page does the same
-// (www/js/core/swap-flow.js, with0x). Not a string - then there is no point: we leave it as is, this is a refusal
+// (sdk/src/swap-flow.mjs, with0x). Not a string - then there is no point: we leave it as is, this is a refusal
 // "no point", not "point in another form".
 const pointForm = (v) => (typeof v === "string" && v ? norm(v) : v);
 
@@ -112,7 +112,7 @@ export function acceptCounterparty({ context, side = null, counterparty = null, 
     // comes from `quotes.firm`, and there the point is called `edPointClaimer`, the view half - `viewHalfClaimer`
     // (rfq/orderQuote.mjs). While only `edPub`/`viewPub` were accepted, the facade's own side was NOT accepted:
     // start answered bad-input { field: "counterparty", missing: ["edPub"] } to its own answer. The engine knew
-    // this mapping (www/js/core/swap-flow.js: edPub: quote.edPointClaimer). We accept BOTH names.
+    // this mapping (sdk/src/swap-flow.mjs: edPub: quote.edPointClaimer). We accept BOTH names.
     accepted = {
       proof: sameFormAsPoint(counterparty.proof),
       edPub: pointForm(counterparty.edPub || counterparty.edPoint || counterparty.edPointClaimer || pub.ed || null),
@@ -128,7 +128,7 @@ export function acceptCounterparty({ context, side = null, counterparty = null, 
     };
   } else if (standIn === true) {
     // THE STAND-IN IS COMPUTED IN THE SAME CONTEXT AS THE ORDER: the string gets nothing appended. The same path
-    // as the page (core/swap-flow.js: worker.buildSide) and the flow check - otherwise what would be checked is
+    // as the page (sdk/src/swap-flow.mjs: worker.buildSide) and the flow check - otherwise what would be checked is
     // not what the page runs on.
     const mock = builder().newSide(context, true);
     accepted = { proof: sameFormAsPoint(mock.proof), edPub: norm(mock.pub.ed), viewPoint: norm(mock.viewPub),

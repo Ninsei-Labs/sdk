@@ -30,11 +30,12 @@
 //   * Ссылка на бандл несёт ?v=<хеш> (tools/assetVersions.mjs, tools/stamp-assets.mjs): кеш пограничного
 //     слоя сбрасывается сам после пересборки.
 //
-// ПОЧЕМУ ЗАПАСНОЙ ПУТЬ ОСТАЁТСЯ (и почему он не «вторая логика»). Если бандл не загрузился (нет файла,
-// старый кеш, сеть), действия ордера идут прежним вызовом движка. Это ОДНИ И ТЕ ЖЕ функции: sdk/src/
-// actions.mjs внутри зовёт engine.swapFlow.markReadyOrder/claimOrder/refundOrder - ровно их же зовёт
-// запасной путь. Второй редакции правил здесь нет. Переход виден в консоли: при отказе загрузки печатается
-// причина, молчания нет.
+// ЗАПАСНОГО ПУТИ У ДЕЙСТВИЙ ОРДЕРА БОЛЬШЕ НЕТ, И ЭТО НЕ ПОТЕРЯ, А СЛЕДСТВИЕ ПЕРЕЕЗДА (#32, волна 3). Раньше
+// www/js/core/swap-flow.js лежал на странице, и при недоступном бандле действия ордера шли им же - «одни и те
+// же функции», как здесь и было написано. Теперь движок сделки - СОБСТВЕННЫЙ модуль пакета
+// (sdk/src/swap-flow.mjs): второй копии на странице нет, значит и запасного пути быть не может. Бандл не
+// загрузился (нет файла, старый кеш, сеть) - это НАЗВАННЫЙ отказ с причиной в консоли (sdkBundle ниже), а не
+// молчание и не подмена.
 
 import { chainById, DEFAULT_CHAIN, MONERO, allowedProvidersFor, knownFactoryCodesFor } from "../core/config.js";
 import { storage as pageStorage } from "../core/store.js";
@@ -44,15 +45,31 @@ import * as evm from "../evm/index.js";
 // (core/finality.js), соль - генератором движка (evm/funding.js). Своих сроков и своих чисел здесь нет.
 import { orderWindows } from "../core/finality.js";
 import { newSecret } from "../evm/funding.js";
-// ПРЕЖНИЕ ВЫЗОВЫ ОРДЕРА - ЗАПАСНОЙ ПУТЬ на время, пока ядро не собрано странице (см. выше).
-// Имена берём с псевдонимом: наружу склейник отдаёт ИМЕННО те же имена (markReadyOrder/claimOrder/refundOrder),
-// поэтому экран меняет только источник импорта, а не строку вызова - и стража, которая держит место вызова,
-// видит прежний вызов.
-import { markReadyOrder as engineMarkReadyOrder, claimOrder as engineClaimOrder, refundOrder as engineRefundOrder } from "../core/swap-flow.js";
+// ВЫЗОВЫ ОРДЕРА - ДЕЙСТВИЕ  И ЧТЕНИЕ - ОТ ЯДРА. Движок сделки переехал в пакет (#32, волна 3), и наружу
+// склейник отдаёт ИМЕННО те же имена (markReadyOrder/claimOrder/refundOrder/orderStatus/orderDeadlines),
+// поэтому экран меняет только источник, а не строку вызова - и стража, которая держит место вызова
+// (tools/check-signing-guards.mjs, tools/check-arrival-depositor.mjs), видит прежний вызов.
+// СПИСОК СДЕЛОК И ЕГО ОБСЛУЖИВАНИЕ (экран #/swaps). Состояния отдаёт ЯДРО: swaps.list - показ, swaps.sync -
+// слияние с серверным списком, swaps.forget - уборка записи. Ядру для этого нужны только швы страницы
+// (пропуск и хранилище), и оба уже подсунуты выше - своих правил слияния склейник не заводит.
+//
+// СЛЕЖЕНИЕ - МЕХАНИЗМ СТРАНИЦЫ, А НЕ ЯДРА: такт опроса живёт в app.js, поэтому фокус остаётся в
+// core/swap.js, а экран только объявляет его склейнику.
+import { setLiveFocus, dealSwapIds, serverRestoreHeightFor, STEP_LABELS,
+  confirmReady as engineConfirmReady, refundEth as engineRefundEth, sweepNow as engineSweepNow,
+  getSwap as engineGetSwap, saveSwap as engineSaveSwap } from "../core/swap.js";
+// СТАВКА КОМИССИИ И СОСТОЯНИЕ ОРДЕРА - ЧТЕНИЕ ЦЕПИ КОШЕЛЬКОМ СТРАНИЦЫ: их берут справочник ("как это
+// работает") и разбор recovery-файла. Страница получает их ОТСЮДА, а не из evm/* напрямую.
+import { cachedFeeRate } from "../evm/fees.js";
+// АДРЕС И ВЫСОТА MONERO - ОСОЗНАННЫЕ ЧТЕНИЯ СТРАНИЦЫ (экран хода): проверка формы адреса получателя и высота
+// узла для высоты скана в файле восстановления. Логика адреса живёт в ядре (swaps.addressNetwork), здесь -
+// запасной путь тем же модулем; высота узла - чтение ноды страницы, своего узла у ядра нет.
+import { networkFromShape } from "../monero/address.js";
+import { height as nodeHeightValue } from "../monero/node.js";
 
 // АДРЕС ЯДРА СТРОКОЙ - СОБРАННЫЙ БАНДЛ ПОД www/ (tools/build-sdk.mjs): страница получает ядро ОДНИМ
 // модулем, а не пачкой исходников sdk/. ?v=<хеш> проставляет tools/stamp-assets.mjs.
-const SDK_BUNDLE = "/assets/vendors/sdk/sdk-browser.js?v=f62a6201";
+const SDK_BUNDLE = "/assets/vendors/sdk/sdk-browser.js?v=11f2239a";
 
 // ОДНА ЗАГРУЗКА НА СТРАНИЦУ. Отказ - это состояние, а не поломка: он назван в консоли, и вызывающий решает.
 let loading = null;
@@ -153,33 +170,28 @@ function walletFor(mods) {
 export async function markReadyOrder({ escrow, expect } = {}) {
   const mods = await sdkCoreModules();
   const wallet = mods ? walletFor(mods) : null;
-  if (mods && wallet) {
-    return await mods.actions.createActions({ call: (r) => evm.readContract(r) })
-      .markReady({ escrow, expect }, wallet);
-  }
-  return await engineMarkReadyOrder({ escrow, expect });
+  // ЯДРО И КОШЕЛЁК - ОБЯЗАТЕЛЬНЫ: запасного пути (движок на странице) больше нет. Отказ назван, а не молчание.
+  if (!mods || !wallet) throw new Error("[bridge] отметку готовности подписать нечем: " + (mods ? "кошелёк не подключён" : "ядро SDK странице не отдалось"));
+  return await mods.actions.createActions({ call: (r) => evm.readContract(r) })
+    .markReady({ escrow, expect }, wallet);
 }
 
 export async function claimOrder({ escrow, halfClaimer, expect } = {}) {
   const mods = await sdkCoreModules();
   const wallet = mods ? walletFor(mods) : null;
-  if (mods && wallet) {
-    return await mods.actions.createActions({ call: (r) => evm.readContract(r) })
-      .claim({ escrow, halfClaimer, expect }, wallet);
-  }
-  return await engineClaimOrder({ escrow, halfClaimer, expect });
+  if (!mods || !wallet) throw new Error("[bridge] забор подписать нечем: " + (mods ? "кошелёк не подключён" : "ядро SDK странице не отдалось"));
+  return await mods.actions.createActions({ call: (r) => evm.readContract(r) })
+    .claim({ escrow, halfClaimer, expect }, wallet);
 }
 
 export async function refundOrder({ escrow, halfLocker } = {}) {
   const mods = await sdkCoreModules();
   const wallet = mods ? walletFor(mods) : null;
-  if (mods && wallet) {
-    return await mods.actions.createActions({ call: (r) => evm.readContract(r) })
-      .refund({ escrow, halfLocker }, wallet);
-  }
+  if (!mods || !wallet) throw new Error("[bridge] возврат подписать нечем: " + (mods ? "кошелёк не подключён" : "ядро SDK странице не отдалось"));
   // ОЖИДАНИЙ ЗДЕСЬ НЕТ НАМЕРЕННО: экран возврата их не передавал, и дописать их значило бы включить сверку
   // слотов там, где её не было, - то есть изменить поведение возврата.
-  return await engineRefundOrder({ escrow, halfLocker });
+  return await mods.actions.createActions({ call: (r) => evm.readContract(r) })
+    .refund({ escrow, halfLocker }, wallet);
 }
 
 // --- АВТОМАТИЧЕСКИЙ РАННИЙ ВОЗВРАТ (issue #88) ------------------------------------------------------
@@ -472,3 +484,124 @@ export async function sdkWatchSwap(request) {
   if (!ctx) return null;
   return ctx.sdk.swaps.watch(request);
 }
+
+// --- СПИСОК СДЕЛОК ОТ ЯДРА (экран #/swaps) ---------------------------------------------------------
+// ЧТЕНИЕ, СЛИЯНИЕ И УБОРКА ИДУТ ЧЕРЕЗ ЯДРО, А НЕ ЧЕРЕЗ ДВИЖОК НА ЭКРАНЕ. sdkListSwaps выше отдаёт
+// состояния сделок (swaps.list); ниже - серверный список (swaps.sync: путь и правило слияния живут в ядре)
+// и уборка записи (swaps.forget: она убирает запись только здесь, на сервере и в контракте всё остаётся).
+// Ядро не поднялось - null, и причину называет консоль (см. sdkBundle), а не молчание.
+export async function sdkSyncSwaps(chainSlug) {
+  const ctx = await instanceFor(chainSlug);
+  return ctx ? ctx.sdk.swaps.sync() : null;
+}
+
+export async function sdkForgetSwap(id, chainSlug) {
+  const ctx = await instanceFor(chainSlug);
+  return ctx ? ctx.sdk.swaps.forget(id) : null;
+}
+
+// СЛЕЖЕНИЕ И ЧТЕНИЯ СТРАНИЦЫ - ЧЕРЕЗ ТОТ ЖЕ ШОВ, ПОД ПРЕЖНИМИ ИМЕНАМИ. Экран объявляет фокус опроса и
+// читает ставку комиссии (справочник) ЗДЕСЬ, а не из core/ и evm/ напрямую. Имена оставлены ДОСЛОВНО теми
+// же, что были у движка (тот же приём, что у markReadyOrder/claimOrder/refundOrder выше): экран меняет
+// ИСТОЧНИК импорта, а не строку вызова. Состояние ордера (orderStatus/orderDeadlines) объявлено функциями
+// выше - это те же чтения, но теперь правила чтения живут в пакете, а не в www/js/core/swap-flow.js.
+export { setLiveFocus, cachedFeeRate, dealSwapIds, serverRestoreHeightFor, STEP_LABELS };
+
+// СОСТОЯНИЕ ОРДЕРА И ЕГО СРОКИ - ЧТЕНИЕ ЦЕПИ КОШЕЛЬКОМ СТРАНИЦЫ, НО ЧЕРЕЗ ЯДРО (#32, волна 3). Сами правила
+// чтения (status()/t1()/termsHash()/readyBy() и разбор ответов) переехали в пакет (sdk/src/swap-flow.mjs,
+// фасад order.status/order.deadlines). Склейник отдаёт их экрану ПОД ПРЕЖНИМИ ИМЕНАМИ, а кошелёк-читатель
+// подсовывает ядру тот же, что и у действий ордера (optionsFor -> evmCall), поэтому читает тот же кошелёк,
+// что и подпишет. Ядро не загрузилось - НАЗВАННЫЙ отказ, а не молчание и не пустое состояние.
+export async function orderStatus(escrow) {
+  const ctx = await instanceFor(undefined);
+  if (!ctx) throw new Error("[bridge] состояние ордера не прочитать: ядро SDK странице не отдалось");
+  return ctx.sdk.order.status(escrow);
+}
+
+export async function orderDeadlines(escrow) {
+  const ctx = await instanceFor(undefined);
+  if (!ctx) throw new Error("[bridge] сроки ордера не прочитать: ядро SDK странице не отдалось");
+  return ctx.sdk.order.deadlines(escrow);
+}
+
+// ВЫСОТА УЗЛА MONERO - ЧТЕНИЕ СТРАНИЦЫ. Своего нода у ядра нет (все чтения цепи идут через адаптер кошелька
+// страницы), поэтому высота для высоты скана берётся здесь, а не выдумывается. Имя сохранено (nodeHeight).
+export async function nodeHeight() { return nodeHeightValue(); }
+
+// --- СОСТОЯНИЕ И ДЕЙСТВИЯ ДЕМОНСТРАЦИОННОЙ СДЕЛКИ (экран хода, progress.js) -------------------------
+// СОСТОЯНИЕ ОТДАЁТ ЯДРО: swaps.progress собирает снимок сделки (запись + вывод состояния + кошелёк из половин).
+// Прежней движковой дороги у экрана НЕТ (в отличие от действий ордера выше): ядро не поднялось - null, и экран
+// честно говорит, что состояния нет. Так же устроен и экран списка (sdkListSwaps).
+export async function sdkProgress(id, chainSlug) {
+  const ctx = await instanceFor(chainSlug);
+  return ctx ? ctx.sdk.swaps.progress(id) : null;
+}
+
+// ДЕЙСТВИЯ И ЗАПИСЬ ДЕМОНСТРАЦИОННОЙ СДЕЛКИ - через ядро, с прежним вызовом движка как запасным путём: это ТЕ ЖЕ
+// функции (sdk/src/swaps.mjs зовёт engine.swap.*). Имена - ядра (swaps.confirmReady/refundEth/sweepNow/
+// setDestination), а не строки вызова экрана.
+export async function sdkConfirmReady(id) {
+  const ctx = await instanceFor(undefined);
+  if (ctx) return ctx.sdk.swaps.confirmReady(id);
+  return engineConfirmReady(id);
+}
+
+export async function sdkRefundEth(id, by = "you") {
+  const ctx = await instanceFor(undefined);
+  if (ctx) return ctx.sdk.swaps.refundEth(id, by);
+  return engineRefundEth(id, by);
+}
+
+export async function sdkSweepNow(id) {
+  const ctx = await instanceFor(undefined);
+  if (ctx) return ctx.sdk.swaps.sweepNow(id);
+  return engineSweepNow(id);
+}
+
+export async function sdkSetDestination(id, address) {
+  const ctx = await instanceFor(undefined);
+  if (ctx) return ctx.sdk.swaps.setDestination(id, address);
+  const swap = engineGetSwap(id);
+  if (!swap) return null;
+  swap.receiveAddress = address;
+  return engineSaveSwap(swap);
+}
+
+// СЕТЬ АДРЕСА MONERO - ПОВЕРХНОСТЬ ЯДРА (оно владеет форматом адреса): склейник только отдаёт её экрану.
+// Запасной путь - тот же модуль, что зеркалит ядро (www/js/monero/address.js): второй таблицы префиксов нет.
+export async function sdkAddressNetwork(address) {
+  const ctx = await instanceFor(undefined);
+  if (ctx) return ctx.sdk.swaps.addressNetwork(address);
+  try { return networkFromShape(address); } catch { return null; }
+}
+
+// --- ВИТРИНА И МЕХАНИЗМЫ СТРАНИЦЫ: ФОРМА, ПОДПИСЬ, ПРОДАЖА, ОСНОВАНИЕ -------------------------------
+// ЗДЕСЬ ЖИВЁТ ТО, ЧТО ЭКРАНЫ БРАЛИ У ДВИЖКА НАПРЯМУЮ, а теперь берут ТЕМ ЖЕ ШВОМ - под теми же именами.
+// Это ОСОЗНАННО оставшееся и названное, а не забытое:
+//   * evm, swapCore, moneroNode - механизмы СТРАНИЦЫ: кошелёк (подпись возможна только в его провайдере),
+//     свод сделок и такт опроса, чтения и опрос узла Monero (своего узла у ядра нет);
+//   * цены, комиссии, газ и DEX-нога формы - ВИТРИНА: числа читаются у цепи модулями движка, а экран
+//     получает их швом, а не второй дорогой в движок;
+//   * networkFromShape/networkLabel - форма адреса Monero и её название: тот же модуль формата, что
+//     зеркалит ядро (второй таблицы префиксов нет);
+//   * createOrderWorker - воркер половин атомарного свопа: криптография живёт в одном месте и зовётся
+//     воркером, чтобы главный поток не замирал;
+//   * createSwap/createReverseSwap/activeSwaps - ЗАПИСЬ демонстрационной и обратной сделки (запись ведёт
+//     движок; ядро отдаёт её СОСТОЯНИЕ через swaps.list/swaps.progress).
+// ИМЯ БЕРЁТСЯ ИЗ ДВИЖКА ЗДЕСЬ ЖЕ (импортом) И ОТДАЁТСЯ НАРУЖУ (экспортом) - один шов, одна копия. Ни
+// одного нового правила здесь нет: экран меняет источник импорта, а не строку вызова.
+import { networkLabel, probeMode } from "../monero/wallet.js";
+import { amountInputValue } from "../evm/amounts.js";
+import { refreshChainPrices, priceLabel } from "../evm/prices.js";
+import { orderGasReservePlan } from "../evm/gasReserve.js";
+import { quoteDexOut, dexLegVerdict } from "../evm/dex.js";
+import { toWei } from "../evm/funding.js";
+import { cachedFeeTerms, feeWeiFor, ensureFeeTerms } from "../evm/fees.js";
+import { createOrderWorker } from "../atomic/order-client.js";
+import { activeSwaps, createSwap, createReverseSwap } from "../core/swap.js";
+
+export { evm, networkFromShape };
+export * as swapCore from "../core/swap.js";
+export * as moneroNode from "../monero/node.js";
+export { networkLabel, probeMode, amountInputValue, refreshChainPrices, priceLabel, orderGasReservePlan, quoteDexOut, dexLegVerdict, toWei, cachedFeeTerms, feeWeiFor, ensureFeeTerms, createOrderWorker, activeSwaps, createSwap, createReverseSwap };
+

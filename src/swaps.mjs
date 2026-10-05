@@ -166,6 +166,28 @@ export function toState(swap) {
   return {
     id: swap.id,
     direction: swap.side === "sell" ? "sell" : "buy",
+    // WHAT THE LIST SHOWS, NOT ONLY THE STEPPER (www/js/ui/views/info.js, swapsView). The list needs the date,
+    // who gave the price, the human name of the phase and whether the swap is settled - and it must take them
+    // from the CORE, not by reaching into the record itself. The names repeat the record's (core/swap.js,
+    // createSwap: createdAt, maker, escrow).
+    createdAt: swap.createdAt ?? null,
+    maker: {
+      id: (swap.makerId !== undefined && swap.makerId !== null) ? swap.makerId : ((swap.maker && swap.maker.id) ?? null),
+      name: (swap.makerName !== undefined && swap.makerName !== null) ? swap.makerName : ((swap.maker && swap.maker.name) ?? null),
+    },
+    // THE HUMAN NAME OF THE PHASE IS THE ENGINE'S (derive -> phaseLabel): the words on the screen come from the
+    // same place as the state they describe, so they cannot drift apart.
+    phase: d.phase || null,
+    phaseLabel: d.phaseLabel || null,
+    // "LIVE OR SETTLED" IS THE RECORD'S SETTLEMENT, exactly as the screen split it before. It is NOT read from
+    // the phase's text: the text is for the person, the flag is for the code.
+    settled: !!swap.settlement,
+    // WHAT HAS ALREADY MOVED ON THE SWAP - the two signs the removal prompt warns about. Computed HERE from the
+    // record: the screen must not reach into it for them.
+    funds: {
+      receivedXmr: num(d.xmrAmount && d.xmrAmount.seen) ?? 0,
+      escrowLocked: !!(swap.escrow && (swap.escrow.fundTx || swap.escrow.secret)),
+    },
     pay: { token: swap.payToken || "eth", amount: num(swap.payAmount) ?? 0 },
     get: { xmr: num(swap.xmrAmount) ?? 0 },
     step: active.code,
@@ -218,7 +240,7 @@ const recordInputOf = (request) => {
     xmrAmount: quote.size !== undefined ? quote.size : undefined,
     // THE ORDER-QUOTE ID IS PART OF THE RECORD, NOT A DETAIL OF THE SCREEN (a defect found): our service uses it to
     // tie the created escrow to the provider node's record, and without it the node cannot take the ETH
-    // (www/js/core/swap-flow.js: quoteId: quote.id -> swap.orderQuoteId; markBodyOf reads exactly this field).
+    // (sdk/src/swap-flow.mjs: quoteId: quote.id -> swap.orderQuoteId; markBodyOf reads exactly this field).
     orderQuoteId: pass(quote.id),
     // WHERE TO WITHDRAW XMR: part of the record, not a detail of the screen - the progress screen exports the file by it.
     receiveAddress: pass(request.receiveTo),
@@ -422,6 +444,126 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       if (typeof id !== "string" || !id) throw new SdkError("bad-input", { field: "id" });
       const found = records().find((s) => s.id === id);
       return found ? toState(found) : null;
+    },
+
+    /**
+     * THE DEAL-PROGRESS SNAPSHOT. The progress screen shows one swap live: which steps are done, how many Monero
+     * confirmations are left, what is allowed now, when the refund opens, what the Monero leg is doing - plus the
+     * record's own facts (the escrow, the maker, the amounts, the one-time address, the destination). ALL of it is
+     * assembled HERE: the record is read (engine.swap.getSwap), the state is DERIVED by the core
+     * (engine.swap.derive) and the wallet is rebuilt from the halves (engine.swap.halvesWalletOf). The screen only
+     * draws this snapshot - it no longer reads the record or derives the state itself, so there is one
+     * implementation of the deal's rules instead of two.
+     *
+     * `null` means "there is no such record" - it is NOT an empty state.
+     */
+    async progress(id) {
+      if (typeof id !== "string" || !id) throw new SdkError("bad-input", { field: "id" });
+      const swap = engine.swap.getSwap(id);
+      if (!swap) return null;
+      return {
+        id: String(swap.id || id),
+        // THE RECORD'S OWN FIELDS. The screen shows them and hands the escrow back as the order expectations for a
+        // live action (markReady/claim/refund), so they travel as they are - no second copy of the record.
+        swap,
+        // THE WALLET REBUILT FROM THE HALVES: the recovery file is assembled from it, and the half-of-the-key rule
+        // stays the engine's (halvesWalletOf), not a second reading on the screen.
+        swapWallet: engine.swap.halvesWalletOf(swap),
+        // THE DERIVED DEAL VIEW: the phase, the allowed actions, the deadlines, the steps, the Monero leg and the
+        // amounts. The field names are the engine's (derive) - one source for the state and the words about it.
+        view: engine.swap.derive(swap),
+      };
+    },
+
+    /**
+     * THE DEMONSTRATION RECORD'S ACTIONS (mode "sim"): confirming readiness, refunding the ETH, sweeping the XMR.
+     * In a LIVE swap the same steps go through `actions` (a real escrow and the wallet adapter); here they are the
+     * sandbox's record mutations, kept in ONE place instead of on the screen.
+     */
+    async confirmReady(id) {
+      if (typeof id !== "string" || !id) throw new SdkError("bad-input", { field: "id" });
+      return engine.swap.confirmReady(id);
+    },
+    async refundEth(id, by = "you") {
+      if (typeof id !== "string" || !id) throw new SdkError("bad-input", { field: "id" });
+      return engine.swap.refundEth(id, by);
+    },
+    async sweepNow(id) {
+      if (typeof id !== "string" || !id) throw new SdkError("bad-input", { field: "id" });
+      return engine.swap.sweepNow(id);
+    },
+
+    /**
+     * WHERE TO WITHDRAW THE XMR. Sets the record's `receiveAddress` and saves it: the destination is part of the
+     * recovery file, so the change is WRITTEN (named), not inferred. The order and the chain are untouched.
+     * `null` - there is no such record.
+     */
+    async setDestination(id, address) {
+      if (typeof id !== "string" || !id) throw new SdkError("bad-input", { field: "id" });
+      if (typeof address !== "string" || !address) throw new SdkError("bad-input", { field: "address" });
+      const swap = engine.swap.getSwap(id);
+      if (!swap) return null;
+      swap.receiveAddress = address;
+      return engine.swap.saveSwap(swap);
+    },
+
+    /**
+     * THE MONERO NETWORK OF AN ADDRESS, BY ITS SHAPE. The format and the network prefixes live in one module
+     * (engine.xmrAddress), the SAME one the Monero wallet adapter uses - the interface must not keep a prefix table
+     * of its own. `null` - not an address of a known network.
+     */
+    async addressNetwork(address) {
+      if (typeof address !== "string" || !address) return null;
+      try { return engine.xmrAddress.networkFromShape(address); } catch { return null; }
+    },
+
+    /**
+     * REMOVING A RECORD FROM THE LIST. The record leaves THIS store only: on the service and in the contract
+     * everything stays, so this is a tidy-up of the list, not a cancellation of the swap. `false` means there was
+     * no such record - the caller tells that apart from a refusal.
+     */
+    async forget(id) {
+      if (typeof id !== "string" || !id) throw new SdkError("bad-input", { field: "id" });
+      let state = null;
+      try { state = engine.store.loadState(); } catch { throw new SdkError("storage-unavailable", { step: "forget" }); }
+      const swaps = state && state.swaps;
+      if (!swaps || !swaps[id]) return false;
+      delete swaps[id];
+      try { engine.store.saveState(state); } catch { throw new SdkError("storage-unavailable", { step: "forget" }); }
+      return true;
+    },
+
+    /**
+     * THE SERVICE'S SWAP LIST, MERGED INTO THE LOCAL ONE. The path and the body are the page's
+     * (www/js/evm/auth.js, loadServerSwaps: GET /api/evm-swaps, the address ties the list to the wallet). The
+     * merge rule is the ENGINE'S (core/swap.js, addServerSwaps): a local record always wins, the service only
+     * adds what this browser does not have, and the rules are not written a second time here. The pass is
+     * obtained by the interface and only presented by the core (the `auth` seam), so an unauthenticated call is
+     * the service's own refusal with a code, not a silent empty list.
+     */
+    async sync() {
+      if (!http || typeof http.tryJson !== "function") throw new SdkError("bad-input", { field: "http", step: "sync" });
+      const headers = {};
+      if (typeof auth === "function") {
+        let token = null;
+        try { token = await auth(); } catch { token = null; }
+        if (typeof token === "string" && token) headers.authorization = "Bearer " + token;
+      }
+      let answer = null;
+      try { answer = await http.tryJson(routeOf("evmSwaps"), { method: "GET", headers }); }
+      catch (error) { throw new SdkError("server-unavailable", { step: "sync", why: (error && error.code) || "fetch" }); }
+      if (!answer || answer.ok !== true) {
+        throw new SdkError("server-refused", {
+          step: "sync", status: answer ? answer.status : null,
+          why: (answer && answer.body && (answer.body.error || answer.body.detail)) || null,
+        });
+      }
+      // A GARBAGE ANSWER IS A REFUSAL, NOT AN EMPTY LIST: a non-JSON body (an SPA fallback, a proxy error page) must
+      // not look like "the service has no swaps" - the two are different, and only one of them means "synced".
+      const body = answer.body;
+      if (!body || !Array.isArray(body.swaps)) throw new SdkError("server-unavailable", { step: "sync", why: "bad-response" });
+      const added = engine.swap.addServerSwaps(body.swaps);
+      return { ok: true, added, seen: body.swaps.length };
     },
 
     // THE ARRIVAL VERDICT WITHOUT THE WATCH LOOP, and the deadline check as a separate call: an interface may
@@ -632,8 +774,8 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         edViewPointLocker: builtSide.own.viewPoint,
       } : {};
       const lockRequest = { ...request.order, ...derived, amountWei: request.order.amount };
-      // A SIGNED QUOTE: the fee, the registry address and the provider live in IT, not in the factory
-      // (decision #76). It is brought by the caller (the interface got it from the maker); without it the lock is not signed.
+      // THE SIGNED QUOTE: the fee, the registry address and the provider live in IT, not in the factory
+      // (decision #76). The caller brings it (the interface got it from the maker); without it the lock is not signed.
       lockRequest.quote = request.orderQuote || null;
       let funded = null;
       try { funded = await lock.send(lockRequest, wallet, { call: reader }); }

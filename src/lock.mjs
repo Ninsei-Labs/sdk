@@ -10,12 +10,15 @@
 // seam: by default the engine's read, but the caller can substitute its own (as in actions.mjs).
 import { SdkError } from "./errors.mjs";
 import * as engine from "./engine.mjs";
+// THE DEAL FLOW IS A PACKAGE MODULE NOW (#32, wave 3): the registry address is read through it, exactly as
+// the actions read the order flow.
+import * as flow from "./swap-flow.mjs";
 
 // THE ORDER'S WORD-ADDRESSES ARE BROUGHT TO 0x HERE, AT THE BOUNDARY, NOT AT EVERY CALLER.
 //
 // The engine returns the points and commitments WITHOUT the 0x prefix (that is how www/js/atomic/halves.js stores
 // them), while the calldata encoder (www/js/evm/factory.js, word) REQUIRES the prefix and refuses "not a number
-// and not hex" on 64 digits without one. The page normalises them on its side (www/js/core/swap-flow.js, with0x)
+// and not hex" on 64 digits without one. The page normalises them on its side (sdk/src/swap-flow.mjs, with0x)
 // for exactly this reason. The core must do the same ITSELF: otherwise every caller would repeat the
 // normalisation, and one forgetful one would break the signature with the encoder's raw error. The list is
 // exactly the fields encoded as bytes32 that do NOT enter the order context string (otherwise the normalisation
@@ -119,7 +122,7 @@ export async function send(request, wallet, deps = {}) {
 
 /**
  * The escrow factory address for a network: FROM THE NETWORK REGISTRY, by the same path as the rest of the core.
- * The registry is read through the order parser module (www/js/core/swap-flow.js, escrowFactoryAddress) - the core
+ * The registry is read through the deal-flow module (sdk/src/swap-flow.mjs, escrowFactoryAddress) - the core
  * keeps no SECOND table of addresses.
  *
  * PREVIOUSLY THE FUNCTION LOOKED IN THE WRONG MODULE (www/js/evm/escrow.js, which has no such function) and
@@ -129,7 +132,7 @@ export async function send(request, wallet, deps = {}) {
  */
 export function factoryOf(chainSlug) {
   let address = null;
-  try { address = engine.swapFlow.escrowFactoryAddress(chainSlug); } catch { address = null; }
+  try { address = flow.escrowFactoryAddress(chainSlug); } catch { address = null; }
   if (typeof address !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
     throw new SdkError("bad-input", { field: "factory", chain: typeof chainSlug === "string" ? chainSlug : null });
   }

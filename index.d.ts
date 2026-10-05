@@ -619,6 +619,93 @@ export interface SwapsApi {
   /** Unfinished swaps after a page reload. */
   list(): Promise<readonly SwapState[]>;
   get(id: string): Promise<SwapState | null>;
+  /**
+   * THE SERVICE'S SWAP LIST, MERGED INTO THE LOCAL ONE. The path is the page's (www/js/evm/auth.js,
+   * loadServerSwaps: GET /api/evm-swaps), and the merge rule is the ENGINE'S (core/swap.js, addServerSwaps): a
+   * local record always wins, the service only adds what this browser does not have, and a record that came
+   * from the service is marked `source: "server"`. The pass is obtained by the interface and only presented by
+   * the core (the `serverAuth` seam): without it the service's own refusal comes as a code. `added` says how
+   * many records the merge brought in - the interface decides by it whether the list changed, instead of
+   * guessing.
+   */
+  sync(): Promise<SwapSync>;
+  /**
+   * REMOVE A RECORD FROM THE LOCAL LIST. The record leaves THIS store alone: on the service and in the
+   * contract everything stays, so this is a tidy-up of the list, not a cancellation of the swap. `false` means
+   * there was no such record.
+   */
+  forget(id: string): Promise<boolean>;
+  /**
+   * THE DEAL-PROGRESS SNAPSHOT: the record's own facts, the wallet rebuilt from the halves and the DERIVED deal
+   * view (phase, allowed actions, deadlines, steps, the Monero leg, the two amounts). The progress screen draws
+   * this snapshot; it does not read the record or derive the state itself, so the deal's rules live in one place.
+   * `null` - there is no such record (this is NOT an empty state).
+   */
+  progress(id: string): Promise<SwapProgress | null>;
+  /**
+   * THE DEMONSTRATION RECORD'S ACTIONS (mode `sim`): confirm readiness, refund the ETH, sweep the XMR. In a live
+   * swap the same steps go through `actions` (a real escrow and the wallet adapter); these are the sandbox's record
+   * mutations, kept in the core rather than on the screen.
+   */
+  confirmReady(id: string): Promise<unknown>;
+  refundEth(id: string, by?: string): Promise<unknown>;
+  sweepNow(id: string): Promise<unknown>;
+  /**
+   * WHERE TO WITHDRAW THE XMR: writes the record's `receiveAddress` (it is part of the recovery file). The order
+   * and the chain are untouched. `null` - there is no such record.
+   */
+  setDestination(id: string, address: string): Promise<unknown>;
+  /**
+   * THE MONERO NETWORK OF AN ADDRESS, BY ITS SHAPE (`mainnet` | `stagenet` | `testnet`), or `null`. The format and
+   * the prefixes live in one module - the same one the Monero wallet adapter uses - so no interface keeps its own
+   * prefix table.
+   */
+  addressNetwork(address: string): Promise<string | null>;
+}
+
+/**
+ * THE DEAL-PROGRESS SNAPSHOT. `swap` carries the record's own fields (what the interface shows and hands back as
+ * order expectations); `swapWallet` is the wallet rebuilt from the halves (the recovery file is assembled from it);
+ * `view` is the DERIVED deal state. The names in `view` are the engine's derive output: `phase`/`phaseLabel`,
+ * `can` (the allowed actions), `deadlines`, `steps`, `xmr`/`xmrAmount`, `sellWindow`, `readyDeadline`, `terminal`.
+ */
+export interface SwapProgress {
+  readonly id: string;
+  readonly swap: Readonly<Record<string, unknown>>;
+  readonly swapWallet: unknown;
+  readonly view: SwapProgressView;
+}
+
+/** The derived deal state the progress screen draws. Loose by design: the fields are the engine's derive output. */
+export interface SwapProgressView {
+  readonly swap: unknown;
+  readonly phase: string;
+  readonly phaseLabel: string;
+  readonly note: string | null;
+  readonly sim: number;
+  readonly simWallTime: number;
+  readonly conf: number;
+  readonly confTarget: number;
+  readonly confProgress: number;
+  readonly can: Readonly<Record<string, unknown>>;
+  readonly deadlines: Readonly<Record<string, unknown>>;
+  readonly steps: readonly Readonly<Record<string, unknown>>[];
+  readonly xmr: Readonly<Record<string, unknown>>;
+  /** The amount promised by the quote and the one seen at the address: the interface shows both. */
+  readonly xmrAmount: { readonly expected: number | null; readonly seen: number | null };
+  readonly sellWindow: unknown;
+  readonly readyDeadline: Readonly<Record<string, unknown>>;
+  readonly xmrReclaimed: boolean;
+  readonly simulated: { readonly evm: boolean; readonly xmr: boolean };
+  /** The terminal state (the record's settlement), or null while the swap is live. */
+  readonly terminal: unknown;
+}
+
+/** The outcome of merging the service's list: how many rows the service gave, how many were new locally. */
+export interface SwapSync {
+  readonly ok: true;
+  readonly added: number;
+  readonly seen: number;
 }
 
 /** ONE WITNESS NODE: the address, and whose node it is (two nodes of one operator are one opinion). */
@@ -905,6 +992,20 @@ export interface SwapState {
   readonly error?: { readonly code: ErrorCode; readonly params?: Readonly<Record<string, unknown>> };
   /** The terminal state, if the swap has ended. */
   readonly terminal: TerminalCode | null;
+  /**
+   * WHEN THE RECORD WAS CREATED (the record's own `createdAt`, an ISO string). null - an old record without
+   * one: the list shows a dash rather than a date it does not have.
+   */
+  readonly createdAt: string | null;
+  /** WHO GAVE THE PRICE. Either field may be absent: an old record or a swap without a provider. */
+  readonly maker: { readonly id: string | null; readonly name: string | null };
+  /** The engine's phase code and its human name: the list shows the name. */
+  readonly phase: string | null;
+  readonly phaseLabel: string | null;
+  /** The swap has a settlement record: the list splits live from settled by THIS flag, not by the phase's text. */
+  readonly settled: boolean;
+  /** WHAT HAS ALREADY MOVED: the sum seen at the address and whether the record holds a lock or a secret. */
+  readonly funds: { readonly receivedXmr: number; readonly escrowLocked: boolean };
 }
 
 export interface StepState {
@@ -1073,6 +1174,32 @@ export interface OrderApi {
   verifyCounterparty(request: { readonly side: unknown; readonly order: Readonly<Record<string, unknown>>; readonly sealed?: unknown; readonly ownEncPriv?: unknown }): unknown;
   /** The joint Monero address from your own spend half and the other's point. */
   jointAddress(request: { readonly ownSpendHalf: string; readonly ownViewHalf: string; readonly otherSpendPoint: string; readonly otherViewPoint: string; readonly network?: string }): unknown;
+  /**
+   * The order state, READ FROM THE CHAIN (escrow status()): which of the four states the order is in. The state is
+   * read by a call, not guessed from logs. It is read by the same chain-read seam as the actions (`evmCall`), so
+   * the wallet that reads is the wallet that will sign.
+   */
+  status(escrow: string): Promise<OrderStatus>;
+  /**
+   * The order deadlines from the chain: t1 (the settlement boundary), readyBy (the ready-mark boundary) and the
+   * terms hash the recovery file is bound to. The screen uses them to say whether the person is in the dead zone.
+   */
+  deadlines(escrow: string): Promise<OrderDeadlines>;
+}
+
+/** THE ORDER STATE, READ FROM THE CHAIN (escrow status()): three flags and the remainder. */
+export interface OrderStatus {
+  readonly isFunded: boolean;
+  readonly isClaimed: boolean;
+  readonly isRefunded: boolean;
+  readonly balance: bigint;
+}
+
+/** THE ORDER DEADLINES FROM THE CHAIN: the settlement boundary t1, the ready-mark boundary readyBy and termsHash. */
+export interface OrderDeadlines {
+  readonly t1: number;
+  readonly readyBy: number;
+  readonly termsHash: string;
 }
 
 /** Order actions on a ready escrow. The slot check against the chain stands in them BEFORE the signature. */

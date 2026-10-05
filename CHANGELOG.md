@@ -1,3 +1,41 @@
+## Unreleased
+
+THE PROGRESS SCREEN READS THE CORE. The swap-progress screen of the demo used to read the engine's record and
+derive its state on the page; now the core owns that read and that derivation, and the screen only draws a snapshot.
+
+- **`SwapsApi.progress(id)`** - the deal-progress snapshot: the record's own fields (`swap`), the wallet rebuilt from
+  the halves (`swapWallet`, the recovery file is assembled from it) and the DERIVED state (`view`: phase,
+  `can`, `deadlines`, `steps`, `xmr`/`xmrAmount`, `sellWindow`, `readyDeadline`, `terminal`). `null` - there is no
+  such record. New interfaces `SwapProgress` / `SwapProgressView`.
+- **The demonstration record's actions and write are methods, not page code:**
+  `SwapsApi.confirmReady(id)`, `SwapsApi.refundEth(id, by?)` and `SwapsApi.sweepNow(id)` (mode `sim`; a live swap goes
+  through `actions`), and `SwapsApi.setDestination(id, address)` - writes the record's `receiveAddress`, which is
+  part of the recovery file.
+- **`SwapsApi.addressNetwork(address)`** - the Monero network of an address by its shape, from the SAME module the
+  Monero wallet adapter uses, so no interface keeps its own prefix table.
+
+THE DEAL ENGINE IS A PACKAGE MODULE. The order flow used to live on the page (`www/js/core/swap-flow.js`) and be
+mirrored into the package; the page imported it directly. It is now `sdk/src/swap-flow.mjs` - ONE implementation
+inside the package - and the page reaches it through a single seam (`www/js/sdk/bridge.js`, facade
+`order.status`/`order.deadlines`). The engine file is gone, the mirror no longer carries it, and the fallback
+"call the engine directly if the bundle did not load" is gone with it: there is no second copy to fall back to,
+and a missing bundle is a NAMED refusal.
+
+- **`OrderApi.status(escrow)`** - the on-chain order state (escrow `status()`): `isFunded`, `isClaimed`,
+  `isRefunded` and the remainder `balance`. Read by a CALL, not derived from logs. New interface `OrderStatus`.
+- **`OrderApi.deadlines(escrow)`** - `t1`, `readyBy` and `termsHash` read from the chain; the screen needs them to
+  say whether the order is already in the dead zone. New interface `OrderDeadlines`.
+- **Both reads take the same chain-read seam as the actions** (`deps.call`, bound to the caller's `evmCall` by the
+  facade), so the wallet that reads is the wallet that signs; without a caller reader they keep the engine default.
+- **The engine seam changed.** `engine.swapFlow` is removed; the seam now exposes `orderClient` (the half worker),
+  `rfqSource` (the order quote under the deal) and `claimGas` (the shared claim gas limit) - the modules the moved
+  flow reads through it. `sdk/src/actions.mjs` and `sdk/src/lock.mjs` call the package module (`./swap-flow.mjs`)
+  instead of the mirror.
+- **The module keeps the engine's names:** `escrowFactoryAddress`, `escrowCashierAddress`, `runAtomicOrder`,
+  `orderStatus`, `orderDeadlines`, `orderLiveSlots`, `assertOrderSlots`, `claimOrder`, `refundOrder`,
+  `markReadyOrder`. Refusals are codes (`SdkError`), not text; `onStage`/`onStep` details are tokens.
+
+
 ## 0.38.0 — 2026-10-02
 
 XMR that is ON the address but BARRED by the transaction's `unlock_time` is not an arrival, and the ready mark is

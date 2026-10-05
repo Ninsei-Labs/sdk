@@ -354,9 +354,9 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
       // THE QUOTE'S OWN EXPIRY, checked against the clock the core already has. It is bound in the signature too,
       // but a stale quote is refused by its own code rather than looking like a signature failure.
       const validUntil = Number(quote.validUntil);
-      // THE SCALE IS SECONDS: the same one the order deadlines and block.timestamp use. The core's clock is in
-      // milliseconds (Date.now), so exactly ONE boundary is converted - "now", not the quote's own value: one
-      // unit per value, one conversion at the entrance.
+      // THE SCALE IS SECONDS: the same as the order's deadlines and block.timestamp. The core's clock is in
+      // milliseconds (Date.now), so exactly ONE boundary is converted - "now", not the quote value itself: one
+      // unit for the value, one conversion at the input.
       const nowSec = Math.floor(now() / 1000);
       if (Number.isFinite(validUntil) && validUntil > 0 && validUntil <= nowSec) {
         fail("quote-expired", { step: "signature", validUntil });
@@ -441,7 +441,7 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
       // know the provider's address, and then the quote cannot be obtained at all (the live contour answered this
       // with bad-input {field:"order"} BEFORE any network). So if the sent terms had no claimer, the context is
       // computed from the terms WITH HIS value from the quote - exactly as the engine does it
-      // (www/js/core/swap-flow.js: `{ ...orderBase, claimer: claimerResolved }`). No OPTIONAL checks appeared here:
+      // (sdk/src/swap-flow.mjs: `{ ...orderBase, claimer: claimerResolved }`). No OPTIONAL checks appeared here:
       // a mismatched string is still a refusal (quote-refused { step: "context" }).
       let expectedContext = null;
       try { expectedContext = engine.orderContext.orderContextString(request.order); }
