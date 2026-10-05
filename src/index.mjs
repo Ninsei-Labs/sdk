@@ -13,6 +13,10 @@ import { createSwaps } from "./swaps.mjs";
 // the lock. The page gets them from the facade, not by importing the module separately.
 import { createActions } from "./actions.mjs";
 import { contextOf, verifyCounterparty, jointAddress } from "./order.mjs";
+// THE DEAL ENGINE, NOW A PACKAGE MODULE (#32, wave 3): the order flow used to be an engine file the page pulled
+// out of www/js. It is declared here so the facade carries the order READS the page needs (state and deadlines)
+// on the same chain-read seam as the actions.
+import * as orderFlow from "./swap-flow.mjs";
 import { createSweep } from "./sweep.mjs";
 import { SdkError, fail } from "./errors.mjs";
 import { ERROR_CODES, STEP_CODES, CHECK_CODES } from "./codes.mjs";
@@ -186,6 +190,9 @@ export function createNinsei(options) {
   // THE SAME CHAIN-READ SEAM AS THE LOCK AND THE CORE: checking the slots and signing must go one way, otherwise
   // part of the check goes past the wallet and part does not.
   const actions = createActions({ call: o.evmCall });
+  // THE SAME CHAIN-READ SEAM FOR THE ORDER READS: state and deadlines must be read by the wallet that will sign,
+  // not by a second provider. Without a caller reader the module keeps its engine default.
+  const orderDeps = typeof o.evmCall === "function" ? { call: o.evmCall } : {};
 
   return Object.freeze({
     config,
@@ -202,6 +209,12 @@ export function createNinsei(options) {
       context: (terms) => contextOf(terms),
       verifyCounterparty: (request) => verifyCounterparty(request),
       jointAddress: (request) => jointAddress(request),
+      // ORDER STATE FROM THE CHAIN (escrow slot 3): which of the four states the order is in. Read, not guessed
+      // from logs - the very call the engine used to make from www/js/core/swap-flow.js.
+      status: (escrow) => orderFlow.orderStatus(escrow, orderDeps),
+      // THE ORDER DEADLINES (t1, readyBy, termsHash) from the chain: the screen needs them to say whether the
+      // person is in the dead zone.
+      deadlines: (escrow) => orderFlow.orderDeadlines(escrow, orderDeps),
     },
     sim,
     quotes: {

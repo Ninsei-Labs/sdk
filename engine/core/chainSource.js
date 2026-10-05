@@ -229,7 +229,11 @@ export function mockView(swap, simElapsedMs) {
   const locked = lockAt !== null && simElapsedMs >= lockAt;
   const confirmations = mockConfirmations(swap, simElapsedMs);
   const status = !locked ? XMR_STATUS.AWAITING : confirmations >= confTarget ? XMR_STATUS.READY : XMR_STATUS.FUNDED;
-  const received = locked ? swap.xmrAmount : 0;
+  // WHAT ACTUALLY ARRIVED. By default the quoted amount: the demo path without underpayment. If the record names
+  // the amount that REALLY arrived (swap.xmr.received), show that: it is exactly what an underpayment looks like -
+  // the shortfall that sends the order into a refund - and the screen must name BOTH numbers, not repeat one twice.
+  const stated = Number(swap.xmr && swap.xmr.received);
+  const received = locked ? (Number.isFinite(stated) ? stated : swap.xmrAmount) : 0;
   return {
     live: false,
     status,

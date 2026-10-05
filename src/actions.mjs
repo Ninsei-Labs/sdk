@@ -10,6 +10,10 @@
 // looks successful.
 import { SdkError } from "./errors.mjs";
 import * as engine from "./engine.mjs";
+// THE DEAL FLOW IS NOW A PACKAGE MODULE, NOT AN ENGINE FILE (#32, wave 3): www/js/core/swap-flow.js moved to
+// sdk/src/swap-flow.mjs. The actions therefore call the module directly instead of reaching it through the
+// mirror - there is exactly one implementation, and it lives here.
+import * as flow from "./swap-flow.mjs";
 
 const missingFields = (object, fields) =>
   fields.filter((k) => object[k] === undefined || object[k] === null || object[k] === "");
@@ -48,21 +52,21 @@ export function createActions({ call = null } = {}) {
       requestOrFail(request, []);
       walletOrFail(wallet);
       const { escrow, expect, onStep } = request;
-      return await withCodes("mark-ready", () => engine.swapFlow.markReadyOrder({ escrow, expect, onStep, deps: deps(wallet) }));
+      return await withCodes("mark-ready", () => flow.markReadyOrder({ escrow, expect, onStep, deps: deps(wallet) }));
     },
     /** Claiming: it reveals your own half, so expectations are mandatory. */
     async claim(request, wallet) {
       requestOrFail(request, ["halfClaimer"]);
       walletOrFail(wallet);
       const { escrow, halfClaimer, expect, onStep } = request;
-      return await withCodes("claim", () => engine.swapFlow.claimOrder({ escrow, halfClaimer, expect, onStep, deps: deps(wallet) }));
+      return await withCodes("claim", () => flow.claimOrder({ escrow, halfClaimer, expect, onStep, deps: deps(wallet) }));
     },
     /** Refunding: it also reveals a half. The core passes the expectations ALWAYS, though the engine does not require them. */
     async refund(request, wallet) {
       requestOrFail(request, ["halfLocker"]);
       walletOrFail(wallet);
       const { escrow, halfLocker, expect, onStep } = request;
-      return await withCodes("refund", () => engine.swapFlow.refundOrder({ escrow, halfLocker, expect, onStep, deps: deps(wallet) }));
+      return await withCodes("refund", () => flow.refundOrder({ escrow, halfLocker, expect, onStep, deps: deps(wallet) }));
     },
   };
 }

@@ -14,7 +14,7 @@
 //      address, transaction hashes and amounts go out.
 //
 //   2) ON A PRODUCTION NETWORK THE ADAPTER DOES NOT SIGN. The rule is not its own: it is already declared by the
-//      engine (www/js/core/swap-flow.js: production = chain.escrow.mode === "live" && !chain.testnet) and the page
+//      engine (sdk/src/swap-flow.mjs: production = chain.escrow.mode === "live" && !chain.testnet) and the page
 //      itself uses the same marker. A private "production network" marker would silently drift from the engine, and
 //      then the test key would sign real money. So the rule is taken from the network registry, not written here.
 //
@@ -39,7 +39,7 @@ export const CHAIN_ENV = "ARRAKIS_TEST_EVM_CHAIN";
 export const CLAIMER_ENV = "ARRAKIS_TEST_EVM_CLAIMER";
 
 // AN EXPLICIT WHITELIST OF TEST NETWORKS - HERE, NOT IN THE ENGINE, and WHY. The engine's "production network" rule
-// (www/js/core/swap-flow.js: escrow.mode === "live" && !testnet) today does not trigger ON ANY recorded network: for
+// (sdk/src/swap-flow.mjs: escrow.mode === "live" && !testnet) today does not trigger ON ANY recorded network: for
 // the registry's production networks the escrow is marked "simulated", that is, by the letter of the rule they are
 // not production. So the test key would also sign on mainnet - the engine would not notice, and the engine's rule
 // must not be changed (it is shared by the page and all legs). So the "signing is ALLOWED here" marker is set
@@ -200,7 +200,7 @@ export function evmRpcReader({ url }) {
 // --- THE PRODUCTION-NETWORK MARKER ----------------------------------------------------------------------
 /**
  * A PRODUCTION NETWORK - BY THE ENGINE'S RULE, NOT ITS OWN. The marker is taken from www/js/core/config.js (the
- * testnet field) and www/js/core/swap-flow.js (escrow.mode === "live"): on a production network there is a live
+ * testnet field) and sdk/src/swap-flow.mjs (escrow.mode === "live"): on a production network there is a live
  * escrow and NO testnet marker. An unknown network is also considered production: there is nothing to prove it is a
  * test one, and an error in that direction costs a test key signing over real money.
  */

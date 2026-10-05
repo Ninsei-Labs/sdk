@@ -63,7 +63,7 @@ export function testOrderTerms({ locker, claimer, commitHalfLocker, commitHalfCl
   const hasT1 = t1 !== undefined && t1 !== null && t1 !== "";
   const readyByValue = hasReady ? Number(readyBy) : now + readyWindowSeconds;
   // t1 - ОКНО ПОСЛЕ readyBy, а не "от сейчас" (issue #88): плоская формула при 4-часовом окне готовности
-  // давала t1 раньше readyBy. Тот же смысл, что в swap-flow.js и rfq/reverseOrder.mjs.
+  // давала t1 раньше readyBy. Тот же смысл, что в sdk/src/swap-flow.mjs и rfq/reverseOrder.mjs.
   const t1Value = hasT1 ? Number(t1) : readyByValue + claimWindowSeconds;
   // ИНВАРИАНТ ОРДЕРА ПРОВЕРЯЕТСЯ ЗДЕСЬ: до readyBy отмечают готовность, с t1 забор закрыт. Совпадение или
   // перестановка дали бы окно, где оба пути валидны одновременно, и спор решал бы газ (док 26).
@@ -205,7 +205,7 @@ export async function fundOrder({ factory, locker, claimer, commitHalfLocker, co
   // вместо прежнего - деньги ушли бы в него, а не в тот, о котором человек думает (док 45).
   //
   // ПУСТОЙ ОТВЕТ - ЭТО "ОРДЕРА НЕТ", А НЕ "ПРОВЕРИТЬ НЕ УДАЛОСЬ": по адресу, которого ещё не существует,
-  // eth_call возвращает пусто (так же это читается в core/swap-flow.js: orderDeadlines). А вот ОШИБКА
+  // eth_call возвращает пусто (так же это читается в sdk/src/swap-flow.mjs: orderDeadlines). А вот ОШИБКА
   // вызова - другое состояние, и она запирает: "не проверили" нельзя считать за "всё хорошо".
   onStep?.("checking the order is not already on chain");
   let stateRead = null;

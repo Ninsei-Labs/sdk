@@ -170,7 +170,7 @@ export async function verifyArrival(request) {
   const tip = Math.max(...live.map((l) => l.info.height));
   // THE REPORTED HEIGHT IS THE NEXT BLOCK, NOT A REACHABLE ONE. monerod's get_info returns height = "the block that
   // will be mined next", so get_block(height) refuses with "greater than current top block". The backend already
-  // knows this (app/watcher.mjs: "we take top = height - 1"), and a live run against the contour's own node found the
+  // knows this (app/watcher.mjs: "take top = height - 1"), and a live run against the contour's own node found the
   // same off-by-one here: walking to `tip` inclusive threw xmr-no-nodes on the very last block instead of returning
   // `pending`. The reachable top is one below.
   const top = Math.max(0, tip - 1);

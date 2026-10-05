@@ -20,6 +20,8 @@
 // поэтому ЛЮБАЯ сделка, заведённая без явного chainMode, падала с "DEMO is not defined" - а страница живой
 // сделки передаёт режим явно, и поломка не была видна до первой проверки, которая заводит сделку без него.
 import { TIMING, MONERO, SCENARIO_LABELS, DEFAULT_CHAIN, API, DEMO, chainById, SIGNING_GUARDS } from "./config.js";
+// ОКНО ПРОДАЖИ XMR (issue #111) - ОДНО правило на ноду и страницу. Здесь оно только читается для отсчёта.
+import { sellWindowSec, SELL_WINDOW } from "./sellWindow.js";
 import { simElapsed, simWall, nowReal, rescaleStart } from "./clock.js";
 import { loadState, saveState } from "./store.js";
 import { shortId, randomHex } from "./format.js";
@@ -121,6 +123,78 @@ export function createSwap(input) {
   return swap;
 }
 
+// REVERSE-FLOW DEAL RECORD (issue #118, second half). The sell screen used to stop at the request, and there was
+// nowhere to show a refund: a reverse deal had no record. It is created here - from exactly what the screen
+// already has (the node ticket plus the computed halves) - and lands in the same store as the buy flow, so the
+// deal card, the recovery file and the XMR sweep all work off it.
+//
+// WHAT THE REVERSE DEAL DOES DIFFERENTLY. On the buy flow the PAGE funds the escrow, and the counterparty's half
+// is only learned after settlement. On the sell flow the PROVIDER funds the escrow, the page merely requests the
+// order, and it computes ITS OWN halves (atomic/order-worker.js, newMakerMaterial). So fields are named by side:
+// our half is `half`, and the DEPOSITOR's (provider's) point and view half are counterSpendPoint/counterView*.
+// The page does not know the depositor's SPEND half and must not: the contract publishes it on settlement, and
+// only then does the sweep of our own XMR open up (see refundHalfRevealed).
+export function createReverseSwap(input = {}) {
+  const s = loadState();
+  const now = Date.now();
+  const xmr = Number(input.xmrAmount);
+  const swap = {
+    id: shortId(),
+    side: "reverse",
+    scenario: "happy",
+    speed: Number(input.speed) || 60,
+    network: input.network || DEFAULT_CHAIN,
+    moneroNetwork: MONERO.networkType,
+    realStart: now,
+    simStartWall: now,
+    createdAt: new Date(now).toISOString(),
+    // THE USER GIVES XMR AND RECEIVES THE NATIVE COIN: payToken is XMR, receiveAddress is their payout address
+    // on the settlement chain.
+    payToken: "XMR",
+    payAmount: xmr,
+    xmrAmount: xmr,
+    rate: Number(input.rate) || 0,
+    fee: Number(input.fee) || 0,
+    maker: { id: input.providerId || null, name: input.providerName || null, spread: null },
+    receiveAddress: input.claimer || null,
+    quoteSignature: null,
+    ticket: input.ticketId || null,
+    timeline: { fundAtSim: 0, lockAtSim: 0, blockSim: MONERO.blockTimeSim, confTarget: MONERO.confirmTarget, t0Sim: TIMING.t0Refund },
+    chainMode: input.chainMode || DEMO.defaultChainMode,
+    xmrSource: input.xmrSource || API.xmrSource,
+    xmrSession: null,
+    xmrSessionError: null,
+    events: [],
+    // HALVES WALLET OF THE REVERSE ORDER: our own spend and view half plus the depositor's PUBLIC halves. The
+    // recovery file builds the wallet from here (recovery/recoveryFile.js, buildPayload v3), and after the half
+    // is revealed, so does the spend key. The counterparty's SPEND half is not here: the chain provides it
+    // (refundHalfRevealed).
+    escrow: {
+      address: input.escrowAddress || null,
+      moneroAddress: input.moneroAddress || null,
+      half: input.ownSpendHalf || null,
+      viewHalf: input.ownViewHalf || null,
+      counterViewHalf: input.counterViewHalf || null,
+      counterViewPoint: input.counterViewPoint || null,
+      counterSpendPoint: input.counterSpendPoint || null,
+      moneroNetwork: MONERO.networkType,
+      birthHeight: input.escrowBirthHeight || null,
+      readyBy: input.readyBy || null,
+      t1: input.t1 || null,
+      // The DEPOSITOR's REVEALED HALF appears when the chain publishes it on settlement. Until then there is
+      // nothing to sweep with.
+      counterHalf: null,
+    },
+    xmr: null,
+    settlement: null,
+    log: [],
+  };
+  s.swaps[swap.id] = swap;
+  s.activeSwapId = swap.id;
+  saveState(s);
+  return swap;
+}
+
 function pushLog(swap, atSim, title, detail) {
   swap.log.push({ atSim, wall: simWall(swap, atSim), title, detail: detail || "" });
   // Дублируем в КОНСОЛЬ и это основной канал для разбора. Раньше журнал показывался только на странице,
@@ -149,7 +223,11 @@ export function halvesWalletOf(swap) {
     subaddress: null,
     spendHalf: e.half,
     viewHalf: e.viewHalf,
-    otherSpendPoint: e.edPointClaimer || null,
+    // THE COUNTERPARTY'S SPEND POINT CARRIES DIFFERENT NAMES PER FLOW: on the direct swap it is the claimer's
+    // point (edPointClaimer); on the reverse swap it is the DEPOSITOR's point, which the contract publishes on
+    // settlement (counterSpendPoint). One consumer (the recovery file and the sweep) must read both, or the
+    // reverse order would end up without its own spend key.
+    otherSpendPoint: e.counterSpendPoint || e.edPointClaimer || null,
     otherViewPoint: e.counterViewPoint || null,
     otherViewHalf: e.counterViewHalf,
   };
@@ -269,15 +347,35 @@ export function confirmReady(id) {
   return persist(swap);
 }
 
+// THE COUNTERPARTY'S SPEND HALF - THE ONE PLACE THAT SHOWS WHETHER THERE IS ANYTHING TO ASSEMBLE. The Monero
+// spend key is the sum of two halves, and the user holds their own; sweeping XMR back after a refund is possible
+// exactly when the second half is ALREADY revealed. In the record it is stored as counterHalf (the engine sets it
+// while the counterparty is a stand-in) or as revealedHalf (read from the chain after claim/refund, docs/36).
+export function refundHalfRevealed(swap) {
+  const e = (swap && swap.escrow) || {};
+  return e.revealedHalf || e.counterHalf || null;
+}
+
+// XMR SWEEP. In the ordinary phase this happens after the other side reveals its half through settlement. A
+// REVERSE-FLOW REFUND (issue #118, second half) is the SECOND case: the order was refunded, the user's coins
+// stayed on the swap's one-time address, and the contract revealed the DEPOSITOR's half on refund. Then the same
+// sweep takes our coins back, and the settlement is marked recovered: the money returned to the user rather
+// than leaving through the swap.
 export function sweepNow(id) {
   const swap = getSwap(id);
-  if (!swap || swap.settlement) return swap;
+  if (!swap) return swap;
+  // The deal already settled: no second sweep - EXCEPT a reverse-flow refund, which is how our own XMR are taken
+  // back.
+  if (swap.settlement && !(swap.settlement.kind === "refund_eth" && swap.side === "reverse")) return swap;
   const view = derive(swap);
   if (!view.can.sweep) throw new Error("sweep недоступен в этой фазе");
   const atSim = simElapsed(swap);
   const tx = chain.sweepXmr({ swapId: swap.id });
+  swap.xmr = swap.xmr || {};
   swap.xmr.sweepTxid = tx.txid;
-  swap.settlement = { kind: "success", phase: TERMINAL.success.phase, atSim, txid: tx.txid, by: "you" };
+  const fromRefund = Boolean(swap.settlement && swap.settlement.kind === "refund_eth");
+  swap.settlement = { kind: "success", phase: TERMINAL.success.phase, atSim, txid: tx.txid, by: "you",
+    ...(fromRefund ? { recovered: true } : {}) };
   pushLog(swap, atSim, "XMR swept to your address", tx.txid);
   return persist(swap);
 }
@@ -364,6 +462,22 @@ export function derive(swap, now = nowReal()) {
   // ускоренному времени демонстрации, ни к симулятору.
   const chainReadyByMs = swap.escrow && swap.escrow.readyBy ? Number(swap.escrow.readyBy) * 1000 : null;
   const chainT1Ms = swap.escrow && swap.escrow.t1 ? Number(swap.escrow.t1) * 1000 : null;
+  // ОКНО ПРОДАЖИ XMR (issue #111). Отсчёт идёт ОТ КОНТРАКТНОГО readyBy (это проставляют не мы и не симулятор),
+  // а не от TIMING.readyWindow: тот живёт в ускоренном времени демонстрации и на живой сделке показал бы
+  // демо-время. Мягкое обещание (600 с) продлевается до контрактного (1200 с), пока в пуле нет ПОЛНОЙ суммы, -
+  // тем же правилом, что у ноды (sellWindowSec). Право на действие это НЕ меняет: отметку контракт принимает
+  // до readyBy, а окно здесь - обещание на экране.
+  const sellSeen = Number(xmr.arrived !== undefined && xmr.arrived !== null ? xmr.arrived : (xmr.received || 0)) > 0;
+  const sellWindow = (() => {
+    if (swap.side !== "reverse" || chainReadyByMs === null) return null;
+    const startMs = chainReadyByMs - SELL_WINDOW.hardSec * 1000;      // начало окна = readyBy минус контрактный максимум
+    const softAtMs = startMs + SELL_WINDOW.softSec * 1000;
+    const windowSec = sellWindowSec({ poolSeen: sellSeen, soft: SELL_WINDOW.softSec, hard: SELL_WINDOW.hardSec });
+    const extended = !sellSeen && nowReal() >= softAtMs;             // обещание продлено до контрактного окна
+    const atMs = extended ? startMs + windowSec * 1000 : softAtMs;   // до продления счёт идёт до мягкого обещания
+    return { startMs, atMs, leftMs: atMs - nowReal(), seen: sellSeen, extended,
+      softSec: SELL_WINDOW.softSec, hardSec: SELL_WINDOW.hardSec, windowSec };
+  })();
   const claimAt = readyAt !== null && swap.scenario !== "maker_stall" ? readyAt + TIMING.makerClaim : null;
   const sweptAt = claimAt !== null ? claimAt + TIMING.sweep : null;
 
@@ -384,6 +498,23 @@ export function derive(swap, now = nowReal()) {
   if (swap.settlement) {
     phase = swap.settlement.phase;
     phaseLabel = Object.values(TERMINAL).find((x) => x.phase === swap.settlement.phase)?.label || "Settled";
+    // SWEEPING OUR OWN XMR AFTER A REFUND (issue #118, second half). On the reverse flow a refund leaves the
+    // user's coins on the swap's one-time address: the claimer's ETH came back, and nobody moved the XMR. They can
+    // only be taken by assembling the spend key from OUR half and the OTHER half that the chain revealed on
+    // settlement. While the revealed half is missing we do NOT grant the right - can.sweep stays false precisely
+    // so that the button cannot appear without a working action. The "arrived / expected" numbers are already
+    // handed to the screen below (xmrAmount): only the right to sweep is decided here.
+    if (swap.settlement.kind === "refund_eth" && swap.side === "reverse") {
+      const revealed = refundHalfRevealed(swap);
+      const stillOnAddress = arrived > 0;
+      can.sweep = Boolean(revealed && stillOnAddress && halvesWalletOf(swap));
+      // THE REASON IS NAMED, NOT HIDDEN: the screen must say what is missing, not merely omit the button.
+      note = can.sweep
+        ? "The refund published the provider's half, so your XMR can be swept back from the swap's one-time address to your own wallet."
+        : (!stillOnAddress
+          ? "The refund is done, but no XMR is on the swap's one-time address: there is nothing of yours to sweep back."
+          : "The refund is done and your XMR is on the swap's one-time address, but the provider's half of the spend key is not published yet: sweeping needs both halves, so the button waits for the chain.");
+    }
   } else if (live && readyAt === null && chainReadyByMs !== null && nowReal() >= chainReadyByMs
              && (chainT1Ms === null || nowReal() < chainT1Ms)) {
     // БЫЛА МЁРТВАЯ ЗОНА - СТАЛА ОТКРЫТАЯ ДВЕРЬ (решение 30.09.2026). Отметку внёсший уже не поставит, забор
@@ -619,6 +750,8 @@ export function derive(swap, now = nowReal()) {
     xmrAmount: { expected: (() => { const e = Number(swap.xmrAmount); return Number.isFinite(e) && e > 0 ? e : null; })(),
                  seen: xmr.received !== null && xmr.received !== undefined ? Number(xmr.received) : null },
     steps,
+    // ОКНО ПРОДАЖИ: адрес уже в xmr.address, здесь - отсчёт и его границы (issue #111). null у прямого потока.
+    sellWindow,
     terminal: swap.settlement,
     xmrReclaimed,
   };

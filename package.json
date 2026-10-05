@@ -55,12 +55,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/aleksraiden/arrakisswap-demo.git",
-    "directory": "sdk"
+    "url": "git+https://github.com/Ninsei-Labs/sdk.git"
   },
-  "homepage": "https://github.com/aleksraiden/arrakisswap-demo/tree/main/sdk#readme",
+  "homepage": "https://github.com/Ninsei-Labs/sdk#readme",
   "bugs": {
-    "url": "https://github.com/aleksraiden/arrakisswap-demo/issues"
+    "url": "https://github.com/Ninsei-Labs/sdk/issues"
   },
   "dependencies": {
     "@noble/curves": "^2.4.0",
