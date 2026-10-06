@@ -1,0 +1,84 @@
+# Publish @ninsei-labs/sdk to npm.
+#
+# AUTHENTICATION: npm trusted publishing (OIDC). There is NO npm token anywhere -
+# not in secrets, not in .npmrc. The job asks GitHub for a short-lived signed
+# identity token, npm verifies it against the trusted publisher configured on the
+# package page, and only then allows the publish. This is why `id-token: write`
+# below is load-bearing: without it npm finds no token and fails with ENEEDAUTH.
+#
+# One-time setup on npmjs.com (human, 2FA required): package Settings ->
+# Trusted Publisher -> GitHub Actions, then fill in the owner, the repository,
+# the workflow filename BOTH of these must read `release.yml`, and optionally an
+# environment name. Publishing access should then be set to "require 2FA and
+# disallow tokens", so a leaked token cannot publish anything.
+#
+# The package must already exist on npm for the trusted publisher to attach to
+# it, so the very first version is published by hand.
+#
+# NOTE ON PROVENANCE: the SLSA attestation is only produced when both the
+# repository and the package are public. While the repository is private the
+# publish still works, the attestation is simply not generated.
+
+name: Release
+
+on:
+  # Manual only. The owner decides when a version ships - no auto-publish on push.
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Build and pack, but do not publish
+        type: boolean
+        default: true
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write # the OIDC exchange - required by npm trusted publishing
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest # cloud-hosted only: npm accepts OIDC from these, not from self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org" # wires up the .npmrc the OIDC exchange rides on
+
+      # The npm bundled with the runner image can be older than the trusted
+      # publishing floor (11.5.1), and an old npm cannot do the OIDC exchange.
+      - name: Ensure npm supports trusted publishing
+        run: |
+          npm install -g npm@^11.5.1
+          npm --version
+
+      # pnpm is this repository's package manager, so the lock file is pnpm's.
+      # npm is still used for the publish itself: npm owns the OIDC exchange.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Install and verify
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run check
+
+      - name: Version must match the tag
+        if: github.ref_type == 'tag'
+        run: |
+          pkg=$(node -p "require('./package.json').version")
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$pkg" != "$tag" ]; then
+            echo "package.json says $pkg, the tag says $tag" >&2
+            exit 1
+          fi
+
+      - name: What is about to be published
+        run: npm pack --dry-run
+
+      - name: Publish
+        if: ${{ github.event_name == 'push' || inputs.dry-run == false }}
+        run: npm publish --access public --provenance
