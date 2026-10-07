@@ -46,7 +46,7 @@ export async function loadMoneroJs() {
   if (moneroJsModule) return moneroJsModule;
   if (moneroJsError) throw new Error(moneroJsError);
   try {
-    const mod = await import("../../assets/vendors/monero/monero-js-browser.js?v=0d1f30bd");
+    const mod = await import("../../assets/vendors/monero/monero-js-browser.js?v=05c682ea");
     moneroJsModule = mod.default || mod;
     return moneroJsModule;
   } catch (e) {

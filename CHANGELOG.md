@@ -1,5 +1,28 @@
 ## Unreleased
 
+THE PACKAGE IS LEVEL WITH THE MAIN REPOSITORY AGAIN. The `sdk/src` and `sdk/engine` trees were re-synced
+byte-for-byte from the demo repository's `sdk/`, so the mirrored engine and the core carry today's changes.
+
+- **The order-quote signature carries the XMR amount** (`src/quoteEip712Spec.mjs`): the EIP-712 message grew
+  `xmrAmount` - the XMR the level walk computes - so the provider now signs exactly the XMR the chain checks at
+  order birth. The request-shape label moved `6 -> 8` together with the field set, and the domain name renamed
+  `ArrakisEscrowFactory -> NinseiEscrowFactory`. The label and the domain version string move apart on purpose:
+  the label tracks the message shape, the domain names the factory address and the chain.
+- **A route provider declares the SHAPE of its swap** (`src/legs/evm.mjs`): `shape: "sync"` runs the swap inside
+  the user's own transaction (the router AMMs), `"async"` settles later as a separate action (an intent
+  auction). A path that assumes "swap and funding in one transaction" asks for a synchronous provider through the
+  new `requireSyncProvider(id)` gate, which refuses an asynchronous one BY NAME (`provider-not-synchronous`,
+  `provider-unknown`) instead of assuming it synchronous.
+- **The order flow lost a duplicated set of lock-term keys** (`src/swap-flow.mjs`): `salt`,
+  `claimWindowSeconds` and `readyWindowSeconds` were assembled into the terms twice.
+- **The engine mirror follows the contract rename** (`engine/**`): the escrow and factory names in the comments
+  and the calldata tables read `NinseiEscrow` / `NinseiEscrowFactory`, matching the deployed contracts.
+- One module of the main tree is NOT carried over, and this is named rather than translated:
+  `src/levelsWalkSpec.mjs` is a byte-frozen twin of the node's `rfq/lib/levelsWalkSpec.mjs`, and its comments are
+  Russian. Bringing it in byte-for-byte would put Cyrillic inside `src/`, which the language check forbids;
+  translating it would break the byte-identity it exists for. It waits for a deliberate decision.
+
+
 THE PROGRESS SCREEN READS THE CORE. The swap-progress screen of the demo used to read the engine's record and
 derive its state on the page; now the core owns that read and that derivation, and the screen only draws a snapshot.
 

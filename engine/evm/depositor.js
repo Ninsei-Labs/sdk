@@ -23,8 +23,8 @@
 // ЧЕГО ЗДЕСЬ НЕТ. Криптографии: дайджест считает КОШЕЛЁК (eth_signTypedData_v4), а не этот модуль. Здесь -
 // только форма и её проверка, чтобы кошелёк подписал ровно то, что проверит цепь.
 
-// Имя и версия домена - протокол котировок v6, дословно как в OrderQuote.sol.
-export const DEPOSITOR_DOMAIN_NAME = "ArrakisEscrowFactory";
+// Имя и версия домена - протокол котировок v8, дословно как в OrderQuote.sol.
+export const DEPOSITOR_DOMAIN_NAME = "NinseiEscrowFactory";
 export const DEPOSITOR_DOMAIN_VERSION = "1";
 
 // НАБОР ПОЛЕЙ В ПОРЯДКЕ КОНТРАКТА. Порядок - часть ABI: перестановка даёт другой дайджест. Список один -
@@ -48,6 +48,10 @@ export const ORDER_QUOTE_TYPED_FIELDS = [
   ["feeRecipient", "address"],
   ["validUntil", "uint64"],
   ["nonce", "uint256"],
+  // THE XMR SIDE OF THE DEAL (#110 step 3), in atomic units: it joined the signed set together with the contract
+  // (OrderQuote.sol), the node/SDK spec and the vector, so the depositor's signature covers the same XMR the chain
+  // verifies. A field the chain could not see used to stay OUT of this list on purpose - that is no longer the case.
+  ["xmrAmount", "uint256"],
 ];
 
 // Тип сообщения. Собирается из списка: правка списка меняет и тип, и подпись - то есть не может остаться

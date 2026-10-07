@@ -69,7 +69,7 @@ import { height as nodeHeightValue } from "../monero/node.js";
 
 // АДРЕС ЯДРА СТРОКОЙ - СОБРАННЫЙ БАНДЛ ПОД www/ (tools/build-sdk.mjs): страница получает ядро ОДНИМ
 // модулем, а не пачкой исходников sdk/. ?v=<хеш> проставляет tools/stamp-assets.mjs.
-const SDK_BUNDLE = "/assets/vendors/sdk/sdk-browser.js?v=11f2239a";
+const SDK_BUNDLE = "/assets/vendors/sdk/sdk-browser.js?v=bdb79a39";
 
 // ОДНА ЗАГРУЗКА НА СТРАНИЦУ. Отказ - это состояние, а не поломка: он назван в консоли, и вызывающий решает.
 let loading = null;
@@ -588,9 +588,11 @@ export async function sdkAddressNetwork(address) {
 //     воркером, чтобы главный поток не замирал;
 //   * createSwap/createReverseSwap/activeSwaps - ЗАПИСЬ демонстрационной и обратной сделки (запись ведёт
 //     движок; ядро отдаёт её СОСТОЯНИЕ через swaps.list/swaps.progress).
+//   * createSwapWallet - КОШЕЛЁК СДЕЛКИ ФОРМЫ (состояние между экранами, ui/formState.js): кошелёк страницы
+//     со своими ключами. Ядру он не нужен, поэтому шов отдаёт его тем же импортом, что и прочее.
 // ИМЯ БЕРЁТСЯ ИЗ ДВИЖКА ЗДЕСЬ ЖЕ (импортом) И ОТДАЁТСЯ НАРУЖУ (экспортом) - один шов, одна копия. Ни
 // одного нового правила здесь нет: экран меняет источник импорта, а не строку вызова.
-import { networkLabel, probeMode } from "../monero/wallet.js";
+import { networkLabel, probeMode, createSwapWallet } from "../monero/wallet.js";
 import { amountInputValue } from "../evm/amounts.js";
 import { refreshChainPrices, priceLabel } from "../evm/prices.js";
 import { orderGasReservePlan } from "../evm/gasReserve.js";
@@ -603,5 +605,5 @@ import { activeSwaps, createSwap, createReverseSwap } from "../core/swap.js";
 export { evm, networkFromShape };
 export * as swapCore from "../core/swap.js";
 export * as moneroNode from "../monero/node.js";
-export { networkLabel, probeMode, amountInputValue, refreshChainPrices, priceLabel, orderGasReservePlan, quoteDexOut, dexLegVerdict, toWei, cachedFeeTerms, feeWeiFor, ensureFeeTerms, createOrderWorker, activeSwaps, createSwap, createReverseSwap };
+export { networkLabel, probeMode, createSwapWallet, amountInputValue, refreshChainPrices, priceLabel, orderGasReservePlan, quoteDexOut, dexLegVerdict, toWei, cachedFeeTerms, feeWeiFor, ensureFeeTerms, createOrderWorker, activeSwaps, createSwap, createReverseSwap };
 

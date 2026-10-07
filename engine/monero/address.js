@@ -84,7 +84,7 @@ async function loadLib() {
   if (lib) return lib;
   if (libFailed) return null;
   try {
-    const mod = await import("../../assets/vendors/monero/monero-js-browser.js?v=0d1f30bd");
+    const mod = await import("../../assets/vendors/monero/monero-js-browser.js?v=05c682ea");
     lib = mod.default || mod;
     return lib;
   } catch {
