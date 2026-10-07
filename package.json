@@ -16,7 +16,6 @@
     "check:import": "node tools/check.mjs --only=import",
     "check:surface": "node tools/check.mjs --only=surface",
     "check:mirror": "node tools/check.mjs --only=mirror",
-    "check:language": "node tools/check.mjs --only=language",
     "check:pack": "node tools/check.mjs --only=pack",
     "check:secrets": "node tools/check.mjs --only=secrets"
   },
