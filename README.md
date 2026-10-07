@@ -185,3 +185,24 @@ trigger where those exist; on another VM they simply do not appear, rather than 
    touch them: `atomic/order-worker.js`, the Monero bundles.
 6. **Strict CSP.** The package is designed for a policy without `eval` and inline.
 7. **Zero dependencies.**
+
+## Releases and prereleases
+
+Every published version rides on an npm dist-tag, and the tag is **derived from the version** - never left to
+npm's default:
+
+| Version | npm dist-tag | What it is |
+|---|---|---|
+| `X.Y.Z` | `latest` | a release - a separate decision, and the only thing that moves `latest` |
+| `X.Y.Z-develop.N` | `develop` | a build for ourselves |
+| `X.Y.Z-preview.N` | `preview` | a build to show |
+
+The loop this serves: build a version for yourself (`0.40.0-develop.1`), publish it under `develop`, and have the
+demo pin the **exact** version (`"@ninsei-labs/sdk": "0.40.0-develop.1"`) rather than a tag. `latest` does not
+move, so `npm install @ninsei-labs/sdk` keeps serving the last real release. Shipping a release is then its own
+decision: a plain `X.Y.Z`, the only shape that publishes under `latest`.
+
+The tag is passed to `npm publish` explicitly (`--tag <tag>`), and `tools/npm-tag.mjs` refuses the two ways this
+can go wrong **by name** - a prerelease that would take `latest`, and a plain version that would slide into a
+channel someone else owns. A manual run of the release workflow may override the tag with an input; when it does,
+the log says so. The derivation and its refusals are covered by `node tools/npm-tag.test.mjs`.

@@ -1,3 +1,31 @@
+## Unreleased — 2026-10-07
+
+PRERELEASES GET THEIR OWN npm TAGS, AND `latest` STOPS MOVING BY ACCIDENT. The release workflow published whatever
+version `package.json` carried under whatever tag npm chose on its own; now the tag is DERIVED from the version and
+handed to `npm publish` by name. This entry rides the next version - nothing in `src/`, `engine/` or `index.d.ts`
+changes here.
+
+- **The tag comes from the version** (`tools/npm-tag.mjs`): `X.Y.Z` -> `latest`, `X.Y.Z-develop.N` -> `develop`,
+  `X.Y.Z-preview.N` -> `preview`, read from the FIRST identifier of the prerelease part. Anything else is a named
+  refusal, not a guess: a version that is not `X.Y.Z[...]`, a prerelease channel that is not declared, a tag that
+  reads as a version.
+- **A prerelease can never move `latest`.** The publish step works the tag out before it sends anything, and the
+  derivation refuses, naming the case, when a prerelease would take `latest` - even under a manual override. The
+  reverse is refused too: a plain version does not publish into a channel tag with no decision behind it.
+- **The tag is passed explicitly.** "Publishing a package sets the `latest` tag to the published version unless
+  the `--tag` option is used" (https://docs.npmjs.com/cli/v11/commands/npm-dist-tag), and the `tag` config defaults
+  to `latest` (https://docs.npmjs.com/cli/v11/using-npm/config#tag) - so the step now ends in
+  `npm publish --access public --provenance --tag <tag>` and never leans on that default.
+- **A manual run may override the tag** with the new `tag` input; the step echoes the override and the tag the
+  derivation would have produced into the log before the publish, so the decision is readable, not silent.
+- **The cycle is written down** (README, "Releases and prereleases"): a build for ourselves is a prerelease under
+  `develop`/`preview`, the demo pins the EXACT version, and a release is a separate decision - a plain version, the
+  only shape that moves `latest`.
+- **Proven locally:** `node tools/npm-tag.test.mjs` walks the table - plain, both channels, build metadata, an
+  undeclared channel, garbage, every override - 28 cases, all green. A breaking run that cuts the guard reddens 5
+  of those 28, exactly the tooth's own cases, and `tools/npm-tag.mjs` was restored byte for byte. `node
+  tools/check.mjs` stays green, and CI gained the same case table as its own named step.
+
 ## 0.39.1 — 2026-10-07
 
 THE FIRST RELEASE CUT BY THE TAG-TRIGGERED WORKFLOW. The package's contents did not change: this entry and the

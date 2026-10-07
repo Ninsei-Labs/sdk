@@ -18,6 +18,16 @@
 # NOTE ON PROVENANCE: the SLSA attestation is only produced when both the
 # repository and the package are public. While the repository is private the
 # publish still works, the attestation is simply not generated.
+#
+# THE DIST-TAG IS DERIVED FROM THE VERSION, NOT LEFT TO A DEFAULT. An npm publish moves `latest` to the version
+# it carries unless `--tag` is given, so a build for ourselves must say where it goes. `tools/npm-tag.mjs` is the
+# one place that decides, and the publish step hands its answer to npm by name:
+#   X.Y.Z              -> latest    a release: a separate decision, and the only thing that moves `latest`
+#   X.Y.Z-develop.N    -> develop   a build for ourselves; the demo pins the EXACT version, not the tag
+#   X.Y.Z-preview.N    -> preview   a build to show, pinned the same way
+# A prerelease NEVER moves `latest`, and a plain version does not slide into a channel someone else owns: both are
+# refusals that NAME the case, so a wrong version fails this run instead of tagging quietly. A manual run may
+# override the tag with the `tag` input, and the step says so in the log before anything is sent.
 
 name: Release
 
@@ -29,6 +39,12 @@ on:
         description: Build and pack, but do not publish
         type: boolean
         default: true
+      tag:
+        description: >-
+          Override the npm dist-tag (a decision; the version would otherwise pick it). Empty means derive it from
+          the version. A prerelease can never be given `latest`.
+        type: string
+        default: ""
   push:
     tags:
       - "v*"
@@ -66,6 +82,10 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm run check
 
+      # The tag the publish rides on is a decision, so it is exercised before it is taken.
+      - name: The dist-tag derivation agrees with its own cases
+        run: node tools/npm-tag.test.mjs
+
       - name: Version must match the tag
         if: github.ref_type == 'tag'
         run: |
@@ -76,9 +96,30 @@ jobs:
             exit 1
           fi
 
+      # THE TAG, WORKED OUT AND NAMED BEFORE ANYTHING IS SENT. Derived from the version; a manual `tag` input
+      # overrides it and is echoed as a decision. The tool refuses (and the step fails) if a prerelease would take
+      # `latest` or a plain version would take a channel tag with no decision behind it.
+      - name: Work out the npm dist-tag
+        id: dist-tag
+        env:
+          OVERRIDE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          if [ -n "${OVERRIDE_TAG:-}" ]; then
+            echo "dist-tag: a manual tag input was given (${OVERRIDE_TAG}) for version ${version}; the derivation alone would say $(node tools/npm-tag.mjs "$version")"
+            tag=$(node tools/npm-tag.mjs "$version" --override "$OVERRIDE_TAG")
+          else
+            tag=$(node tools/npm-tag.mjs "$version")
+          fi
+          echo "dist-tag: version ${version} will publish under the \"${tag}\" tag"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
       - name: What is about to be published
         run: npm pack --dry-run
 
+      # THE TAG IS EXPLICIT: the publish never falls back to npm's default (`latest`), so a prerelease cannot move
+      # it by accident. The provenance attestation needs the repository and the package to be public.
       - name: Publish
         if: ${{ github.event_name == 'push' || inputs.dry-run == false }}
-        run: npm publish --access public --provenance
+        run: npm publish --access public --provenance --tag "${{ steps.dist-tag.outputs.tag }}"
