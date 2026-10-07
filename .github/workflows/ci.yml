@@ -56,3 +56,7 @@ jobs:
 
       - name: Check for secrets
         run: pnpm run check:secrets
+
+      # The release workflow's tag rule is a decision, so it is exercised on every change, not only at release time.
+      - name: Check the release tag rule (version -> npm dist-tag)
+        run: node tools/npm-tag.test.mjs
