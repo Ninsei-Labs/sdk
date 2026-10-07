@@ -41,25 +41,25 @@ jobs:
   publish:
     runs-on: ubuntu-latest # cloud-hosted only: npm accepts OIDC from these, not from self-hosted
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "26"
           registry-url: "https://registry.npmjs.org" # wires up the .npmrc the OIDC exchange rides on
 
       # The npm bundled with the runner image can be older than the trusted
-      # publishing floor (11.5.1), and an old npm cannot do the OIDC exchange.
+      # publishing floor (11.12.1), and an old npm cannot do the OIDC exchange.
       - name: Ensure npm supports trusted publishing
         run: |
-          npm install -g npm@^11.5.1
+          npm install -g npm@^11.12.1
           npm --version
 
       # pnpm is this repository's package manager, so the lock file is pnpm's.
       # npm is still used for the publish itself: npm owns the OIDC exchange.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
-          version: 9.15.9
+          version: 12.10.1
 
       - name: Install and verify
         run: |

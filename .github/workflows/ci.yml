@@ -22,17 +22,17 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # pnpm comes from the `packageManager` field in package.json, not from a version pinned here: there is one
       # place that says which package manager this package uses.
       - name: Set up pnpm (from packageManager)
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20.x'
+          node-version: '26.x'
           cache: pnpm
 
       # --frozen-lockfile: the lock file is the input, not something CI may rewrite.
