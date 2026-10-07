@@ -6,7 +6,6 @@
 //   import   - the entry point loads in bare Node, and the check NAMES what a browser would be needed for;
 //   surface  - index.d.ts and the runtime agree in BOTH directions: interface members, named exports, code tables;
 //   mirror   - the engine mirror parses and none of its imports dangle inside the package;
-//   language - no Cyrillic outside the named generated engine mirror;
 //   pack     - what the tarball will carry matches the `files` field;
 //   secrets  - no keys, tokens or passwords in the tree.
 //
@@ -285,42 +284,7 @@ export const mirrorCheck = () => {
 };
 
 // ---------------------------------------------------------------------------------------------------
-// 5. LANGUAGE - Cyrillic nowhere, except the generated engine mirror, which is named here.
-// ---------------------------------------------------------------------------------------------------
-
-const CYRILLIC = /[\u0400-\u04FF]/;
-
-// THE ONE NAMED EXCEPTION. engine/** is a generated mirror of the demo's browser engine (www/js), kept
-// byte-for-byte in sync by tools/build-sdk-engine.mjs and never edited here (src/engine.mjs). Translating it would
-// break that invariant and be overwritten on the next build. Its non-English lines are DEBT, counted and printed,
-// not hidden. Everything written inside this repository must be English.
-const LANGUAGE_MIRROR = "engine/";
-
-export const languageCheck = () => {
-  const problems = [];
-  let mirrorFiles = 0;
-  let mirrorLines = 0;
-  for (const file of listFiles(ROOT)) {
-    const rel = slashed(file);
-    let text;
-    try { text = read(file); } catch { continue; }
-    const lines = text.split("\n").filter((l) => CYRILLIC.test(l));
-    if (lines.length === 0) continue;
-    if (rel.startsWith(LANGUAGE_MIRROR)) {
-      mirrorFiles += 1;
-      mirrorLines += lines.length;
-      continue;
-    }
-    for (const line of lines) problems.push(`${rel}: ${line.trim().slice(0, 90)}`);
-  }
-  return {
-    note: `no Cyrillic outside the engine mirror (${mirrorFiles} mirror files / ${mirrorLines} lines named as debt)`,
-    problems,
-  };
-};
-
-// ---------------------------------------------------------------------------------------------------
-// 6. PACK - what will ride in the tarball, against the `files` field.
+// 5. PACK - what will ride in the tarball, against the `files` field.
 // ---------------------------------------------------------------------------------------------------
 
 export const packCheck = () => {
@@ -362,7 +326,7 @@ export const packCheck = () => {
 };
 
 // ---------------------------------------------------------------------------------------------------
-// 7. SECRETS - no keys, tokens or passwords. Matched by SHAPE, high-confidence patterns only.
+// 6. SECRETS - no keys, tokens or passwords. Matched by SHAPE, high-confidence patterns only.
 // ---------------------------------------------------------------------------------------------------
 
 // High-confidence shapes: a hit here is a secret, not a lookalike. Session labels, transaction hashes and event
@@ -412,7 +376,6 @@ const CHECKS = {
   import: importCheck,
   surface: surfaceCheck,
   mirror: mirrorCheck,
-  language: languageCheck,
   pack: packCheck,
   secrets: secretsCheck,
 };

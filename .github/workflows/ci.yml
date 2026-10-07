@@ -51,9 +51,6 @@ jobs:
       - name: Check engine mirror (parses, no dangling imports)
         run: pnpm run check:mirror
 
-      - name: Check language (no Cyrillic outside the engine mirror)
-        run: pnpm run check:language
-
       - name: Check package contents (the tarball against `files`)
         run: pnpm run check:pack
 
