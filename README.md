@@ -153,7 +153,7 @@ Separately, about what is already in place:
   appears (a local key, a hardware wallet, MPC), the adapter will gain a "sign" capability — that is an edit of one
   interface, not a rewrite of the swap.
 - **Executing the DEX leg and aggregators.** The route-provider registry already exists in the EVM driver:
-  `routeProviders()` and `routeProviderFor(id)`, a requirement for a provider — `id`, `kind`, `plan(...)`.
+  `routeProviders()` and `routeProviderFor(id)`, a requirement for a provider — `id`, `kind`, `shape`, `plan(...)` and, for `shape: "async"`, `settled(...)`.
   One provider is declared: `declared` (our routes; execution — stage 3). An external aggregator (1inch and the
   like) is added **by a file and a line in the registry**, and the order of preference is set by options
   (`routing: { prefer: [...] }`) and checked against the registry: an unknown identifier is `bad-input`, not

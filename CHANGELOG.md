@@ -1,4 +1,4 @@
-## Unreleased
+## 0.39.0 — 2026-10-07
 
 THE PACKAGE IS LEVEL WITH THE MAIN REPOSITORY AGAIN. The `sdk/src` and `sdk/engine` trees were re-synced
 byte-for-byte from the demo repository's `sdk/`, so the mirrored engine and the core carry today's changes.
@@ -17,10 +17,15 @@ byte-for-byte from the demo repository's `sdk/`, so the mirrored engine and the 
   `claimWindowSeconds` and `readyWindowSeconds` were assembled into the terms twice.
 - **The engine mirror follows the contract rename** (`engine/**`): the escrow and factory names in the comments
   and the calldata tables read `NinseiEscrow` / `NinseiEscrowFactory`, matching the deployed contracts.
-- One module of the main tree is NOT carried over, and this is named rather than translated:
-  `src/levelsWalkSpec.mjs` is a byte-frozen twin of the node's `rfq/lib/levelsWalkSpec.mjs`, and its comments are
-  Russian. Bringing it in byte-for-byte would put Cyrillic inside `src/`, which the language check forbids;
-  translating it would break the byte-identity it exists for. It waits for a deliberate decision.
+- **The level walk is carried over, translated, and ON THE PACKAGE SURFACE** (`src/levelsWalkSpec.mjs`): the
+  maker's level set in, the firm price out - the SAME walk the node runs (`rfq/lib/levelsWalkSpec.mjs`). Its
+  comments were translated to English, so the language check stays green, and the twin no longer forces a single
+  comment language: the guard now compares the CODE with the comments cut out, and what must never diverge is the
+  BEHAVIOUR - 32 vectors still run through BOTH copies. Exported from the entry point and declared in
+  `index.d.ts`: `checkLevels`, `xmrForAsset`, `assetForXmr`, `toBigInt`, `XMR_ATOMIC_PER_ONE`.
+- **The docs no longer describe a provider without its `shape`:** the README requirement names `shape` (and
+  `settled(...)` for `shape: "async"`), and the `routing` doc comment in `index.d.ts` carries the four lines on
+  how a swap settles (one transaction or a separate later action).
 
 
 THE PROGRESS SCREEN READS THE CORE. The swap-progress screen of the demo used to read the engine's record and
