@@ -17,6 +17,12 @@
 //   locker, claimer,     - the order conditions: the same terms the DLEQ context binds and the escrow's
 //   amount, readyBy,       termsHash covers. Binding them means the quote is usable for THESE terms only.
 //   t1, salt
+//   xmrAmount            - the XMR side of the deal, in ATOMIC units (#110 step 3). It is IN this list AND in the
+//                          chain's list (OrderQuote.sol) at once: the field set is ONE, so the provider's
+//                          signature covers exactly the XMR the chain verifies at order birth. Earlier this field
+//                          rode in the quote object OUTSIDE the digest on purpose - a field the chain could not
+//                          see must not be signed; once the contract learned it, it moved in here together with
+//                          the typehash, the depositor form and the independent vector.
 //   commitHalfClaimer,   - the provider's own commitment and ed25519 spend point: both are inputs to the
 //   edPointClaimer         escrow's termsHash, so they are bound and cannot be swapped for another order's.
 //   chainId              - bound in the domain AND in the message. A quote signed for one network does not
@@ -30,9 +36,14 @@
 // The domain's verifyingContract is the escrow FACTORY taken from the order: the contract that will verify the
 // quote in EVM (stage 2). The type order, the domain name and the version are part of the protocol - they may
 // change only together with the quote version.
-export const ORDER_QUOTE_DOMAIN_NAME = "ArrakisEscrowFactory";
+export const ORDER_QUOTE_DOMAIN_NAME = "NinseiEscrowFactory";
 export const ORDER_QUOTE_DOMAIN_VERSION = "1";
-export const ORDER_QUOTE_VERSION = 6;
+// 8: the signed EIP-712 field set grew `xmrAmount` (#110 step 3) - the XMR the level walk gives is now covered by
+// the provider's signature and verified ON CHAIN. This is the request-shape generation label, and it moves WITH the
+// field set (see the note above). The DOMAIN name and the domain version string are UNCHANGED by it: they name the
+// domain (the factory address and the chain), which did not change. So here the label and the domain version string
+// move apart, and that is deliberate - the label tracks the message shape, not the domain identity.
+export const ORDER_QUOTE_VERSION = 8;
 
 // The domain type string is assembled from parts ON PURPOSE. A single literal of it is a phrase of several
 // space-separated words, and the SDK check reads such literals as user-facing text. Do not "simplify" it.
@@ -60,6 +71,7 @@ export const ORDER_QUOTE_FIELDS = [
   ["feeRecipient", "address"],
   ["validUntil", "uint64"],
   ["nonce", "uint256"],
+  ["xmrAmount", "uint256"],
 ];
 export const ORDER_QUOTE_TYPE = "OrderQuote(" + ORDER_QUOTE_FIELDS.map((f) => f[1] + " " + f[0]).join(",") + ")";
 

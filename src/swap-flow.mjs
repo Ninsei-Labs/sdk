@@ -268,7 +268,6 @@ export async function runAtomicOrder({
       // a condition: diverge by even a second - and the proof by which the provider confirms the half stops
       // agreeing.
       readyBy, t1, readyWindowSeconds, claimWindowSeconds,
-      salt,
       commitHalfLocker, commitHalfClaimer,
       // The ed25519 points go into the order explicitly: the other side assembles the shared address from them
       // and checks the proof EXACTLY against the on-chain fields, not against what arrived in the quote (doc 27
@@ -279,7 +278,7 @@ export async function runAtomicOrder({
       edViewPointLocker: mine.viewPub,
       salt,                        // our swap salt: see funding.js
       amountLabel,                 // the ready amount string for the label: formatting lives in the UI
-      amountWei, claimWindowSeconds, readyWindowSeconds,
+      amountWei,
       onStep: (text) => say("lock", text),
     });
     // WE HAND OUT OUR HALF: it is what claims the XMR and what must go into the recovery file. There used to be a
@@ -344,7 +343,7 @@ export async function runAtomicOrder({
 // The order state is read by a status() call, not from logs - and the previous explanation here was WRONG. It
 // claimed that the escrow has a SealedHalf event but no "claimed"/"refunded" events. The contract has NO
 // SealedHalf event at all, while the settlement events EXIST: HalfRevealed(bytes32 half, bool byClaimer)
-// (ArrakisEscrow.sol:109; the byClaimer flag distinguishes a claim from a refund), OrderTerms (:111-117) and
+// (NinseiEscrow.sol:109; the byClaimer flag distinguishes a claim from a refund), OrderTerms (:111-117) and
 // Ready (:119). The reason for polling is different, and it is also in the contract:
 //   * THE DEPOSIT HAS NO EVENT: the funded flag is set in the constructor together with OrderTerms, so there is
 //     no separate "deposited" in the logs, and that is the first of the order's states;
@@ -449,7 +448,7 @@ export async function claimOrder({ escrow, halfClaimer, expect, onStep, deps = {
   // THE CLAIM GAS LIMIT COMES FROM THE SHARED MODULE, NOT A LITERAL HERE (issue #127): the node lays exactly
   // this limit into the gas gift. It is set explicitly and with a margin: claim has the same trap as order
   // creation - the wallet estimates gas over a state that no longer exists on the chain (the same reason is
-  // named in the contract, ArrakisEscrow.sol:137-138), and the call costs tens of thousands of gas.
+  // named in the contract, NinseiEscrow.sol:137-138), and the call costs tens of thousands of gas.
   const hash = await (deps.send || sendTransaction)({ to: escrow, data: encodeClaim(halfClaimer), gas: CLAIM_GAS_LIMIT });
   return { hash };
 }

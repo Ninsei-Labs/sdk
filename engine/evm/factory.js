@@ -11,18 +11,18 @@
 // решение #76), и спрашивать их не у чего. Все аргументы статические, поэтому calldata - селектор плюс слова
 // по 32 байта; собирается здесь, в одном месте, и проверяется tools/check-evm-abi.mjs.
 //
-//   cast sig "predict((address,address,address,address,address,address,uint256,uint64,uint64,bytes32,bytes32,bytes32,uint256,uint256,uint256,address,uint64,uint256),bytes32,bytes32,uint8,bytes32,bytes32,bytes32)" -> 0x650f8657
-//   cast sig "createOrderAndFund(<тот же tuple>,...)"                                                                                                          -> 0x0c36feb7
+//   cast sig "predict((address,address,address,address,address,address,uint256,uint64,uint64,bytes32,bytes32,bytes32,uint256,uint256,uint256,address,uint64,uint256,uint256),bytes32,bytes32,uint8,bytes32,bytes32,bytes32)" -> 0x0824d205
+//   cast sig "createOrderAndFund(<тот же tuple>,...)"                                                                                                                -> 0x4703a9d3
 
 export const FACTORY_METHODS = {
-  // СОСТАВ КОТИРОВКИ ВЫРОС ПОЛЕМ cashier (#103): касса комиссии - часть ПОДПИСАННЫХ условий ордера, а не
-  // касса, которую заводит фабрика. От этого сменились селекторы обеих прежних функций.
-  predict: "0x3d81fc01",
+  // СОСТАВ КОТИРОВКИ ВЫРОС ПОЛЕМ xmrAmount (#110 шаг 3): XMR-сторона сделки входит в подписанный набор, поэтому
+  // селекторы обеих прежних функций сменились вторично (прежде - от поля cashier, #103).
+  predict: "0x0824d205",
   // создать эскроу И внести деньги ОДНОЙ транзакцией (перевод value вместе с вызовом).
-  createOrderAndFund: "0xc02a2ffa",
+  createOrderAndFund: "0x4703a9d3",
   // создать эскроу и внести деньги, когда ВНОСЯЩИЙ восстановлен ИЗ ПОДПИСИ над дайджестом котировки
   // (issue #97, часть A): транзакцию шлёт кто угодно, а `locker` записан подписавшим.
-  createOrderAndFundByDepositor: "0x535cf25c",
+  createOrderAndFundByDepositor: "0x2acd187b",
 };
 
 // ТЕМА СОБЫТИЯ OrderCreated. Она выросла адресом реестра, провайдером и ключом подписи:
@@ -36,7 +36,7 @@ export const ORDER_CREATED_TOPIC =
 // или ордер с чужими условиями). Список ОДИН на обе функции: разойтись им нечем.
 export const QUOTE_FIELDS = [
   "provider", "quoteKey", "registry", "cashier", "locker", "claimer", "amount", "readyBy", "t1", "salt",
-  "commitHalfClaimer", "edPointClaimer", "chainId", "feeBps", "fee", "feeRecipient", "validUntil", "nonce",
+  "commitHalfClaimer", "edPointClaimer", "chainId", "feeBps", "fee", "feeRecipient", "validUntil", "nonce", "xmrAmount",
 ];
 // Поля вносившего котировка НЕ несёт: они уходят отдельными аргументами (входят в init-код эскроу).
 const LOCKER_HALF_FIELDS = ["commitHalfLocker", "edPointLocker", "edViewPointLocker"];
@@ -94,6 +94,7 @@ function quoteWords(quote) {
     edPointClaimer: word(asHex32(quote.edPointClaimer), 32),
     chainId: word(quote.chainId, 32), feeBps: word(quote.feeBps, 32), fee: word(quote.fee, 32),
     feeRecipient: word(quote.feeRecipient, 32), validUntil: word(quote.validUntil, 32), nonce: word(quote.nonce, 32),
+    xmrAmount: word(quote.xmrAmount, 32),
   };
   return QUOTE_FIELDS.map((n) => map[n]).join("");
 }

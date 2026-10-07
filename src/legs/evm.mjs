@@ -63,13 +63,31 @@ export async function balances({ driver, address, tokens }) {
 // pre-signature guards are shared by all providers: the price is not market, the amount is covered, the token
 // allowance - otherwise an external route would become a hole in those very guards.
 //
-// REQUIREMENT FOR A PROVIDER: id, kind, plan(...) -> { ok, expectedOutWei | code, route?, calldata?, to? }.
-// Execution (assembling and sending the transaction) is stage 3; for now only our provider is declared, and its
-// plan honestly answers with a code.
+// THE SHAPE OF THE SWAP IS DECLARED, NOT ASSUMED. A provider says which way its swap settles, because the deal
+// path differs by it. Uniswap and SushiSwap are router AMMs - the router runs INSIDE the user's transaction, so
+// the swap and the escrow funding are ONE transaction (shape "sync"). CoWSwap is an intent auction - the person
+// signs an intent, and the settlement arrives LATER as a separate transaction sent by someone else (shape
+// "async"). Hard-coding "one transaction" into the deal path would fit only the first and force a rewrite for the
+// second, so the shape lives HERE and the path ASKS for it (see requireSyncProvider) instead of assuming it.
+//
+// AN ASYNCHRONOUS PROVIDER MUST DECLARE WHAT ENDS ITS EXECUTION - not a stub field, but something that can really
+// be checked: `settled(request)`, a check that reads the outcome (for an intent auction - the settlement of the
+// signed order) and answers whether the swap has ended and with what. A provider that cannot say this is
+// incomplete, and the check refuses it by NAME rather than treating it as synchronous.
+//
+// REQUIREMENT FOR A PROVIDER: id, kind, shape ("sync" | "async"), plan(...) -> { ok, expectedOutWei | code,
+// route?, calldata?, to? } and, for shape "async", settled(...). Execution (assembling and sending the
+// transaction) is stage 3; for now only our provider is declared, and its plan honestly answers with a code.
+export const SYNC = "sync";
+export const ASYNC = "async";
+
 const ROUTE_PROVIDERS = {
   declared: {
     id: "declared",
     kind: "declared",
+    // OUR ROUTES ARE A ROUTER: the swap runs inside the user's own transaction and funds the escrow in it - hence
+    // "sync", and hence no completion step: there is no later action to wait for.
+    shape: SYNC,
     async plan() {
       return { ok: false, code: "not-implemented", stage: 3 };
     },
@@ -79,3 +97,22 @@ const ROUTE_PROVIDERS = {
 /** Who can execute a route at all. The list is needed by the "no such provider" error. */
 export const routeProviders = () => Object.keys(ROUTE_PROVIDERS).sort();
 export const routeProviderFor = (id) => ROUTE_PROVIDERS[id] || null;
+
+/**
+ * THE GATE OF A PATH THAT ASSUMES "SWAP AND FUNDING IN ONE TRANSACTION". Such a path (stage 3: the router leg that
+ * funds the escrow with the very transaction that swaps) needs a provider whose swap happens in the user's OWN
+ * transaction. An asynchronous provider settles in a LATER, separate action, and silently treating it as
+ * synchronous would fund an escrow with nothing behind it - so it is refused BY NAME, with a `reason` token (the
+ * same shape of refusal the level book uses), not assumed to be synchronous.
+ *
+ * Returns { ok: true, provider } or { ok: false, reason, ... } - a refusal as a VALUE, not an exception: the
+ * caller keeps its own wording for the token.
+ */
+export const requireSyncProvider = (id) => {
+  const provider = routeProviderFor(id);
+  if (!provider) return { ok: false, reason: "provider-unknown", provider: typeof id === "string" ? id : null, known: routeProviders() };
+  if (provider.shape !== SYNC) {
+    return { ok: false, reason: "provider-not-synchronous", provider: provider.id, shape: provider.shape === undefined ? null : provider.shape };
+  }
+  return { ok: true, provider };
+};

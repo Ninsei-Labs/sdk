@@ -43,7 +43,7 @@ export const ERROR_CODES = [
   "quote-unavailable",
   "quote-refused",
   "quote-stale",
-  // THE ORDER-QUOTE SIGNATURE (EIP-712, quote format v6). Four different refusals, because the interface owes the
+  // THE ORDER-QUOTE SIGNATURE (EIP-712, quote format v7). Four different refusals, because the interface owes the
   // person a different piece of advice for each:
   //   quote-signature-invalid - the signature does not recover to any address: it is malformed or made for other bytes;
   //   quote-key-mismatch      - the signature is valid but belongs to a key other than the one the quote names;

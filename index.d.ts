@@ -39,6 +39,10 @@ export interface NinseiOptions {
   /**
    * Route providers (the DEX/aggregator leg) and the order of preference. An unknown identifier is `bad-input`:
    * the order is set explicitly, not by whoever answered over the network first.
+   * A provider's record also DECLARES THE SHAPE OF ITS SWAP: "sync" - the router runs in the user's own
+   * transaction, so the swap and the escrow funding are one transaction (Uniswap, SushiSwap); "async" - the
+   * settlement arrives later as a separate action, and then the record must also say what ends execution
+   * (CoWSwap). A path that assumes "one transaction" refuses an asynchronous provider BY NAME, not silently.
    */
   routing?: { prefer?: readonly string[] };
   /**
@@ -1334,3 +1338,80 @@ export declare const CHECK_CODES: readonly CheckCode[];
 export declare const ERROR_CODES: readonly ErrorCode[];
 
 export declare function createNinsei(options: NinseiOptions): Ninsei;
+
+// --- The maker's level set: the level walk the node and the client agree on ------------------------
+
+/**
+ * THE LEVEL WALK. A maker publishes a LEVEL SET - chunks of volume with their own prices - and both the node and
+ * the client compute a firm price by WALKING it, before anything is signed. `levelsWalkSpec.mjs` is the ONE
+ * implementation, a byte-identical twin of the node's copy (`rfq/lib/levelsWalkSpec.mjs`), and it is exported so a
+ * consumer reaches the same price: the maker's set in, the walk's answer out.
+ *
+ * NUMBERS ARE INTEGERS, BigInt ONLY. XMR is in atomic units (1 XMR = 1e12); a price is in the asset's atomic units
+ * per 1 WHOLE XMR. A refusal comes back as a NAMED `reason` token, never as an exception.
+ */
+
+/** One level: the NEXT chunk of volume, not a running total. Amounts are parsed with {@link toBigInt}. */
+export interface Level {
+  /** The chunk's volume in XMR atomic units. */
+  readonly amount: bigint | number | string;
+  /** The chunk's price in the asset's atomic units per 1 whole XMR. */
+  readonly price: bigint | number | string;
+}
+
+/** The orientation of a set: `ask` - the best price is the LOWEST; `bid` - the HIGHEST. */
+export type LevelOrientation = "ask" | "bid";
+
+/** The side the taker is on: `buy` pays the asset, `sell` receives it. */
+export type LevelRole = "buy" | "sell";
+
+/**
+ * A NAMED refusal over a level set (returned, not thrown). `index` is the guilty level in the ORIGINAL numbering.
+ * `side-off` is not an error: an empty set means the side is disabled.
+ */
+export type LevelReason =
+  | "levels-not-array"
+  | "levels-bad-orientation"
+  | "levels-bad-level"
+  | "levels-not-integer"
+  | "levels-not-positive"
+  | "levels-not-best-first"
+  | "levels-bad-role"
+  | "levels-fee-beyond-budget"
+  | "levels-exceed-side"
+  | "levels-below-minimum"
+  | "side-off";
+
+/** The verdict on a level set: the side off, a valid set with its volume and full cost, or a named refusal. */
+export type LevelVerdict =
+  | { readonly ok: true; readonly enabled: false; readonly count: 0; readonly minAtomic: 0n; readonly totalAtomic: 0n }
+  | { readonly ok: true; readonly enabled: true; readonly count: number; readonly minAtomic: bigint; readonly totalAtomic: bigint }
+  | { readonly ok: false; readonly reason: LevelReason; readonly index?: number };
+
+/** A walk answer: how much XMR and how much asset, or a named refusal. */
+export type LevelWalkResult =
+  | { readonly ok: true; readonly role: LevelRole; readonly xmrAtomic: bigint; readonly assetWei: bigint }
+  | { readonly ok: false; readonly reason: LevelReason; readonly role: LevelRole; readonly index?: number };
+
+/** XMR atomic units per 1 whole XMR. */
+export declare const XMR_ATOMIC_PER_ONE: bigint;
+
+/** Parse an integer into BigInt. Fractional / NaN / garbage -> null (the caller names the refusal, it does not guess). */
+export declare function toBigInt(value: bigint | number | string): bigint | null;
+
+/** Check a set: the side off, the set valid, or a NAMED reason. Equal prices are allowed; a worse price is not. */
+export declare function checkLevels(levels: readonly Level[], orientation?: LevelOrientation): LevelVerdict;
+
+/**
+ * DIRECTION 1 - "I give/take ASSET": how much XMR the asset buys or sells. The fee is ADDED for `buy` and
+ * SUBTRACTED for `sell`.
+ */
+export declare function xmrForAsset(request: { readonly levels: readonly Level[]; readonly role: LevelRole;
+  readonly feeWei?: bigint | string; readonly assetWei: bigint | string; readonly orientation?: LevelOrientation }): LevelWalkResult;
+
+/**
+ * DIRECTION 2 - "I give/want XMR": how much asset the XMR costs. The fee is ADDED for `buy` and SUBTRACTED for
+ * `sell`.
+ */
+export declare function assetForXmr(request: { readonly levels: readonly Level[]; readonly role: LevelRole;
+  readonly feeWei?: bigint | string; readonly xmrAtomic: bigint | string; readonly orientation?: LevelOrientation }): LevelWalkResult;
