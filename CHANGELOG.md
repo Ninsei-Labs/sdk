@@ -1,3 +1,18 @@
+## 0.39.1 — 2026-10-07
+
+THE FIRST RELEASE CUT BY THE TAG-TRIGGERED WORKFLOW. The package's contents did not change: this entry and the
+version field are the whole difference from 0.39.0, and the release exists to publish once through the
+trusted-publisher setup on npm.
+
+- **Why a release at all.** npm's trusted-publisher link for `@ninsei-labs/sdk` (GitHub Actions, repository `sdk`,
+  workflow `release.yml`) reads "Pending validation" and only becomes active after one publish goes through that
+  workflow. This is that publish.
+- **Nothing in the package moved.** `src/**`, `engine/**` and `index.d.ts` are the same sources as 0.39.0; the only
+  edits are `package.json` (0.39.0 to 0.39.1) and this entry. The dependencies are unchanged, so `pnpm-lock.yaml` is
+  untouched.
+- Checks: `node tools/check.mjs` - all 7 green (syntax, import, surface, mirror, language, pack, secrets).
+
+
 ## 0.39.0 — 2026-10-07
 
 THE PACKAGE IS LEVEL WITH THE MAIN REPOSITORY AGAIN. The `sdk/src` and `sdk/engine` trees were re-synced
