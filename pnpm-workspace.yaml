@@ -1,0 +1,14 @@
+# pnpm's project settings live here (pnpm >= 10.6). They used to sit in .npmrc,
+# which npm also reads: npm does not know these keys and warned
+# `Unknown project config "node-linker"` on every run.
+packages:
+  - "."
+
+# Flat node_modules, the way npm lays it out: bundlers and the checks expect it.
+nodeLinker: hoisted
+
+# pnpm >= 10 blocks dependency build scripts unless allowed. keccak ships
+# prebuilt binaries and its hook is `node-gyp-build || exit 0`, so allowing it
+# only lets it pick the prebuild - the tree stays as flat as npm used to build it.
+allowBuilds:
+  keccak: true
