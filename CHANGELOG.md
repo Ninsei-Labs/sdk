@@ -1,3 +1,32 @@
+## Unreleased — 2026-10-08
+
+EVERY ORDER'S ESCROW IS A CLONE, AND THE CLIENT NOW CHECKS THE IMPLEMENTATION IT WILL EXECUTE (issue #114).
+Since the contract change an order's escrow is an EIP-1167 minimal proxy of ONE shared implementation, and the
+factory carries the pair (`implementation()`, `implementationCodeHash()`). The factory checks that pair before every
+creation; the client now checks the SAME pair on chain, armed by the interface's own policy - `knownImplementationCodes`,
+an array of known implementation build hashes, sitting next to `knownFactoryCodes`. The verdict reads the pair off the
+factory, reads the CODE at the implementation's address and applies the same check the factory does - and re-hashes the
+live code, so it does not trust the factory's own answer alone. A `delegatecall` to an address without code SUCCEEDS,
+so a clone without an implementation would take the ETH and its `markReady`/`claim`/`refund` would appear to go through
+while doing nothing: that case is refused by name (`implementation-has-no-code`).
+
+- **`knownImplementationCodes`** (`src/quotes.mjs`, `src/index.mjs`, `index.d.ts`) - the interface's
+  escrow-implementation policy, next to `knownFactoryCodes`. An empty/absent list means "no policy": the pair is not
+  read and behaviour is as before (needed while a network still runs a factory of the OLDER build, which has no such
+  getters and answers a revert - the deployed one does). A non-empty list refuses an implementation whose recorded
+  hash is not a known build with `quote-factory-code-unknown`; a pair that cannot be read at all is refused with
+  `quote-factory-unchecked`. Proven by four cases beside the existing factory-code ones: a known build is accepted,
+  and a foreign one, a code whose hash does not match the recorded one, and an implementation without code are each
+  refused by a named reason.
+- **`verifyFactoryImplementationOnChain`** (`engine/evm/factory.js`) - one place that reads the pair and applies
+  `verifyFactoryImplementation`, with the chain injected (`read` = `eth_call`, `code` = `eth_getCode`). The module
+  stays pure (no imports, no network) and is the same helper the demo's node and watchtower call with their own reads.
+- **The package source is re-synced from the source-of-truth tree**: `src/**`, `engine/**` and `index.d.ts` are
+  byte-for-byte the demo repository's `sdk/`. The demo's interface config pins the known implementation hash - a
+  protocol constant, because the implementation has no immutable fields, so its runtime code (and its hash) is the
+  same on every network.
+- Checks: `node tools/check.mjs` - all green.
+
 ## 0.39.2 — 2026-10-08
 
 `fakechain` IS A KNOWN MONERO NETWORK. The withdrawal page takes the Monero network FROM THE NODE, and monerod in

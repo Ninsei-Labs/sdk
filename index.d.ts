@@ -94,6 +94,18 @@ export interface NinseiOptions {
    */
   knownFactoryCodes?: readonly string[];
   /**
+   * THE INTERFACE'S ESCROW-IMPLEMENTATION POLICY (issue #114) - policy, not proof, next to knownFactoryCodes and
+   * allowedProviders. Since #114 every order's escrow is an EIP-1167 clone of ONE shared implementation, and the
+   * factory carries the pair (`implementation()`, `implementationCodeHash()`). The factory checks that pair at
+   * creation; the core checks the SAME pair on chain - it reads the pair off the factory, reads the code at the
+   * implementation's address, re-hashes it and matches it against this list of known build hashes (`keccak256` of
+   * the implementation's runtime code, a protocol constant: the implementation has no immutables). An implementation
+   * whose code is not a known build (or has no code at all) is refused with `quote-factory-code-unknown`; a pair
+   * that cannot be read at all (an older factory without those getters) is refused with `quote-factory-unchecked`.
+   * An empty/absent list means "no policy": the pair is still read and the implementation's code must be non-empty.
+   */
+  knownImplementationCodes?: readonly string[];
+  /**
    * A PASS TO OUR SERVICE for the "server" step (recording the swap with us). Only a wallet can sign the sign-in
    * message, and the wallet's role in the SDK is an adapter: windows and message signatures remain the interface's,
    * and the core receives a READY pass through the same seam the interface obtains it with today

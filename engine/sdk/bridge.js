@@ -37,7 +37,7 @@
 // загрузился (нет файла, старый кеш, сеть) - это НАЗВАННЫЙ отказ с причиной в консоли (sdkBundle ниже), а не
 // молчание и не подмена.
 
-import { chainById, DEFAULT_CHAIN, MONERO, allowedProvidersFor, knownFactoryCodesFor } from "../core/config.js";
+import { chainById, DEFAULT_CHAIN, MONERO, allowedProvidersFor, knownFactoryCodesFor, knownImplementationCodesFor } from "../core/config.js";
 import { storage as pageStorage } from "../core/store.js";
 import { token as authToken, signIn } from "../evm/auth.js";
 import * as evm from "../evm/index.js";
@@ -69,7 +69,7 @@ import { height as nodeHeightValue } from "../monero/node.js";
 
 // АДРЕС ЯДРА СТРОКОЙ - СОБРАННЫЙ БАНДЛ ПОД www/ (tools/build-sdk.mjs): страница получает ядро ОДНИМ
 // модулем, а не пачкой исходников sdk/. ?v=<хеш> проставляет tools/stamp-assets.mjs.
-const SDK_BUNDLE = "/assets/vendors/sdk/sdk-browser.js?v=512864ff";
+const SDK_BUNDLE = "/assets/vendors/sdk/sdk-browser.js?v=31e62de5";
 
 // ОДНА ЗАГРУЗКА НА СТРАНИЦУ. Отказ - это состояние, а не поломка: он назван в консоли, и вызывающий решает.
 let loading = null;
@@ -140,6 +140,11 @@ function optionsFor(chain) {
     // берёт из записи реестра провайдера, а её КОД сверяет с этим списком (extcodehash). Пусто = политики
     // нет; тогда фабрика всё равно обязана совпасть с подписанной котировкой.
     knownFactoryCodes: knownFactoryCodesFor(chain),
+    // ХЕШ ИЗВЕСТНОЙ СБОРКИ РЕАЛИЗАЦИИ ЭСКРОУ (#114) - РЯДОМ С knownFactoryCodes. Фабрика сверяет пару
+    // (implementation, implementationCodeHash) при создании ордера; ядро сверяет ТУ ЖЕ пару на цепи, и этот
+    // список - политика интерфейса: какие сборки реализации он принимает. Пусто = политики нет (сеть со
+    // старой фабрикой), и тогда пара всё равно читается, а код по адресу реализации обязан быть непустым.
+    knownImplementationCodes: knownImplementationCodesFor(chain),
   };
 }
 
