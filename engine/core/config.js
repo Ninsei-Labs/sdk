@@ -365,7 +365,16 @@ export const CHAINS = [
     // селектор predict 0x3d81fc01) и касса 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512 (573 байта, но ДРУГОЙ
     // сборки - keccak 0x5c32bb9c…): её код не совпадал с канонической кассой, и эскроу отверг бы такой ордер
     // по #122 - поэтому касса развёрнута заново тем же заходом.
-    escrow: { address: "0xcbEAF3BDe82155F56486Fb5a1072cb8baAf547cc", mode: "live", cashier: "0x1429859428C0aBc9C2C47C8Ee9FBaf82cFA0F20f" },
+    // ХЕШ КОДА РЕАЛИЗАЦИИ ЭСКРОУ (#114): то, что исполняет клон каждого ордера и что интерфейс обязан
+    // сверить сам, а не только довериться фабрике. Значение - keccak256 runtime-кода NinseiEscrow, взято
+    // из СВОЕЙ сборки: forge inspect NinseiEscrow deployedBytecode --root mvp/contracts и keccak (совпало
+    // с keccak256(type(NinseiEscrow).runtimeCode), которое записывает фабрика, и с артефактом out/).
+    // У реализации НЕТ immutables, поэтому это КОНСТАНТА ПРОТОКОЛА - один и тот же хеш в любой сети со
+    // сборкой #114. Лежит при сети, а не одним общим числом, потому что политика может отсутствовать: сеть
+    // со СТАРОЙ фабрикой (без implementation()) обязана остаться БЕЗ политики, иначе чтение пары откажет и
+    // живые котировки этой сети встанут. Так и есть у arbitrum-sepolia: развёрнутая там фабрика сборки #114
+    // не знает (оба геттера revert-ят), поэтому у неё поля НЕТ; включается тем же заходом, что и новый деплой.
+    escrow: { address: "0xcbEAF3BDe82155F56486Fb5a1072cb8baAf547cc", mode: "live", cashier: "0x1429859428C0aBc9C2C47C8Ee9FBaf82cFA0F20f", implementationCodeHash: "0xfd1ef12c1d96d3ee7060bd5901e06108723783403fad00c9630dcdeb6193674b" },
     // Токенов в песочнице нет: расплата идёт нейтивом. Пустой список - это факт о песочнице, а не забывчивость.
     tokens: [],
     // Uniswap в песочнице не развёрнут и не нужен: тут своя цепочка для сквозных прогонов, а DEX-нога
@@ -690,6 +699,18 @@ export function knownFactoryCodesFor(chainOrId) {
   const list = KNOWN_FACTORY_CODES[id];
   if (!Array.isArray(list) || list.length === 0) return null;
   return list.map((h) => String(h).toLowerCase());
+}
+
+// СПИСОК ИЗВЕСТНЫХ СБОРОК РЕАЛИЗАЦИИ ЭСКРОУ - ПОЛИТИКА ИНТЕРФЕЙСА (#114), при самой сети, где живёт адрес
+// фабрики (escrow.address). Хеш её кода - КОНСТАНТА ПРОТОКОЛА (у реализации нет immutables), но политика
+// может быть не задана: у сети без поля implementationCodeHash её НЕТ (старая фабрика пары не отдаёт).
+// Пусто = политики нет; непусто = интерфейс торгует только через фабрики, ведущие на эту сборку.
+export function knownImplementationCodesFor(chainOrId) {
+  const id = typeof chainOrId === "string" ? chainOrId : chainOrId && chainOrId.id;
+  const chain = CHAINS.find((c) => c.id === id) || chainById(id);
+  const pinned = chain && chain.escrow ? chain.escrow.implementationCodeHash : null;
+  if (typeof pinned !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(pinned)) return null;
+  return [pinned.toLowerCase()];
 }
 
 export function chainById(id) {

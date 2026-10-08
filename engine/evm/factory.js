@@ -214,3 +214,42 @@ export function verifyFactoryImplementation({ implementation, implementationCode
   }
   return { ok: true, codeHash: pinned };
 }
+
+// ЧТЕНИЕ ПАРЫ У ФАБРИКИ + ВЕРДИКТ - ОДНО МЕСТО НА ВСЕ НОСИТЕЛИ (SDK, узел, сторож). Читает пару полей
+// фабрики (implementation() / implementationCodeHash()) и КОД по адресу реализации, затем применяет тот же
+// вердикт, что и фабрика при создании ордера (verifyFactoryImplementation выше). Цепь инжектится: read -
+// это eth_call ({to,data}) -> hex, code - это eth_getCode (address) -> hex. Модуль остаётся чистым: ни
+// одного импорта, ни одного сетевого вызова, поэтому проверяется без сети. Носители подставляют СВОИ
+// чтения (SDK - evmCall/evmCode кошелька страницы, узел и сторож - свой RPC). hashCode, если передан,
+// пересчитывает живой код: тогда вердикт не доверяет одному лишь ответу фабрики.
+export async function verifyFactoryImplementationOnChain({ factory, read, code, policy = null, hashCode = null } = {}) {
+  if (!factory || !/^0x[0-9a-fA-F]{40}$/.test(String(factory))) {
+    return { ok: false, why: "factory-missing" };
+  }
+  if (typeof read !== "function") return { ok: false, why: "no-chain-read" };
+  if (typeof code !== "function") return { ok: false, why: "no-code-read" };
+  let implRaw, hashRaw;
+  try {
+    implRaw = await read({ to: factory, data: FACTORY_READS.implementation });
+    hashRaw = await read({ to: factory, data: FACTORY_READS.implementationCodeHash });
+  } catch {
+    // ЧТЕНИЕ ПАРЫ НЕ УДАЛОСЬ - ЭТО НАЗВАННЫЙ ОТКАЗ, А НЕ МОЛЧАНИЕ. Старая фабрика (без этих геттеров)
+    // отвечает revert'ом: пара не прочитана, вердикта нет, и носитель обязан отказать.
+    return { ok: false, why: "implementation-unreadable", factory: String(factory).toLowerCase() };
+  }
+  let implementation, implementationCodeHash;
+  try {
+    implementation = decodeImplementation(implRaw);
+    implementationCodeHash = decodeImplementationCodeHash(hashRaw);
+  } catch {
+    return { ok: false, why: "implementation-unreadable", factory: String(factory).toLowerCase() };
+  }
+  let liveCode;
+  try {
+    liveCode = await code(implementation);
+  } catch {
+    return { ok: false, why: "implementation-code-unreadable", implementation };
+  }
+  const verdict = verifyFactoryImplementation({ implementation, implementationCodeHash, code: liveCode, hashCode, policy });
+  return { ...verdict, implementation, implementationCodeHash };
+}
