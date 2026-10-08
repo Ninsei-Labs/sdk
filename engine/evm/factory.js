@@ -147,3 +147,70 @@ export function decodeAddress(returnedHex) {
   if (hex.length < 64) throw new Error("короткий ответ: " + returnedHex);
   return "0x" + hex.slice(24, 64);
 }
+
+
+// ============================================================================================
+// РЕАЛИЗАЦИЯ ЭСКРОУ: ЕЁ АДРЕС И ХЕШ ЕЁ КОДА (issue #114, поправка 2).
+// С #114 эскроу каждого ордера - КЛОН EIP-1167 одной общей реализации, а адрес реализации и хеш её кода
+// лежат у фабрики (implementation() / implementationCodeHash()). ФАБРИКА при создании ордера проверяет эту
+// пару; КЛИЕНТ обязан проверить ТУ ЖЕ пару, иначе клон исполнит чужой код, а денежные пути "пройдут" впустую
+// (delegatecall на адрес без кода УСПЕШЕН). Здесь - только чтение полей и вердикт; вызовы к цепи делает
+// носитель (session.js: readContract/readCode), поэтому функция чистая и проверяется без сети.
+// ============================================================================================
+
+// Селекторы посчитаны инструментом, не вручную:
+//   cast sig "implementation()"         -> 0x5c60da1b
+//   cast sig "implementationCodeHash()" -> 0xbc0a3981
+export const FACTORY_READS = {
+  implementation: "0x5c60da1b",
+  implementationCodeHash: "0xbc0a3981",
+};
+
+// Чтение поля фабрики без аргументов: calldata равен селектору.
+export function encodeFactoryRead(name) {
+  const sel = FACTORY_READS[name];
+  if (typeof sel !== "string" || !/^0x[0-9a-f]{8}$/.test(sel)) throw new Error("нет такого чтения фабрики: " + name);
+  return sel;
+}
+
+// implementation() - один адрес в 32-байтовом слове.
+export function decodeImplementation(returnedHex) {
+  return decodeAddress(returnedHex);
+}
+
+// implementationCodeHash() - одно слово bytes32.
+export function decodeImplementationCodeHash(returnedHex) {
+  const hex = String(returnedHex || "").replace(/^0x/, "");
+  if (hex.length < 64) throw new Error("короткий ответ implementationCodeHash(): " + returnedHex);
+  return "0x" + hex.slice(0, 64).toLowerCase();
+}
+
+// ВЕРДИКТ ПО РЕАЛИЗАЦИИ - те же три условия, что проверяет фабрика (и что закрывает поправки #114):
+//   1) адрес реализации назван и её КОД на цепи непуст: delegatecall на адрес без кода успешен, поэтому
+//      клон без реализации принял бы ETH, а markReady/claim/refund "прошли" бы, ничего не сделав;
+//   2) хеш кода реализации равен recorded-хешу фабрики (сравнение делает сама фабрика через codehash);
+//   3) recorded-хеш входит в политику интерфейса (список известных сборок) - если она задана.
+// Если передан hashCode (keccak256 байтов кода), сверяется и живой код: тогда вердикт не доверяет одному
+// лишь ответу фабрики, а пересчитывает хеш из eth_getCode.
+export function verifyFactoryImplementation({ implementation, implementationCodeHash, code, hashCode, policy } = {}) {
+  if (!implementation || !/^0x[0-9a-fA-F]{40}$/.test(String(implementation))) {
+    return { ok: false, why: "implementation-missing" };
+  }
+  if (!implementationCodeHash || !/^0x[0-9a-fA-F]{64}$/.test(String(implementationCodeHash))) {
+    return { ok: false, why: "code-hash-missing" };
+  }
+  if (code === undefined || code === null || code === "0x" || code === "0x0") {
+    return { ok: false, why: "implementation-has-no-code" };
+  }
+  const pinned = String(implementationCodeHash).toLowerCase();
+  if (Array.isArray(policy) && policy.length) {
+    if (!policy.map((h) => String(h).toLowerCase()).includes(pinned)) {
+      return { ok: false, why: "implementation-code-unknown", codeHash: pinned };
+    }
+  }
+  if (typeof hashCode === "function") {
+    const live = String(hashCode(code)).toLowerCase();
+    if (live !== pinned) return { ok: false, why: "implementation-code-mismatch", got: live, want: pinned };
+  }
+  return { ok: true, codeHash: pinned };
+}

@@ -218,12 +218,15 @@ export function buildConfig(options) {
     if (!known.includes(id)) fail("bad-input", { field: "routing.prefer", unknown: id, known });
   }
 
-  // MONERO NETWORKS THE CORE KNOWS. The engine's registry declares only the one the demo is configured for
-  // (XMR_NETWORKS: stagenet). But the SDK contract (index.d.ts, xmrNetwork) names THREE standard names -
-  // mainnet/stagenet/testnet - and that is not about the demo: the withdrawal page takes the network FROM THE
-  // NODE, and on a production network its network is mainnet, not a typo. So three standard ones are added to
-  // the declared ones; anything else is still a refusal with the known list.
-  const STANDARD_XMR_NETWORKS = ["mainnet", "stagenet", "testnet"];
+  // MONERO NETWORKS THE CORE KNOWS. The engine's registry declares only the ones the demo is configured for
+  // (XMR_NETWORKS). But the SDK contract (index.d.ts, xmrNetwork) names the STANDARD ones - mainnet/stagenet/
+  // testnet - and that is not about the demo: the withdrawal page takes the network FROM THE NODE, and on a
+  // production network its network is mainnet, not a typo.
+  // REGTEST JOINS THEM BY ITS OFFICIAL NAME. monerod in regtest mode reports its network as `fakechain`, and the
+  // withdrawal page builds the facade from the network the node hands it - so the CI contour (a regtest node)
+  // hands out `fakechain`. Without that name the core refuses its OWN recovery file and the withdrawal never
+  // starts. This is a KNOWN name, not a wildcard: anything else is still a refusal with the known list below.
+  const STANDARD_XMR_NETWORKS = ["mainnet", "stagenet", "testnet", "fakechain"];
   const xmrNetworks = [...new Set([...Object.values(engine.config.XMR_NETWORKS || {}), ...STANDARD_XMR_NETWORKS])];
   if (!xmrNetworks.includes(options.xmrNetwork)) {
     fail("bad-input", { field: "xmrNetwork", known: xmrNetworks });

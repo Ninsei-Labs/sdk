@@ -1,3 +1,26 @@
+## 0.39.2 — 2026-10-08
+
+`fakechain` IS A KNOWN MONERO NETWORK. The withdrawal page takes the Monero network FROM THE NODE, and monerod in
+regtest mode reports its network as `fakechain` - the official name of that mode. On the CI contour (a regtest node)
+the core therefore refused its OWN recovery file (`bad-input`, field `xmrNetwork`) and the withdrawal never started.
+The name is now accepted by every check of the network value, and everything else is still refused by name.
+
+- **`fakechain` joins the accepted networks** (`src/config.mjs`, `index.d.ts`): beside the engine registry's own
+  names and the standard mainnet/stagenet/testnet it is a KNOWN name of the regtest mode. Anything else is still a
+  `bad-input` refusal that names the known list - the value is checked, not "any word accepted".
+- **The recovery-file reader accepts it as well** (`engine/recovery/recoveryFile.js`): a file whose wallet network is
+  `fakechain` reads back; an unknown name is still rejected. Proven by a writer -> reader round trip, with the
+  unknown-name case beside it.
+- **The engine's network registry declares it** (`engine/core/config.js`): the Monero wallet adapter builds its list
+  of known networks from `XMR_NETWORKS`, so `/adapters` knows the name too.
+- **The package source is re-synced from the source-of-truth tree**: `src/**`, `engine/**` and `index.d.ts` are now
+  byte-for-byte the demo repository's `sdk/`. Besides the change above this also carries two changes that were
+  already in that tree: the escrow-implementation address/codehash read and verdict (`engine/evm/factory.js`,
+  `verifyFactoryImplementation`) and the smallest-trade rule that reads the maker's SENT minimum rather than the
+  effective set's first level (`src/levelsWalkSpec.mjs`, the `minAtomic` argument).
+- Checks: `node tools/check.mjs` - all green.
+
+ HEAD
 ## Unreleased — 2026-10-07
 
 PRERELEASES GET THEIR OWN npm TAGS, AND `latest` STOPS MOVING BY ACCIDENT. The release workflow published whatever

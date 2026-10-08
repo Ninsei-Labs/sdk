@@ -24,8 +24,12 @@ export interface NinseiOptions {
    * without a driver answers with the code `not-implemented`, rather than being assumed EVM by default.
    */
   settlement: { chain: string; vm?: string };
-  /** The Monero network. A value from `sdk.config.xmrNetworks`. */
-  xmrNetwork: "mainnet" | "stagenet" | "testnet";
+  /**
+   * The Monero network. A value from `sdk.config.xmrNetworks`. Besides mainnet/stagenet/testnet it names
+   * `fakechain` - the official network name monerod reports in regtest mode, which the withdrawal page picks up
+   * from the node on the CI contour.
+   */
+  xmrNetwork: "mainnet" | "stagenet" | "testnet" | "fakechain";
   /** Where to load workers and WASM from (order-worker, the Monero bundles). Default "/". */
   assetsBase?: string;
   /** Storage for unfinished swaps and sessions. Default - a localStorage adapter, if present. */
