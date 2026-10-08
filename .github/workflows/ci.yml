@@ -60,3 +60,9 @@ jobs:
       # The release workflow's tag rule is a decision, so it is exercised on every change, not only at release time.
       - name: Check the release tag rule (version -> npm dist-tag)
         run: node tools/npm-tag.test.mjs
+
+      # The withdrawal core's refusal behaviour is a package agreement as well: an empty remainder is a NAMED
+      # refusal (insufficient-funds), and a low-level wallet error never escapes without a code. A unit run - no
+      # browser, no contour: the wallet is a stand-in and the recovery file is built by the engine itself.
+      - name: Check the withdrawal refusal (empty remainder -> insufficient-funds)
+        run: pnpm run check:sweep

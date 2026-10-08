@@ -14,6 +14,22 @@ const STEPS = ["unlock", "sync", "sweep", "relay"];
 
 const contentsOf = (file) => (typeof file === "string" ? file : file && typeof file.contents === "string" ? file.contents : null);
 
+// A LOW-LEVEL WALLET ERROR IS STILL A REFUSAL, AND EVERY REFUSAL CARRIES A CODE.
+//
+// The library brings its own exceptions with no code at all - monero-ts answers "failed to get hashes" while
+// scanning, and lets it out as a bare `Error`. Releasing one turns a named refusal into `code: null` + raw
+// text: the interface cannot translate it (it has no phrase to look up) and a check cannot assert it. So a
+// wallet step that fails with anything but an SdkError is re-thrown as one, on a code from the package's own
+// dictionary, with the library's message kept as a detail.
+const walletStep = async (surface, step) => {
+  try {
+    return await step();
+  } catch (error) {
+    if (error instanceof SdkError) throw error;
+    throw new SdkError("wallet-rejected", { surface, why: String((error && error.message) || error) });
+  }
+};
+
 export function createSweep({ http, config }) {
   // THE NAME IS NEEDED BY THE OBJECT ITSELF: `run` calls `api.plan(...)` - the step order is held by the plan and
   // the withdrawal living in one object, not in two copies. During a manual merge of branches the object was left
@@ -157,9 +173,16 @@ export function createSweep({ http, config }) {
 
     // SIGNING WITHOUT SENDING - AS A SEPARATE STEP. The core HOLDS the signed transaction until the person's
     // decision: otherwise the interface could not show what exactly will leave, and would tell about it only after
-    // sending. Here is the whole order UP TO AND INCLUDING SIGNING: plan -> wallet -> open -> sync -> free remainder
+    // sending. Here is the whole order UP TO AND INCLUDING SIGNING: plan -> wallet -> open -> free remainder
     // (an empty one STOPS the withdrawal with a code) -> sign (relay: false). The wallet stays open until `relay`,
     // and the session token is the only handle to it.
+    //
+    // THE FREE REMAINDER IS READ AND JUDGED BEFORE ANY INPUT SELECTION, AND A SYNC PASS IS NOT THE VERDICT.
+    // The wallet library fails low-level while scanning a chain it cannot read (measured: monero-ts `sync()` against
+    // a regtest node answering "failed to get hashes"), and that bare error used to escape BEFORE the remainder was
+    // read - an empty wallet was refused by a raw exception (`code: null`) instead of `insufficient-funds`. A failed
+    // pass is not fatal by itself: the remainder below decides, and anything still blocking the signature is refused
+    // WITH A CODE from the dictionary (see `walletStep`).
     async sign(request) {
       const plan = await api.plan(request);
       if (!request || typeof request.to !== "string" || !request.to) throw new SdkError("bad-input", { field: "to" });
@@ -171,12 +194,14 @@ export function createSweep({ http, config }) {
 
       await wallet.open(plan);
       try {
-        await wallet.sync();
-        const unlocked = BigInt(await wallet.unlockedBalance());
+        // A SYNC PASS - BEST-EFFORT, NOT THE VERDICT. A node whose chain the wallet cannot scan makes the library
+        // throw; that must not pre-empt the funds verdict below, and it must not leave as raw text.
+        try { await wallet.sync(); } catch { /* the remainder below decides; a real blocker is refused by a code */ }
+        const unlocked = BigInt(await walletStep("unlockedBalance", () => wallet.unlockedBalance()));
         // AN EMPTY REMAINDER STOPS THE WITHDRAWAL BEFORE SIGNING: otherwise the wallet would sign a transaction for
         // zero, and the refusal would look like success.
         if (unlocked <= 0n) throw new SdkError("insufficient-funds", { unlocked: unlocked.toString() });
-        const signed = await wallet.sweepUnlocked({ address: request.to, relay: false });
+        const signed = await walletStep("sweepUnlocked", () => wallet.sweepUnlocked({ address: request.to, relay: false }));
         const token = "sweep-" + (++sessionSeq);
         sessions.set(token, { wallet, plan, signed });
         return { token, amount: unlocked.toString(), to: request.to, swept: plan.address };
