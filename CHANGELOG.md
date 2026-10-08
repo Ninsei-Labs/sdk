@@ -18,6 +18,19 @@ The name is now accepted by every check of the network value, and everything els
   already in that tree: the escrow-implementation address/codehash read and verdict (`engine/evm/factory.js`,
   `verifyFactoryImplementation`) and the smallest-trade rule that reads the maker's SENT minimum rather than the
   effective set's first level (`src/levelsWalkSpec.mjs`, the `minAtomic` argument).
+- **A withdrawal no longer loses its refusal code on a chain the wallet library cannot scan** (`src/sweep.mjs`):
+  the FREE REMAINDER is read and judged BEFORE any input selection, and a failed `sync()` no longer pre-empts that
+  verdict. On the CI contour (a regtest node) monero-ts `sync()` throws a bare `failed to get hashes`; that error
+  used to escape ahead of the funds check, so an EMPTY wallet was refused with `code: null` + raw text instead of
+  the named `insufficient-funds` - and the page had no phrase to translate, because the core had named nothing.
+- **Every refusal keeps a code from the package's dictionary** (`src/sweep.mjs`, `walletStep`): a wallet step that
+  fails with anything other than an `SdkError` is re-thrown as one, on `wallet-rejected`, with the library's own
+  message kept as `params.why`. `code: null` + raw text is not a refusal an interface can show or a check assert.
+- Proven by a unit run WITHOUT a browser or a contour (the source-of-truth tree's `tools/check-sweep-empty-wallet.mjs`,
+  part of the fast gates): a zero remainder refuses with `insufficient-funds` and human words while input selection
+  is never touched; a non-zero remainder reaches signing; a low-level library failure comes out WITH a code. Two
+  breaking runs redden - cutting the remainder check (the refusal stops being named) and cutting the wrapper (the
+  run then reproduces the exact CI symptom: `code: null` + `failed to get hashes`).
 - Checks: `node tools/check.mjs` - all green.
 
  HEAD

@@ -17,7 +17,8 @@
     "check:surface": "node tools/check.mjs --only=surface",
     "check:mirror": "node tools/check.mjs --only=mirror",
     "check:pack": "node tools/check.mjs --only=pack",
-    "check:secrets": "node tools/check.mjs --only=secrets"
+    "check:secrets": "node tools/check.mjs --only=secrets",
+    "check:sweep": "node tools/sweep-refusal.test.mjs"
   },
   "types": "./index.d.ts",
   "exports": {

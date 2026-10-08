@@ -69,7 +69,7 @@ import { height as nodeHeightValue } from "../monero/node.js";
 
 // АДРЕС ЯДРА СТРОКОЙ - СОБРАННЫЙ БАНДЛ ПОД www/ (tools/build-sdk.mjs): страница получает ядро ОДНИМ
 // модулем, а не пачкой исходников sdk/. ?v=<хеш> проставляет tools/stamp-assets.mjs.
-const SDK_BUNDLE = "/assets/vendors/sdk/sdk-browser.js?v=253862fe";
+const SDK_BUNDLE = "/assets/vendors/sdk/sdk-browser.js?v=512864ff";
 
 // ОДНА ЗАГРУЗКА НА СТРАНИЦУ. Отказ - это состояние, а не поломка: он назван в консоли, и вызывающий решает.
 let loading = null;
