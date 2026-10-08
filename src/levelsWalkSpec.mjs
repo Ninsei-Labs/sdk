@@ -141,11 +141,22 @@ function walkCostForXmr(levels, xmrAtomic) {
   return costWei;
 }
 
+// THE SMALLEST TRADE (rule 3). It is the size of the FIRST level the maker SENT, and the node's own
+// deductions (outstanding quotes, a balance cut) never change it: they take depth off the TOP, and a trade
+// that was allowed when the set arrived must stay allowed after the top was eaten. If the minimum were read
+// off the EFFECTIVE set, eating the first level whole would RAISE it to the next, larger level, and eating it
+// in part would LOWER it below what the maker sent - both wrong. Callers pass the sent minimum as minAtomic;
+// absent, the set's own first level is the minimum (the historical behaviour and what the vectors pin).
+function minOf(levels, minAtomic) {
+  if (minAtomic === null || minAtomic === undefined) return toBigInt(levels[0].amount);
+  return toBigInt(minAtomic);
+}
+
 // DIRECTION 1: "I give/take ASSET - how much XMR".
 //   buy:  assetWei - the asset the taker PAYS; the walk budget = assetWei - fee;
 //   sell: assetWei - the asset the taker RECEIVES; the walk budget = assetWei + fee (the set must yield that
 //         much so that AFTER the fee is taken out exactly assetWei is left in hand).
-export function xmrForAsset({ levels, role, feeWei = 0n, assetWei, orientation = "ask" }) {
+export function xmrForAsset({ levels, role, feeWei = 0n, assetWei, orientation = "ask", minAtomic = null }) {
   const verdict = checkLevels(levels, orientation);
   if (!verdict.ok) return { ok: false, reason: verdict.reason, role, index: verdict.index };
   if (!verdict.enabled) return { ok: false, reason: "side-off", role };
@@ -157,7 +168,12 @@ export function xmrForAsset({ levels, role, feeWei = 0n, assetWei, orientation =
   if (budget <= 0n) return { ok: false, reason: "levels-fee-beyond-budget", role };
   const { fullCostWei } = sideSummary(levels);
   if (budget > fullCostWei) return { ok: false, reason: "levels-exceed-side", role };
-  const minCost = levelCostWei(toBigInt(levels[0].amount), toBigInt(levels[0].price));
+  // THE SMALLEST TRADE, from the set AS THE MAKER SENT IT (rule 3): callers pass it in minAtomic and the
+  // node's deductions never change it. Absent, the set's own first level is used, as it always was.
+  const min = minOf(levels, minAtomic);
+  // Its cost ON THE EFFECTIVE SET: after deductions the smallest trade may reach into a later level, so the
+  // cost is walked, not read off one price.
+  const minCost = walkCostForXmr(levels, min);
   if (budget < minCost) return { ok: false, reason: "levels-below-minimum", role };
   const xmrAtomic = walkXmrForBudget(levels, budget);
   return { ok: true, role, xmrAtomic, assetWei: asset };
@@ -166,7 +182,7 @@ export function xmrForAsset({ levels, role, feeWei = 0n, assetWei, orientation =
 // DIRECTION 2: "I give/want XMR - how much ASSET".
 //   buy:  xmrAtomic - how much XMR the taker WANTS; the asset to pay = the walk + fee;
 //   sell: xmrAtomic - how much XMR the taker GIVES;  the asset to receive = the walk - fee.
-export function assetForXmr({ levels, role, feeWei = 0n, xmrAtomic, orientation = "ask" }) {
+export function assetForXmr({ levels, role, feeWei = 0n, xmrAtomic, orientation = "ask", minAtomic = null }) {
   const verdict = checkLevels(levels, orientation);
   if (!verdict.ok) return { ok: false, reason: verdict.reason, role, index: verdict.index };
   if (!verdict.enabled) return { ok: false, reason: "side-off", role };
@@ -175,7 +191,8 @@ export function assetForXmr({ levels, role, feeWei = 0n, xmrAtomic, orientation 
   const fee = toBigInt(feeWei === undefined || feeWei === null ? 0n : feeWei);
   if (want === null || fee === null || fee < 0n) return { ok: false, reason: "levels-not-integer", role };
   if (want > verdict.totalAtomic) return { ok: false, reason: "levels-exceed-side", role };
-  if (want < verdict.minAtomic) return { ok: false, reason: "levels-below-minimum", role };
+  // THE SMALLEST TRADE AS THE MAKER SENT IT, never the effective set's first level (rule 3): see minOf.
+  if (want < minOf(levels, minAtomic)) return { ok: false, reason: "levels-below-minimum", role };
   const walkWei = walkCostForXmr(levels, want);
   const assetWei = role === "buy" ? walkWei + fee : walkWei - fee;
   if (assetWei <= 0n) return { ok: false, reason: "levels-fee-beyond-budget", role };

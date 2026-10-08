@@ -88,7 +88,10 @@ export const PAYLOAD_VERSION = 3;
 // источник, v3 - ПОЛОВИНЫ. Читать обязаны все три: у людей на руках есть файлы всех версий, и файл
 // восстановления - единственный способ забрать свои XMR. Выбрасывать старые версии нельзя.
 const SUPPORTED_PAYLOAD_VERSIONS = [1, 2, 3];
-const NETWORKS = ["mainnet", "stagenet", "testnet"];
+// СЕТИ, КОТОРЫЕ ЧИТАТЕЛЬ ФАЙЛА ЗНАЕТ. Три стандартные плюс fakechain - официальное имя regtest-режима
+// monerod: нода контура CI называет себя именно так, и файл, выпущенный на такой сети, обязан читаться.
+// Список поимённый: сеть вне него отвергается как неизвестная, и это остаётся в силе.
+const NETWORKS = ["mainnet", "stagenet", "testnet", "fakechain"];
 
 function b64(bytes) {
   return btoa(String.fromCharCode(...new Uint8Array(bytes)));
