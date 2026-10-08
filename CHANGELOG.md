@@ -25,6 +25,13 @@ while doing nothing: that case is refused by name (`implementation-has-no-code`)
   byte-for-byte the demo repository's `sdk/`. The demo's interface config pins the known implementation hash - a
   protocol constant, because the implementation has no immutable fields, so its runtime code (and its hash) is the
   same on every network.
+- **Claim and order-creation gas limits are the MEASURED ones** (`engine/evm/claimGas.js`, `engine/evm/funding.js`).
+  `CLAIM_GAS_LIMIT` is raised from 120 000 to 200 000: an honest `claim` whose fee is the FIRST credit to the
+  recipient's cashier costs 120 721 gas on a live chain (124 072 in `forge --gas-report`), so the former limit cut a
+  valid claim. `GAS_CREATE_ORDER_AND_FUND` is lowered from 1 500 000 to 700 000, because an order's escrow is now an
+  EIP-1167 clone - the measured full call is 315 530 gas (1 190 683 for the former full contract). The dead
+  `GAS_CREATE_ORDER` constant (there is no separate creation path) is removed. The node's own claim in the
+  source-of-truth tree signs with the SAME shared limit instead of its own literal.
 - Checks: `node tools/check.mjs` - all green.
 
 ## 0.39.2 — 2026-10-08
