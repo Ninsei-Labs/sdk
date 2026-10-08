@@ -98,7 +98,12 @@ async function signOutcome(mod, wallet) {
 // addresses of the REAL modules, so the copy is exactly the same code with one place cut out.
 function mutatedModule(mutate) {
   const dir = mkdtempSync(join(tmpdir(), "sweep-refusal-"));
-  const source = mutate(readFileSync(SWEEP_MJS, "utf8"));
+  // LINE ENDINGS ARE NORMALISED BEFORE MUTATING. The patterns below are written with a plain "\n", so on a
+  // Windows checkout (CRLF) every one of them would silently fail to apply and the breaking run would report
+  // "the mutation did not apply" instead of proving anything. The copy lives in a temp directory and is written
+  // back with LF, so the same patterns apply on a Windows checkout and on the CI checkout alike; the loud
+  // "did not apply" guard below is kept on purpose.
+  const source = mutate(readFileSync(SWEEP_MJS, "utf8").replace(/\r\n/g, "\n"));
   const rewritten = source.replace(/from\s+"(\.[^"]+)"/g, (whole, rel) =>
     `from "${pathToFileURL(join(dirname(SWEEP_MJS), rel)).href}"`);
   const file = join(dir, "sweep.mjs");
