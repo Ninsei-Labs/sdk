@@ -97,6 +97,14 @@ const normalizeOptions = (options) => {
   if (o.knownFactoryCodes !== undefined && o.knownFactoryCodes !== null && !Array.isArray(o.knownFactoryCodes)) {
     fail("bad-input", { field: "knownFactoryCodes" });
   }
+  // THE INTERFACE'S ESCROW-IMPLEMENTATION POLICY (issue #114): an array of code hashes of known implementations
+  // of the escrow - the code every order's clone delegatecalls. The client checks the pair (implementation,
+  // implementationCodeHash) the factory carries, exactly as the factory does at creation; this list pins WHICH
+  // builds the interface accepts. Same rule as knownFactoryCodes: a POLICY list, empty/absent means "no policy"
+  // (then the pair is still read and the code at the implementation's address must be non-empty).
+  if (o.knownImplementationCodes !== undefined && o.knownImplementationCodes !== null && !Array.isArray(o.knownImplementationCodes)) {
+    fail("bad-input", { field: "knownImplementationCodes" });
+  }
   // A PASS TO OUR SERVICE - A SEAM FROM OUTSIDE, like the wallet: only a wallet can sign the sign-in message
   // (www/js/evm/auth.js, signIn), and requiring it of the core would mean opening windows and signing messages
   // inside the SDK. The core receives a ready pass and presents it. A missing pass is NOT an option error: the
@@ -137,6 +145,7 @@ const normalizeOptions = (options) => {
     evmCode: o.evmCode || null,
     allowedProviders: o.allowedProviders === undefined ? null : o.allowedProviders,
     knownFactoryCodes: o.knownFactoryCodes === undefined ? null : o.knownFactoryCodes,
+    knownImplementationCodes: o.knownImplementationCodes === undefined ? null : o.knownImplementationCodes,
     serverAuth: o.serverAuth || null,
     watch: o.watch || null,
     createRecord: o.createRecord || null,
@@ -186,7 +195,7 @@ export function createNinsei(options) {
     return (provider) => set.has(String(provider).toLowerCase());
   })();
   const quotes = createQuotes({ config, http, now: o.now || (() => Date.now()), evmCall: o.evmCall || null,
-    evmCode: o.evmCode || null, providerAllowed, knownFactoryCodes: o.knownFactoryCodes });
+    evmCode: o.evmCode || null, providerAllowed, knownFactoryCodes: o.knownFactoryCodes, knownImplementationCodes: o.knownImplementationCodes });
   // THE SAME CHAIN-READ SEAM AS THE LOCK AND THE CORE: checking the slots and signing must go one way, otherwise
   // part of the check goes past the wallet and part does not.
   const actions = createActions({ call: o.evmCall });

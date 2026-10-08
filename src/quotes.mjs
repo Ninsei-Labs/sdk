@@ -208,12 +208,18 @@ const compactOffer = (o) => ({
 // the price of the failed row to tell the person WHY there is no offer (and not just "none").
 const compactRefusal = (r) => ({ ...compactOffer(r), code: r.code, why: r.why });
 
-export function createQuotes({ config, http, now = () => Date.now(), evmCall = null, evmCode = null, providerAllowed = null, knownFactoryCodes = null }) {
+export function createQuotes({ config, http, now = () => Date.now(), evmCall = null, evmCode = null, providerAllowed = null, knownFactoryCodes = null, knownImplementationCodes = null }) {
   // THE INTERFACE'S FACTORY POLICY (#103): the code hashes of factories it is willing to trade through
   // (extcodehash semantics = keccak256 of the runtime code). An EMPTY list is "no policy" (like
   // allowedProviders); a NON-EMPTY one refuses any factory whose code is not on it. Lower-cased once.
   const factoryPolicy = Array.isArray(knownFactoryCodes) && knownFactoryCodes.length
     ? knownFactoryCodes.map((h) => String(h).toLowerCase()).filter(Boolean)
+    : null;
+  // THE INTERFACE'S ESCROW-IMPLEMENTATION POLICY (#114): the code hashes of the escrow IMPLEMENTATION the
+  // factory must lead to - the code every order's clone delegatecalls. Same rule as the factory policy: an
+  // EMPTY list is "no policy" (then the pair is still read and the implementation's code must be non-empty).
+  const implementationPolicy = Array.isArray(knownImplementationCodes) && knownImplementationCodes.length
+    ? knownImplementationCodes.map((h) => String(h).toLowerCase()).filter(Boolean)
     : null;
   const listeners = new Set();
   let timer = null;
@@ -426,6 +432,30 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
         const codeHash = bytesToHexQ(keccak256(codeBytes || new Uint8Array(0)));
         if (!factoryPolicy.includes(codeHash)) {
           fail("quote-factory-code-unknown", { step: "factory", factory: declaredFactory, codeHash });
+        }
+      }
+      // THE IMPLEMENTATION THE CLONES WILL EXECUTE (#114). A pinned factory CODE is not enough on its own: the
+      // implementation ADDRESS lives in the factory's STORAGE, so the client re-reads the pair the factory itself
+      // checks (implementation() / implementationCodeHash()) and the CODE at that address, then applies the same
+      // verdict (verifyFactoryImplementationOnChain). A delegatecall to an address WITHOUT code SUCCEEDS, so a
+      // clone without an implementation would take the ETH and its markReady/claim/refund would appear to go
+      // through while doing nothing - that is exactly the case this refuses. The live code is re-hashed here, so
+      // the verdict does not trust the factory's own answer alone.
+      if (implementationPolicy) {
+        if (typeof evmCall !== "function") fail("quote-factory-unchecked", { step: "factory", why: "no-chain-read" });
+        if (typeof evmCode !== "function") fail("quote-factory-unchecked", { step: "factory", why: "no-code-read" });
+        const verdict = await engine.evm.verifyFactoryImplementationOnChain({
+          factory: declaredFactory,
+          read: evmCall,
+          code: (address) => evmCode(address),
+          policy: implementationPolicy,
+          hashCode: (codeHex) => bytesToHexQ(keccak256(hexToBytesQ(codeHex) || new Uint8Array(0))),
+        });
+        if (!verdict.ok) {
+          const unknown = verdict.why === "implementation-code-unknown" ||
+            verdict.why === "implementation-code-mismatch" || verdict.why === "implementation-has-no-code";
+          fail(unknown ? "quote-factory-code-unknown" : "quote-factory-unchecked",
+            { step: "factory", why: verdict.why, factory: declaredFactory, implementation: verdict.implementation || null });
         }
       }
       // BINDING THE QUOTE TO OUR TERMS. The signature confirms the provider signed THIS quote, but not that it is
