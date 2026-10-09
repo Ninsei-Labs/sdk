@@ -247,7 +247,7 @@ const recordInputOf = (request) => {
     // WHAT THE PERSON SAW: the maker, its spread, the fee, the rate and the quote signature. Screen data, but it must
     // live in the record - otherwise the progress screen shows an empty maker instead of whoever gave the price.
     makerId: pass(quote.makerId), makerName: pass(quote.makerName), makerSpread: pass(quote.makerSpread),
-    quoteSignature: pass(quote.signature), fee: pass(quote.arrakisFee),
+    quoteSignature: pass(quote.signature), fee: pass(quote.ninseiFee),
     dexSpread: pass(quote.dexSpread), gasUsd: pass(quote.gasUsd), rate: pass(quote.rate),
   };
 };

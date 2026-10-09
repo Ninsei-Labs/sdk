@@ -1,32 +1,31 @@
 // GENERATED FILE - a byte-for-byte copy of the engine module www/js/evm/gasReserve.js for the SDK package.
-// Edit the source under www/js, then run: node tools/build-sdk-engine.mjs
-// tools/check-sdk-engine.mjs reddens on any drift, so a stale copy cannot ship silently.
+// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
 // Everything below this header is identical to the source.
 
-// ЗАПАС ГАЗА ПОКУПАТЕЛЯ НА ДЕЙСТВИЯ ОРДЕРА (issue #97, часть B): ОТМЕТКА ГОТОВНОСТИ И ВОЗМОЖНЫЙ ВОЗВРАТ.
+// THE BUYER GAS RESERVE FOR ORDER ACTIONS: THE READINESS MARK AND A POSSIBLE REFUND.
 //
-// СУТЬ. В прямом обмене человек вносит средства в эскроу, а после прихода XMR сам зовёт markReady (когда XMR
-// подтверждены) либо refund (когда сделка не состоялась). Оба вызова стоят газа в НАТИВНОЙ монете сети, и у
-// человека, пришедшего из USDC, своего натива нет. Поэтому ДО котировки решается, СКОЛЬКО НАТИВА ОСТАВИТЬ под
-// эти два вызова; решение показывается и в ETH, и в долларах, а строкой входит в разбивку цены.
+// THE POINT. In a direct swap the person deposits into the escrow, and after the XMR arrives calls markReady itself
+// (when the XMR is confirmed) or refund (when the swap did not happen). Both calls cost gas in the network
+// NATIVE coin, and a person coming from USDC has no native of their own. So BEFORE the quote it is decided HOW MUCH
+// NATIVE to leave for those two calls; the decision is shown both in ETH and in dollars, and enters the price breakdown as a line.
 //
-// ПОЧЕМУ ЧИСТЫЕ ФУНКЦИИ. Решение стоит денег и обязано проверяться без сети (tools/check-buy-gas-reserve.mjs)
-// и считаться ОДНИМ И ТЕМ ЖЕ кодом на экране и в прогоне. Сеть касается только чтения цены газа - его
-// подставляет вызывающий (www/js/evm/prices.js кладёт gasPriceWei в живые цены, экран передаёт его сюда).
+// WHY PURE FUNCTIONS. The decision costs money and must be checked without a network
+// and computed by THE SAME code on screen and in the run. Only reading the gas price touches the network - the
+// caller supplies it (www/js/evm/prices.js puts gasPriceWei into the live prices, the screen passes it here).
 //
-// ЧИСЛА НЕ ВЫДУМАНЫ. Пределы газа - те же, с которыми НАШ ЖЕ код отправляет обе транзакции
-// (движок сделки теперь в пакете: sdk/src/swap-flow.mjs - markReadyOrder - gas 120000, refundOrder - gas 250000). Проверка
-// tools/check-buy-gas-reserve.mjs сверяет обе константы со строками того файла, поэтому правка одного места
-// без другого краснит прогон - ровно так же, как это сделано для газа забора в rfq/reverseGas.mjs.
+// THE NUMBERS ARE NOT INVENTED. The gas limits are the same ones OUR OWN code sends both transactions with
+// (the swap engine is now in the package: sdk/src/swap-flow.mjs - markReadyOrder - gas 120000, refundOrder - gas
+// 250000). The check compares both constants against the lines of that file, so
+// editing one place without the other reddens the run - exactly as done for the claim gas in rfq/reverseGas.mjs.
 //
-// ПОЧЕМУ ЗАПАС ФИКСИРУЕТСЯ ДО КОТИРОВКИ. `amount` ордера входит в ПОДПИСАННУЮ котировку, и решение о запасе
-// меняет итоговую сумму взноса; значит оно принимается ДО запроса котировки и дальше не пересчитывается.
-// Экран кладёт готовый план в состояние формы (www/js/ui/views/swapForm.js), а экран подписи пользуется тем
-// же зафиксированным планом - второй пересчёт разошёлся бы с первым.
+// WHY THE RESERVE IS FIXED BEFORE THE QUOTE. The order `amount` is part of the SIGNED quote, and the reserve
+// decision changes the final deposit amount; so it is made BEFORE the quote request and not recomputed afterwards.
+// The screen puts the ready plan into the form state (www/js/ui/views/swapForm.js), and the signing screen uses the
+// same fixed plan - a second recomputation would diverge from the first.
 
-// ПРЕДЕЛЫ ГАЗА - ИЗ НАШЕГО ЖЕ КОДА. Строки-источники: sdk/src/swap-flow.mjs (gas: 120_000n у отметки и
-// gas: 250_000n у возврата). Заниженный предел - это отказ уже после раскрытия половины; неиспользованный
-// газ в лимите не списывается, поэтому запас берётся с запасом.
+// THE GAS LIMITS ARE FROM OUR OWN CODE. Source lines: sdk/src/swap-flow.mjs (gas: 120_000n at the mark and
+// gas: 250_000n at the refund). A limit set too low is a refusal already after the half is revealed; unused
+// gas in the limit is not charged, so the reserve is taken with a margin.
 export const ORDER_READY_GAS_LIMIT = 120_000n;   // markReady - sdk/src/swap-flow.mjs markReadyOrder
 export const ORDER_REFUND_GAS_LIMIT = 250_000n;  // refund   - sdk/src/swap-flow.mjs refundOrder
 export const ORDER_GAS_LIMIT = ORDER_READY_GAS_LIMIT + ORDER_REFUND_GAS_LIMIT;
@@ -36,9 +35,9 @@ const toBig = (v) => {
   try { return BigInt(typeof v === "bigint" ? v : String(v)); } catch { return null; }
 };
 
-// СКОЛЬКО ВЕЙ НУЖНО НА ОБА ВЫЗОВА. Цену газа даёт цепь, пределы - наши. Ноль цены и нечитаемое число
-// означают «не измерено», и это НЕ ноль газа: неизвестное требование обязано называться, а не выдаваться за
-// ноль (то же правило, что у газа забора: rfq/reverseGas.mjs).
+// HOW MANY WEI IS NEEDED FOR BOTH CALLS. The gas price comes from the chain, the limits are ours. A zero price
+// and an unreadable number mean "not measured", and this is NOT zero gas: an unknown requirement must be named,
+// not passed off as zero (the same rule as for the claim gas: rfq/reverseGas.mjs).
 export function orderGasReserveWei({ gasPriceWei, readyGasLimit = ORDER_READY_GAS_LIMIT, refundGasLimit = ORDER_REFUND_GAS_LIMIT } = {}) {
   const gp = toBig(gasPriceWei);
   if (gp === null || gp <= 0n) return null;
@@ -48,8 +47,8 @@ export function orderGasReserveWei({ gasPriceWei, readyGasLimit = ORDER_READY_GA
   return gp * (ready + refund);
 }
 
-// ПОКАЗ В ОБЕИХ ВЕЛИЧИНАХ. У человека, пришедшего из USDC, нет чувства масштаба ETH, поэтому запас показан и
-// в ETH, и в долларах. Доллар - оценка по живому курсу натива; нет курса - нет и оценки (null), а не выдумка.
+// DISPLAY IN BOTH UNITS. A person coming from USDC has no sense of ETH scale, so the reserve is shown both
+// in ETH and in dollars. The dollar is an estimate at the live native rate; no rate - no estimate (null), not a made-up one.
 export function gasReserveDisplay({ reserveWei, nativeUsd, decimals = 18 } = {}) {
   const w = toBig(reserveWei);
   if (w === null || w <= 0n) return null;
@@ -58,9 +57,9 @@ export function gasReserveDisplay({ reserveWei, nativeUsd, decimals = 18 } = {})
   return { native, usd };
 }
 
-// РЕШЕНИЕ ПО ГАЛОЧКЕ. Галочка НУЖНА, только когда своего натива НЕ ХВАТАЕТ на оба вызова; при достатке ETH
-// она не показывается вовсе - человек платит своим газом, и просить у него нечего. Нечитаемый баланс натива -
-// отдельное состояние: запас предлагаем (лучше предложить, чем промолчать о нехватке), и это названо полем.
+// DECISION BY THE CHECKBOX. The checkbox is NEEDED only when one own native is NOT ENOUGH for both calls; with enough
+// ETH it is not shown at all - the person pays with their own gas, and there is nothing to ask of them. An unreadable
+// native balance is a separate state: we offer the reserve (better to offer than stay silent about the shortfall), and this is named by a field.
 export function gasReserveChoice({ nativeBalanceWei, reserveWei } = {}) {
   const need = toBig(reserveWei);
   if (need === null || need <= 0n) return { measured: false, enough: null, show: false, balanceUnread: false };
@@ -69,8 +68,8 @@ export function gasReserveChoice({ nativeBalanceWei, reserveWei } = {}) {
   return { measured: true, enough: have >= need, show: have < need, balanceUnread: false };
 }
 
-// ПОЛНОЕ РЕШЕНИЕ ОДНИМ ОБЪЕКТОМ - именно оно фиксируется в состоянии формы до котировки. Все числовые поля -
-// строки либо null: так план переживает запись и чтение, и BigInt не превращается в «[object BigInt]».
+// THE WHOLE DECISION IN ONE OBJECT - exactly what is fixed in the form state before the quote. All numeric fields
+// are strings or null: so the plan survives writing and reading, and BigInt does not become "[object BigInt]".
 export function orderGasReservePlan({ gasPriceWei = null, nativeBalanceWei = null, nativeUsd = null, decimals = 18 } = {}) {
   const reserveWei = orderGasReserveWei({ gasPriceWei });
   const display = reserveWei === null ? null : gasReserveDisplay({ reserveWei, nativeUsd, decimals });

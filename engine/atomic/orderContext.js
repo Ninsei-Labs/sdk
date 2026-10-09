@@ -1,47 +1,23 @@
 // GENERATED FILE - a byte-for-byte copy of the engine module www/js/atomic/orderContext.js for the SDK package.
-// Edit the source under www/js, then run: node tools/build-sdk-engine.mjs
-// tools/check-sdk-engine.mjs reddens on any drift, so a stale copy cannot ship silently.
+// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
 // Everything below this header is identical to the source.
 
-// КАНОНИЧЕСКИЙ КОНТЕКСТ ОРДЕРА - то, к чему привязывается доказательство DLEQ.
-//
-// ЗАЧЕМ ОТДЕЛЬНЫЙ МОДУЛЬ. Раньше контекст был произвольной строкой, которую передавал вызывающий, а
-// заглушка контрагента просто дописывала к ней ":контрагент". Внутри одной вкладки это работало, но
-// означало ровно одно: доказательство привязано НИ К ЧЕМУ, что снаружи воспроизвести нельзя. Наш же
-// критерий приёмки (док 27, раздел 11) требует обратного: взял поля ордера с цепи, собрал точку,
-// проверил доказательство, сошлось. Значит контекст обязан собираться ИЗ ПОЛЕЙ ОРДЕРА, и собираться
-// одинаково у всех: у приложения, у ноды провайдера и у любого, кто захочет проверить сделку.
-//
-// ЧТО ВХОДИТ И ЧЕГО НЕ ВХОДИТ. Только УСЛОВИЯ ордера - то, что известно до всякого доказательства:
-// сеть, фабрика, адрес внёсшего, адрес забирающего, сумма, сроки и соль.
-//
-// ОБЯЗАТЕЛЬСТВ И ТОЧЕК ЗДЕСЬ НЕТ, И ЭТО ИСПРАВЛЕНИЕ, А НЕ УПУЩЕНИЕ. Первая версия их включала, и выходил
-// КРУГ: доказательство привязывается к контексту, а контекст брал обязательства и точки - то есть то, что
-// само появляется только ВМЕСТЕ с доказательством. Порядок получался невыполнимым.
-//
-// Структура от этого не слабеет, и вот почему: половина провайдера ВЫВОДИТСЯ из условий ордера, поэтому
-// одни и те же условия дают у него ту же половину, то же обязательство и ту же точку. Меняются условия -
-// меняется всё. А обязательства и точки обеих сторон отдельно закреплены В САМОМ ОРДЕРЕ и в его
-// termsHash: контракт делает их неизменяемыми после фондирования. Два разных места - две разные задачи.
-//
-// Адреса эскроу здесь тоже нет: он выводится из этих полей через CREATE2, то есть следствие, а не вход.
-//
-// ВЕРСИЯ КОНТЕКСТА. Префикс "arrakis-order-v1" отделяет контекст от любых других подписей и доказательств.
-// Менять состав полей можно только вместе с номером версии в префиксе: иначе два разных смысла оказались
-// бы под одной строкой, и проверка проходила бы там, где не должна.
-
-// ВЕРСИЯ ПОДНЯТА ДО v2: состав полей изменился (убраны обязательства и точки), а по нашему же правилу
-// смена смысла - это новая версия, а не дополнение. Выданных котировок в обращении ещё нет, поэтому
-// переход ничего не ломает; дальше так уже не получится.
-// ВЕРСИЯ 3: ИЗМЕНЁН ХЕШ ВЫЗОВА В ДОКАЗАТЕЛЬСТВЕ DLEQ (SHA3-512 и широкое приведение вместо keccak256).
-// Это не косметика: доказательства версии 2 не проходят проверку версии 3, поэтому метка поднята - иначе
-// живая котировка со старым доказательством ломалась бы молча, а причина искалась бы в подписи.
-export const ORDER_CONTEXT_VERSION = "arrakis-order-v3";
+// CANONICAL ORDER CONTEXT - what the DLEQ proof binds to.
+// It is built FROM THE ORDER FIELDS and identically everywhere (app, provider node, any verifier), so a
+// proof can be checked from the on-chain order alone (docs 27, section 11).
+// It holds only the ORDER CONDITIONS known before any proof: network, factory, depositor, claimer, amount,
+// deadlines and salt. Commitments and points are NOT here - they appear only WITH the proof, so binding them
+// would make the order circular. They are pinned separately in the order's termsHash.
+// The escrow address is not here either: it is a CREATE2 consequence, not an input.
+// CONTEXT VERSION. The prefix separates the context from any other signature or proof; the field set may change
+// only together with the version. v2 changed the field set; v3 changed the DLEQ call hash (SHA3-512 wide
+// reduction instead of keccak256), so a v2 proof does not verify under v3.
+export const ORDER_CONTEXT_VERSION = "ninsei-order-v3";
 
 const norm = (v) => String(v === undefined || v === null ? "" : v).trim().toLowerCase();
 const dec = (v) => {
-  // Числа приводим к десятичной строке: "0x10" и "16" - одно и то же число, и если оставить как пришло,
-  // два вызывающих дадут разные контексты для одного ордера, а доказательство развалится без причины.
+  // Numbers are turned into decimal strings: "0x10" and "16" are the same number, and leaving them as
+  // received would give different contexts for one order and break the proof for no reason.
   if (typeof v === "bigint") return v.toString(10);
   if (typeof v === "number") return String(Math.trunc(v));
   const s = norm(v);
@@ -49,22 +25,22 @@ const dec = (v) => {
   return s;
 };
 
-// Поля перечислены ЯВНО и в фиксированном порядке. Порядок - часть протокола: переставить значит
-// сменить контекст, то есть разом сделать недействительными все выданные котировки под ордер.
+// Fields are listed EXPLICITLY in a fixed order. The order is part of the protocol: rearranging it
+// invalidates all issued quotes for the order at once.
 const FIELDS = [
-  "chainId",            // сеть: один и тот же ордер в разных сетях - разные ордера
-  "factory",            // какая фабрика создаёт эскроу
-  "locker",             // кто вносит ETH
-  "claimer",            // кому контракт заплатит
-  "amount",             // сумма в wei
-  "readyBy",            // срок готовности
-  "t1",                 // срок расчёта
-  "salt",               // соль ордера
+  "chainId",            // network: the same order on different networks is a different order
+  "factory",            // which factory creates the escrow
+  "locker",             // who deposits ETH
+  "claimer",            // whom the contract pays
+  "amount",             // amount in wei
+  "readyBy",            // readiness deadline
+  "t1",                 // settlement deadline
+  "salt",               // order salt
 ];
 
 export function orderContextString(order) {
-  if (!order || typeof order !== "object") throw new Error("для контекста ордера нужен объект с полями ордера");
+  if (!order || typeof order !== "object") throw new Error("order context needs an object with the order fields");
   const missing = FIELDS.filter((f) => order[f] === undefined || order[f] === null || order[f] === "");
-  if (missing.length) throw new Error("в контекст ордера не хватает полей: " + missing.join(", "));
+  if (missing.length) throw new Error("order context is missing fields: " + missing.join(", "));
   return ORDER_CONTEXT_VERSION + "|" + FIELDS.map((f) => dec(order[f])).join("|");
 }

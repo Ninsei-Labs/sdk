@@ -32,11 +32,11 @@ const keccak256 = (bytes) => new Uint8Array(keccakPkg(Buffer.from(bytes)));
 
 // THE ENVIRONMENT VARIABLE NAMES - HERE, IN ONE PLACE: the run and the adapter must look at the same name,
 // otherwise the key "is there" but the adapter does not see it.
-export const KEY_ENV = "ARRAKIS_TEST_EVM_KEY";
-export const KEY_FILE_ENV = "ARRAKIS_TEST_EVM_KEY_FILE";
-export const RPC_ENV = "ARRAKIS_TEST_EVM_RPC";
-export const CHAIN_ENV = "ARRAKIS_TEST_EVM_CHAIN";
-export const CLAIMER_ENV = "ARRAKIS_TEST_EVM_CLAIMER";
+export const KEY_ENV = "NINSEI_TEST_EVM_KEY";
+export const KEY_FILE_ENV = "NINSEI_TEST_EVM_KEY_FILE";
+export const RPC_ENV = "NINSEI_TEST_EVM_RPC";
+export const CHAIN_ENV = "NINSEI_TEST_EVM_CHAIN";
+export const CLAIMER_ENV = "NINSEI_TEST_EVM_CLAIMER";
 
 // AN EXPLICIT WHITELIST OF TEST NETWORKS - HERE, NOT IN THE ENGINE, and WHY. The engine's "production network" rule
 // (sdk/src/swap-flow.mjs: escrow.mode === "live" && !testnet) today does not trigger ON ANY recorded network: for

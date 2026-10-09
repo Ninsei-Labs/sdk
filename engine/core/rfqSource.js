@@ -1,39 +1,28 @@
 // GENERATED FILE - a byte-for-byte copy of the engine module www/js/core/rfqSource.js for the SDK package.
-// Edit the source under www/js, then run: node tools/build-sdk-engine.mjs
-// tools/check-sdk-engine.mjs reddens on any drift, so a stale copy cannot ship silently.
+// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
 // Everything below this header is identical to the source.
 
-// ЖИВЫЕ ИНДИКАТИВНЫЕ КОТИРОВКИ ОТ НАШЕГО ПРОВАЙДЕРА - ЧЕРЕЗ ЯДРО SDK.
+// LIVE INDICATIVE QUOTES FROM OUR PROVIDER - THROUGH THE SDK CORE.
+// WHY THROUGH THE CORE, NOT OUR OWN REQUEST. The read rules (zero = "no direction", staleness by the quote own
+// stamp, a self-contradicting row) used to live here and, separately, in the core, and two editions of one rule
+// diverge silently. So the book now comes from the CORE: watch - quotes.watch, snapshot - quotes.snapshot, and
+// the shape is translated by the bridge. NO selection rule is left here: the core decides. Core silence or
+// refusal gives an EMPTY book.
+// THE SNAPSHOT SHAPE, in short: no STEPS (one RANGE, one price); one quote KIND - quoteKind is gone, the only
+// firm quote is the order one; rate: 0 means "direction disabled" with a why, and zero is NEVER a price; the
+// network is part of the market identity and is checked against ours; seq and at travel with the quote for
+// freshness; the SIZE is in units of the ASSET (the first pair element).
 //
-// ПОЧЕМУ ЧЕРЕЗ ЯДРО, А НЕ СВОИМ ЗАПРОСОМ. Раньше этот модуль САМ ходил в /api/rate и САМ разбирал книгу:
-// правила чтения (ноль = "направления нет", просрочка по СОБСТВЕННОЙ метке котировки, строка, противоречащая
-// себе) жили здесь, а рядом - в ядре (sdk/src/quotes.mjs). Две редакции одних правил расходятся молча
-// (док 41/54), поэтому книга теперь берётся у ЯДРА: опрос - quotes.watch, снимок - quotes.snapshot, а
-// ПЕРЕВОД ФОРМЫ делает склейник (www/js/sdk/bridge.js). Здесь не осталось НИ ОДНОГО правила отбора: что
-// предложение, что отказ, что лучший - решает ядро. Молчание или отказ ядра даёт ПУСТУЮ книгу: прежняя
-// (движковая) книга на экран не подставляется.
 //
-// ЧТО ЗНАЧИТ ЭТА ФОРМА СНИМКА (полный текст формы - .hermes/docs/41-quote-protocol-v4.md; действующие
-// правила приёма - .hermes/docs/54-quote-protocol-v5.md), если коротко:
-//   - СТУПЕНЕЙ НЕТ. min/max/step/ttlMs описывают ДИАПАЗОН целиком, а цена одна на весь диапазон: объём либо
-//     попадает в диапазон провайдера, либо он за него не берётся;
-//   - ВИД КОТИРОВКИ ОДИН. quoteKind (live/fixed) ушёл: твёрдая котировка ровно одна - ордерная;
-//   - rate: 0 ЗНАЧИТ "НАПРАВЛЕНИЕ ОТКЛЮЧЕНО" и рядом стоит why. Это ЕДИНСТВЕННЫЙ сигнал отсутствия
-//     предложения, поэтому ноль НИКОГДА не становится ценой и НИКОГДА не делится;
-//   - СЕТЬ - ЧАСТЬ ЛИЧНОСТИ РЫНКА: assetNetwork/currencyNetwork сверяются со своей сетью (quoteNetworksFit);
-//   - seq (номер запроса) и at (метка времени) едут вместе с котировкой: по ним читается свежесть;
-//   - ОБЪЁМ МЕРЯЕТСЯ В ЕДИНИЦАХ ASSET ПАРЫ (первого элемента): у XMR/<токен> это XMR, у <токен>/XMR - токен.
 import { API, DEFAULT_CHAIN } from "./config.js";
 
-// КОТИРОВКА ПОД КОНКРЕТНЫЙ ОРДЕР (orderQuote). Запрос идёт ЧЕРЕЗ НАШ БЭКЕНД, а не напрямую в ноду
-// провайдера: прямой запрос потребовал бы от ноды заголовков CORS, то есть открытой наружу ноды. Наш
-// бэкенд маршрутизирует запрос и заодно проверяет подпись провайдера по списку разрешённых ключей
-// (док 21, D5.1; док 22, версия 4). Тело котировки бэкенд не хранит и не логирует.
+// QUOTE FOR A SPECIFIC ORDER (orderQuote). The request goes THROUGH OUR BACKEND, not straight to the provider
+// node: a direct request would require CORS headers, i.e. a node exposed to the internet. Our backend routes
+// the request and also checks the provider signature against an allowlist of keys.
 export async function requestOrderQuote({ providerId, order }) {
-  if (!providerId) throw new Error("не выбран провайдер: запрашивать котировку под ордер не у кого");
-  // ПУТЬ БЕЗ ВТОРОГО "api": apiBase() уже возвращает "/api", и лишний префикс давал /api/api/order-quote -
-  // 404 на каждом запросе. Снаружи это выглядело как «котировка под ордер не запрашивается вовсе», хотя
-  // запрос уходил и получал отказ: сбивало с толку и разбор, и поиск причины.
+  if (!providerId) throw new Error("no provider selected: there is no one to ask for an order quote");
+  // A PATH WITHOUT A SECOND "api": apiBase() already returns "/api", and a stray prefix gave /api/api/order-quote -
+  // a 404 on every request.
   const res = await fetch(apiBase() + "/order-quote", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -43,70 +32,65 @@ export async function requestOrderQuote({ providerId, order }) {
   try { body = await res.json(); } catch { body = null; }
   if (!res.ok || !body || body.ok !== true || !body.quote) {
     const why = (body && (body.error || body.why)) || ("HTTP " + res.status);
-    throw new Error("провайдер не дал котировку под ордер: " + why);
+    throw new Error("the provider gave no order quote: " + why);
   }
-  // ПОДПИСЬ ПРОВЕРЯЕТ БЭКЕНД, НО РЕЗУЛЬТАТ ПРИХОДИТ ПОЛЕМ, А НЕ МОЛЧАНИЕМ. Непроверенная подпись -
-  // это не «наверное всё хорошо»: котировка под ордер несёт обязательство по ключам, и принимать её без
-  // подтверждения нельзя. Отсутствие флага тоже считаем непроверенной: обещать больше, чем сделано, нельзя.
+  // THE BACKEND CHECKS THE SIGNATURE, BUT THE RESULT COMES AS A FIELD, NOT BY SILENCE. An unverified signature
+  // is not "probably fine": an order quote commits to keys. A missing flag also counts as unverified.
   if (body.signatureVerified !== true) {
-    throw new Error("подпись провайдера не подтверждена: " + String(body.signatureWhy || "бэкенд не проверил"));
+    throw new Error("provider signature not confirmed: " + String(body.signatureWhy || "the backend did not verify"));
   }
   return body.quote;
 }
 
-// ПРОВЕРКА КОТИРОВКИ ПОД ОРДЕР - то, ради чего она вообще запрашивается. Проверяющий код тот же, что и
-// у своей стороны: доказательство в контексте ордера, и доказанная точка ed25519 обязана совпасть с той,
-// которую мы отдадим в контракт. Второе без первого бессмысленно, первое без второго не защищает.
+// ORDER-QUOTE CHECK - the reason it is requested at all. The verifier code is the same as our own side: a proof
+// in the order context, and the proven ed25519 point must match the one we will send to the contract.
 export function checkOrderQuoteShape(quote) {
-  // ПОЛОВИНА ПРОСМОТРА В СПИСКЕ ОБЯЗАТЕЛЬНЫХ: без неё по котировке не собрать адрес Monero (док 21, D14.3).
+  // THE VIEW HALF IS MANDATORY: without it the Monero address cannot be built from the quote.
   const missing = ["providerId", "amount", "claimer", "edPointClaimer", "commitHalfClaimer", "viewHalfClaimer", "proof", "context", "expiresAt"]
     .filter((f) => quote[f] === undefined || quote[f] === null || quote[f] === "");
-  if (missing.length) throw new Error("в котировке под ордер не хватает полей: " + missing.join(", "));
-  // ЕДИНСТВЕННЫЙ ТВЁРДЫЙ ВИД - ОРДЕРНЫЙ. В версии 4 второго вида (fixed) в продукте нет, поэтому проверка
-  // не "какой это вид", а "это вообще котировка под ордер или нет": рассылочная котировка сюда не годится.
-  if (quote.quoteKind !== "orderQuote") throw new Error("пришла не котировка под ордер, а " + String(quote.quoteKind));
-  if (Number(quote.expiresAt) <= Date.now()) throw new Error("котировка под ордер просрочена");
+  if (missing.length) throw new Error("the order quote is missing fields: " + missing.join(", "));
+  // THE ONLY FIRM KIND IS THE ORDER ONE: a broadcast quote does not fit here.
+  if (quote.quoteKind !== "orderQuote") throw new Error("not an order quote, but " + String(quote.quoteKind));
+  if (Number(quote.expiresAt) <= Date.now()) throw new Error("the order quote has expired");
 }
 
 let baseOverride = null;
 const apiBase = () => baseOverride || API.base;
 
-// ЧТО СПРАШИВАЕМ У ЯДРА. Сторона и РАЗМЕР - в единицах ASSET пары (см. формулировку выше); сеть и токен
-// нужны ядру, чтобы выбрать СВОЙ экземпляр (у каждой сети свой опрос). Своих чисел здесь не появляется:
-// размер приходит от экрана, который выровнял его по сетке провайдера.
+// WHAT WE ASK THE CORE. The side and SIZE are in units of the ASSET; the network and token let the core pick ITS
+// instance. No numbers appear here: the size comes from the screen, aligned to the provider grid.
 let query = { size: 1, side: "buy", chain: DEFAULT_CHAIN, token: null };
 export function setRfqQuery(next) {
   if (!next) return;
   if (next.side === "buy" || next.side === "sell") query.side = next.side;
-  // ВИДА КОТИРОВКИ В ЗАПРОСЕ БОЛЬШЕ НЕТ: второго вида не существует, и поле mode ушло вместе с ним.
+  // NO QUOTE KIND IN THE REQUEST anymore: the second kind does not exist.
   if (next.size !== null && next.size !== undefined && Number(next.size) > 0) query.size = Number(next.size);
-  else query.size = 1;                 // сумма не введена - спрашиваем единицу ASSET, а не "ничего"
+  else query.size = 1;                 // no amount entered - ask for one ASSET unit, not "nothing"
   if (typeof next.chain === "string" && next.chain) query.chain = next.chain;
   if (typeof next.token === "string" && next.token) query.token = next.token;
 }
 
-// Текущий запрос: экрану нужно знать, под какой объём и сторону спрашивали - иначе он не отличит "провайдер
-// молчит" от "провайдер не берётся за такой объём".
+// The current request: the screen needs to know the side and size asked for, else it cannot tell "the provider is
+// silent" from "the provider does not take this size".
 export function rfqQuery() {
   return { ...query };
 }
 
-// СНИМОК, КОТОРЫЙ ЧИТАЮТ ЭКРАНЫ. Форма та же, что была: { ok, error, data, at }. В data - references
-// (справочный курс) и best, а предложения и отказы отдаёт rfqOffers(). Ядро не опрошено ни разу или
-// отказало - данных нет, и это видно по ok. Прежние числа как "живые" не подставляются.
+// THE SNAPSHOT THE SCREENS READ: { ok, error, data, at }. In data - references and best, while offers and
+// refusals come from rfqOffers(). If the core was never polled or refused, there is no data, shown by ok.
+// Old numbers are not pasted as "live".
 const snapshot = { ok: false, error: null, data: null, at: 0, fetching: false };
 export function rfqSnapshot() {
   return snapshot;
 }
 
-// Пара, которую пользователь ВИДИТ: он покупает XMR, значит смотрит на пары XMR/<актив>; продаёт - на обратные.
+// The pair the user SEES: buying XMR means the pairs XMR/<asset>; selling means the reverse.
 export function pairFacingUser(side = query.side, asset = "ETH") {
   return side === "sell" ? asset.toUpperCase() + "/XMR" : "XMR/" + asset.toUpperCase();
 }
 
-// СТОРОНЫ ПАРЫ ЧИТАЮТСЯ ПО МЕСТУ (док 41, §1): первый элемент - ASSET (в нём же меряется объём), второй -
-// CURRENCY (то, чем платят). Отдельные функции, потому что это правило конвенции, а не разбор строки:
-// "XMR/ETH" значит "сколько ETH за 1 XMR" и ничего другого.
+// PAIR SIDES ARE READ BY POSITION: the first element is the ASSET (the size is measured in it), the second is
+// the CURRENCY (what is paid). Separate functions, because this is a convention.
 export function pairAsset(pair) {
   return String(pair || "").split("/")[0].toUpperCase();
 }
@@ -114,10 +98,9 @@ export function pairCurrency(pair) {
   return String(pair || "").split("/")[1] ? String(pair).split("/")[1].toUpperCase() : "";
 }
 
-// ПРЕДЛОЖЕНИЯ И ОТКАЗЫ - ИЗ СНИМКА ЯДРА, БЕЗ ВТОРОГО ОТБОРА. Ядро уже разделило строки книги на
-// предложения и отказы (sdk/src/quotes.mjs, readBook: ноль/противоречие/просрочка) и назвало лучшего.
-// Здесь они ТОЛЬКО переносятся: своего отсева, своей сортировки и своих порогов не появляется. Пустой
-// снимок - пустая книга; прежняя книга на экране не остаётся.
+// OFFERS AND REFUSALS - FROM THE CORE SNAPSHOT, NO SECOND SELECTION. The core already split the rows into
+// offers and refusals and named the best. Here they are only transferred: no own filtering, sorting or
+// thresholds. An empty snapshot is an empty book.
 export function rfqOffers() {
   const data = snapshot.ok && snapshot.data ? snapshot.data : null;
   if (!data) return { offers: [], refused: [], seq: null, at: null };
@@ -129,10 +112,10 @@ export function rfqOffers() {
   };
 }
 
-// СВЕРКА СЕТИ КОТИРОВКИ СО СВОЕЙ (док 41, §3). Сеть - часть личности рынка, а не украшение: arbitrum и
-// arbitrum-sepolia - это ОДНО СЛОВО ДЛЯ РАЗНЫХ ДЕНЕГ, и кошелёк между ними монеты не переводит. Сторона,
-// где стоит XMR, обязана говорить на языке Monero, вторая - на языке реестра сетей EVM (его id).
-// Возвращаем вердикт, а не throw: отказ одной котировки не закрывает рынок (см. market.js).
+// CHECKING THE QUOTE NETWORK AGAINST OURS. The network is part of the market identity: arbitrum and
+// arbitrum-sepolia are ONE WORD FOR DIFFERENT MONEY, and a wallet does not move coins between them. The side
+// holding XMR must speak Monero, the other the EVM registry language (its id). We return a verdict, not a
+// throw: one quote refusal does not close the market.
 export function quoteNetworksFit(quote, { monero, evm }) {
   const xmrOnAsset = quote.asset === "XMR";
   const xmrOnCurrency = quote.currency === "XMR";
@@ -147,15 +130,14 @@ export function quoteNetworksFit(quote, { monero, evm }) {
   if (evmNet && evmNet !== evm) {
     return { ok: false, stated: true, why: quote.pair + ": " + evmSide + " is " + evmNet + ", but this page settles on " + evm };
   }
-  // НЕ НАЗВАНА - НЕ ЗНАЧИТ "НАША". Сверять нечего, и это надо сказать вслух (в лог), но отказом за это не
-  // закрываем рынок: правило §3 ловит СЕТЬ, НАЗВАННУЮ НЕВЕРНО, а не поле, которого котировка ещё не несёт.
+  // NOT NAMED - DOES NOT MEAN "OURS". There is nothing to compare, and that is logged, but we do not close the
+  // market for it: the rule catches a network NAMED WRONG, not a missing field.
   return { ok: true, stated: quote.networkStated, moneroNet: moneroNet || null, evmNet: evmNet || null, why: null };
 }
 
-// ОПРОС ИДЁТ ЧЕРЕЗ ЯДРО. Склейник (www/js/sdk/bridge.js) отдаёт ядру то, что нужно ему снаружи (сеть, размер,
-// направление), и возвращает ПЕРЕВЕДЁННЫЙ снимок. Ядро грузится ДИНАМИЧЕСКИ: этот модуль читают и без
-// браузера (проверки рынка), и тогда книга просто не запрашивается - динамический импорт в Node не тянет
-// страничные модули. Отказ загрузки ядра - ЭТО ОТКАЗ, а не повод взять книгу где-то ещё.
+// POLLING GOES THROUGH THE CORE. The bridge hands the core what it needs (network, size, direction) and returns
+// the TRANSLATED snapshot. The core is loaded DYNAMICALLY: this module is also read without a browser, and then
+// the book is simply not requested. A load failure IS a failure, not a reason to take the book elsewhere.
 export async function refreshRfq() {
   if (snapshot.fetching) return snapshot;
   snapshot.fetching = true;
@@ -168,8 +150,8 @@ export async function refreshRfq() {
     snapshot.data = next.data;
     snapshot.at = next.at || Date.now();
   } catch (error) {
-    // ОТКАЗ НЕ ПОДМЕНЯЕМ ПРОШЛЫМИ ЧИСЛАМИ: показать устаревшую цену как живую - хуже, чем сказать, что
-    // связи нет. Данных не остаётся вовсе: книги, которую можно было бы показать, больше нет.
+    // A REFUSAL IS NOT REPLACED BY OLD NUMBERS: showing a stale price as live is worse than saying there is no
+    // connection. No data is left at all.
     snapshot.ok = false;
     snapshot.error = String((error && error.message) || error);
     snapshot.data = null;
@@ -182,9 +164,9 @@ export async function refreshRfq() {
 
 let timer = null;
 
-// ОПРАШИВАЕМ ВСЕГДА, как и раньше. Опрос здесь не для того, чтобы "поймать новую цену": он подтверждает,
-// что провайдер на месте. Сам опрос держит ЯДРО (на время подписки), а этот такт заставляет книгу
-// обновляться вместе с экраном. Молчание ноды видно как отсутствие свежей метки, а не как "цена та же".
+// ALWAYS POLL. The poll is not to "catch a new price": it confirms the provider is there. The core holds the
+// poll for the subscription; this tick keeps the book updating with the screen. Node silence shows as a missing
+// fresh stamp, not as "the price is the same".
 export function startRfqPolling(chain = null, ms = API.pollMs) {
   if (typeof chain === "string" && chain) query.chain = chain;
   if (timer) return;

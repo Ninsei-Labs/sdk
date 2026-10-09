@@ -1,20 +1,19 @@
 // GENERATED FILE - a byte-for-byte copy of the engine module www/js/monero/node.js for the SDK package.
-// Edit the source under www/js, then run: node tools/build-sdk-engine.mjs
-// tools/check-sdk-engine.mjs reddens on any drift, so a stale copy cannot ship silently.
+// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
 // Everything below this header is identical to the source.
 
-// Живой Monero-нод: единственная реальная внешняя зависимость демки.
+// The live Monero node: the only real external dependency of the demo.
 //
-// Адрес ноды - константа MONERO.node в www/js/core/config.js: наш прокси
-// https://xmr.arrakisswap.trade (конфиг .hermes/deploy/arrakis-xmr-rpc.conf).
-// Никаких параметров и переопределений у демки нет: адрес один и виден в коде.
-// Используем ноду для двух честных вещей:
-//   1) статус сети в шапке: реальная высота, nettype, доступность нода;
-//   2) режим "live chain": подтверждения Monero считаются по реальному росту высоты,
-//      а не по таймеру (медленно - блок ~2 минуты, зато по-настоящему).
+// The node address is the MONERO.node constant in www/js/core/config.js - the proxy
+// address is supplied at deploy time (see the deploy config for the Monero RPC proxy).
+// The demo has no parameters or overrides: the address is one and visible in the code.
+// We use the node for two honest things:
+//   1) network status in the header: real height, nettype, node availability;
+//   2) "live chain" mode: Monero confirmations are counted from real height growth,
+//      not from a timer (slow - a block is ~2 minutes, but real).
 //
-// Балансы, outputs и ключи через этот RPC не запрашиваются: для этого нужен кошелёк
-// (wallet2 в WASM + view-ключ), это следующий шаг, а не то, что делает демка.
+// Balances, outputs and keys are NOT queried through this RPC: that needs a wallet
+// (wallet2 in WASM + view key), which is the next step, not what the demo does.
 
 import { MONERO } from "../core/config.js";
 
@@ -32,7 +31,7 @@ async function rpc(method, params = {}, path = "/json_rpc") {
     const res = await fetch(RPC + path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: "arrakis-demo", method, params }),
+      body: JSON.stringify({ jsonrpc: "2.0", id: "ninsei-demo", method, params }),
       signal: ctl.signal,
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
@@ -52,7 +51,7 @@ export function lastError() {
   return cache.error;
 }
 
-// Высота сети на момент вызова (из кеша, если он свежий).
+// Network height at call time (from cache, if fresh).
 export async function height() {
   const info = await getInfo();
   return info ? info.height : null;
@@ -94,7 +93,7 @@ function normalize(info) {
   };
 }
 
-// Опрос раз в 30 секунд, пока страница открыта: шапка показывает живую высоту.
+// Poll every 30 seconds while the page is open: the header shows the live height.
 let poller = null;
 export function startPolling(onUpdate, intervalMs = 30_000) {
   if (poller) clearInterval(poller);

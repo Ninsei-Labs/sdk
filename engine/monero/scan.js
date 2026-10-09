@@ -1,55 +1,50 @@
 // GENERATED FILE - a byte-for-byte copy of the engine module www/js/monero/scan.js for the SDK package.
-// Edit the source under www/js, then run: node tools/build-sdk-engine.mjs
-// tools/check-sdk-engine.mjs reddens on any drift, so a stale copy cannot ship silently.
+// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
 // Everything below this header is identical to the source.
 
-// ИНДЕКСЕР MONERO: находим поступления на адрес сделки САМИ, разбирая блоки.
+// MONERO INDEXER: we find arrivals at the swap address ourselves by parsing blocks.
+// WHY. Before, arrivals were learned from monero-wallet-rpc through a watch-only wallet, a path that hit a defect
+// (the wallet+keys pair is created and never reopens) and where one instance held one wallet, so scanning 25
+// swaps took 140 s. Our own block parsing depends on neither.
+// WHAT IS NEEDED: the VIEW KEY and the PUBLIC SPEND KEY - both on the client and already sent to the backend by
+// an allowlist. The spend key is NOT needed: seeing arrivals and spending them are different rights, the
+// non-custodial boundary.
+// FORMULAS FROM THE MONERO SOURCES, not from memory:
+//   derivation    = 8 * (view_secret * tx_public_key)
+//   scalar_i      = Hs(derivation || varint(i))
+//   derived_key_i = scalar_i * G + spend_public_key
+//   amount_i      = ecdhInfo[i].amount XOR Hs("amount" || derivation)[0..8]   (RingCT v2)
+//   amount_i      = ecdhInfo[i].amount - Hs(derivation)                        (RingCT v1)
+// Both versions are implemented: old transactions in the chain are still there.
+// keccak-256 from @noble/hashes, the same package as the SDK core: the standalone keccak256 npm package needs Buffer.
+// THE unlock_time RULE IS THE SAME ONE, lives next door (./unlock.js) and is re-exported from here.
 //
-// ЗАЧЕМ. До этого поступления узнавались у monero-wallet-rpc через watch-only кошелёк
-// (generate_from_keys). Этот путь упёрся в дефект: пара «кошелёк + ключи» создаётся и больше не
-// открывается (.hermes/docs/19), а кроме того один экземпляр держит один кошелёк и обход 25 свопов
-// занимал 140 с. Свой разбор блоков не зависит ни от сборки кошелька, ни от числа свопов.
 //
-// ЧТО НУЖНО И ЧЕГО НЕ НУЖНО. Нужен КЛЮЧ ПРОСМОТРА и ПУБЛИЧНЫЙ КЛЮЧ ТРАТЫ - оба есть у клиента и оба уже
-// уходят на бэкенд по белому списку полей. Ключ траты НЕ нужен: смотреть поступления и распоряжаться
-// ими - разные права, и это ровно та граница, на которой стоит некастодиальность.
 //
-// ФОРМУЛЫ - ИЗ ИСХОДНИКОВ MONERO, не по памяти (src/crypto/crypto.cpp, src/ringct/rctOps.cpp):
-//   derivation    = 8 * (view_secret * tx_public_key)            - точка, 32 байта (generate_key_derivation)
-//   scalar_i      = Hs(derivation || varint(i))                   - хеш в скаляр (derivation_to_scalar)
-//   derived_key_i = scalar_i * G + spend_public_key               - (derive_public_key); совпал с выводом - наш
-//   amount_i      = ecdhInfo[i].amount XOR Hs("amount" || derivation)[0..8]      - RingCT v2 (текущий)
-//   amount_i      = ecdhInfo[i].amount - Hs(derivation)                          - RingCT v1 (старое)
-// Здесь реализованы обе версии: старые транзакции в цепочке никуда не делись.
 
 import { ed25519 } from "@noble/curves/ed25519.js";
-// keccak-256 - из @noble/hashes, того же пакета, что у ядра SDK: собственный npm-пакет keccak256 требует
-// Buffer и в браузер не входит. keccak_256 даёт тот же результат (проверено на известном значении).
 import { keccak_256 } from "@noble/hashes/sha3.js";
-// ПРАВИЛО unlock_time - ОДНО И ТО ЖЕ, живёт рядом (./unlock.js) и реэкспортируется отсюда, чтобы все, кто
-// ходил в app/indexer.mjs, получали те же имена.
 import { UNLOCK_TIME_BLOCK_MAX, unlockStateOf, laterBoundary } from "./unlock.js";
 export { UNLOCK_TIME_BLOCK_MAX, unlockStateOf, laterBoundary };
 
 export function keccak(bytes) { return keccak_256(bytes); }
 
-// Порядок группы edwards25519 (l). Берём у самой кривой, а не числом из памяти: ошибка в этой
-// константе сделала бы неверным и скаляр, и вывод, и сумму - то есть «невидимое поступление».
+// Order of the edwards25519 group (l). Taken from the curve, not a remembered number: a wrong constant would
+// corrupt the scalar, the derivation and the sum - an "invisible arrival".
 export const ED_ORDER = ed25519.Point.CURVE().n;
 
 export function hexToBytes(hex) {
   const t = String(hex).trim().replace(/^0x/, "");
-  if (t.length % 2) throw new Error("нечётная длина hex");
+  if (t.length % 2) throw new Error("odd hex length");
   const out = new Uint8Array(t.length / 2);
   for (let i = 0; i < out.length; i++) out[i] = parseInt(t.substr(i * 2, 2), 16);
   return out;
 }
 export function bytesToHex(b) { return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join(""); }
 
-// ПОРЯДОК БАЙТ - МАЛЕНЬКИЙ (little-endian). Это не придирка: Monero хранит скаляры младшим байтом
-// вперёд, и `sc_reduce32` толкует 32 байта хеша именно так. Чтение их большим порядком даёт ДРУГОЕ
-// число - скаляр выходит неверным, вывод не сходится, и поступление не находится МОЛЧА. Здесь на этом
-// уже один раз потеряли вечер.
+// BYTE ORDER IS LITTLE-ENDIAN. Monero stores scalars least-significant first, and sc_reduce32 reads the 32 hash
+// bytes that way. Reading them big-endian gives a DIFFERENT number, the derivation does not match, and the
+// arrival is not found SILENTLY.
 export function scalarFromBytesLE(bytes) {
   const rev = Uint8Array.from(bytes).reverse();
   return BigInt("0x" + bytesToHex(rev));
@@ -62,7 +57,7 @@ export function scalarToBytesLE(v, n = 32) {
   return out;
 }
 
-// Хеш в скаляр: Hs(...) в Monero = keccak256, прочитанный МЛАДШИМ байтом вперёд, с приведением по l.
+// Hash to scalar: Hs(...) in Monero = keccak256 read LEAST-SIGNIFICANT first, reduced mod l.
 export function hashToScalar(...parts) {
   const total = parts.reduce((n, p) => n + p.length, 0);
   const buf = new Uint8Array(total);
@@ -71,7 +66,7 @@ export function hashToScalar(...parts) {
   return scalarFromBytesLE(keccak(buf)) % ED_ORDER;
 }
 
-// Varint Monero (LEB128, 7 бит на байт, старший бит - продолжение).
+// Monero varint (LEB128, 7 bits per byte, high bit = continuation).
 export function varint(n) {
   const out = [];
   let v = BigInt(n);
@@ -80,29 +75,27 @@ export function varint(n) {
   return new Uint8Array(out);
 }
 
-// Публичный ключ сделки проверяем на разборе: точка должна лежать на кривой.
+// The swap public key is checked on parse: the point must lie on the curve.
 function pointFromHex(hex) { return ed25519.Point.fromHex(String(hex).replace(/^0x/, "")); }
 
-// derivation = 8 * (view_secret * tx_public_key) - ровно то, что делает generate_key_derivation.
+// derivation = 8 * (view_secret * tx_public_key) - exactly what generate_key_derivation does.
 //
-// ПОРЯДОК БАЙТ: ЗДЕСЬ БЫЛА ТИХАЯ ПОТЕРЯ ПОСТУПЛЕНИЙ. Ключ просмотра приходит в двух видах, и вид не виден
-// по строке: из monero-rpc - как БАЙТЫ младшим вперёд, а из записи сделки (её пишет страница) - как ЧИСЛО в
-// hex. Чтение одного вида другим даёт другой скаляр: вывод не сходится, поступление не находится, и ни одной
-// ошибки при этом не пишется. На живом прогоне оплата на общий адрес ордера лежала на цепи, а индексер
-// честно докладывал ноль. Поэтому вид перебирается ЯВНО, а победивший называется в результате.
+// BYTE ORDER: HERE WAS A SILENT LOSS OF ARRIVALS. The view key comes in two forms that look identical as a
+// string: from monero-rpc as LITTLE-ENDIAN BYTES, from the swap record as a NUMBER in hex. Reading one as the
+// other gives another scalar: the derivation does not match, the arrival is not found, and no error is written.
+// So the form is tried EXPLICITLY and the winner is named in the result.
 export function viewSecretCandidates(viewSecret) {
-  if (typeof viewSecret === "bigint") return [["число", viewSecret % ED_ORDER]];
+  if (typeof viewSecret === "bigint") return [["number", viewSecret % ED_ORDER]];
   const hex = String(viewSecret).replace(/^0x/, "");
-  if (!/^[0-9a-fA-F]{64}$/.test(hex)) return [["не разобран", null]];
-  // ОБА вида приводим по модулю порядка группы: без этого значение, большее порядка (а такое даёт любая
-  // мусорная строка), не даст посчитать точку, и проверка ключа упадёт вместо того, чтобы сказать «не подошёл».
-  return [["BE-число", BigInt("0x" + hex) % ED_ORDER], ["LE-байты", scalarFromHexLE(hex) % ED_ORDER]];
+  if (!/^[0-9a-fA-F]{64}$/.test(hex)) return [["unparsed", null]];
+  // Both forms are reduced mod the group order: without this, a value larger than the order (any garbage string)
+  // cannot produce a point and the key check would crash instead of saying "no match".
+  return [["BE-number", BigInt("0x" + hex) % ED_ORDER], ["LE-bytes", scalarFromHexLE(hex) % ED_ORDER]];
 }
 
-// ПОДХОДИТ ЛИ КЛЮЧ ПРОСМОТРА К АДРЕСУ. Сверка ровно одна: точка ключа обязана совпасть с точкой просмотра,
-// записанной в адресе (её даёт decodeAddressKeys). Возврат: имя вида, которым совпало; false - не совпало НИ
-// ОДНИМ видом, то есть ключ от другого адреса, и обход по нему не найдёт ничего, сколько его ни запускай;
-// null - сверять не с чем.
+// WHETHER THE VIEW KEY MATCHES THE ADDRESS. One comparison: the key point must equal the view point in the
+// address. Return: the form name that matched; false - no form matched, so the key is from another address;
+// null - nothing to compare.
 export function viewKeyFormForAddress(viewSecret, expectedViewPubHex) {
   const want = String(expectedViewPubHex || "").toLowerCase();
   if (!want) return null;
@@ -115,12 +108,12 @@ export function viewKeyFormForAddress(viewSecret, expectedViewPubHex) {
 
 export function keyDerivation(txPublicKeyHex, viewSecretHex) {
   const txPub = pointFromHex(txPublicKeyHex);
-  // Ключ просмотра принимаем и как LE-байты из monero-rpc, и как число, если он уже разобран.
+  // The view key is accepted both as LE bytes from monero-rpc and as a number if already parsed.
   const a = (typeof viewSecretHex === "bigint" ? viewSecretHex : scalarFromHexLE(String(viewSecretHex).replace(/^0x/, ""))) % ED_ORDER;
   const shared = txPub.multiply(a);
-  // ВАЖНО: возвращаем БАЙТЫ, а не hex-строку. Если отдать строку, дальше она поедет как «байты» строки
-  // (в хеш уйдут ASCII-коды символов hex), и поступление просто не найдётся - молча и без ошибок.
-  return hexToBytes(shared.multiply(8n).toHex());   // 32 байта точки (ge_tobytes) - это и есть derivation
+  // IMPORTANT: return BYTES, not a hex string. A string would later travel as the string's "bytes" (ASCII codes
+  // into the hash) and the arrival simply would not be found - silently.
+  return hexToBytes(shared.multiply(8n).toHex());   // 32-byte point (ge_tobytes) - this is the derivation
 }
 
 // derived_key_i = Hs(derivation || varint(i)) * G + B
@@ -130,9 +123,8 @@ export function derivedOutputKey(derivation, outputIndex, spendPubHex) {
   return point.toHex();
 }
 
-// Вспомогательное: tx public key лежит в extra транзакции, тег 0x01, 32 байта.
-// Читаем extra как есть - это тот же разбор, что делает кошелёк.
-// extra приходит из ноды МАССИВОМ БАЙТ (не hex-строкой), поэтому принимаем оба вида.
+// Helper: the tx public key sits in the transaction extra, tag 0x01, 32 bytes. We read extra as is - the same
+// parse the wallet does. extra arrives from the node as a BYTE ARRAY (not hex), so both forms are accepted.
 export function txPublicKeyFromExtra(extra) {
   const b = Array.isArray(extra) ? Uint8Array.from(extra) : hexToBytes(extra);
   let i = 0;
@@ -140,29 +132,28 @@ export function txPublicKeyFromExtra(extra) {
     const tag = b[i];
     if (tag === 0x01) return bytesToHex(b.subarray(i + 1, i + 33));
     if (tag === 0x02) { i += 1 + b[i + 1]; continue; }          // nonce
-    if (tag === 0x00) { i += 1 + b[i + 1]; continue; }          // дополнительный public key
-    return null;                                                 // неизвестный тег: не гадаем
+    if (tag === 0x00) { i += 1 + b[i + 1]; continue; }          // additional public key
+    return null;                                                 // unknown tag: we do not guess
   }
   return null;
 }
 
-// Расшифровка суммы. version: 2 = текущая схема (xor первых 8 байт), 1 = старая (вычитание скаляра).
+// Amount decryption. version: 2 = current scheme (xor of the first 8 bytes), 1 = old (scalar subtraction).
 //
-// СЕКРЕТ - ЭТО СКАЛЯР ВЫВОДА, А НЕ DERIVATION. Здесь легко ошибиться: и то и другое - 32 байта, но в
-// genAmountEncodingFactor уходит именно скаляр (derivation_to_scalar), записанный МЛАДШИМ байтом вперёд.
-// С derivation результат получается правдоподобным на вид и НЕВЕРНЫМ по существу - проверил на живых
-// числах: правильный ответ 1000000000 atomic, с derivation выходило 8830061611517333961.
+// THE SECRET IS THE DERIVATION SCALAR, NOT THE DERIVATION. Easy to get wrong: both are 32 bytes, but what goes
+// into genAmountEncodingFactor is the scalar (derivation_to_scalar), written LEAST-SIGNIFICANT first. With the
+// derivation the result looks plausible and is WRONG (checked on live numbers).
 export function decodeAmount(ecdhAmountHex, scalarLE, rctVersion) {
   const enc = hexToBytes(ecdhAmountHex);
   if (Number(rctVersion) >= 2) {
-    // Множитель: keccak("amount" || скаляр_LE), 38 байт - порядок проверен по исходнику (rctOps.cpp).
+    // Multiplier: keccak("amount" || scalar_LE), 38 bytes - order checked against the source.
     const label = new TextEncoder().encode("amount");
     const buf = new Uint8Array(label.length + scalarLE.length);
     buf.set(label, 0); buf.set(scalarLE, label.length);
     const factor = keccak(buf);
     const out = enc.slice();
-    for (let i = 0; i < 8; i++) out[i] ^= factor[i];             // xor ТОЛЬКО первых 8 байт
-    // И снова МЛАДШИЙ байт вперёд: суммы Monero тоже little-endian.
+    for (let i = 0; i < 8; i++) out[i] ^= factor[i];             // xor of the FIRST 8 bytes only
+    // And again LEAST-SIGNIFICANT first: Monero amounts are little-endian too.
     return scalarFromBytesLE(out);
   }
   const s2 = hashToScalar(hexToBytes(hashToScalar(hexToBytes(bytesToHex(rctVersion === 1 ? scalarLE : scalarLE))).toString(16).padStart(64, "0")));
@@ -170,15 +161,14 @@ export function decodeAmount(ecdhAmountHex, scalarLE, rctVersion) {
   return (amt - s2 + ED_ORDER) % ED_ORDER;
 }
 
-// ГЛАВНОЕ: разобрать транзакцию и вернуть НАШИ выводы (её номера, ключи и суммы).
+// MAIN: parse a transaction and return OUR outputs (their indices, keys and amounts).
 // txView - { txPublicKey, vout: [{key, index}], ecdhAmounts: [...], rctVersion }
 export function findOurOutputs({ txPublicKey, viewSecretHex, spendPubHex, outputs, ecdhAmounts = [], rctVersion = 2 }) {
-  if (!txPublicKey) throw new Error("в транзакции нет публичного ключа (extra тег 0x01) - разбирать нечего");
-  // Вид ключа перебираем ЯВНО (см. viewSecretCandidates): верным может оказаться любой из них, и имя
-  // победившего уходит наверх - чтобы в журнале было видно, ЧЕМ считали. Если не нашли ничем, отдаём первый
-  // осмысленный вид, а не пустоту: иначе в журнале будет «ничем», и причина снова спрячется.
+  if (!txPublicKey) throw new Error("the transaction has no public key (extra tag 0x01) - nothing to parse");
+  // The key form is tried EXPLICITLY; the winner's name goes up so the log shows what was used. If none matched,
+  // the first meaningful form is returned, not nothing.
   const usable = viewSecretCandidates(viewSecretHex).filter(([, v]) => v !== null);
-  const first = usable[0] || ["не разобран", null];
+  const first = usable[0] || ["unparsed", null];
   for (const [form, secret] of usable) {
     const derivation = keyDerivation(txPublicKey, secret);
     const found = [];
@@ -186,7 +176,7 @@ export function findOurOutputs({ txPublicKey, viewSecretHex, spendPubHex, output
       const scalar = hashToScalar(derivation, varint(o.index));
       const derived = derivedOutputKey(derivation, o.index, spendPubHex);
       if (derived.toLowerCase() === String(o.key).toLowerCase()) {
-        // В расшифровку суммы идёт СКАЛЯР ЭТОГО вывода, младшим байтом вперёд.
+        // The amount decryption uses THIS output's SCALAR, least-significant first.
         const amount = ecdhAmounts[o.index] ? decodeAmount(ecdhAmounts[o.index], scalarToBytesLE(scalar), rctVersion) : null;
         found.push({ index: o.index, key: o.key, amountAtomic: amount });
       }
@@ -201,13 +191,12 @@ export function findOurOutputs({ txPublicKey, viewSecretHex, spendPubHex, output
 }
 
 // ============================================================================================
-// ОБХОД ДИАПАЗОНА ВЫСОТ. Это и есть собственно индексация: читаем блоки подряд, из каждого берём
-// хеши транзакций и разбираем их ОДНИМ запросом на блок (нода принимает список хешей), а затем
-// проверяем выводы каждой транзакции против ВСЕХ наблюдаемых адресов сразу. Именно поэтому обход не
-// зависит от числа свопов: блок читается один раз для всех.
+// SCANNING A HEIGHT RANGE. This is the indexing itself: read blocks in order, take their transaction hashes
+// and parse them with ONE request per block, then check each transaction's outputs against ALL watched
+// addresses at once. That is why the scan does not depend on the number of swaps.
 //
-// Чего здесь СОЗНАТЕЛЬНО нет: обрезки, подтверждений «по своей высоте», записи состояния в файлы.
-// Высота - это параметр вызова, состояние обхода решает вызывающий (у бэкенда это поле в базе).
+// Deliberately NOT here: truncation, "height-based" confirmations, writing state to files. The height is a call
+// parameter; the caller owns the scan state.
 // ============================================================================================
 
 
@@ -217,12 +206,12 @@ export async function fetchBlock(daemonUrl, height) {
     body: JSON.stringify({ jsonrpc: "2.0", id: "block", method: "get_block", params: { height } }),
   });
   const j = await res.json();
-  if (!j.result) throw new Error(`блок ${height} не получен: ${j.error ? j.error.message : "пустой ответ"}`);
+  if (!j.result) throw new Error(`block ${height} not received: ${j.error ? j.error.message : "empty answer"}`);
   return j.result;
 }
 
-// Транзакции по списку хешей. Ходим на ПУТЬ /get_transactions, а не в /json_rpc: через JSON-RPC этот
-// метод молча возвращает пусто (проверено, док 19), и это выглядит как «транзакций нет».
+// Transactions by hash list. We hit the PATH /get_transactions, not /json_rpc: over JSON-RPC this method
+// silently returns empty, which looks like "no transactions".
 export async function fetchTransactions(daemonUrl, hashes) {
   if (!hashes.length) return [];
   const res = await fetch(`${String(daemonUrl).replace(/\/+$/, "")}/get_transactions`, {
@@ -231,9 +220,8 @@ export async function fetchTransactions(daemonUrl, hashes) {
   });
   const j = await res.json();
   const wrappers = j.txs || [];
-  // ХЕШ И ВЫСОТА ЖИВУТ В ОБЁРТКЕ, а не в разобранном теле транзакции: в as_json их просто нет. Без этого
-  // пришивания «найденный перевод» не имеет ни хеша, ни высоты - то есть бесполезен вызывающему, и при
-  // этом всё выглядит успешным.
+  // HASH AND HEIGHT LIVE IN THE WRAPPER, not in the parsed body: as_json omits them. Without this stitching a
+  // "found transfer" would have neither hash nor height - useless to the caller, yet everything would look successful.
   return (j.txs_as_json || []).map((s, i) => {
     const body = typeof s === "string" ? JSON.parse(s) : s;
     const w = wrappers[i] || {};
@@ -245,15 +233,14 @@ export async function fetchTransactions(daemonUrl, hashes) {
   });
 }
 
-// Разбор одной транзакции против списка наблюдаемых адресов.
-// watched: [{ address, viewSecret, spendPub }] - viewSecret принимается и числом, и LE-hex, и BE-hex
-// (см. viewSecretCandidates). В результате едет viewKeyForm: имя вида, которым вывод сошёлся.
+// Parsing one transaction against the watched addresses. watched: [{ address, viewSecret, spendPub }] - viewSecret
+// is taken as a number, LE-hex or BE-hex. The result carries viewKeyForm: the form name that matched.
 export function matchTransaction(tx, watched, { height = null, nowSec = null } = {}) {
   const out = [];
   const txPublicKey = txPublicKeyFromExtra(tx.extra);
-  if (!txPublicKey) return out;                       // нет ключа в extra - смотреть нечего
-  // ЗАПЕРТ ЛИ ВЫХОД - РЕШАЕТСЯ ЗДЕСЬ, ОДИН РАЗ НА ТРАНЗАКЦИЮ: все её выходы несут один unlock_time.
-  // Обычная транзакция (unlock_time = 0) идёт как раньше; высота берётся у блока, в котором лежит перевод.
+  if (!txPublicKey) return out;                       // no key in extra - nothing to look at
+  // WHETHER THE OUTPUT IS LOCKED IS DECIDED HERE, ONCE PER TRANSACTION: all its outputs carry one unlock_time.
+  // A normal transaction (unlock_time = 0) goes as before; the height comes from the block holding the transfer.
   const blockHeight = height === null || height === undefined ? (tx.block_height ?? null) : height;
   const unlock = unlockStateOf(tx.unlock_time, { height: blockHeight, nowSec });
   const keyOf = (o) => ((o.target || {}).tagged_key || o.target || {}).key;
@@ -270,17 +257,17 @@ export function matchTransaction(tx, watched, { height = null, nowSec = null } =
   return out;
 }
 
-// Обход диапазона. Возвращает по каждому адресу сумму (receivedAtomic - только РАЗБЛОКИРОВАННОЕ), хеши,
-// запертую сумму (lockedAtomic) с границей (lockedUntil) и лучшую (наибольшую) высоту найденного вывода.
+// Range scan. Returns per address the sum (receivedAtomic - only the UNLOCKED), hashes, the locked sum
+// (lockedAtomic) with its boundary (lockedUntil) and the best (highest) height of a found output.
 export async function scanRange({ daemonUrl, fromHeight, toHeight, watched, log = () => {}, concurrency = 4, nowSec = null }) {
   const from = Number(fromHeight), to = Number(toHeight);
-  if (!(from >= 0) || !(to >= from)) throw new Error("диапазон высот задан неверно: " + fromHeight + ".." + toHeight);
+  if (!(from >= 0) || !(to >= from)) throw new Error("bad height range: " + fromHeight + ".." + toHeight);
   const acc = new Map();
   for (const w of watched) acc.set(w.address, { address: w.address, receivedAtomic: 0n, lockedAtomic: 0n, lockedUntil: null, lockedTxids: [], txids: [], bestHeight: null, outputs: 0, viewKeyForm: null });
   const heights = [];
   for (let h = from; h <= to; h++) heights.push(h);
 
-  // Ограниченный параллелизм: нода - общий ресурс, а блоки независимы.
+  // Bounded parallelism: the node is a shared resource and blocks are independent.
   let cursor = 0;
   const worker = async () => {
     while (cursor < heights.length) {
@@ -294,13 +281,13 @@ export async function scanRange({ daemonUrl, fromHeight, toHeight, watched, log 
           for (const hit of matchTransaction(tx, watched, { height: h, nowSec })) {
             const a = acc.get(hit.address);
             if (!a) continue;
-            if (hit.viewKeyForm) a.viewKeyForm = hit.viewKeyForm;   // чем сошлось - это и уходит в журнал
+            if (hit.viewKeyForm) a.viewKeyForm = hit.viewKeyForm;   // what matched - this goes to the log
             const lockedHere = !!(hit.unlock && hit.unlock.locked);
             const hash = String(tx.tx_hash || "").replace(/^0x/, "");
             for (const o of hit.outputs) {
               const amount = o.amountAtomic || 0n;
-              // ЗАПЕРТЫЙ ВЫХОД - ЭТО НЕ ПРИХОД. Его перевод виден в txids (деньги на адресе есть), но сумма
-              // НЕ идёт в receivedAtomic: иначе «готово» разрешило бы забор ETH под запертые XMR.
+              // A LOCKED OUTPUT IS NOT AN ARRIVAL. Its transfer shows in txids (money is on the address) but the
+              // sum does NOT go into receivedAtomic: else 'ready' would allow claiming ETH against locked XMR.
               if (lockedHere) {
                 a.lockedAtomic += amount;
                 if (hash && !a.lockedTxids.includes(hash)) a.lockedTxids.push(hash);

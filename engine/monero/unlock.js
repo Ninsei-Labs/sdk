@@ -1,28 +1,25 @@
 // GENERATED FILE - a byte-for-byte copy of the engine module www/js/monero/unlock.js for the SDK package.
-// Edit the source under www/js, then run: node tools/build-sdk-engine.mjs
-// tools/check-sdk-engine.mjs reddens on any drift, so a stale copy cannot ship silently.
+// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
 // Everything below this header is identical to the source.
 
-// ВРЕМЯ РАЗБЛОКИРОВКИ ВЫХОДА (unlock_time). ОДНО ПРАВИЛО НА ВСЕХ, КТО РЕШАЕТ «ПРИХОД ЕСТЬ».
+// OUTPUT UNLOCK TIME (unlock_time). ONE RULE FOR EVERYONE WHO DECIDES "ARRIVAL IS THERE".
 //
-// У транзакции Monero есть поле unlock_time. Ноль - «выход открыт обычным порядком». Ненулевое значение
-// ЗАПРЕЩАЕТ тратить выход до указанной границы, и граница бывает двух видов:
-//   * меньше 500 000 000 - это ВЫСОТА блока (CRYPTONOTE_MAX_BLOCK_NUMBER в исходниках Monero);
-//   * 500 000 000 и больше - это ВРЕМЯ (unix-секунды).
-// Пока граница не пройдена, деньги ЛЕЖАТ на адресе, но потратить их нельзя: это НЕ приход, которым можно
-// закрыть сделку. Мейкер, отправивший верную сумму с unlock_time на пять лет вперёд, получал ETH по отметке
-// «готово», а XMR оставались запертыми (issue #84).
+// A Monero transaction has an unlock_time field. Zero - "the output is open in the normal order". A non-zero
+// value FORBIDS spending the output until the given boundary, and the boundary is of two kinds:
+//   * less than 500 000 000 - this is a BLOCK HEIGHT (CRYPTONOTE_MAX_BLOCK_NUMBER in the Monero sources);
+//   * 500 000 000 and more - this is a TIME (unix seconds).
+// Until the boundary has passed, the money LIES at the address but cannot be spent: this is NOT an arrival
+// that can close the swap. A maker who sent the correct amount with unlock_time five years ahead received ETH
+// on the "done" mark, while the XMR stayed locked.
 //
-// ПОЧЕМУ ЗДЕСЬ, ПОД www/js. Это ЕДИНСТВЕННЫЙ источник правила. Его читает бэкенд-индексер
-// (app/indexer.mjs -> ../www/js/monero/scan.js) и ЯДРО SDK - через ШТАТНОЕ ЗЕРКАЛО ДВИЖКА:
-// sdk/engine/monero/unlock.js, собирается tools/build-sdk-engine.mjs и сверяется побайтно сторожем
-// tools/check-sdk-engine.mjs. Вторая копия означала бы вторую правду о деньгах, поэтому копии нет:
-// зеркало обязано совпасть с этим файлом до байта, и расхождение ловит проверка, а не человек.
+// WHY THE ONE SOURCE LIVES HERE. The rule is read by the backend indexer through the scan module and by the
+// SDK core through the engine mirror. A second copy would mean a second truth about money, so there is no copy:
+// the mirror must match this file to the byte, and a divergence between them is caught mechanically, not by a human.
 export const UNLOCK_TIME_BLOCK_MAX = 500_000_000;
 
-// Состояние выхода по его unlock_time. Возврат - НАЗВАННЫЙ результат, а не булево: интерфейс должен
-// объяснить человеку, ДО ЧЕГО именно заперты деньги (высоты или даты), а на каком языке это сказать - дело
-// словаря интерфейса, а не ядра.
+// Output state by its unlock_time. The return is a NAMED result, not a boolean: the interface must
+// explain to the person UP TO WHAT exactly the money is locked (heights or dates), and in what language to
+// say it is the business of the interface dictionary, not of the core.
 export function unlockStateOf(unlockTime, { height = null, nowSec = null } = {}) {
   const u = Number(unlockTime) || 0;
   if (u <= 0) return { code: "unlocked", locked: false, untilHeight: null, untilTime: null };
@@ -36,8 +33,8 @@ export function unlockStateOf(unlockTime, { height = null, nowSec = null } = {})
   return { code: open ? "unlocked" : "locked_height", locked: !open, untilHeight: u, untilTime: null };
 }
 
-// Насколько «поздняя» граница: из двух запертых переводов в состоянии записи оставляем ту, что открывается
-// позже, - иначе по одному из них показали бы «скоро откроется», когда второй держит деньги дальше.
+// How "late" the boundary is: of two locked transfers in the record state we keep the one that opens
+// later - otherwise one of them would show "opening soon" while the second holds the money longer.
 export function laterBoundary(state) {
   if (!state) return -1;
   if (state.untilTime !== null && state.untilTime !== undefined) return Number(state.untilTime);

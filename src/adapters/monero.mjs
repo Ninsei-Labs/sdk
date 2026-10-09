@@ -9,7 +9,7 @@
 // leave, BEFORE sending rather than after.
 import { SdkError } from "../errors.mjs";
 
-export function moneroWallet({ createWallet, networkType, serverUri, password = "arrakis-sweep-session", fields = {} }) {
+export function moneroWallet({ createWallet, networkType, serverUri, password = "ninsei-sweep-session", fields = {} }) {
   const build = typeof createWallet === "function" ? createWallet : null;
   // Refusals - with CODES, as everywhere in the core: the phrase for a person is said by the interface, not the adapter.
   const need = () => { if (!wallet) throw new SdkError("bad-input", { field: "wallet", state: "closed" }); };

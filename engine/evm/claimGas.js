@@ -1,38 +1,23 @@
 // GENERATED FILE - a byte-for-byte copy of the engine module www/js/evm/claimGas.js for the SDK package.
-// Edit the source under www/js, then run: node tools/build-sdk-engine.mjs
-// tools/check-sdk-engine.mjs reddens on any drift, so a stale copy cannot ship silently.
+// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
 // Everything below this header is identical to the source.
 
-// ГАЗ ЗАБОРА ПРИ ПРОДАЖЕ XMR (claim): ОДИН ИСТОЧНИК ПРАВДЫ ДЛЯ КЛИЕНТА И ДЛЯ НОДЫ (issue #127).
-//
-// СУТЬ. В обратном обмене человек отдаёт XMR и забирает ETH вызовом `claim` в сети расчёта. Своего ETH у
-// него нет, поэтому газ на claim ПРИСЫЛАЕТ НОДА (issue #78, rfq/reverseGas.mjs). Но правила газа жили в
-// ДВУХ местах: страница/SDK отправляли claim с пределом 250 000 и комиссией `2 x baseFee + 1 gwei`
-// (движок сделки теперь в пакете: sdk/src/swap-flow.mjs; www/js/evm/session.js), а нода считала подарок как `eth_gasPrice x 120 000`
-// (rfq/reverseGas.mjs). Числа расходились примерно в 100 раз, и человек с одним подарком claim отправить
-// не мог: узел принимает транзакцию, только если на балансе есть `gasLimit x maxFeePerGas`, а подарка на
-// это не хватало. Теперь оба числа считает ЭТОТ модуль.
-//
-// ПОЧЕМУ ОТДЕЛЬНЫЙ МОДУЛЬ И ПОЧЕМУ ПОД www/js. Формула обязана быть ОДНА. Её читает и страница/SDK
-// (движок живёт под www/js), и нода - rfq/reverseGas.mjs, а rfq уже импортирует из www/js (см.
-// rfq/payoutFee.mjs, `../www/js/core/format.js`). Обратный импорт невозможен: боевой веб-корень - www/,
-// каталог rfq/ браузеру не отдаётся. Поэтому единственный общий дом - www/js/evm/.
-//
-// ЧТО ЗДЕСЬ ОДНО. Предел газа claim, правило комиссии (2 x baseFee + чаевые) и РАЗМЕР ПОДАРКА - та же
-// стоимость claim плюс ЯВНЫЙ ЗАПАС на рост базовой цены между выдачей билета и забором. Второго расчёта
-// размера подарка нет ни у ноды, ни у прогонов: они зовут claimGasGiftWei отсюда.
+// CLAIM GAS FOR THE XMR SELL (claim): ONE SOURCE OF TRUTH FOR THE CLIENT AND THE NODE.
+// In a reverse swap the person gives XMR and claims ETH via `claim` on the settlement chain. They have no ETH,
+// so the node sends the claim gas. The gas rules used to live in TWO places and the numbers differed ~100x, so
+// a person with one gift could not send the claim. Now this module computes both numbers.
+// WHY ONE MODULE UNDER www/js: the formula must be ONE. The EVM engine lives under www/js, and the node imports
+// from www/js too; the reverse import is impossible (the browser is never served the node directory).
+// WHAT IS ONE HERE: the claim gas limit, the fee rule (2 x baseFee + tip) and the GIFT SIZE - the same claim
+// cost plus an EXPLICIT margin for base-fee growth between ticket and claim.
 
-// ПРЕДЕЛ ГАЗА CLAIM - ОДНО ЧИСЛО НА ОБЕИХ СТОРОНАХ: его берут и страница/SDK (sdk/src/swap-flow.mjs), и
-// нода (rfq/payout.mjs). ИЗМЕРЕНО: честный claim, когда получателю комиссии ещё НЕ начислено (первая запись
-// в кассе = SSTORE нуля), стоит 120 721 газа на живой цепи (124 072 в gas-report канонических контрактов) -
-// больше прежних 120 000, чем законный забор и резался. Лимит задан с запасом: 200 000.
+// THE CLAIM GAS LIMIT IS ONE NUMBER ON BOTH SIDES. MEASURED: an honest claim costs 120 721 gas on a live chain,
+// more than the old 120 000, which cut off legitimate claims. The limit has a margin: 200 000.
 export const CLAIM_GAS_LIMIT = 200_000n;
 
-// ПОЛ ЧАЕВЫХ - ПОЛИТИКА СЕТИ, А НЕ КОНСТАНТА В КОДЕ ОТПРАВКИ. Раньше session.js ставил минимум 1 gwei
-// ВСЕГДА. На сети с дешёвым газом (Arbitrum One: baseFee ~0.02 gwei) это раздувало maxFeePerGas примерно
-// в 50 раз и поднимало ТРЕБУЕМЫЙ БАЛАНС пропорционально - то есть ломало ровно того, кому газ и
-// предназначен. Для Arbitrum чаевые не нужны: пол 0. Сеть со своей политикой передаёт minTipWei
-// аргументом (session.js берёт сеть из реестра, www/js/core/config.js).
+// THE TIP FLOOR IS NETWORK POLICY, NOT A CONSTANT IN THE SENDING CODE. A fixed 1 gwei minimum inflated
+// maxFeePerGas ~50x on cheap-gas networks and broke exactly those the gas is for. Arbitrum needs no tip
+// (floor 0); a network with its own policy passes minTipWei, taken from the network registry.
 export const CLAIM_TIP_FLOOR_WEI = 0n;
 
 const toBig = (v) => {
@@ -40,10 +25,9 @@ const toBig = (v) => {
   try { return BigInt(typeof v === "bigint" ? v : String(v)); } catch { return null; }
 };
 
-// КОМИССИЯ ЗАБОРА (EIP-1559): `maxFeePerGas = 2 x baseFee + чаевые`. Удвоение базовой цены перекрывает её
-// рост за время подтверждения СВОЕЙ транзакции; чаевые - это разница gasPrice - baseFee (её отдаёт любая
-// цепь), не ниже пола сети. baseFee = 0 (сеть без EIP-1559) - полей комиссии нет вовсе, и это null, а не
-// ноль: неизвестное обязано называться, а не выдаваться за измеренное.
+// CLAIM FEE (EIP-1559): `maxFeePerGas = 2 x baseFee + tip`. Doubling the base fee covers its growth during the
+// transaction; the tip is gasPrice - baseFee, not below the network floor. baseFee = 0 (no EIP-1559): no fee
+// fields at all, and that is null, not zero.
 export function claimMaxFeePerGasWei({ baseFeeWei, priorityFeeWei = 0n, minTipWei = CLAIM_TIP_FLOOR_WEI } = {}) {
   const base = toBig(baseFeeWei);
   if (base === null || base <= 0n) return null;
@@ -54,8 +38,8 @@ export function claimMaxFeePerGasWei({ baseFeeWei, priorityFeeWei = 0n, minTipWe
   return base * 2n + tip;
 }
 
-// СКОЛЬКО НУЖНО НА БАЛАНСЕ ДЛЯ CLAIM - это же правило приёма транзакции узлом: `gasLimit x maxFeePerGas`.
-// Один из множителей не измерен - null (не «ноль газа»).
+// HOW MUCH THE BALANCE NEEDS FOR CLAIM - the node acceptance rule: `gasLimit x maxFeePerGas`. If a factor is
+// unmeasured - null (not "zero gas").
 export function claimRequiredWei({ gasLimit = CLAIM_GAS_LIMIT, maxFeePerGasWei } = {}) {
   const limit = toBig(gasLimit);
   const maxFee = toBig(maxFeePerGasWei);
@@ -63,21 +47,18 @@ export function claimRequiredWei({ gasLimit = CLAIM_GAS_LIMIT, maxFeePerGasWei }
   return limit * maxFee;
 }
 
-// ЗАПАС НА РОСТ БАЗОВОЙ ЦЕНЫ МЕЖДУ ВЫДАЧЕЙ БИЛЕТА И ЗАБОРОМ, в базисных пунктах (10 000 = +100%).
+// MARGIN FOR BASE-FEE GROWTH BETWEEN TICKET AND CLAIM, in basis points (10 000 = +100%).
 //
-// ПОЧЕМУ ОН НУЖЕН И ПОЧЕМУ СТОЛЬКО. Стоимость claim считается на момент БИЛЕТА, а сам claim случается
-// позже: билет живёт RFQ_ORDER_QUOTE_TTL_MS, по умолчанию 40 минут (rfq/config.mjs). Правило клиента
-// (2 x baseFee) перекрывает рост цены ТОЛЬКО на время подтверждения своей транзакции, а не эти 40 минут.
-// Подарок без запаса не проходит, если базовая цена хоть немного поднялась с момента билета - это и
-// показал issue #127. +100% перекрывает УДВОЕНИЕ базовой цены за окно билета, то есть подарок остаётся
-// достаточным, даже если цена газа к забору вырастет вдвое. Значение - настройка ноды
-// (RFQ_REVERSE_GAS_RESERVE_BPS), а не догадка: её видно и можно переопределить без правки кода.
+// WHY IT IS NEEDED AND WHY THIS MUCH. The claim cost is computed at TICKET time, but the claim happens later:
+// the ticket lives RFQ_ORDER_QUOTE_TTL_MS, 40 minutes by default. The client rule (2 x baseFee) covers growth
+// only during its own transaction, not those 40 minutes. +100% covers a doubling of the base fee over the
+// ticket window, so the gift stays sufficient. The value is a node setting (RFQ_REVERSE_GAS_RESERVE_BPS), not
+// a guess: it is visible and can be overridden.
 export const DEFAULT_GIFT_RESERVE_BPS = 10_000n;
 
-// РАЗМЕР ПОДАРКА - ТА ЖЕ стоимость claim, что требует клиент, ПЛЮС запас. Это ЕДИНСТВЕННЫЙ расчёт размера
-// подарка: нода (rfq/reverseGas.mjs, requiredGasWei) и живой прогон зовут ИМЕННО ЕГО, а не свою копию.
-// base берётся у цепи на момент билета; priorityFeeWei - реальные чаевые сети (gasPrice - baseFee), если
-// известны. Нечитаемая база - null, а не ноль.
+// GIFT SIZE - the same claim cost the client requires, PLUS the margin. This is the ONLY computation of the
+// gift size: the node and the live run call IT, not their own copy. base comes from the chain at ticket time;
+// priorityFeeWei is the real network tip. An unreadable base is null, not zero.
 export function claimGasGiftWei({ baseFeeWei, priorityFeeWei, minTipWei, gasLimit = CLAIM_GAS_LIMIT, reserveBps = DEFAULT_GIFT_RESERVE_BPS } = {}) {
   const maxFee = claimMaxFeePerGasWei({ baseFeeWei, priorityFeeWei, minTipWei });
   const need = claimRequiredWei({ gasLimit, maxFeePerGasWei: maxFee });

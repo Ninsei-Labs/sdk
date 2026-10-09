@@ -1,22 +1,13 @@
 // GENERATED FILE - a byte-for-byte copy of the engine module www/js/ui/walletModal.js for the SDK package.
-// Edit the source under www/js, then run: node tools/build-sdk-engine.mjs
-// tools/check-sdk-engine.mjs reddens on any drift, so a stale copy cannot ship silently.
+// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
 // Everything below this header is identical to the source.
 
-// Своя модалка подключения кошелька: выбор браузерного кошелька и QR для WalletConnect.
-//
-// Список браузерных кошельков приходит снаружи (setChoices) - обнаружением занимается
-// www/js/evm/injected.js по EIP-6963. Здесь только отрисовка: CSP запрещает inline-стили, поэтому
-// всё идёт через dom.h(), а иконки кошельков - data:-URL, что разрешено img-src 'self' data:.
-//
-// Почему не модалка Reown (@reown/appkit): она рисует свои стили inline - и атрибутом style="",
-// и целыми <style>-блоками. CSP демки запрещает и то, и другое (ловушка №1 в
-// .hermes/docs/05-frontend-stack.md), ослаблять её ради модалки мы не стали. Поэтому модалку
-// рисуем сами через dom.h() (стили идут через CSSOM), а QR - генератором qrcode из бандла
-// в виде data:-URL (img-src 'self' data: в CSP это разрешает).
-//
-// Никаких секретов здесь нет: в QR лежит открытая ссылка сессии WalletConnect (wc:...),
-// её и показывать пользователю не страшно - такое же показывает любая dapp.
+// A wallet-connect modal: browser-wallet choice and a QR for WalletConnect.
+// The browser-wallet list comes from outside (setChoices); detection is evm/injected.js by EIP-6963. Here is
+// only rendering: the CSP bans inline styles, so everything goes through dom.h(), and wallet icons are data: URLs.
+// NOT the Reown (@reown/appkit) modal: it draws its own inline styles and <style> blocks, both banned by the demo
+// CSP, and we did not weaken it for a modal. So we draw the modal ourselves and the QR with a qrcode generator as a data: URL.
+// No secrets here: the QR holds the public WalletConnect session URI (wc:...), safe to show like any dapp.
 
 import { h, copy } from "./dom.js";
 
@@ -30,7 +21,7 @@ export function openWalletModal({ title = "Connect a wallet", subtitle = "", hin
         (refs.closeBtn = h("button", { class: "ar-modal-close", type: "button", title: "Close", text: "\u00d7" })),
       ]),
       (refs.subtitle = h("div", { class: "ar-modal-sub", text: subtitle })),
-      // Список браузерных кошельков: пустой, пока не пришёл от обнаружения (тогда и не виден).
+      // The browser-wallet list: empty until detection delivers it (then invisible).
       (refs.choices = h("div", { class: "ar-modal-choices" })),
       (refs.qrBox = h("div", { class: "ar-modal-qr", hidden: true }, [(refs.qr = h("img", { alt: "WalletConnect QR code" }))])),
       (refs.uri = h("code", { class: "ar-modal-uri" })),
@@ -48,12 +39,10 @@ export function openWalletModal({ title = "Connect a wallet", subtitle = "", hin
   const closed = { value: false };
   let onCancel = null;
 
-  // Два разных выхода из модалки, и разница принципиальная:
-  //   close()  - закрывает программно (например, сессия успешно установлена);
-  //   cancel() - пользователь отказался: вот тут-то и надо гасить сессию, которую мы просили.
-  // Путать их нельзя: раньше успешное подключение закрывало модалку, а та дёргала обработчик
-  // отмены и удаляла только что созданную сессию (в логе SDK это видно как wc_sessionDelete
-  // через 85 мс после wc_sessionSettle).
+  // TWO DIFFERENT EXITS FROM THE MODAL, and the difference is fundamental: close() closes it programmatically
+  // (e.g. the session settled), while cancel() is the user refusing - and THAT is when we must kill the session
+  // we asked for. They must not be confused: before, a successful connect closed the modal, which fired the
+  // cancel handler and deleted the just-created session.
   function close() {
     if (closed.value) return;
     closed.value = true;
@@ -75,9 +64,9 @@ export function openWalletModal({ title = "Connect a wallet", subtitle = "", hin
     if (e.target === overlay) cancel();
   });
 
-  // setChoices([{ key, name, icon, hint, onClick }]) - список браузерных кошельков и WalletConnect.
-  // Иконки только из data:-URL (их отдаёт сам кошелёк по EIP-6963): внешние адреса в CSP демки не
-  // разрешены, и это правильно - картинка из сети не должна влиять на то, какой кошелёк выбран.
+  // setChoices([{ key, name, icon, hint, onClick }]) - the browser-wallet list plus WalletConnect. Icons are
+  // data: URLs only (the wallet itself provides them): external addresses are not allowed by the demo CSP, and
+  // rightly so - a network image must not influence which wallet is chosen.
   function setChoices(list) {
     refs.choices.innerHTML = "";
     refs.choices.hidden = !list || !list.length;
@@ -91,8 +80,8 @@ export function openWalletModal({ title = "Connect a wallet", subtitle = "", hin
           item.hint ? h("span", { class: "ar-modal-choice-hint", text: item.hint }) : null,
         ]),
       ]);
-      // Дальше модалку гасит тот, кто обработал выбор: у браузерного кошелька окно показывает сам
-      // кошелёк, а у WalletConnect нужно ещё показать QR.
+      // The rest of the modal is closed by whoever handled the choice: a browser wallet shows its own window,
+      // while WalletConnect still needs the QR shown.
       btn.addEventListener("click", () => {
         if (closed.value) return;
         item.onClick();
@@ -114,14 +103,14 @@ export function openWalletModal({ title = "Connect a wallet", subtitle = "", hin
       if (closed.value) return;
       if (qrDataUrl) {
         refs.qr.src = qrDataUrl;
-        // Рамку показываем только когда QR реально есть: до выбора WalletConnect это пустое место.
+        // The frame is shown only when a QR actually exists: before WalletConnect is chosen this is empty.
         refs.qrBox.hidden = false;
       }
       if (uri !== undefined) refs.uri.textContent = uri || "";
       if (subtitle !== undefined) refs.subtitle.textContent = subtitle || "";
       if (hintText !== undefined) refs.hint.textContent = hintText || "";
-      // error важнее status: иначе переданное «попробуйте ещё раз» перетирает сам текст ошибки, и
-      // причина отказа видна только в тосте (раньше error влиял лишь на цвет - мёртвый параметр).
+      // error is more important than status: otherwise a generic "try again" overwrites the error text, and
+      // the refusal reason is visible only in the toast.
       const line = error || status;
       if (line !== undefined) {
         refs.status.className = "ar-modal-status" + (error ? " ar-modal-status-error" : "");

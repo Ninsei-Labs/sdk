@@ -1,23 +1,17 @@
 // GENERATED FILE - a byte-for-byte copy of the engine module www/js/atomic/order.js for the SDK package.
-// Edit the source under www/js, then run: node tools/build-sdk-engine.mjs
-// tools/check-sdk-engine.mjs reddens on any drift, so a stale copy cannot ship silently.
+// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
 // Everything below this header is identical to the source.
 
-// Сборка стороны ордера атомарного свопа: половина ключа, точки, доказательство, зашифрованная
-// посылка и обязательство для контракта.
-// Разбор: .hermes/docs/20-key-shares.md, разделы 12, 19, 23, 25.
+// ASSEMBLING ONE ORDER SIDE of an atomic swap: a key half, points, a proof, the encrypted envelope and the
+// contract commitment.
 //
-// ЧТО ЭТО ЗАКРЫВАЕТ. До сих пор модули существовали по отдельности: половины, DLEQ, передача половины,
-// байтовый формат. Здесь они собираются в одну сторону ордера и, главное, здесь КОДОМ выполняются два
-// обязательных условия из раздела 20.5:
-//   1) перед блокировкой проверяется, что в посылке контрагента лежит настоящая половина (сверка с точкой);
-//   2) при этом проверяется и его DLEQ - что обе публичные точки стоят за одним скаляром.
-// Без этих двух проверок схема не даёт гарантии, и они не «на будущее», а здесь.
+// WHAT THIS CLOSES. The modules used to exist separately; here they assemble into one order side and, above all,
+// two mandatory conditions are enforced IN CODE: before locking, the counterparty envelope must hold a real half
+// (checked against the point), and its DLEQ must verify (both public points stand for one scalar).
 //
-// ЧЕСТНОЕ ОГРАНИЧЕНИЕ ДЕМО. Настоящего мейкера (RFQ-узла) ещё нет: в market.js котировки фиктивные.
-// Поэтому сторона контрагента собирается ЛОКАЛЬНО и помечается как заглушка (standIn: true). Это
-// позволяет прогнать полный цикл - от половины до обязательства и до вскрытия - но ценность гарантии
-// появляется только с настоящим контрагентом, у которого свой ключ.
+// AN HONEST DEMO LIMIT. There is no real maker yet (quotes are fake), so the counterparty side is built LOCALLY
+// and marked standIn: true. This runs the full cycle, but the guarantee only becomes real with a counterparty
+// that has its own key.
 
 import { createHalves } from "./halves.js";import { halfCommitmentHex } from "./orderHalfCommit.js";
 import { createDleq2 } from "./dleq2.js";
@@ -30,97 +24,85 @@ export function createOrderBuilder({ ed25519, secp256k1, keccak256, sha3_512, ra
   const dleq = createDleq2({ ed25519, secp256k1, keccak256, sha3_512, randomBytes });
   const enc = createHalfEnc({ secp256k1, ed25519, keccak256, randomBytes });
 
-  // Сторона ордера: ДВЕ половины (траты и просмотра), их точки, доказательство и ключ шифрования.
+  // An order side: TWO halves (spend and view), their points, the proof and the encryption key.
   //
-  // ЗАЧЕМ ОТДЕЛЬНАЯ ПОЛОВИНА ПРОСМОТРА. Ключ просмотра в Monero независим от ключа траты, и из половины
-  // траты его не вывести. Без суммы половин ПРОСМОТРА кошелёк не найдёт входящие и не сможет сканировать:
-  // половины траты для скана недостаточно. При этом делиться половиной просмотра БЕЗОПАСНО - она даёт
-  // видеть и не даёт тратить; трата требует суммы половин ТРАТЫ.
+  // WHY A SEPARATE VIEW HALF. The Monero view key is independent of the spend key and cannot be derived from the
+  // spend half; without the sum of VIEW halves the wallet cannot find incoming funds. Sharing the view half is safe
+  // - it sees but cannot spend; spending needs the sum of SPEND halves.
   //
-  // ДОКАЗАТЕЛЬСТВА ДЛЯ НЕЁ НЕ НУЖНО, и это осознанно: половина просмотра приходит вместе с котировкой и
-  // сама определяет точку просмотра, поэтому подменять её нечем. Доказательство DLEQ остаётся там, где
-  // оно решает - на половине ТРАТЫ, за которую платят ETH.
+  // NO PROOF IS NEEDED FOR IT, deliberately: the view half comes with the quote and defines its own view point, so
+  // it cannot be substituted. The DLEQ proof stays on the SPEND half, the one paid for with ETH.
   function newSide(orderContext, standIn = false, onBit) {
     const half = halves.newHalf();
-    const pub = halves.publicHalves(half);                     // ed25519 и secp256k1
+    const pub = halves.publicHalves(half);                     // ed25519 and secp256k1
     const viewHalf = halves.newHalf();
-    const viewPub = halves.publicHalves(viewHalf).ed;          // точка просмотра: из неё собирается адрес
-    const encPair = enc.recipientKeyPair();                    // отдельно от ключа траты
-    const proof = dleq.prove(half, orderContext, onBit);        // привязано к контексту ордера
+    const viewPub = halves.publicHalves(viewHalf).ed;          // view point: the address is built from it
+    const encPair = enc.recipientKeyPair();                    // separate from the spend key
+    const proof = dleq.prove(half, orderContext, onBit);        // bound to the order context
     return { half, pub, viewHalf, viewPub, enc: encPair, proof, standIn };
   }
 
-  // Проверка стороны контрагента - это и есть условие (1) и (2) из раздела 20.5.
-  // Проверка стороны контрагента: доказательство и - если посылка дана - вскрытие ЕГО посылки НАШИМ
-  // приватным ключом со сверкой по ЕГО публичной точке.
+  // Checking the counterparty side IS conditions (1) and (2): its proof, and - if an envelope is given - opening
+  // ITS envelope with OUR private key and verifying against ITS public point.
   //
-  // РОЛИ КЛЮЧЕЙ ЗДЕСЬ ПРИНЦИПИАЛЬНЫ, и первая версия этой функции их путала: она вскрывала посылку
-  // приватным ключом самого контрагента, которого у нас нет и быть не может - посылка адресована ему.
-  // Такая проверка не могла пройти никогда, но выглядела как работающая, что хуже всего.
+  // KEY ROLES ARE FUNDAMENTAL HERE, and the first version mixed them up: it opened the envelope with the
+  // counterparty's own key (which we do not have - the envelope is addressed to them). That check could never pass.
   function verifySide(side, orderContext, sealedPayloadBytes, ownEncPriv) {
     const proofOk = dleq.verify(side.proof, orderContext);
-    if (!proofOk.ok) return { ok: false, reason: "DLEQ контрагента не прошёл: " + proofOk.reason };
-    // ДОКАЗАННАЯ ТОЧКА ОБЯЗАНА БЫТЬ ТОЙ ЖЕ, ЧТО УЙДЁТ В ОРДЕР, и этой сверки не было.
+    if (!proofOk.ok) return { ok: false, reason: "counterparty DLEQ failed: " + proofOk.reason };
+    // THE PROVEN POINT MUST BE THE ONE THAT GOES INTO THE ORDER, and this check was missing. A proof confirms that
+    // ONE scalar stands behind a pair of points, but not that the proven ed25519 point is the one the joint address
+    // and the contract use. The counterparty could prove one point and put another in the order; the mismatch would
+    // surface only at XMR claim time.
     //
-    // Чего не хватало без неё: доказательство подтверждает, что за парой точек стоит ОДИН скаляр, но НЕ
-    // подтверждает, что доказанная точка ed25519 - та самая, по которой собирается общий адрес и которую
-    // контракт потом заставит раскрыть. Контрагент мог предъявить корректное доказательство для одной
-    // точки, а в ордер подставить другую. На своей стороне всё выглядело бы исправным, а расхождение
-    // вылезло бы в самом конце - при заборе XMR, когда исправлять уже нечем.
-    //
-    // Сверка одна на обе стороны: у своей стороны pub.ed выведена из половины, у контрагента приходит из
-    // котировки; в обоих случаях это ТА точка, которую увидят в контракте.
+    // One comparison for both sides: our pub.ed is derived from the half, the counterparty's comes from the quote;
+    // in both cases this is THE point the contract will see.
     if (side.pub && side.pub.ed && String(side.proof.XB).toLowerCase() !== String(side.pub.ed).toLowerCase()) {
-      return { ok: false, reason: "доказанная точка ed25519 не совпадает с заявленной: " + side.proof.XB + " против " + side.pub.ed };
+      return { ok: false, reason: "the proven ed25519 point does not match the declared one: " + side.proof.XB + " vs " + side.pub.ed };
     }
     if (sealedPayloadBytes && ownEncPriv) {
       const opened = enc.open(enc.unpackSealed(sealedPayloadBytes), ownEncPriv, side.pub.ed);
-      if (!opened.ok) return { ok: false, reason: "посылка контрагента не подтверждает половину: " + opened.reason };
+      if (!opened.ok) return { ok: false, reason: "the counterparty envelope does not confirm the half: " + opened.reason };
     }
     return { ok: true };
   }
 
-  // Посылка со своей половиной, зашифрованная на ключ контрагента: то, что уходит ему и в контракт.
+  // The envelope with our half, encrypted to the counterparty key: what goes to them and to the contract.
   function sealFor(counterparty, ownHalf, orderContext) {
     const sealed = enc.seal(ownHalf, counterparty.enc.pub, orderContext);
     const bytes = packSealed(sealed);
     return { sealed, bytes, commitment: enc.sealedCommitmentOf(bytes) };
   }
 
-  // Открыть посылку контрагента своей половиной и проверить, что это именно его половина.
+  // Open the counterparty envelope with our half and check it is really their half.
   function openFrom(sealedBytes, ownEncPriv, counterpartyEdPub) {
     return enc.open(enc.unpackSealed(sealedBytes), ownEncPriv, counterpartyEdPub);
   }
 
-  // ОБЯЗАТЕЛЬСТВО НА ПОЛОВИНУ - то, что контракт проверяет в `claim` и `refund`, и то, что входит в
-  // `termsHash`. Ровно это считает Solidity: `keccak256` от secp256k1-ТОЧКИ половины (`half·G`), а не от
-  // числа. Значит формула обязана совпадать у приложения и у ноды - поэтому она живёт ОТДЕЛЬНЫМ модулем и
-  // здесь только вызывается, а курс (`secp256k1`) передаётся снаружи: две копии одной формулы расходятся
-  // ровно тогда, когда цепь отвергнет «точно правильную» половину (#123).
+  // THE HALF COMMITMENT - what the contract checks in `claim` and `refund` and what goes into `termsHash`. Solidity
+  // computes `keccak256` of the secp256k1 POINT of the half (`half*G`), not of the number. So the formula must match
+  // in the app and the node; it lives in a separate module and is only called here, with the curve passed in.
   function halfCommitment(half) {
     return halfCommitmentHex(half, secp256k1, keccak256);
   }
 
-  // Общий адрес Monero: сумма публичных половин. Проверяется свойством (a+b)G == aG + bG.
+  // The joint Monero address: the sum of the public halves. Checked by the property (a+b)G == aG + bG.
   function jointAddressPoint(sideA, sideB) {
     return halves.combinePublic(sideA.pub.ed, sideB.pub.ed);
   }
 
-  // ТОЧКА ПО ПОЛОВИНЕ. Нужна там, где от контрагента пришла ПОЛОВИНА (так она приходит в котировке под
-  // ордер), а для адреса нужна точка. Точка из половины выводится тем же модулем половин, что и везде.
+  // POINT FROM A HALF. Needed where the counterparty sent a HALF (as in the quote) and the address needs a point.
   function pointOf(half) {
     return halves.publicHalves(typeof half === "bigint" ? half : BigInt(half)).ed;
   }
 
-  // ОБЩИЙ АДРЕС MONERO - то, ради чего схема и построена. Ни одна сторона не знает чужой половины ТРАТЫ:
-  // адрес собирается из СВОЕЙ половины и ЧУЖОЙ ТОЧКИ, потому что (a+b)G == aG + bG. До раскрытия второй
-  // половины расчётом адрес существует, но потратить с него не может никто.
+  // THE JOINT MONERO ADDRESS - the whole point of the scheme. Neither side knows the other's SPEND half: the
+  // address is built from OUR half and THEIR point, because (a+b)G == aG + bG. Before the second half is revealed,
+  // the address exists but nobody can spend from it.
   //
-  // КОДИРОВЩИК БЕРЁМ ТОТ ЖЕ, ЧТО У КОШЕЛЬКА (monero/address.js). Второй кодировщик разошёлся бы с первым
-  // там, где ошибку видно только отправкой XMR, - и заметил бы её не тот, кто ошибся.
+  // SAME ENCODER AS THE WALLET (monero/address.js): a second encoder would diverge where the error is visible only by sending XMR.
   //
-  // КЛЮЧ ПРОСМОТРА СОБИРАЕТСЯ ОТДЕЛЬНО И ИЗ СВОИХ ПОЛОВИН: в Monero ключи просмотра и траты независимы, и
-  // подменять один другим нельзя. Без верной половины просмотра пользователь не увидит приход.
+  // THE VIEW KEY IS ASSEMBLED SEPARATELY FROM ITS OWN HALVES: in Monero, view and spend keys are independent.
   function jointAddress({ ownSpendHalf, ownViewHalf, otherSpendPoint, otherViewPoint, network }) {
     return swapAddressFromHalves({
       halves, addressFromKeys, deps: { keccak256 },

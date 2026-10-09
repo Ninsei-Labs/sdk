@@ -1,182 +1,167 @@
 // GENERATED FILE - a byte-for-byte copy of the engine module www/js/evm/escrow.js for the SDK package.
-// Edit the source under www/js, then run: node tools/build-sdk-engine.mjs
-// tools/check-sdk-engine.mjs reddens on any drift, so a stale copy cannot ship silently.
+// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
 // Everything below this header is identical to the source.
 
-// Вызовы контракта-эскроу ArrakisSwap (один экземпляр = один ордер).
+// Calls to the NinseiSwap escrow contract (one instance = one order).
 //
-// Библиотек для EVM в проекте нет: у эскроу ТРИ функции, которые двигают состояние (markReady, claim,
-// refund), и несколько читаемых, поэтому calldata собирается селектором и словами по 32 байта.
-// ФУНКЦИИ ВНЕСЕНИЯ У ЭСКРОУ НЕТ: ордер рождается зафондированным в транзакции создания, и двухшаговый
-// путь («создать пустым, внести вторым вызовом») убран вместе с ней - он и был источником запирания
-// денег в закрытом ордере. Отсюда и отсутствие селектора fund() в таблице ниже.
-// Селекторы вычислены инструментом, не вручную - и это те подписи, которые у контракта ЕСТЬ:
+// There is no EVM library here: the escrow has three state-moving functions (markReady, claim, refund) and a few
+// readers, so calldata is built from a selector and 32-byte words. There is NO FUNDING FUNCTION: an order is born
+// funded in the creation transaction, and the two-step path (create empty, fund by a second call) was removed with
+// it - that path locked money inside a closed order. Hence no fund() selector below.
+// Selectors were computed by a tool, and they are the signatures the contract HAS:
 //   cast sig "markReady()"     -> 0x1ca087e7
 //   cast sig "claim(bytes32)"  -> 0xbd66528a
-//   cast sig "refund(bytes32)" -> 0x7249fbb6   (refund() БЕЗ аргумента у контракта нет: половина обязательна, :294)
+//   cast sig "refund(bytes32)" -> 0x7249fbb6   (no refund() without an argument: the half is mandatory)
 //   cast sig "status()"        -> 0x200d2ed2
-// Проверяются в tools/check-evm-abi.mjs сверкой с эталоном Foundry (cast sig / cast calldata).
+// They are cross-checked against the Foundry reference (cast sig / cast calldata).
 //
-// ПРО СОБЫТИЯ - ПРЕЖНЯЯ РЕДАКЦИЯ ЭТОГО КОММЕНТАРИЯ ВРАЛА, и врала дважды. У эскроу события ЕСТЬ, три:
-//   HalfRevealed(bytes32 half, bool byClaimer) - mvp/contracts/NinseiEscrow.sol:131
-//   OrderTerms(...)                            - :133-139
-//   Ready(address indexed by)                  - :141
-//   StrayRescued(address indexed token, ...)    - :145
-// Состояние всё же читается вызовом status(), и причина не в отсутствии событий, а в двух других вещах:
-//   1) ВНЕСЕНИЕ ДЕНЕГ СОБЫТИЯ НЕ ИМЕЕТ ВООБЩЕ: флаг funded ставится в конструкторе (:232-237) вместе с
-//      эмиссией OrderTerms, но отдельного «внесено» в логах нет, а это первое из состояний ордера;
-//   2) status() (:406-408) заведён в контракте именно «фронту и watchtower'у» и отдаёт все четыре
-//      величины ОДНИМ вызовом - внесено, забрано, возвращено, остаток - по адресу эскроу, который уже
-//      известен из записи сделки. Следить для этого за логами с блока создания не нужно.
-// Событие HalfRevealed при этом несёт признак byClaimer, то есть из него видно и «забрано», и
-// «возвращено»: тому, кто ведёт журнал ордеров, подписка на него полезна. Для чтения состояния
-// конкретного ордера на месте нужен status().
+// EVENTS EXIST - THREE OF THEM:
+//   HalfRevealed(bytes32 half, bool byClaimer), OrderTerms(...), Ready(address indexed by), StrayRescued(...)
+// State is still read by calling status(), and the reason is not the absence of events:
+//   1) FUNDING HAS NO EVENT AT ALL: the funded flag is set in the constructor together with OrderTerms, so the
+//      first order state never reaches the logs;
+//   2) status() returns all four values - funded, claimed, refunded, balance - in ONE call by escrow address.
+//      There is no need to follow logs from the creation block. HalfRevealed carries byClaimer, so it tells both
+//      "claimed" and "refunded": useful for whoever keeps an order journal, but status() reads one order on the spot.
 
 export const ESCROW_METHODS = {
-  // ВНЕСЕНИЯ ЗДЕСЬ НЕТ НАМЕРЕННО. Прежний fund() кодировался как 0xb60d4288; функции у контракта больше
-  // нет, а её правила переехали в рождение ордера: ровно `amount + fee` проверяет конструктор, и платит
-  // тот, кто назван внёсшим, - других транзакций у ордера не бывает. Вернувшаяся строка с этим селектором
-  // краснит tools/check-evm-abi.mjs.
-  // отметить готовность: "XMR вижу". Без неё забор невозможен (:233) - это защита от забора ETH без XMR.
-  // Ставит её только внёсший, только на зафондированном ордере и только до readyBy (:218-222).
+  // NO FUNDING HERE, ON PURPOSE. The old fund() encoded as 0xb60d4288; the contract no longer has it, and its
+  // rules moved into order birth: the constructor checks exactly `amount + fee`, paid by the named depositor. A
+  // returning line with this selector reddens the ABI check.
+  // mark readiness: "I see the XMR". Without it a claim is impossible - the guard against claiming ETH without XMR.
+  // Only the depositor sets it, only on a funded order, and only before readyBy.
   markReady: "0x1ca087e7",
-  // забрать, предъявив СВОЮ половину; её хеш (обязательство) зашит в ордер при создании.
-  // Вызвать вправе кто угодно - адрес отправителя контракт не проверяет (:232-235), - но деньги уходят
-  // не ему, а записанному claimer (:242), поэтому переадресовать их вызывающий не может.
+  // claim, presenting YOUR half; its hash (the commitment) was fixed in the order at creation.
+  // Anyone may send it - the contract does not check the sender - but the money goes to the recorded claimer, so
+  // the caller cannot redirect it.
   claim: "0xbd66528a",
-  // вернуть средства после срока t1, ПРЕДЪЯВИВ ПОЛОВИНУ ВНЁСШЕГО: контракт сверяет её хеш с
-  // обязательством commitHalfLocker (:253, поле :79) и отвергает чужую половину (BadHalf).
-  // Отсюда уточнение к прежней формулировке "может позвать кто угодно": отправить транзакцию вправе
-  // любой (:246-249, роль watchtower), но провести её может лишь тот, у кого есть половина внёсшего.
-  // Деньги при этом идут ВСЕГДА внёсшему (:260), а половина публикуется - по ней он заберёт своё XMR.
+  // refund after t1, PRESENTING THE DEPOSITOR'S HALF: the contract checks its hash against commitHalfLocker and
+  // rejects a foreign half (BadHalf). So "anyone may call" is precise: anyone may SEND the transaction (the
+  // watchtower role), but only the holder of the depositor's half can carry it through. The money always goes to
+  // the depositor, and the half is published - with it he claims his XMR.
   refund: "0x7249fbb6",
-  // состояние: (заблокировано, забрано, возвращено, остаток)
+  // state: (funded, claimed, refunded, balance)
   status: "0x200d2ed2",
-  // СРОК ОДИН. До t1 ETH забирает только claimer по своей половине и только при отметке ready (:233),
-  // с t1 забор запрещён (:234), а вернуть вправе кто угодно, предъявив половину внёсшего (:250-253).
-  // Селектора t0() здесь больше нет: поля t0 в контракте не существует (решение
-  // 2026-09-16, док 26). У ордеров, созданных раньше, срок лежит в записи сделки, и правило для них
-  // прежнее - см. derive() в core/swap.js.
+  // ONE DEADLINE. Before t1 only the claimer may claim by his half and only with the ready mark; from t1 a claim
+  // is forbidden and anyone may refund by presenting the depositor's half. There is no t0() selector: the t0 field
+  // does not exist in the contract. Orders created earlier carry their deadline in the deal record, with the old
+  // rule - see derive() in core/swap.js.
   t1: "0xfb5343f3",
-  // до этого срока внёсший может отметить готовность; строго раньше t1
+  // up to this deadline the depositor may mark readiness; strictly before t1
   readyBy: "0x53fc2f40",
-  // отмечена ли готовность: без неё забор закрыт
+  // whether readiness is marked: without it a claim is closed
   ready: "0x6defbf80",
-  // раскрытая расчётом половина: из неё вторая сторона собирает ключ траты
+  // the half revealed by settlement: from it the other side assembles the spend key
   revealedHalf: "0x3f267bb6",
-  // ТОЧКИ И ОБЯЗАТЕЛЬСТВА ОРДЕРА, прочитанные У САМОГО ЭСКРОУ. Нужны перед подписью: доказательство DLEQ
-  // связывает половину с точкой, но не мешает положить в ордер ДРУГИЕ точки - тогда общий адрес Monero
-  // соберётся не из тех половин, а узнать об этом можно, только сверив СЛОТЫ ЖИВОЙ ЦЕПИ с тем, что собрала
-  // страница. Селекторы посчитаны `cast sig` по фактическим подписям; сверка таблицы - в
-  // tools/check-evm-abi.mjs (отдельный зуб на каждое имя).
-  edPointLocker: "0x8c03382b",     // точка траты внёсшего: половина общего адреса
-  edPointClaimer: "0xdd98c465",    // и точка траты забирающего: сверяется с котировкой, а не берётся на слово
-  edViewPointLocker: "0x9a06a5fe", // и его точка просмотра: без неё адрес Monero не собрать
-  commitHalfLocker: "0x498b422e",  // обязательство на половину внёсшего: по нему контракт проверит refund
-  commitHalfClaimer: "0x7d4c81f7", // обязательство на половину забирающего: по нему контракт проверит claim
-  // условия ордера одним хешем. Нужен, чтобы файл восстановления был ПРИВЯЗАН к ордеру на цепи: по нему
-  // владелец файла проверяет, что файл относится именно к этому эскроу, а не к похожему.
-  // ГРАНИЦА, КОТОРУЮ НАЗВАЛ АУДИТ, ЗАКРЫТА РЕШЕНИЕМ. Раньше точки просмотра внёсшего (edViewPointLocker) в хеше
-  // НЕ было, и сверку именно этой точки приходилось делать отдельно. Теперь поле входит в слепок (:346) на
-  // своё место - сразу после точки забирающего, как в событии OrderTerms, - поэтому ордер сверяется
-  // ЦЕЛИКОМ, и отдельная сверка точки просмотра больше не нужна. ЦЕНА НАЗВАНА ПРЯМО: слепок у ВСЕХ ордеров
-  // другой, значит фабрика и эскроу передеплоиваются, а адреса, записанные где-либо до этого (config.js,
-  // networks.json, записи сделок), к новым ордерам не относятся.
+  // ORDER POINTS AND COMMITMENTS, read FROM THE ESCROW ITSELF. Needed before signing: the DLEQ proof binds a half
+  // to a point but does not stop OTHER points from being put into the order - then the Monero address would be
+  // assembled from the wrong halves, and only a comparison of the LIVE CHAIN slots with what the page assembled
+  // reveals it. Selectors are `cast sig` over the actual signatures; the ABI check cross-checks the table.
+  edPointLocker: "0x8c03382b",     // the depositor's spend point: half of the joint address
+  edPointClaimer: "0xdd98c465",    // and the claimer's spend point: checked against the quote, not taken on trust
+  edViewPointLocker: "0x9a06a5fe", // and his view point: without it the Monero address cannot be built
+  commitHalfLocker: "0x498b422e",  // commitment to the depositor's half: the contract checks refund by it
+  commitHalfClaimer: "0x7d4c81f7", // commitment to the claimer's half: the contract checks claim by it
+  // order terms in one hash. It ties the recovery file to the on-chain order: by it the file's owner checks the
+  // file belongs to THIS escrow and not a look-alike.
+  // A FORMER GAP, CLOSED BY DECISION: the depositor's view point used to be OUTSIDE the hash, so it had to be
+  // checked separately. Now it is inside, right after the claimer's point as in the OrderTerms event, so the order
+  // is checked WHOLE. THE PRICE IS NAMED: every order's hash changes, so the factory and escrow are redeployed,
+  // and addresses recorded before that do not refer to the new orders.
   termsHash: "0xb311d9fd",
-  // КОМИССИЯ, РЕЕСТР И ПРОИСХОЖДЕНИЕ - ВСЁ ЧИТАЕТСЯ У САМОГО ЭСКРОУ. У фабрики этих полей больше нет
-  // (роутер удалён, решение #76): ставка, величина и получатель комиссии, адрес реестра, провайдер и ключ
-  // подписи приходят в подписанной котировке и лежат в ордере неизменяемыми полями. Селекторы - `cast sig`
-  // по фактическим подписям, как и всё остальное в этой таблице; сверка - в tools/check-evm-abi.mjs.
-  fee: "0xddca3f43",                // величина комиссии в wei (посчитана при создании ордера)
-  feeBps: "0x24a9d853",             // ставка в базисных пунктах (30 = 0.30%)
-  feeRecipient: "0x46904840",       // кому комиссия зачисляется в кассу
-  feeOnTop: "0x2296cc23",           // true - покупка (комиссия сверху), false - продажа (вычет из выплаты)
-  registry: "0x7b103999",           // адрес реестра мейкеров ИЗ УСЛОВИЙ ОРДЕРА
-  cashier: "0xed740e97",            // касса комиссии ИЗ УСЛОВИЙ ОРДЕРА (#103): фабрика её НЕ заводит
-  provider: "0x085d4883",           // провайдер, заявленный в котировке (проверен по реестру)
-  quoteKey: "0x391d53ca",           // ключ, которым подписана котировка
-  validUntil: "0xddac6654",         // срок годности котировки (СЕКУНДЫ)
-  nonce: "0xaffed0e0",              // нонс котировки
+  // FEE, REGISTRY AND ORIGIN - ALL READ FROM THE ESCROW. The factory no longer has these fields (the router was
+  // removed): the rate, amount and recipient of the fee, the registry address, the provider and the signing key
+  // come in the signed quote as immutable order fields. Selectors are `cast sig` over the actual signatures.
+  fee: "0xddca3f43",                // fee amount in wei (computed at order creation)
+  feeBps: "0x24a9d853",             // rate in basis points (30 = 0.30%)
+  feeRecipient: "0x46904840",       // who the fee is credited to in the cashier
+  feeOnTop: "0x2296cc23",           // true - a buy (fee on top), false - a sell (deducted from the payout)
+  registry: "0x7b103999",           // maker registry address FROM THE ORDER TERMS
+  cashier: "0xed740e97",            // fee cashier FROM THE ORDER TERMS: the factory does NOT create it
+  provider: "0x085d4883",           // the provider declared in the quote (checked against the registry)
+  quoteKey: "0x391d53ca",           // the key the quote was signed with
+  validUntil: "0xddac6654",         // quote validity (SECONDS)
+  nonce: "0xaffed0e0",              // quote nonce
 };
 
-// Динамических аргументов у эскроу НЕТ, поэтому все вызовы ниже - голые селекторы. Кодировщика внесения
-// здесь больше нет: у эскроу нет самой функции (см. заметку в ESCROW_METHODS).
-// call markReady(): аргументов нет.
+// The escrow has NO dynamic arguments, so every call below is a bare selector. The funding encoder is gone with
+// the function itself (see the note in ESCROW_METHODS).
+// call markReady(): no arguments.
 export function encodeMarkReady() {
   return ESCROW_METHODS.markReady;
 }
 
-// call ready()/readyBy()/revealedHalf(): аргументов нет - calldata у них равен самому селектору,
-// поэтому отдельных кодировщиков здесь нет, а селекторы лежат в ESCROW_METHODS выше.
+// call ready()/readyBy()/revealedHalf(): no arguments - their calldata equals the selector, so there are no
+// separate encoders and the selectors live in ESCROW_METHODS above.
 
-// call claim(secret): секрет - bytes32. По контракту это половина ЗАБИРАЮЩЕГО (имя параметра -
-// halfClaimer, :231), а "секретом" её называют потому, что она служит прообразом обязательства
-// commitHalfClaimer: контракт сверяет keccak256 предъявленной половины со своим обязательством
-// (:235) и ничего больше - связь половины с адресом Monero проверяет не он (док 27 §10).
+// call claim(secret): the secret is bytes32. In the contract it is the CLAIMER'S half (the parameter is named
+// halfClaimer), called a "secret" because it is the preimage of the commitHalfClaimer commitment: the contract
+// compares keccak256 of the presented half with its commitment and nothing more - it does not check the link
+// between the half and the Monero address.
 export function encodeClaim(secret) {
-  return ESCROW_METHODS.claim + halfAsThirtyTwoBytes(secret, "секрет");
+  return ESCROW_METHODS.claim + halfAsThirtyTwoBytes(secret, "secret");
 }
 
-// ПОЛОВИНА - ЧИСЛО, А НЕ СТРОКА ФИКСИРОВАННОЙ ДЛИНЫ. В записи сделки и в файле восстановления половина
-// хранится как есть, и ведущий ноль теряется: 63 знака вместо 64. Контракту нужны ровно 32 байта, поэтому
-// добиваем слева (как это делает нода в своём заборе). Без этого возврат был невозможен в принципе:
-// снаружи это выглядело как "половина должна быть 32 байтами" на живом нажатии кнопки возврата.
+// A HALF IS A NUMBER, NOT A FIXED-LENGTH STRING. In the deal record and the recovery file it is stored as is, and
+// a leading zero is lost: 63 digits instead of 64. The contract needs exactly 32 bytes, so we pad on the left (as
+// the node does in its claim). Without this a refund was impossible in principle: on screen it looked like "the
+// half must be 32 bytes" on a live click of the refund button.
 function halfAsThirtyTwoBytes(value, what) {
   const hex = String(value || "").replace(/^0x/i, "").toLowerCase();
-  if (!/^[0-9a-f]{1,64}$/.test(hex)) throw new Error(what + " должен быть числом до 32 байт: " + value);
+  if (!/^[0-9a-f]{1,64}$/.test(hex)) throw new Error(what + " must be a number of up to 32 bytes: " + value);
   return hex.padStart(64, "0");
 }
 
-// call refund(bytes32 halfLocker): предъявляется половина ВНЁСШЕГО, а не половина вызывающего -
-// контракт сверяет её хеш с обязательством commitHalfLocker (:253) и чужую отвергает (BadHalf).
-// Отправителя контракт не проверяет: право на вызов даёт сама половина (:246-249).
+// call refund(bytes32 halfLocker): the DEPOSITOR'S half is presented, not the caller's - the contract checks its
+// hash against commitHalfLocker and rejects a foreign one (BadHalf). The sender is not checked: the half itself
+// grants the right to call.
 export function encodeRefund(halfLocker) {
-  return ESCROW_METHODS.refund + halfAsThirtyTwoBytes(halfLocker, "половина");
+  return ESCROW_METHODS.refund + halfAsThirtyTwoBytes(halfLocker, "half");
 }
 
-// call status(): аргументов нет.
+// call status(): no arguments.
 export function encodeStatus() {
   return ESCROW_METHODS.status;
 }
 
-// call t1(): аргументов нет.
+// call t1(): no arguments.
 export function encodeT1() {
   return ESCROW_METHODS.t1;
 }
 
-// call termsHash(): аргументов нет.
+// call termsHash(): no arguments.
 export function encodeTermsHash() {
   return ESCROW_METHODS.termsHash;
 }
 
-// call к методу эскроу БЕЗ аргументов по имени. Нужен там, где чтений много (слоты ордера): отдельная
-// функция на каждый селектор завела бы вторую таблицу тех же имён, и она разошлась бы с первой молча.
+// call an escrow method WITHOUT arguments by name. Used where there are many reads (the order slots): a function
+// per selector would mean a second table of the same names, free to diverge silently.
 export function encodeRead(name) {
   const sel = ESCROW_METHODS[name];
-  if (typeof sel !== "string" || !/^0x[0-9a-f]{8}$/.test(sel)) throw new Error("нет такого метода эскроу: " + name);
+  if (typeof sel !== "string" || !/^0x[0-9a-f]{8}$/.test(sel)) throw new Error("no such escrow method: " + name);
   return sel;
 }
 
-// Разбор ответа bytes32: одно слово.
-export function decodeBytes32(returnedHex, what = "значение") {
+// Parse a bytes32 answer: one word.
+export function decodeBytes32(returnedHex, what = "value") {
   const hex = String(returnedHex || "").replace(/^0x/, "");
-  if (hex.length < 64) throw new Error("короткий ответ " + what + ": " + returnedHex);
+  if (hex.length < 64) throw new Error("short answer " + what + ": " + returnedHex);
   return "0x" + hex.slice(0, 64).toLowerCase();
 }
 
-// Разбор ответа t1(): одно слово, uint64 внутри uint256.
-export function decodeUint64(returnedHex, what = "значение") {
+// Parse the t1() answer: one word, uint64 inside uint256.
+export function decodeUint64(returnedHex, what = "value") {
   const hex = String(returnedHex || "").replace(/^0x/, "");
-  if (hex.length < 64) throw new Error("короткий ответ " + what + ": " + returnedHex);
+  if (hex.length < 64) throw new Error("short answer " + what + ": " + returnedHex);
   const v = BigInt("0x" + hex.slice(0, 64));
-  if (v > 18446744073709551615n) throw new Error("ответ " + what + " не влезает в uint64: " + v);
+  if (v > 18446744073709551615n) throw new Error("answer " + what + " does not fit in uint64: " + v);
   return Number(v);
 }
 
-// Разбор ответа status(): четыре слова по 32 байта, три флага и остаток.
+// Parse the status() answer: four 32-byte words - three flags and the balance.
 export function decodeStatus(returnedHex) {
   const hex = String(returnedHex || "").replace(/^0x/, "");
-  if (hex.length < 256) throw new Error("короткий ответ status(): " + returnedHex);
+  if (hex.length < 256) throw new Error("short status() answer: " + returnedHex);
   const word = (i) => hex.slice(i * 64, (i + 1) * 64);
   return {
     isFunded: BigInt("0x" + word(0)) !== 0n,
@@ -186,23 +171,22 @@ export function decodeStatus(returnedHex) {
   };
 }
 
-// Какие условия ордера нужны эскроу при создании - одним местом, чтобы форма и проверка не разошлись.
-// СРОК ОДИН. Поля t0 в условиях ордера больше нет: до t1 ETH забирает claimer по своей половине и
-// только при отметке ready, с t1 забор запрещён, а вернуть вправе кто угодно, ПРЕДЪЯВИВ ПОЛОВИНУ
-// ВНЁСШЕГО (NinseiEscrow.sol:250-253) - у сторожа её нет, поэтому "вернёт кто угодно" надо читать как
-// "любой, у кого есть половина" (решение 2026-09-16, док 26; то же уточнение - док 24 §1).
-// Проверка "t1 позже t0" потеряла смысл, но её место заняла не пустота: срок обязан быть В БУДУЩЕМ,
-// иначе ордер создаётся уже закрытым - claim по нему невозможен, и деньги зависли бы до возврата.
-// Верхних границ и требования "сроки в будущем" у КОНТРАКТА нет вовсе: конструктор проверяет только
-// amount != 0 и t1 > readyBy (:170-171), а сроки в прошлом для него допустимы. Их держит эта функция -
-// контракт защищает деньги, но не защищает от ордера с прошлыми сроками.
+// Which order terms the escrow needs at creation - in one place, so the form and the checks do not diverge.
+// ONE DEADLINE. There is no t0 field: before t1 ETH is claimed by the claimer via his half and only with the
+// ready mark; from t1 a claim is forbidden and anyone may refund by PRESENTING THE DEPOSITOR'S HALF - the
+// watchtower does not have it, so "anyone refunds" reads as "anyone holding the half".
+// The "t1 later than t0" check lost its meaning, but emptiness did not take its place: the deadline must be IN
+// THE FUTURE, else the order is created already closed - no claim is possible and the money hangs until refund.
+// The CONTRACT has no upper bounds and no "future deadlines" rule: the constructor only checks amount != 0 and
+// t1 > readyBy, and deadlines in the past are fine for it. This function holds those bounds - the contract
+// protects the money, not the caller from an order with past deadlines.
 export function orderTerms({ locker, claimer, commitHalfLocker, commitHalfClaimer, edPointLocker, edPointClaimer, amount, readyBy, t1 }) {
   for (const [k, v] of Object.entries({ locker, claimer, commitHalfLocker, commitHalfClaimer, edPointLocker, edPointClaimer, amount })) {
-    if (v === undefined || v === null || v === "") throw new Error("не задано условие ордера: " + k);
+    if (v === undefined || v === null || v === "") throw new Error("order term not set: " + k);
   }
-  // Сроков два, и они НЕ должны совпадать: совпадение вернуло бы окно, где забор и возврат валидны
-  // одновременно, и спор решал бы газ. Первый срок - окно отметки готовности, второй - граница расчёта.
-  if (Number(readyBy) <= Math.floor(Date.now() / 1000)) throw new Error("readyBy должен быть в будущем: " + readyBy);
-  if (Number(t1) <= Number(readyBy)) throw new Error("t1 должен быть позже readyBy");
+  // Two deadlines that must NOT coincide: coincidence would restore a window where claim and refund are both
+  // valid and gas would decide the dispute. The first is the readiness window, the second the settlement boundary.
+  if (Number(readyBy) <= Math.floor(Date.now() / 1000)) throw new Error("readyBy must be in the future: " + readyBy);
+  if (Number(t1) <= Number(readyBy)) throw new Error("t1 must be later than readyBy");
   return { locker, claimer, commitHalfLocker, commitHalfClaimer, edPointLocker, edPointClaimer, amount, readyBy, t1 };
 }

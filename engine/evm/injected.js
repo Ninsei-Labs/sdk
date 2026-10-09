@@ -1,27 +1,22 @@
 // GENERATED FILE - a byte-for-byte copy of the engine module www/js/evm/injected.js for the SDK package.
-// Edit the source under www/js, then run: node tools/build-sdk-engine.mjs
-// tools/check-sdk-engine.mjs reddens on any drift, so a stale copy cannot ship silently.
+// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
 // Everything below this header is identical to the source.
 
-// Браузерные кошельки: обнаружение по EIP-6963 и подключение по EIP-1193.
+// BROWSER WALLETS: detection by EIP-6963 and connection by EIP-1193.
+// WHY EIP-6963, NOT window.ethereum.isMetaMask. With two extensions installed, window.ethereum is "whoever was
+// last", and guessing by flags gives wrong names and icons. EIP-6963 solves this: a wallet announces itself with
+// an `eip6963:announceProvider` event (name, icon, provider), and the page requests it with `eip6963:requestProvider`.
+// So the wallet list is real and updates if the user installs an extension with the tab open.
+// window.ethereum stays as a fallback for old wallets; there the honest name is "Browser wallet".
+// NO STATE HERE: this module only finds providers and does the handshake. State and balances live in evm/session.js.
 //
-// ПОЧЕМУ EIP-6963, А НЕ window.ethereum.isMetaMask. При двух установленных расширениях
-// window.ethereum - это «кто успел последним», и угадывание по флагам даёт чужие имена и иконки:
-// пользователь видит «MetaMask», а подключается Rabby. EIP-6963 решает это стандартно: кошелёк
-// объявляет себя событием `eip6963:announceProvider` с именем, иконкой и своим провайдером, а
-// страница просит объявиться событием `eip6963:requestProvider`. Так список кошельков настоящий,
-// и он же обновляется, если пользователь поставил расширение при открытой вкладке.
 //
-// window.ethereum остаётся фолбэком для старых кошельков, которые 6963 ещё не умеют. В этом
-// случае честное имя - «Browser wallet»: назвать его MetaMask мы не имеем права, не проверив.
 //
-// Здесь НЕТ состояния: этот модуль только находит провайдеров и делает рукопожатие. Состояние,
-// балансы и смена сети живут в evm/session.js - общие для обоих коннекторов.
 
 const ANNOUNCE = "eip6963:announceProvider";
 const REQUEST = "eip6963:requestProvider";
 
-// Коды EIP-1193, которые важны на экране: отказ пользователя - это не ошибка приложения.
+// EIP-1193 codes that matter on screen: a user refusal is not an application error.
 export const USER_REJECTED = 4001;
 
 export function isUserRejection(error) {
@@ -30,7 +25,7 @@ export function isUserRejection(error) {
   return /rejected|denied|cancell?ed|closed by user/i.test(String((error && error.message) || error || ""));
 }
 
-// Человеческое имя для фолбэка: флаги - единственное, что есть у старых кошельков.
+// A human name for the fallback: flags are all the old wallets have.
 function fallbackName(eth) {
   if (!eth) return null;
   if (eth.isMetaMask) return "MetaMask";
@@ -41,9 +36,8 @@ function fallbackName(eth) {
   return "Browser wallet";
 }
 
-// Собрать список кошельков: сначала объявившиеся по EIP-6963, затем фолбэк window.ethereum.
-// timeoutMs нужен потому, что announceProvider - событие: без паузы список будет пустым даже при
-// установленном кошельке (у расширения свой темп инициализации).
+// Build the wallet list: first those announced by EIP-6963, then the window.ethereum fallback. timeoutMs is
+// needed because announceProvider is an event: without a pause the list would be empty even with a wallet installed.
 export function discoverWallets({ win = globalThis, timeoutMs = 250 } = {}) {
   const found = [];
   const seen = new Set();
@@ -70,7 +64,7 @@ export function discoverWallets({ win = globalThis, timeoutMs = 250 } = {}) {
   if (win && typeof win.addEventListener === "function") {
     win.addEventListener(ANNOUNCE, onAnnounce);
     if (typeof win.dispatchEvent === "function") {
-      // Просим объявиться; ответы придут асинхронно, поэтому ждём короткую паузу.
+      // We ask them to announce; answers arrive asynchronously, so we wait a short pause.
       win.dispatchEvent(new Event(REQUEST));
     }
   }
@@ -78,8 +72,8 @@ export function discoverWallets({ win = globalThis, timeoutMs = 250 } = {}) {
   return new Promise((resolve) => {
     const finish = () => {
       if (win && typeof win.removeEventListener === "function") win.removeEventListener(ANNOUNCE, onAnnounce);
-      // Фолбэк: старый кошелёк, который 6963 не умеет, но window.ethereum выставил.
-      // providers (массив) бывает, когда установлено несколько кошельков без поддержки 6963.
+      // Fallback: an old wallet that does not know 6963 but sets window.ethereum. providers (array) appears with
+      // several wallets without 6963 support.
       const legacy = win && win.ethereum;
       if (!found.length && legacy) {
         const list = Array.isArray(legacy.providers) && legacy.providers.length ? legacy.providers : [legacy];
@@ -94,12 +88,11 @@ export function discoverWallets({ win = globalThis, timeoutMs = 250 } = {}) {
   });
 }
 
-// Подписка на «кошелёк появился». Нужна, чтобы список в модалке не был снимком на момент открытия:
-// пользователь может поставить расширение, не перезагружая страницу.
+// Subscribe to "a wallet appeared". Needed so the modal list is not a snapshot at open time: the user may install
+// an extension without reloading.
 //
-// Работаем именно с самим объявлением, а не с повторным обнаружением: событие EIP-6963 несёт и имя,
-// и провайдер кошелька, а события не переигрываются - кошелёк, объявившийся до нашей подписки, при
-// повторном запросе ответит снова, но снимок всё равно был бы потерян. Так список только дополняется.
+// We work with the announcement itself, not a re-detection: the EIP-6963 event carries the name and provider, and
+// events are not replayed, so a wallet that announced before our subscription would be lost on a re-request. The list only grows.
 export function watchWallets(fn, { win = globalThis } = {}) {
   if (!win || typeof win.addEventListener !== "function") return () => {};
   const known = new Map();
@@ -120,16 +113,16 @@ export function watchWallets(fn, { win = globalThis } = {}) {
     publish();
   };
   win.addEventListener(ANNOUNCE, onAnnounce);
-  // Просим объявиться: кошельки, которые уже установлены, ответят прямо сейчас и попадут в список.
-  // Пустой список наружу не отдаём - иначе UI очищался бы просто потому, что кошельков нет.
+  // We ask them to announce: installed wallets answer right now and enter the list. An empty list is not handed
+  // out, else the UI would be cleared just because there are no wallets.
   if (typeof win.dispatchEvent === "function") win.dispatchEvent(new Event(REQUEST));
   return () => win.removeEventListener(ANNOUNCE, onAnnounce);
 }
 
-// Рукопожатие EIP-1193: просим аккаунты (здесь кошелёк спросит разрешение) и узнаём сеть.
+// EIP-1193 handshake: ask for accounts (here the wallet asks permission) and learn the network.
 export async function handshake(provider) {
   if (!provider || typeof provider.request !== "function") {
-    throw new Error("Этот кошелёк не умеет EIP-1193 (нет request)");
+    throw new Error("This wallet does not support EIP-1193 (no request)");
   }
   const accounts = await provider.request({ method: "eth_requestAccounts" });
   const address = Array.isArray(accounts) ? accounts[0] : null;
@@ -137,10 +130,9 @@ export async function handshake(provider) {
   return { address: address || null, chainId: Number(chainIdHex) || null };
 }
 
-// Тихая проверка «сайт уже разрешён этому кошельку» - для восстановления после перезагрузки.
-// eth_accounts НЕ показывает окно кошелька: пустой ответ значит «разрешения нет», и это нормальное
-// состояние, а не ошибка. Именно поэтому нельзя звать здесь eth_requestAccounts: страница при
-// загрузке не должна выкидывать окно подключения.
+// A silent check "the site is already allowed for this wallet" - for restoring after a reload. eth_accounts does
+// NOT show the wallet window: an empty answer means "no permission", a normal state, not an error. That is why
+// eth_requestAccounts must not be called here: the page must not pop a connect window on load.
 export async function silentAccounts(provider) {
   if (!provider || typeof provider.request !== "function") return [];
   try {
@@ -151,25 +143,25 @@ export async function silentAccounts(provider) {
   }
 }
 
-// Почему кошелёк мог не открыться - переводим код ошибки в понятную причину.
+// Why the wallet may not have opened - translate the error code into a plain reason.
 //
-// -32002 - самая частая причина «нажал, а окно не появилось»: у кошелька уже есть открытый
-// запрос (окно висит на другом экране/вкладке, или предыдущая попытка не завершена).
-export function explainInjectedError(e, label = "Кошелёк") {
+// -32002 is the most common cause of "pressed but no window": the wallet already has an open request (the window
+// hangs on another screen/tab, or the previous attempt did not finish).
+export function explainInjectedError(e, label = "Wallet") {
   const code = e && (e.code || (e.data && e.data.originalError && e.data.originalError.code));
   const message = String((e && e.message) || e);
   if (code === -32002 || /already pending|already processing/i.test(message)) {
     return (
       label +
-      ": в кошельке уже есть незавершённый запрос, поэтому новое окно не открылось. " +
-      "Открой расширение, заверши или отмени тот запрос и нажми снова."
+      ": the wallet already has a pending request, so a new window did not open. " +
+      "Open the extension, finish or cancel that request, then try again."
     );
   }
   if (/no provider|not connected|provider is disconnected|undefined is not a function/i.test(message)) {
-    return label + ": расширение не отвечает (браузер мог выгрузить его или страница открыта не там, где оно работает).";
+    return label + ": the extension is not responding (the browser may have unloaded it, or the page is not where it works).";
   }
   if (/user rejected|user denied|rejected by user/i.test(message) || code === 4001) {
-    return label + ": запрос отклонён в кошельке.";
+    return label + ": the request was rejected in the wallet.";
   }
   return label + ": " + message;
 }
