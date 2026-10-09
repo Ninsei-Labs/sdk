@@ -119,6 +119,22 @@ export function evmWallet(provider, { id = "evm" } = {}) {
       if (typeof txHash !== "string" || !txHash) throw new SdkError("bad-input", { field: "receipt.txHash" });
       return await provider.request({ method: "eth_getTransactionReceipt", params: [txHash] });
     },
+    // SIGNING TYPED DATA (EIP-712) - the same call the page makes (www/js/evm/session.js, signTypedData). This is not
+    // a transaction: no gas, no money moves, so a person without their own ETH can give it. What is signed is DECIDED
+    // BY THE CALLER (ready typed data arrives here - e.g. a CoWSwap order from src/legs/cow.mjs); the shape is not
+    // assembled here, else there would be a second record of the protocol.
+    async signTypedData(typedData) {
+      if (!typedData || typeof typedData !== "object") throw new SdkError("bad-input", { field: "signTypedData" });
+      const accounts = await provider.request({ method: "eth_accounts" });
+      const from = Array.isArray(accounts) ? accounts[0] : null;
+      if (!from) throw new SdkError("wallet-not-connected", { step: "signTypedData" });
+      // The argument order [address, JSON] is as EIP-712 requires and as MetaMask and WalletConnect accept.
+      const signature = await provider.request({ method: "eth_signTypedData_v4", params: [from, JSON.stringify(typedData)] });
+      if (typeof signature !== "string" || !/^0x[0-9a-fA-F]{130}$/.test(signature)) {
+        throw new SdkError("wallet-rejected", { step: "signTypedData", why: "bad-signature-shape" });
+      }
+      return signature;
+    },
     driver() {
       return provider;
     },

@@ -8,6 +8,8 @@
 //   mirror   - the engine mirror parses and none of its imports dangle inside the package;
 //   pack     - what the tarball will carry matches the `files` field;
 //   secrets  - no keys, tokens or passwords in the tree.
+//   cow      - the CoWSwap order EIP-712 golden vector (real on-chain orders), the async seam, a breaking run;
+//   cow-refusal - unreachable, an unexpected shape and a timeout are NAMED refusals, never silence or null.
 //
 // A check is a function returning { note, problems, notes }: an empty `problems` list is green, and every problem
 // line names the file and the member, so a failure is readable without re-running anything.
@@ -17,7 +19,8 @@
 //   node tools/check.mjs --only=surface      run one check (repeatable, comma-separated)
 //   node tools/check.mjs --list              list the check names
 import { execFileSync, execSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -368,6 +371,223 @@ export const secretsCheck = () => {
 };
 
 // ---------------------------------------------------------------------------------------------------
+// 7. COW - THE ASYNCHRONOUS ROUTE PROVIDER. A GOLDEN VECTOR (a real on-chain order), the seam's async gate and a
+//    BREAKING RUN that shows the vector is load-bearing.
+//
+// WHY THESE ASSERTIONS ARE ABOUT AGREEMENT, NOT AN IMPRESSION. Every external fact (the order type, the domain, the
+// markers, the UID layout) comes from CoW Protocol's own source; here it is RECOMPUTED with the repository's own
+// keccak256/secp256k1 and compared. Two REAL settled orders are pinned: their EIP-712 digest, computed from the
+// order fields alone, must equal the digest half of the on-chain UID the order book returns for them. That is the
+// one check no amount of reasoning replaces - a wrong field, a wrong domain or a wrong type reddens it at once.
+// ---------------------------------------------------------------------------------------------------
+
+const COW_SRC = () => p("src", "legs", "cow-spec.mjs");
+const loadFresh = (file) => import(pathToFileURL(file).href + "?v=" + Date.now());
+
+// THE REAL ORDERS (fetched live from the CoW order book; the UID is what the book returns, the fields are the order
+// the settlement signed). Source: GET https://api.cow.fi/mainnet/api/v1/orders/<uid>.
+//   1) https://api.cow.fi/mainnet/api/v1/orders/0xff2e2e54d178997f173266817c1e9ed6fee1a1aae4b43971c53b543cffcc2969845c6f5599fbb25dbdd1b9b013daf85c03f3c63763e4bc4a
+//   2) https://api.cow.fi/mainnet/api/v1/orders/0x84732fe35a973fcc2325e59c6f8a09cda9604b60ff67c0b2399268301ba048c2845c6f5599fbb25dbdd1b9b013daf85c03f3c63763e4bc92
+const COW_VECTORS = [
+  {
+    uid: "0xff2e2e54d178997f173266817c1e9ed6fee1a1aae4b43971c53b543cffcc2969845c6f5599fbb25dbdd1b9b013daf85c03f3c63763e4bc4a",
+    digest: "0xff2e2e54d178997f173266817c1e9ed6fee1a1aae4b43971c53b543cffcc2969",
+    owner: "0x845c6f5599fbb25dbdd1b9b013daf85c03f3c637",
+    chainId: 1,
+    order: {
+      sellToken: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", buyToken: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+      receiver: "0xfe89cc7abb2c4183683ab71653c4cdc9b02d44b7", sellAmount: "9999933530961133759600", buyAmount: "16145549636832",
+      validTo: 1675934794, appData: "0x2b8694ed30082129598720860e8e972f07aa10d9b81cae16ca0e2cfb24743e24",
+      feeAmount: "66469038866240400", kind: "sell", partiallyFillable: false, sellTokenBalance: "erc20", buyTokenBalance: "erc20",
+    },
+  },
+  {
+    uid: "0x84732fe35a973fcc2325e59c6f8a09cda9604b60ff67c0b2399268301ba048c2845c6f5599fbb25dbdd1b9b013daf85c03f3c63763e4bc92",
+    digest: "0x84732fe35a973fcc2325e59c6f8a09cda9604b60ff67c0b2399268301ba048c2",
+    owner: "0x845c6f5599fbb25dbdd1b9b013daf85c03f3c637",
+    chainId: 1,
+    order: {
+      sellToken: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", buyToken: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+      receiver: "0xfe89cc7abb2c4183683ab71653c4cdc9b02d44b7", sellAmount: "9999927155859181783264", buyAmount: "16145360877874",
+      validTo: 1675934866, appData: "0x2b8694ed30082129598720860e8e972f07aa10d9b81cae16ca0e2cfb24743e24",
+      feeAmount: "72844140818216736", kind: "sell", partiallyFillable: false, sellTokenBalance: "erc20", buyTokenBalance: "erc20",
+    },
+  },
+];
+
+// A deterministic signature vector: the same private key always signs the same digest the same way (RFC 6979), so
+// the fixed signature catches any change to the encoding, and the recovery pins the signer address.
+const COW_TEST_KEY = "0x" + "11".repeat(32);
+const COW_TEST_SIG = "0xa5d640c50694953643434964f4336db36ffb8fcd4968a85d795df2897f05f7a2297b23b529ec365d19e1dcb5b5e033d76e37cf2b6de50f89c19300158568c4161c";
+const COW_TEST_ADDRESS = "0x19e7e376e7c213b7e7e7e46cc70a5dd086daff2a";
+
+export const cowCheck = async () => {
+  const problems = [];
+  const notes = [];
+  const legs = await loadFresh(p("src", "legs", "cow.mjs"));
+  const spec = await loadFresh(COW_SRC());
+  const shape = await loadFresh(p("src", "legs", "shape.mjs"));
+  const evm = await loadFresh(p("src", "legs", "evm.mjs"));
+  const { keccak256 } = await import(pathToFileURL(p("src", "primitives.mjs")).href);
+  const toHex = (bytes) => { let out = "0x"; for (const b of bytes) out += b.toString(16).padStart(2, "0"); return out; };
+
+  // (a) THE TYPE AND ITS HASH AGAINST COW PROTOCOL'S OWN CONSTANT. A typo in the field list would change the digest
+  // and make every order unusable - so the recomputed hash must equal GPv2Order.TYPE_HASH.
+  const recomputedTypeHash = toHex(keccak256(spec.COW_ORDER_TYPE));
+  if (recomputedTypeHash !== spec.COW_ORDER_TYPE_HASH) {
+    problems.push(`the order type does not hash to GPv2Order.TYPE_HASH: computed ${recomputedTypeHash}, constant ${spec.COW_ORDER_TYPE_HASH}`);
+  } else {
+    notes.push(`the order type hashes to GPv2Order.TYPE_HASH ${spec.COW_ORDER_TYPE_HASH}`);
+  }
+  // The kind/balance markers must equal the contract's constants (keccak256 of the marker strings).
+  if (spec.cowKindMarker("sell") !== "0xf3b277728b3fee749481eb3e0b3b48980dbbab78658fc419025cb16eee346775") {
+    problems.push("the sell marker is not keccak256(\"sell\") as GPv2Order.KIND_SELL declares");
+  }
+  if (spec.cowBalanceMarker("erc20") !== "0x5a28e9363bb942b639270062aa6bb295f434bcdfc42c97267bf003f272060dc9") {
+    problems.push("the erc20 balance marker is not keccak256(\"erc20\") as GPv2Order.BALANCE_ERC20 declares");
+  }
+
+  // (b) THE GOLDEN VECTORS: real orders, digest from fields alone, against the UID the order book returns.
+  for (const v of COW_VECTORS) {
+    let digest;
+    try {
+      digest = spec.cowOrderDigestHex({ order: v.order, chainId: v.chainId });
+    } catch (error) {
+      problems.push(`vector ${v.uid.slice(0, 10)}: the digest did not compute (${error && error.message})`);
+      continue;
+    }
+    if (digest !== v.digest) problems.push(`vector ${v.uid.slice(0, 10)}: the digest is ${digest}, expected ${v.digest}`);
+    else notes.push(`vector ${v.uid.slice(0, 10)}: the digest matches the on-chain UID`);
+    let uid;
+    try {
+      uid = spec.cowOrderUid({ digest, owner: v.owner, validTo: v.order.validTo });
+    } catch (error) {
+      problems.push(`vector ${v.uid.slice(0, 10)}: the UID did not assemble (${error && error.message})`);
+      continue;
+    }
+    if (uid !== v.uid) problems.push(`vector ${v.uid.slice(0, 10)}: the UID is ${uid}, expected ${v.uid}`);
+    else notes.push(`vector ${v.uid.slice(0, 10)}: digest ++ owner ++ validTo rebuilds the full UID`);
+  }
+
+  // (c) THE SIGNATURE VECTOR: the fixed signature and the recovered signer.
+  const v0 = COW_VECTORS[0];
+  const digest0 = spec.cowOrderDigest({ order: v0.order, chainId: v0.chainId });
+  const signature = spec.signCowOrderDigest({ digest: digest0, privateKey: COW_TEST_KEY });
+  if (signature !== COW_TEST_SIG) problems.push(`the signature over the golden digest is ${signature}, expected ${COW_TEST_SIG}`);
+  else notes.push("the signature over the golden digest is the fixed vector");
+  const signer = spec.recoverCowOrderSigner({ digest: digest0, signature });
+  if (signer !== COW_TEST_ADDRESS) problems.push(`the signature recovers ${signer}, expected ${COW_TEST_ADDRESS}`);
+  else notes.push(`the signature recovers the signer ${COW_TEST_ADDRESS}`);
+
+  // (d) THE SEAM: the async gate refuses by NAME, and the registered provider is complete.
+  if (!evm.routeProviders().includes("cowswap")) problems.push("the registry does not carry the cowswap provider");
+  const okCow = evm.requireAsyncProvider("cowswap");
+  if (!okCow.ok) problems.push(`requireAsyncProvider("cowswap") refused: ${JSON.stringify(okCow)}`);
+  if (evm.requireAsyncProvider("declared").reason !== "provider-not-asynchronous") problems.push("a synchronous provider was not refused by requireAsyncProvider with provider-not-asynchronous");
+  if (evm.requireSyncProvider("cowswap").reason !== "provider-not-synchronous") problems.push("the async provider was not refused by requireSyncProvider with provider-not-synchronous");
+  if (evm.requireAsyncProvider("no-such").reason !== "provider-unknown") problems.push("an unknown provider was not refused with provider-unknown");
+  // An async provider that does NOT name what ends execution is refused by name, not treated as synchronous.
+  const incomplete = shape.providerShapeVerdict({ id: "stub", kind: "stub", shape: shape.ASYNC });
+  if (incomplete.ok || incomplete.reason !== "provider-incomplete") problems.push(`an async provider without settled was not refused with provider-incomplete: ${JSON.stringify(incomplete)}`);
+  else notes.push("an async provider without settled is refused with provider-incomplete");
+
+  // (e) THE BREAKING RUN: change one field's type in the order type and the golden digest MUST stop matching. This
+  // is the proof the golden vector is load-bearing - a copy of the spec is mutated in a temp dir, the working tree
+  // is never touched.
+  {
+    const dir = mkdtempSync(join(tmpdir(), "cow-breaking-"));
+    try {
+      const source = readFileSync(COW_SRC(), "utf8").replace(/\r\n/g, "\n");
+      const before = source;
+      // Roll the fix back: the two amount fields swap places. The field ORDER is the protocol (EIP-712), so a valid
+      // digest is still produced - it is simply a DIFFERENT one, which is exactly what "the vector is load-bearing"
+      // means. (A type change would instead make the encoder throw - also a redden, but a less instructive one.)
+      const mutated = source.replace(
+        '  ["sellAmount", "uint256"],\n  ["buyAmount", "uint256"],\n',
+        '  ["buyAmount", "uint256"],\n  ["sellAmount", "uint256"],\n');
+      if (mutated === before) throw new Error("the breaking-run mutation did not apply: the amount field lines were not found");
+      const rewritten = mutated.replace(/from\s+"(\.[^"]+)"/g, (whole, rel) =>
+        `from "${pathToFileURL(resolve(dirname(COW_SRC()), rel)).href}"`);
+      const file = join(dir, "cow-spec.mjs");
+      writeFileSync(file, rewritten, "utf8");
+      const broken = await loadFresh(file);
+      let brokenDigest = null;
+      try { brokenDigest = broken.cowOrderDigestHex({ order: v0.order, chainId: v0.chainId }); } catch { brokenDigest = null; }
+      if (brokenDigest === v0.digest || brokenDigest === null) problems.push(`BREAKING RUN did not redden as expected: the digest is ${String(brokenDigest)}`);
+      else notes.push(`breaking run REDDENS: reordering the amount fields moves the digest off the golden value (${String(brokenDigest).slice(0, 12)}…)`);
+      const brokenTypeHash = (() => { try { return toHex(keccak256(broken.COW_ORDER_TYPE)); } catch { return null; } })();
+      if (brokenTypeHash === spec.COW_ORDER_TYPE_HASH) problems.push("BREAKING RUN did not redden the type hash either");
+      else notes.push("breaking run also moves the recomputed type hash off GPv2Order.TYPE_HASH");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  notes.push("golden vectors are REAL settled CoW mainnet orders (see the two api.cow.fi URLs in the source)");
+  return { note: `${COW_VECTORS.length} real-order vectors, 1 signature vector, the async seam`, problems, notes };
+};
+
+// ---------------------------------------------------------------------------------------------------
+// 8. COW REFUSALS - UNREACHABLE, AN UNEXPECTED SHAPE AND A TIMEOUT ARE NAMED, NEVER SILENCE OR null.
+//    A stand-in transport (no network) drives the provider down each failure path.
+// ---------------------------------------------------------------------------------------------------
+
+export const cowRefusalCheck = async () => {
+  const problems = [];
+  const notes = [];
+  const cow = await loadFresh(p("src", "legs", "cow.mjs"));
+  const UID = "0x" + "cd".repeat(56);
+  const response = (status, body) => ({ ok: status < 400, status, json: async () => (typeof body === "function" ? body() : body) });
+  const named = (label, result, code) => {
+    if (!result || typeof result !== "object") { problems.push(`${label}: the result is not a refusal value (${JSON.stringify(result)})`); return; }
+    if (result.ok === true) { problems.push(`${label}: expected a refusal, got ok:true (${JSON.stringify(result).slice(0, 120)})`); return; }
+    if (typeof result.code !== "string" || !cow.COW_REFUSAL_CODES.includes(result.code)) { problems.push(`${label}: the refusal code is not named (${JSON.stringify(result.code)})`); return; }
+    if (code && result.code !== code) { problems.push(`${label}: expected code ${code}, got ${result.code}`); return; }
+    notes.push(`${label}: refused with ${result.code}`);
+  };
+
+  const order = { sellToken: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", buyToken: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", receiver: "0xfe89cc7abb2c4183683ab71653c4cdc9b02d44b7", sellAmount: "1", buyAmount: "1", validTo: 1675934794, appData: "0x" + "00".repeat(32), feeAmount: "0", kind: "sell", partiallyFillable: false, sellTokenBalance: "erc20", buyTokenBalance: "erc20" };
+  const sig = "0x" + "ab".repeat(65);
+
+  // (1) unreachable: the transport throws (connection or timeout) - not an exception escaping to the caller.
+  const throwing = async () => { throw new TypeError("network down"); };
+  named("submit: unreachable", await cow.submitCowOrder({ order, signature: sig, owner: "0x" + "11".repeat(20), chainId: 1, fetchImpl: throwing }), "cow-unreachable");
+  named("status: unreachable", await cow.cowOrderStatus({ uid: UID, chainId: 1, fetchImpl: throwing }), "cow-unreachable");
+  named("settled: unreachable", await cow.cowSettled({ uid: UID, chainId: 1 }, { fetchImpl: throwing, now: () => 0, sleep: async () => {} }), "cow-unreachable");
+
+  // (2) an unexpected shape: 200 with a body that is not an order (no status).
+  const weird = async () => response(200, { not: "an order" });
+  named("status: unexpected shape", await cow.cowOrderStatus({ uid: UID, chainId: 1, fetchImpl: weird }), "cow-bad-response");
+  named("settled: unexpected shape", await cow.cowSettled({ uid: UID, chainId: 1 }, { fetchImpl: weird, now: () => 0, sleep: async () => {} }), "cow-bad-response");
+  const unknownStatus = async () => response(200, { status: "teleported" });
+  named("status: unknown status word", await cow.cowOrderStatus({ uid: UID, chainId: 1, fetchImpl: unknownStatus }), "cow-bad-response");
+
+  // (3) not settled in time: the order stays open and the clock passes the timeout.
+  let t = 0;
+  const open = async () => response(200, { status: "open" });
+  named("settled: timeout", await cow.cowSettled({ uid: UID, chainId: 1 }, { fetchImpl: open, now: () => (t += 1000), sleep: async () => {}, pollMs: 1000, timeoutMs: 3000 }), "cow-not-settled");
+
+  // (4) an unknown network and a bounded 404: also named.
+  named("status: unknown network", await cow.cowOrderStatus({ uid: UID, chainId: 421614, fetchImpl: open }), "cow-unknown-network");
+  const notFound = async () => response(404, {});
+  named("status: 404", await cow.cowOrderStatus({ uid: UID, chainId: 1, fetchImpl: notFound }), "cow-order-unknown");
+  const refused = async () => response(400, { errorType: "InvalidOrder" });
+  named("submit: refused by the book", await cow.submitCowOrder({ order, signature: sig, owner: "0x" + "11".repeat(20), chainId: 1, fetchImpl: refused }), "cow-refused");
+
+  // (5) AND THE OTHER WAY: a final status is NOT a refusal - it is the outcome (settled / dead).
+  const fulfilled = async () => response(200, { status: "fulfilled" });
+  const done = await cow.cowSettled({ uid: UID, chainId: 1 }, { fetchImpl: fulfilled, now: () => 0, sleep: async () => {} });
+  if (!(done.ok === true && done.done === true && done.settled === true && done.status === "fulfilled")) problems.push(`settled: a fulfilled order did not end as settled (${JSON.stringify(done)})`);
+  else notes.push("settled: a fulfilled order ends as done + settled with status fulfilled");
+  const cancelled = async () => response(200, { status: "cancelled" });
+  const dead = await cow.cowSettled({ uid: UID, chainId: 1 }, { fetchImpl: cancelled, now: () => 0, sleep: async () => {} });
+  if (!(dead.ok === true && dead.done === true && dead.settled === false && dead.status === "cancelled")) problems.push(`settled: a cancelled order did not end as done + not-settled (${JSON.stringify(dead)})`);
+  else notes.push("settled: a cancelled order ends as done + not-settled");
+
+  return { note: `${cow.COW_REFUSAL_CODES.length} named refusals, exit paths covered`, problems, notes };
+};
+
+// ---------------------------------------------------------------------------------------------------
 // RUNNER
 // ---------------------------------------------------------------------------------------------------
 
@@ -378,6 +598,8 @@ const CHECKS = {
   mirror: mirrorCheck,
   pack: packCheck,
   secrets: secretsCheck,
+  cow: cowCheck,
+  "cow-refusal": cowRefusalCheck,
 };
 
 export const runCheck = async (name) => {

@@ -4,6 +4,11 @@
 // land here in stage 2. Already here: what the network is called for the wallet, how to tell that the wallet is on
 // the right network, how balances are read, and the ROUTE-PROVIDER REGISTRY (our declared routes today, an
 // external aggregator when it arrives).
+// THE SHARED SHAPE VOCABULARY lives in its own module (./shape.mjs) so the registry and the concrete providers can
+// both depend on it without an import cycle. The CoWSwap provider is registered below like any other route provider.
+import { SYNC, ASYNC, providerShapeVerdict } from "./shape.mjs";
+import { cowProvider } from "./cow.mjs";
+
 export const vm = "evm";
 
 /** What this network is called for the wallet: for EVM - a numeric chainId. */
@@ -78,8 +83,7 @@ export async function balances({ driver, address, tokens }) {
 // REQUIREMENT FOR A PROVIDER: id, kind, shape ("sync" | "async"), plan(...) -> { ok, expectedOutWei | code,
 // route?, calldata?, to? } and, for shape "async", settled(...). Execution (assembling and sending the
 // transaction) is stage 3; for now only our provider is declared, and its plan honestly answers with a code.
-export const SYNC = "sync";
-export const ASYNC = "async";
+export { SYNC, ASYNC };
 
 const ROUTE_PROVIDERS = {
   declared: {
@@ -92,6 +96,10 @@ const ROUTE_PROVIDERS = {
       return { ok: false, code: "not-implemented", stage: 3 };
     },
   },
+  // COWSWAP - AN INTENT AUCTION: "async". The person signs an intent, and the settlement arrives LATER as a separate
+  // transaction sent by someone else. Its record therefore carries `settled(...)` - what ends its execution (the
+  // order book reporting the order settled or finally dead). The provider itself lives in ./cow.mjs.
+  cowswap: cowProvider,
 };
 
 /** Who can execute a route at all. The list is needed by the "no such provider" error. */
@@ -114,5 +122,33 @@ export const requireSyncProvider = (id) => {
   if (provider.shape !== SYNC) {
     return { ok: false, reason: "provider-not-synchronous", provider: provider.id, shape: provider.shape === undefined ? null : provider.shape };
   }
+  return { ok: true, provider };
+};
+
+/**
+ * THE GATE OF A PATH THAT ASSUMES AN ASYNCHRONOUS INTENT. The mirror of requireSyncProvider: it accepts a provider
+ * whose swap settles in a LATER, separate action, and refuses by NAME - never silently - a provider that is
+ * unknown, that is in fact synchronous, or that declares itself asynchronous without naming what ends execution
+ * (`settled`). Refusals are VALUES: { ok: true, provider } or { ok: false, reason, ... }.
+ */
+export const requireAsyncProvider = (id) => {
+  const provider = routeProviderFor(id);
+  if (!provider) return { ok: false, reason: "provider-unknown", provider: typeof id === "string" ? id : null, known: routeProviders() };
+  if (provider.shape !== ASYNC) return { ok: false, reason: "provider-not-asynchronous", provider: provider.id, shape: provider.shape === undefined ? null : provider.shape };
+  const verdict = providerShapeVerdict(provider);
+  if (!verdict.ok) return { ok: false, reason: verdict.reason, provider: provider.id, shape: provider.shape === undefined ? null : provider.shape, missing: verdict.missing ?? null };
+  return { ok: true, provider };
+};
+
+/**
+ * A GENERAL GATE: may a path use this provider at all, whatever the shape, and is the provider complete (an
+ * asynchronous one names what ends its execution). The shape itself is NOT required to match a path's assumption
+ * here - that is what requireSyncProvider / requireAsyncProvider are for.
+ */
+export const requireProvider = (id) => {
+  const provider = routeProviderFor(id);
+  if (!provider) return { ok: false, reason: "provider-unknown", provider: typeof id === "string" ? id : null, known: routeProviders() };
+  const verdict = providerShapeVerdict(provider);
+  if (!verdict.ok) return { ok: false, reason: verdict.reason, provider: provider.id, shape: verdict.shape ?? null, missing: verdict.missing ?? null };
   return { ok: true, provider };
 };
