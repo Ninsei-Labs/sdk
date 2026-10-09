@@ -1,30 +1,29 @@
 // GENERATED FILE - a byte-for-byte copy of the engine module www/js/evm/session.js for the SDK package.
-// Edit the source under www/js, then run: node tools/build-sdk-engine.mjs
-// tools/check-sdk-engine.mjs reddens on any drift, so a stale copy cannot ship silently.
+// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
 // Everything below this header is identical to the source.
 
-// Кошелёк EVM: состояние, балансы, смена сети и два способа подключения.
+// The EVM wallet: state, balances, network switching and two ways to connect.
 
-// ПОЧЕМУ ДВА КОННЕКТОРА. WalletConnect (Reown) нужен, когда пользователь пришёл с телефона или из
-// кошелька без расширения: сессия живёт по QR. Браузерный кошелёк (MetaMask, Rabby, Coinbase...),
-// если он установлен, подключается напрямую через EIP-1193 - это быстрее и без лишнего звена.
-// Оба дают один и тот же интерфейс EIP-1193, поэтому состояние, балансы и смена сети у них общие:
-// разница только в рукопожатии (см. www/js/evm/injected.js).
+// WHY TWO CONNECTORS. WalletConnect (Reown) is for a user coming from a phone or a wallet without an extension:
+// the session lives over a QR. A browser wallet (MetaMask, Rabby, Coinbase...), if installed, connects directly
+// over EIP-1193 - faster and with no extra hop.
+// Both expose the same EIP-1193 interface, so state, balances and network switching are shared:
+// only the handshake differs (see www/js/evm/injected.js).
 
-// Что здесь реально, а что нет - принципиально важно:
-//   РЕАЛЬНО: подключение (QR или браузерное расширение), адрес, chainId, балансы нативного токена и
-//            ERC-20 (значения приходят от кошелька пользователя через его провайдер, decimals - из
-//            конфига);
-//   НЕ РЕАЛЬНО: переводы. Контракт escrow пока не задеплоен, адрес escrow в демке - мок, поэтому
-//            отправка транзакции остаётся имитацией (см. evm/index.js). Реальные деньги демка не
-//            двигает и не должна.
+// What is real here and what is not matters:
+//   REAL: connecting (QR or browser extension), address, chainId, native-token and ERC-20 balances (values come
+//         from the user's wallet through its provider, decimals from the config);
+//
+//   NOT REAL: transfers. The escrow contract is not deployed yet and the escrow address in the demo is a mock,
+//         so sending a transaction stays a simulation (see evm/index.js). The demo does not move real money
+//         and must not.
 
-// Модалку рисуем сами (ui/walletModal.js): у Reown она со inline-стилями, а CSP демки их запрещает.
-// Провайдер WalletConnect инициализируется с showQrModal: false, ссылку сессии берём из события
-// display_uri и кодируем в QR в data:-URL.
+// The modal is drawn by us (ui/walletModal.js): Reown's own uses inline styles, which the demo CSP forbids.
+// The WalletConnect provider is initialised with showQrModal: false; the session link comes from the
+// display_uri event and is encoded into a QR in a data: URL.
 
-// Балансы кешируются в состоянии: UI спрашивает balanceOf() синхронно, а обновление идёт
-// через refreshBalances() (подключение, смена сети, событие кошелька).
+// Balances are cached in the state: the UI asks balanceOf() synchronously, and refreshBalances() updates
+// them (on connect, network change, wallet event).
 import { CHAINS, EVM, chainById, chainByChainId, tokensOf } from "../core/config.js";
 import {
   discoverWallets,
@@ -35,18 +34,18 @@ import {
 } from "./injected.js";
 import { openWalletModal } from "../ui/walletModal.js";
 import { toHuman } from "./amounts.js";
-// ПРАВИЛО КОМИССИИ CLAIM - ИЗ ОБЩЕГО МОДУЛЯ (issue #127): та же формула, по которой нода считает подарок.
+// THE CLAIM FEE RULE - FROM THE SHARED MODULE: the same formula the node uses for its gift.
 import { claimMaxFeePerGasWei } from "./claimGas.js";
 
 const listeners = new Set();
 
 const state = {
   status: "idle", // idle | pairing | connected | error
-  kind: null, // walletconnect | injected - каким коннектором подключены
-  label: null, // имя кошелька для UI: "WalletConnect", "MetaMask", "Rabbit"...
+  kind: null, // walletconnect | injected - which connector is in use
+  label: null, // wallet name for the UI: "WalletConnect", "MetaMask", "Rabby"...
   address: null,
-  chainId: null, // числовой chainId сети, в которой сейчас кошелёк
-  balances: {}, // "42161:USDC" -> человекочитаемое число
+  chainId: null, // numeric chainId of the network the wallet is on
+  balances: {}, // "42161:USDC" -> a human-readable number
   error: null,
   lastRefresh: 0,
 };
@@ -90,10 +89,10 @@ export function chainIdOf() {
   return state.chainId;
 }
 
-// ПРОВАЙДЕР КОШЕЛЬКА НАРУЖУ - ЯДРУ, А НЕ ЭКРАНАМ. Ядро (sdk/) получает кошелёк адаптером и окон не
-// открывает: ему нужен тот же EIP-1193 провайдер, которым подписывает страница. Второй провайдер заводить
-// нельзя - подпись ушла бы не тем ключом. Для экранов это имя ничего не значит: состояние кошелька они
-// читают через status()/isConnected(), как и раньше.
+// THE WALLET PROVIDER GOES OUTWARD - TO THE CORE, NOT TO SCREENS. The core (sdk/) gets the wallet as an
+// adapter and opens no windows: it needs the same EIP-1193 provider the page signs with. A second provider is
+// not allowed - the signature would leave with the wrong key. For screens this name means nothing: they read
+// wallet state through status()/isConnected(), as before.
 export function currentProvider() {
   return provider;
 }
@@ -108,8 +107,8 @@ const hexChainId = (id) => "0x" + Number(id).toString(16);
 
 async function loadLib() {
   if (!lib) {
-    // Динамический импорт своего же файла: CSP script-src 'self' это разрешает,
-    // и 2 МБ бандла грузятся только когда пользователь реально жмёт Connect.
+    // A dynamic import of our own file: CSP script-src 'self' allows it,
+    // and the 2 MB bundle loads only when the user actually presses Connect.
     lib = await import("../../assets/vendors/walletconnect/wc-browser.js?v=13fe06e5");
   }
   return lib;
@@ -133,11 +132,11 @@ function reset(status = "idle", error = null) {
   emit();
 }
 
-// --- общая часть обоих коннекторов ----------------------------------------------------------
+// --- the part shared by both connectors ------------------------------------------------------
 //
-// WalletConnect и браузерный кошелёк дают один и тот же интерфейс EIP-1193, поэтому события,
-// состояние и чтение балансов у них общие. Различается только рукопожатие, поэтому здесь -
-// обработчики, а в connect()/connectInjected() - как именно получен провайдер.
+// WalletConnect and a browser wallet expose the same EIP-1193 interface, so events, state and balance reading
+// are shared. Only the handshake differs, so here are the handlers and in connect()/
+// connectInjected() - how exactly the provider was obtained.
 
 function wireProvider(p) {
   p.on("chainChanged", (id) => {
@@ -148,8 +147,8 @@ function wireProvider(p) {
   });
   p.on("accountsChanged", (accounts) => {
     const next = (accounts && accounts[0]) || null;
-    // Пустой список - пользователь отключил сайт в кошельке. Это не «подключено без адреса»,
-    // а именно отключение: иначе экран показывал бы пустой кошелёк как рабочий.
+    // An empty list - the user disconnected the site in the wallet. That is not "connected without an address"
+    // but a real disconnect: otherwise the screen would show an empty wallet as working.
     if (!next) {
       if (modal) modal.close();
       reset("idle", null);
@@ -159,8 +158,8 @@ function wireProvider(p) {
     emit();
     refreshBalances();
   });
-  // disconnect приходит от WalletConnect и от браузерного кошелька (например, при сбросе);
-  // session_delete - только WalletConnect. Оба означают одно: сессии больше нет.
+  // disconnect comes from both WalletConnect and a browser wallet (e.g. on reset);
+  // session_delete - only WalletConnect. Both mean one thing: the session is gone.
   p.on("disconnect", () => {
     if (modal) modal.close();
     reset("idle", null);
@@ -171,13 +170,13 @@ function wireProvider(p) {
   });
 }
 
-// ВОЗВРАТ СТРАНИЦЫ ИЗ BFCACHE. Chrome (с 149) разрывает WebSocket, когда страница уходит в кэш
-// "вперёд-назад", и делает это НАМЕРЕННО: в консоли это выглядит как "failed: Page entered Back-Forward
-// Cache", хотя сеть ни при чём. Следствие: провайдер WalletConnect кэширован в переменной, его сокет уже
-// закрыт, а повторы релея замерли вместе со страницей - и после возврата сессия ВЫГЛЯДИТ живой, а запросы
-// к кошельку не доходят. Ни одноразовый restore(), ни события провайдера этого не замечают. Чиним тем же
-// механизмом, на который restore() опирается: init() поднимает сессию из localStorage. disconnect() здесь
-// НЕ вызываем - он удаляет сессию из хранилища, то есть сломал бы ровно то, что восстанавливаем.
+// RETURNING TO THE PAGE FROM BFCACHE. Chrome (since 149) tears down the WebSocket when the page goes into the
+// back-forward cache, deliberately: in the console it looks like "failed: Page entered Back-Forward Cache",
+// although the network is not to blame. Consequence: the WalletConnect provider is cached in a variable, its
+// socket is closed and the relay retries froze with the page - so after returning the session LOOKS alive while
+// requests to the wallet do not get through. Neither the one-shot restore() nor provider events notice it. We
+// fix it with the same mechanism restore() relies on: init() raises the session from localStorage.
+// disconnect() is NOT called here - it deletes the session from storage, i.e. would break what we restore.
 let resumeInFlight = false;
 
 export async function resumeConnection() {
@@ -187,45 +186,45 @@ export async function resumeConnection() {
   try {
     await Promise.race([
       p.request({ method: "eth_accounts" }),
-      new Promise((_, rej) => setTimeout(() => rej(new Error("релей не ответил за 4 с")), 4000)),
+      new Promise((_, rej) => setTimeout(() => rej(new Error("the relay did not answer in 4 s")), 4000)),
     ]);
-    console.log("[wc] после возврата страницы соединение живо");
+    console.log("[wc] the connection is alive after returning to the page");
     return;
   } catch (e) {
-    console.log("[wc] после возврата страницы релей не отвечает (" + e.message + ") - поднимаю сессию заново");
+    console.log("[wc] the relay does not answer after returning (" + e.message + ") - raising the session again");
   } finally {
     resumeInFlight = false;
   }
-  provider = null;                       // у старого сокета браузер закрыл соединение, кэш смысла не имеет
+  provider = null;                       // the browser closed the old socket, so caching it is pointless
   try {
     const want = state.chainId || (CHAINS.find((c) => c.escrow) || {}).chainId;
     const fresh = await ensureProvider(want);
     const accounts = await fresh.request({ method: "eth_accounts" });
     if (!Array.isArray(accounts) || !accounts.length) {
-      console.log("[wc] сессии в хранилище не осталось - нужен новый QR");
+      console.log("[wc] no session left in storage - a new QR is needed");
       reset("idle", null);
       return;
     }
     state.address = accounts[0];
     emit();
     await refreshBalances();
-    console.log("[wc] сессия поднята заново: " + state.address);
+    console.log("[wc] session raised again: " + state.address);
   } catch (e) {
-    console.log("[wc] поднять сессию не удалось: " + e.message);
+    console.log("[wc] could not raise the session: " + e.message);
     reset("idle", null);
   }
 }
 
-// Возврат страницы: pageshow (в том числе из bfcache) и появление вкладки. Дебаунс, чтобы переключение
-// вкладок не дёргало релей на каждый чих.
+// Returning to the page: pageshow (including from bfcache) and tab visibility. Debounced so switching
+// tabs does not poke the relay on every twitch.
 let resumeTimer = null;
 const scheduleResume = () => {
   clearTimeout(resumeTimer);
   resumeTimer = setTimeout(() => { resumeConnection(); }, 400);
 };
-// ПОДПИСКА НА СОБЫТИЯ ОКНА - ТОЛЬКО ТАМ, ГДЕ ОКНО ЕСТЬ. Раньше это стояло без проверки среды, и модуль
-// падал при загрузке в Node (проверки репозитория) и в SDK, который обещает «без DOM»: падение приходило
-// не в момент подписки, а на импорте файла - то есть ломало всё, что его подтягивает.
+// WINDOW-EVENT SUBSCRIPTION ONLY WHERE THERE IS A WINDOW. It used to run with no environment check, and the
+// module failed on load in Node (repo checks) and in the SDK, which promises "no DOM": the failure came not at
+// subscription time but on importing the file - i.e. it broke everything that pulls it in.
 if (typeof window !== "undefined" && typeof document !== "undefined") {
   window.addEventListener("pageshow", () => scheduleResume());
   document.addEventListener("visibilitychange", () => { if (!document.hidden) scheduleResume(); });
@@ -237,22 +236,22 @@ async function ensureProvider(wantChainId) {
   provider = await EthereumProvider.init({
     projectId: EVM.projectId,
     chains: [wantChainId],
-    // Только сети, где демка может сеттлиться: сеть без эскроу предлагать кошельку незачем (и
-    // проект WalletConnect может её не знать, что сломало бы подключение).
+    // Only networks the demo can settle on: there is no point offering the wallet a network without an escrow
+    // (and the WalletConnect project may not know it, which would break the connection).
     optionalChains: CHAINS.filter((c) => c.escrow).map((c) => c.chainId),
     showQrModal: false,
     rpcMap: rpcMap(),
-    // url в метаданных WalletConnect сверяет с фактическим origin страницы (проверка
-    // происхождения приложения). Если подставить боевой домен, локально и на тестовом
-    // домене сессия срывается - поэтому берём origin, а не константу.
+    // The url in the WalletConnect metadata is compared against the page's actual origin (the app-origin
+    // check). Substituting the production domain breaks the session locally and on a test domain - hence
+    // the origin is taken, not a constant.
     metadata: { ...EVM.metadata, url: location.origin },
   });
 
   provider.on("display_uri", (uri) => showUri(uri));
   wireProvider(provider);
-  // kind/label здесь НЕ выставляем: провайдер создан, но подключения ещё нет. Иначе после
-  // перезагрузки без сессии состояние было бы idle, а UI считал бы кошелёк подключённым
-  // (это ловится проверкой в браузере: status=idle, kind=walletconnect).
+  // kind/label are NOT set here: the provider is created, but there is no connection yet. Otherwise, after
+  // a reload without a session the state would be idle while the UI counted the wallet as connected
+  // (a browser check catches this: status=idle, kind=walletconnect).
   return provider;
 }
 
@@ -268,46 +267,46 @@ async function showUri(uri) {
     });
     modal.update({ qrDataUrl, uri, status: "Waiting for the wallet to approve..." });
   } catch (e) {
-    // QR не собрался - ссылку всё равно показываем, её можно скопировать.
+    // The QR did not render - the link is shown anyway, it can be copied.
     modal.update({ uri, status: "Scan failed to render, copy the link instead", error: true });
     console.warn("qr render failed", e);
   }
 }
 
-// Восстановление сессии после перезагрузки страницы.
+// Restoring the session after a page reload.
 //
-// WalletConnect держит сессию в localStorage, и EthereumProvider.init() поднимает её обратно.
-// Но у нас провайдер создавался ЛЕНИВО - только при нажатии «Connect wallet», - поэтому после F5
-// сессия лежала в хранилище, а страница о ней не знала: показывала «Connect wallet» и предлагала
-// новый QR. Восстановление делаем явным шагом при загрузке: поднять провайдер и, если сессия есть,
-// объявить её подключённой (адрес, сеть, балансы).
+// WalletConnect keeps the session in localStorage, and EthereumProvider.init() raises it back.
+// But our provider was created LAZILY - only on "Connect wallet" - so after F5 the session lay in storage while
+// the page knew nothing: it showed "Connect wallet" and offered a new QR. Restoration is an explicit step at
+// load: raise the provider and, if a session exists, declare it connected (address, network, balances).
 //
-// Состояние читаем ПОСЛЕ init, а не по событию: при восстановлении событие может прийти раньше,
-// чем страница успела подписаться на провайдера.
+//
+// State is read AFTER init, not by event: during restoration the event may arrive before
+// the page has subscribed to the provider.
 let restoreTried = false;
 
-// ПОМЕТКА "ВЫШЕЛ ВРУЧНУЮ". WalletConnect держит сессию в localStorage, поэтому одного disconnect() мало:
-// при следующей загрузке restore() поднимет её обратно, и выход окажется фиктивным. Пометку снимаем
-// ТОЛЬКО при осознанном подключении.
-const OPTOUT_KEY = "arrakis.wallet.optOut";
+// THE "OPTED OUT MANUALLY" MARK. WalletConnect keeps the session in localStorage, so one disconnect() is not
+// enough: on the next load restore() would raise it back and the logout would prove false. The mark is cleared
+// ONLY on a deliberate connect.
+const OPTOUT_KEY = "ninsei.wallet.optOut";
 const isOptedOut = () => { try { return localStorage.getItem(OPTOUT_KEY) === "1"; } catch { return false; } };
 const setOptOut = (on) => { try { on ? localStorage.setItem(OPTOUT_KEY, "1") : localStorage.removeItem(OPTOUT_KEY); } catch {} };
 
 export async function restore() {
-  // Вышел вручную - не подхватываем: иначе кнопка "выйти" ничего не значит.
-  if (isOptedOut()) { restoreTried = true; console.log("[wc] восстановление пропущено: кошелёк отключён вручную"); return publicState(); }
+  // Opted out manually - do not pick it up: otherwise the "log out" button means nothing.
+  if (isOptedOut()) { restoreTried = true; console.log("[wc] restore skipped: wallet disconnected manually"); return publicState(); }
   if (restoreTried || state.status === "connected") return publicState();
   restoreTried = true;
-  // Порядок: сначала сессия WalletConnect (лежит в localStorage), затем браузерный кошелёк.
-  // Второй шаг тихий: eth_accounts не показывает окно, поэтому загрузка страницы не превращается
-  // в «подключите кошелёк» для тех, кто уже подключил его раньше.
+  // Order: first the WalletConnect session (in localStorage), then a browser wallet.
+  // The second step is silent: eth_accounts shows no window, so page load does not turn into
+  // "connect your wallet" for those who already connected before.
   if (EVM.projectId) {
     try {
       const want = chainById(state.chainId || undefined);
       const p = await ensureProvider(want.chainId);
       const accounts = (p && p.accounts) || [];
-      // Пусто - сессии в хранилище нет (или она была отключена). Это нормальное состояние: ниже
-      // пробуем браузерный кошелёк и, если и его нет, страница предложит подключиться.
+      // Empty - there is no session in storage (or it was disconnected). This is normal: below we
+      // try a browser wallet and, if there is none either, the page will offer to connect.
       if (accounts.length) {
         state.kind = "walletconnect";
         state.label = "WalletConnect";
@@ -317,17 +316,17 @@ export async function restore() {
         state.error = null;
         emit();
         await refreshBalances();
-        console.info("WalletConnect: сессия восстановлена после перезагрузки", state.address);
+        console.info("WalletConnect: session restored after reload", state.address);
       }
     } catch (e) {
-      console.warn("WalletConnect: восстановить сессию не удалось", e && e.message ? e.message : e);
+      console.warn("WalletConnect: could not restore the session", e && e.message ? e.message : e);
     }
   }
   if (!isConnected()) return restoreInjected();
   return publicState();
 }
 
-// Тихая проверка браузерных кошельков: тот, кто уже разрешён сайту, возвращает адрес без окна.
+// A silent check for browser wallets: one already allowed for the site returns an address without a window.
 export async function restoreInjected({ wallets } = {}) {
   if (isConnected()) return publicState();
   const list = wallets || (await discoverWallets());
@@ -348,17 +347,17 @@ export async function restoreInjected({ wallets } = {}) {
     state.error = null;
     emit();
     await refreshBalances();
-    console.info("Браузерный кошелёк восстановлен без запроса: " + state.address);
+    console.info("Browser wallet restored without a prompt: " + state.address);
     return publicState();
   }
   return publicState();
 }
 
-// Подключение браузерного кошелька: здесь кошелёк покажет окно разрешения.
+// Connecting a browser wallet: here the wallet shows a permission window.
 export async function connectInjected({ wallet, chainSlug } = {}) {
-  setOptOut(false);  // осознанное подключение снимает пометку
+  setOptOut(false);  // a deliberate connect clears the mark
   if (!wallet || !wallet.provider) {
-    throw new Error("Расширение кошелька не найдено в этом браузере");
+    throw new Error("No wallet extension found in this browser");
   }
   if (isConnected() && state.kind === "injected" && state.label === (wallet.name || null)) {
     return { address: state.address, chainId: state.chainId };
@@ -373,35 +372,35 @@ export async function connectInjected({ wallet, chainSlug } = {}) {
   wireProvider(provider);
   try {
     const res = await injectedHandshake(provider);
-    if (!res.address) throw new Error("Кошелёк не вернул ни одного адреса");
+    if (!res.address) throw new Error("The wallet returned no address");
     state.address = res.address;
     state.chainId = res.chainId || want.chainId;
     state.status = "connected";
     state.error = null;
     emit();
-    // Сеть приводим к выбранной в форме: пользователь мог подключиться в другой сети.
+    // The network is brought to the one selected in the form: the user may have connected on another network.
     if (state.chainId !== want.chainId) await switchChain(want);
     await refreshBalances();
     return { address: state.address, chainId: state.chainId };
   } catch (e) {
-    const label = state.label || wallet.name || "Кошелёк";
+    const label = state.label || wallet.name || "Wallet";
     const message = explainInjectedError(e, label);
     if (isUserRejection(e)) {
-      console.info("[wallet] отказ пользователя: " + message);
+      console.info("[wallet] user refusal: " + message);
       reset("idle", null);
       return null;
     }
-    console.warn("[wallet] подключение не состоялось: " + message, e);
+    console.warn("[wallet] connect did not happen: " + message, e);
     reset("error", message);
     throw new Error(message);
   }
 }
 
-// Подключение. chainSlug - сеть, выбранная в форме; она же становится основной в сессии.
+// Connect. chainSlug - the network selected in the form; it also becomes the primary in the session.
 //
-// WalletConnect здесь НЕ стартует сразу: сначала показывается выбор - браузерные кошельки, найденные
-// по EIP-6963, и WalletConnect отдельной строкой. Так пользователю с расширением не создаётся сессия
-// WalletConnect, которую он не просил, а с телефона не приходится искать расширение.
+// WalletConnect does NOT start immediately here: first a choice is shown - browser wallets found via EIP-6963
+// and WalletConnect as a separate row. So a user with an extension is not given a WalletConnect session he did
+// not ask for, and a phone user does not have to hunt for an extension.
 export async function connect({ chainSlug } = {}) {
   if (isConnected()) return { address: state.address, chainId: state.chainId };
   const want = chainById(chainSlug || state.chainId || undefined);
@@ -411,16 +410,16 @@ export async function connect({ chainSlug } = {}) {
   emit();
 
   const wallets = await discoverWallets();
-  // Журнал обнаружения: первое, что нужно при «кошелёк не открывается» - кого мы вообще нашли.
-  // У старых расширений (без EIP-6963) источник legacy: имя взято по флагам, и провайдер может
-  // принадлежать другому расширению - тогда окно открывает не тот кошелёк, на который нажали.
+  // A discovery log: the first thing needed for "the wallet does not open" is who we actually found.
+  // For old extensions (no EIP-6963) the source is legacy: the name is taken from flags, and the provider may
+  // belong to another extension - then the window opens a different wallet than the one clicked.
   if (wallets.length) {
     console.info(
-      "[wallet] обнаружены в браузере: " +
+      "[wallet] found in the browser: " +
         wallets.map((w) => w.name + " [" + w.source + (w.rdns ? " " + w.rdns : "") + "]").join(", ")
     );
   } else {
-    console.info("[wallet] браузерных кошельков не найдено (остаётся WalletConnect)");
+    console.info("[wallet] no browser wallets found (WalletConnect remains)");
   }
   modal = openWalletModal({
     title: "Connect a wallet",
@@ -429,14 +428,14 @@ export async function connect({ chainSlug } = {}) {
   });
 
   const choice = await new Promise((resolve) => {
-    // Отмена (крестик, клик по фону, Cancel) - это не ошибка приложения, а решение пользователя.
+    // Cancel (the cross, a click on the backdrop, Cancel) is the user's decision, not an app error.
     modal.setOnCancel(() => resolve({ type: "cancel" }));
     const options = wallets.map((w) => ({
       key: w.rdns || w.name,
       name: w.name,
       icon: w.icon,
-      // Честная пометка: кошелёк, найденный через window.ethereum, мы называем по его флагам, но
-      // подтвердить, что это именно он, не можем - поэтому и подпись соответствующая.
+      // An honest mark: a wallet found through window.ethereum is named by its flags, but we cannot
+      // confirm it is exactly that one - hence the matching label.
       hint: w.source === "eip6963" ? null : "detected via window.ethereum",
       onClick: () => resolve({ type: "injected", wallet: w }),
     }));
@@ -462,15 +461,15 @@ export async function connect({ chainSlug } = {}) {
     return null;
   }
 
-  // --- браузерный кошелёк: окно разрешения показывает сам кошелёк ---
+  // --- browser wallet: the wallet itself shows the permission window ---
   if (choice.type === "injected") {
     try {
       const res = await connectInjected({ wallet: choice.wallet, chainSlug: want.id });
       if (modal) modal.close();
       return res;
     } catch (e) {
-      // Модалку НЕ закрываем: причина отказа должна остаться на экране. Иначе получается
-      // «нажал - ничего не произошло», и понять, что случилось, неоткуда (ловится проверкой).
+      // The modal is NOT closed: the refusal cause must stay on screen. Otherwise it is
+      // "pressed - nothing happened", and there is nowhere to learn what happened (a check catches this).
       const message = String((e && e.message) || e);
       if (modal) {
         modal.update({
@@ -482,23 +481,23 @@ export async function connect({ chainSlug } = {}) {
     }
   }
 
-  // --- WalletConnect: прежний путь, включая мгновенную отмену ---
+  // --- WalletConnect: the previous path, including instant cancel ---
   if (!EVM.projectId) {
     if (modal) modal.close();
     reset("error", "no-project-id");
     throw new Error("WalletConnect projectId is not configured");
   }
   modal.update({ status: "Preparing the session..." });
-  // Отмена должна НЕМЕДЛЕННО завершить подключение. Без этого await provider.connect()
-  // висит до таймаута сессии, кнопка "Connect wallet" остаётся disabled, и демка выглядит
-  // сломанной (баг поймался проверкой в браузере: после отмены кнопка не оживала).
+  // Cancel must finish the connect IMMEDIATELY. Without this, await provider.connect() hangs until the
+  // session timeout, the "Connect wallet" button stays disabled, and the demo looks broken (the bug was
+  // caught by a browser check: after cancel the button did not revive).
   let cancelReject = null;
   const cancelled = new Promise((_, reject) => {
     cancelReject = () => reject(new Error("Connection cancelled"));
   });
 
   modal.setOnCancel(() => {
-    // Пользователь закрыл модалку: сессию надо погасить, иначе она останется висеть.
+    // The user closed the modal: the session must be extinguished, else it hangs.
     const p = provider;
     provider = null;
     if (p) Promise.resolve(p.disconnect()).catch(() => {});
@@ -515,7 +514,7 @@ export async function connect({ chainSlug } = {}) {
     state.chainId = Number(p.chainId);
     state.status = "connected";
     state.error = null;
-    // Именно close(), а не cancel(): подключение состоялось, гасить сессию не нужно.
+    // Exactly close(), not cancel(): the connection happened, the session must not be extinguished.
     if (modal) modal.close();
     emit();
     await refreshBalances();
@@ -523,7 +522,7 @@ export async function connect({ chainSlug } = {}) {
   } catch (e) {
     const message = e && e.message ? String(e.message) : String(e);
     console.warn("WalletConnect connect failed:", message);
-    // Отказ пользователя - это не ошибка приложения.
+    // The user's refusal is not an app error.
     const rejected = isUserRejection(e) || /cancell?ed/i.test(message);
     if (modal) modal.close();
     reset(rejected ? "idle" : "error", rejected ? null : message);
@@ -532,50 +531,50 @@ export async function connect({ chainSlug } = {}) {
   }
 }
 
-// ПОДПИСЬ СООБЩЕНИЯ кошельком (EIP-191). Это НЕ транзакция: она ничего не двигает, не стоит газа и не
-// может быть предъявлена контракту - она доказывает ровно одно: владение адресом. На этом держится вход
-// в свой список сделок, потому что подключение кошелька само по себе ничего не доказывает: сервер по нему
-// не знает, кто на другом конце.
+// SIGNING A MESSAGE with the wallet (EIP-191). This is NOT a transaction: it moves nothing, costs no gas and
+// cannot be presented to a contract - it proves exactly one thing: ownership of the address. Entry into your
+// own deal list rests on this, because connecting a wallet proves nothing by itself: the server cannot tell
+// from it who is on the other end.
 //
-// Метод personal_sign поддержан собранным SDK - проверено поиском по бандлу, а не по памяти.
+// personal_sign is supported by the built SDK - verified by searching the bundle, not from memory.
 export async function signMessage(message) {
   if (!provider || state.status !== "connected") {
-    throw new Error("кошелёк не подключён: подпись невозможна");
+    throw new Error("wallet not connected: signing is impossible");
   }
-  // СООБЩЕНИЕ ПЕРЕДАЁМ В HEX, А НЕ ТЕКСТОМ. Так требует EIP-191: первым аргументом personal_sign идут
-  // байты сообщения в hex. MetaMask принимает и текст (поэтому на живом кошельке это годами не всплывало),
-  // а узел отвечает отказом: "invalid value: string ..., expected a valid hex string". Проверено вызовом:
-  // текст - отказ -32602, hex - подпись. Порядок аргументов [данные, адрес] - как у MetaMask и WalletConnect.
-  // Если кошелёк ответит ошибкой, показываем её КАК ЕСТЬ: по тексту сразу видно причину.
+  // THE MESSAGE IS PASSED IN HEX, NOT AS TEXT. EIP-191 requires it: the first personal_sign argument is the
+  // message bytes in hex. MetaMask accepts text too (which is why this never surfaced on a live wallet for
+  // years), while a node refuses: "invalid value: string ..., expected a valid hex string". Verified by a call:
+  // text - refusal -32602, hex - a signature. The argument order [data, address] is as in MetaMask and WalletConnect.
+  // If the wallet answers with an error, we show it AS IS: the cause is visible from the text.
   const hex = "0x" + Array.from(new TextEncoder().encode(String(message)), (b) => b.toString(16).padStart(2, "0")).join("");
   return await provider.request({ method: "personal_sign", params: [hex, state.address] });
 }
 
-// ПОДПИСЬ TYPED DATA КОШЕЛЬКОМ (EIP-712, eth_signTypedData_v4). ЭТО ТОЖЕ НЕ ТРАНЗАКЦИЯ: подпись не
-// двигает деньги и не стоит газа, поэтому её может дать человек БЕЗ своего ETH. Ею вносящий разрешает
-// фабрике записать его адрес в ордер (issue #97, часть A/C), а отправить транзакцию за него вправе кто
-// угодно (путь createOrderAndFundByDepositor).
+// SIGNING TYPED DATA with the wallet (EIP-712, eth_signTypedData_v4). This is also NOT a transaction: the
+// signature moves no money and costs no gas, so a person WITHOUT their own ETH can give it. With it the
+// depositor lets the factory record his address in the order, and anyone may send the transaction for him
+// (the createOrderAndFundByDepositor path).
 //
-// ЧТО ИМЕННО ПОДПИСЫВАЕТСЯ, РЕШАЕТ ВЫЗЫВАЮЩИЙ: сюда приходит ГОТОВОЕ typed data (www/js/evm/depositor.js),
-// а не строка. Собирать форму здесь значило бы завести вторую запись протокола рядом с настоящей.
+// WHAT EXACTLY IS SIGNED IS DECIDED BY THE CALLER: ready typed data arrives here (www/js/evm/depositor.js),
+// not a string. Assembling the shape here would be a second record of the protocol next to the real one.
 export async function signTypedData(typedData) {
   if (!provider || state.status !== "connected") {
-    throw new Error("кошелёк не подключён: подпись typed data невозможна");
+    throw new Error("wallet not connected: typed-data signing is impossible");
   }
-  if (!typedData || typeof typedData !== "object") throw new Error("signTypedData: не передано typed data");
-  // Порядок аргументов [адрес, JSON] - как требует EIP-712 и как принимают MetaMask и WalletConnect.
+  if (!typedData || typeof typedData !== "object") throw new Error("signTypedData: no typed data passed");
+  // The argument order [address, JSON] is as EIP-712 requires and as MetaMask and WalletConnect accept.
   const signature = await provider.request({
     method: "eth_signTypedData_v4",
     params: [state.address, JSON.stringify(typedData)],
   });
   if (typeof signature !== "string" || !/^0x[0-9a-fA-F]{130}$/.test(signature)) {
-    throw new Error("кошелёк вернул не 65-байтовую подпись typed data: " + String(signature).slice(0, 20));
+    throw new Error("the wallet returned a non-65-byte typed-data signature: " + String(signature).slice(0, 20));
   }
   return signature;
 }
 
 export async function disconnect() {
-  setOptOut(true);   // запоминаем решение: после перезагрузки кошелёк не подхватится
+  setOptOut(true);   // remember the decision: after a reload the wallet is not picked up
   const p = provider;
   const kind = state.kind;
   if (!p) {
@@ -584,9 +583,9 @@ export async function disconnect() {
   }
   try {
     if (kind === "injected") {
-      // У браузерного кошелька нет «сессии» на нашей стороне: мы можем только попросить отозвать
-      // разрешение (wallet_revokePermissions) и забыть адрес у себя. Честно: следующие
-      // eth_accounts могут снова вернуть адрес, если кошелёк помнит сайт.
+      // A browser wallet has no "session" on our side: we can only ask it to revoke the permission
+      // (wallet_revokePermissions) and forget the address locally. Honestly: the next eth_accounts may
+      // return the address again if the wallet remembers the site.
       if (typeof p.revokePermissions === "function") {
         await p.request({ method: "wallet_revokePermissions", params: [{ eth_accounts: {} }] });
       }
@@ -599,8 +598,8 @@ export async function disconnect() {
   reset("idle", null);
 }
 
-// Смена сети в кошельке. Если сети у пользователя нет - предлагаем добавить её с нашим rpcUrl
-// (это параметр кошелька, страница по этому адресу не ходит - CSP не при чём).
+// Switching the network in the wallet. If the user lacks it - we offer to add it with our rpcUrl
+// (this is a wallet parameter; the page does not go to that address - CSP is not involved).
 export async function switchChain(chainSlugOrId) {
   const chain = typeof chainSlugOrId === "object" ? chainSlugOrId : chainById(chainSlugOrId);
   if (!provider || !isConnected()) return false;
@@ -641,90 +640,90 @@ export async function switchChain(chainSlugOrId) {
   return true;
 }
 
-// Чтение балансов через провайдер кошелька: нативный - eth_getBalance, ERC-20 - balanceOf
-// через eth_call (селектор 0x70a08231), decimals берём из конфига (в них и была ловушка BSC).
-// Отправить транзакцию из кошелька ПОЛЬЗОВАТЕЛЯ и вернуть её хеш.
+// Reading balances through the wallet provider: native via eth_getBalance, ERC-20 via balanceOf
+// through eth_call (selector 0x70a08231); decimals come from the config (where the BSC trap was).
+// Send a transaction from the USER's wallet and return its hash.
 //
-// Метод EIP-1193, один для WalletConnect и для браузерных кошельков: и те, и другие отдают
-// провайдера с request(). Подпись происходит в кошельке, наш код ключей не касается.
+// An EIP-1193 method, one for WalletConnect and browser wallets: both expose
+// a provider with request(). The signature happens in the wallet, our code never touches keys.
 //
-// Вызов возвращается не сразу: пользователь подтверждает транзакцию в своём кошельке, и до этого
-// момента промис висит. Вызывающий код обязан показать это в интерфейсе, иначе шаг выглядит зависшим.
+// The call does not return at once: the user confirms the transaction in their wallet, and until
+// then the promise hangs. The caller must show this in the interface, else the step looks stuck.
 //
-// value передаётся как hex-строка (wei). Для вызова payable-функции эскроу (lock) сумма уходит в value,
-// у самой функции аргументов нет; для createOrder у фабрики value не нужен вовсе.
-// Прочитать контракт: вызов view-функции без транзакции и без газа.
+// value is passed as a hex string (wei). For calling a payable escrow function (lock) the amount goes into
+// value and the function takes no arguments; for the factory's createOrder value is not needed at all.
+// Read a contract: calling a view function without a transaction and without gas.
 //
-// Нужен, чтобы узнать адрес эскроу ДО его создания (фабрика.predict) и чтобы читать состояние
-// (эскроу.status) при опросе. Ключей не требует, кошелёк не спрашивает - только провайдер.
+// Needed to learn the escrow address BEFORE it is created (factory.predict) and to read state
+// (escrow.status) while polling. Requires no keys, asks the wallet nothing - only the provider.
 export async function readContract({ to, data } = {}) {
-  if (!provider) throw new Error("кошелёк не подключён: читать контракт нечем");
-  if (!to) throw new Error("не указан адрес контракта");
-  if (!data) throw new Error("не указаны данные вызова");
+  if (!provider) throw new Error("wallet not connected: nothing to read the contract with");
+  if (!to) throw new Error("no contract address given");
+  if (!data) throw new Error("no call data given");
   const result = await provider.request({ method: "eth_call", params: [{ to, data }, "latest"] });
   if (typeof result !== "string" || !result.startsWith("0x")) {
-    throw new Error("неожиданный ответ на вызов контракта: " + String(result).slice(0, 60));
+    throw new Error("unexpected answer to a contract call: " + String(result).slice(0, 60));
   }
   return result;
 }
 
-// КВИТАНЦИЯ ТРАНЗАКЦИИ. Нужна там, где хеша мало: у создания ордера в её событиях лежит ФАКТИЧЕСКИЙ адрес
-// эскроу. Предсказанный адрес - это надежда (он зависит от соли и кода фабрики), а событие - факт.
-// Читается тем же провайдером, что и вызовы контракта: второго способа обращаться к цепи не заводим.
-// КОД КОНТРАКТА (eth_getCode). Нужен проверке кода фабрики (#103): extcodehash - это keccak256 от этого
-// кода, и по нему интерфейс сверяет фабрику со списком известных сборок. eth_call сюда не годится: код
-// читается ДРУГИМ методом, поэтому и функция отдельная.
+// THE TRANSACTION RECEIPT. Needed where a hash is not enough: in the order-creation events it carries the
+// ACTUAL escrow address. A predicted address is a hope (it depends on the salt and the factory code), an event is a fact.
+// Read by the same provider as the contract calls: we keep no second way to reach the chain.
+// CONTRACT CODE (eth_getCode). Needed by the factory-code check: extcodehash is keccak256 of this code,
+// and the interface compares the factory against the list of known builds by it. eth_call will not do: code
+// is read by a DIFFERENT method, hence a separate function.
 export async function readCode({ address } = {}) {
-  if (!provider) throw new Error("кошелёк не подключён: читать код контракта нечем");
-  if (!address || !/^0x[0-9a-fA-F]{40}$/.test(String(address))) throw new Error("не адрес для чтения кода: " + String(address));
+  if (!provider) throw new Error("wallet not connected: nothing to read the contract code with");
+  if (!address || !/^0x[0-9a-fA-F]{40}$/.test(String(address))) throw new Error("not an address for reading code: " + String(address));
   return await provider.request({ method: "eth_getCode", params: [address, "latest"] });
 }
 
 export async function readReceipt({ hash } = {}) {
-  if (!provider) throw new Error("кошелёк не подключён: квитанцию читать нечем");
-  if (!hash) throw new Error("не указан хеш транзакции");
+  if (!provider) throw new Error("wallet not connected: nothing to read the receipt with");
+  if (!hash) throw new Error("no transaction hash given");
   const r = await provider.request({ method: "eth_getTransactionReceipt", params: [hash] });
-  if (!r || typeof r !== "object") return null;      // ещё не в блоке - это НЕ ошибка, а ожидание
+  if (!r || typeof r !== "object") return null;      // not in a block yet - NOT an error but a wait
   return r;
 }
 
 export async function sendTransaction({ to, data, value = "0x0", gas } = {}) {
-  if (!provider) throw new Error("кошелёк не подключён: отправлять нечем");
-  if (!to) throw new Error("не указан адрес контракта");
-  if (!data) throw new Error("не указаны данные вызова");
+  if (!provider) throw new Error("wallet not connected: nothing to send with");
+  if (!to) throw new Error("no contract address given");
+  if (!data) throw new Error("no call data given");
   const from = address();
-  if (!from) throw new Error("кошелёк не подключён: нет адреса отправителя");
+  if (!from) throw new Error("wallet not connected: no sender address");
   const tx = { from, to, data, value: typeof value === "bigint" ? "0x" + value.toString(16) : value };
   if (gas) tx.gas = typeof gas === "bigint" ? "0x" + gas.toString(16) : gas;
-  // КОМИССИЮ СЧИТАЕМ САМИ И ОДНИМ ПРАВИЛОМ. Формула (2 x baseFee + чаевые) вынесена в
-  // www/js/evm/claimGas.js - в тот же модуль, по которому нода считает ПОДАРОК на claim. Второй расчёт
-  // здесь разошёлся бы с подарком (issue #127). Пол чаевых - политика сети (Arbitrum: 0), не 1 gwei.
+  // WE COMPUTE THE FEE OURSELVES WITH ONE RULE. The formula (2 x baseFee + tip) is in
+  // www/js/evm/claimGas.js - the same module by which the node computes the GIFT at claim. A second
+  // computation here would diverge from the gift. The tip floor is a network policy (Arbitrum: 0), not 1 gwei.
   try {
     const latest = await provider.request({ method: "eth_getBlockByNumber", params: ["latest", false] });
     const baseFee = latest && latest.baseFeePerGas ? BigInt(latest.baseFeePerGas) : 0n;
     let priorityFeeWei = 0n;
     try {
-      // Чаевые берём из eth_gasPrice: этот метод есть у любого провайдера. eth_maxPriorityFeePerGas
-      // поддерживают не все, и MetaMask отвечает на него ошибкой -32601, которая лезет в консоль пользователя.
+      // The tip is taken from eth_gasPrice: every provider has this method. eth_maxPriorityFeePerGas
+      // is not supported by all, and MetaMask answers it with error -32601, which lands in the user's console.
       const gp = await provider.request({ method: "eth_gasPrice", params: [] });
       if (typeof gp === "string" && /^0x[0-9a-fA-F]+$/.test(gp)) {
         const diff = BigInt(gp) - baseFee;
-        if (diff > 0n) priorityFeeWei = diff;      // разница gasPrice - baseFee и есть чаевые
+        if (diff > 0n) priorityFeeWei = diff;      // gasPrice - baseFee is exactly the tip
       }
-    } catch { /* не подсказал - чаевые остаются нулевыми */ }
+    } catch { /* no hint given - the tip stays zero */ }
     const maxFee = claimMaxFeePerGasWei({ baseFeeWei: baseFee, priorityFeeWei });
-    // maxFee === null значит сеть без EIP-1559 (baseFee = 0): поля не выставляем, решает кошелёк.
+    // maxFee === null means a network without EIP-1559 (baseFee = 0): fields are not set, the wallet decides.
     if (maxFee !== null) {
       tx.maxPriorityFeePerGas = "0x" + (maxFee - baseFee * 2n).toString(16);
       tx.maxFeePerGas = "0x" + maxFee.toString(16);
     }
   } catch (feeErr) {
-    // Не смогли посчитать - отдаём решение кошельку, как раньше. Молча падать из-за этого нельзя.
-    console.warn("не удалось посчитать комиссию, решает кошелёк: " + ((feeErr && feeErr.message) || feeErr));
+    // Could not compute - leave the decision to the wallet, as before. Failing silently over this is not allowed.
+    console.warn("could not compute the fee, the wallet decides: " + ((feeErr && feeErr.message) || feeErr));
   }
   const hash = await provider.request({ method: "eth_sendTransaction", params: [tx] });
   if (typeof hash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(hash)) {
-    throw new Error("кошелёк вернул не хеш транзакции: " + String(hash).slice(0, 60));
+    throw new Error("the wallet returned not a transaction hash: " + String(hash).slice(0, 60));
   }
   return hash;
 }

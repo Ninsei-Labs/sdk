@@ -1,76 +1,69 @@
 // GENERATED FILE - a byte-for-byte copy of the engine module www/js/recovery/restore.js for the SDK package.
-// Edit the source under www/js, then run: node tools/build-sdk-engine.mjs
-// tools/check-sdk-engine.mjs reddens on any drift, so a stale copy cannot ship silently.
+// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
 // Everything below this header is identical to the source.
 
-// Обратный путь recovery-файла: файл → кошелёк, которым можно забрать XMR.
-//
-// Прямой путь (генерация файла) - в recoveryFile.js. Здесь то, ради чего файл вообще существует:
-// восстановление, когда вкладка потеряна. Два правила закреплены кодом, а не комментарием:
-//
-//   1) кошелёк восстанавливается из мнемоники, и восстановленный адрес ОБЯЗАН совпасть с адресом
-//      в файле. Не совпал - файл повреждён или подменён, и продолжать нельзя: молчаливое
-//      «восстановилось» означало бы показать пользователю чужой кошелёк и потерять его средства;
-//   2) на сервер (watch-only кошелёк) уходит ТОЛЬКО view key с адресом и высотой. Ключ траты,
-//      мнемоника и seed остаются в браузере - это граница продукта, поэтому она вынесена в
-//      отдельную функцию и проверяется отдельным тестом (tools/check-recovery.mjs).
+// The reverse recovery-file path: file -> wallet that can claim the XMR.
+// The forward path (file generation) is in recoveryFile.js. Here is why the file exists: recovery when the tab is
+// lost. Two rules are pinned by CODE, not by a comment:
+//   1) the wallet is restored from the mnemonic, and the restored address MUST match the address in the file. No
+//      match - the file is corrupted or substituted, and we must not continue;
+//   2) only the view key, with the address and height, goes to the server (watch-only). The spend key, mnemonic
+//      and seed stay in the browser, a product boundary checked by a separate test.
 
 import { createSwapWallet } from "../monero/wallet.js";
 import { decryptFile, validatePayload } from "./recoveryFile.js";
 import { swapAddressFromHalves, watchViewSeedHex } from "../monero/swapKeys.js";
 
-// Восстановленный кошелёк + всё, что нужно для скана: высота и предупреждения формата.
+// The restored wallet plus everything needed for the scan: height and format warnings.
 //
-// ДВЕ РАЗНЫЕ СХЕМЫ, И ОБЕ ЖИВЫЕ. Файл версии 2 несёт МНЕМОНИКУ: из неё собирается полный кошелёк. Файл версии 3
-// несёт ПОЛОВИНЫ, и полного ключа траты в нём НЕТ И БЫТЬ НЕ МОЖЕТ: у каждой стороны только своя половина,
-// вторая раскрывается в цепи при заборе ETH. Поэтому из файла версии 3 собирается ВИДЯЩИЙ кошелёк (ключ
-// просмотра - сумма двух половин просмотра), а трата становится возможной только после раскрытия.
+// TWO DIFFERENT SCHEMES, BOTH LIVE. A v2 file carries a MNEMONIC (a full wallet is built from it). A v3 file
+// carries HALVES, and has NO full spend key: each side has only its half, the second is revealed on chain at ETH
+// claim. So a v3 file builds a VIEWING wallet; spending becomes possible only after the reveal.
 //
-// deps нужен для проверяемости: в браузере библиотеки берутся из вендорного бандла (подгружаются здесь
-// динамически, потому что статический импорт бандла сломал бы прогоны в Node), а в тестах передаются свои.
+// deps is needed for testability: in the browser the libraries come from the vendored bundle (loaded dynamically,
+// as a static bundle import would break Node runs), in tests they are passed in.
 export async function restoreWalletFromPayload(payload, deps = {}) {
   const { warnings } = validatePayload(payload);
   const m = payload.moneroWallet;
   const network = m.network || payload.moneroNetwork;
   if (payload.version >= 3) return await restoreFromHalves(payload, warnings, deps);
 
-  // Мнемоника передаётся явно: monero-js проверит контрольную сумму и откажется работать,
-  // если фраза битая (в wallet.js это теперь ошибка, а не тихая генерация нового кошелька).
+  // The mnemonic is passed explicitly: monero-js checks its checksum and refuses a broken phrase
+  // (in wallet.js this is now an error, not a silent new-wallet generation).
   const wallet = await createSwapWallet({ seed: m.mnemonic, network });
 
   if (wallet.address !== m.address) {
-    throw new Error("адрес из файла не совпал с адресом, выведенным из мнемоники: файл повреждён или изменён");
+    throw new Error("the address from the file does not match the one derived from the mnemonic: the file is corrupted or altered");
   }
-  // Публичные ключи в файле - вторая проверка того же самого, но по другим данным: адрес
-  // собирается из них, поэтому расхождение означает правку файла руками.
+  // The public keys in the file are a second check on the same thing: the address is built from them, so a
+  // mismatch means the file was edited by hand.
   for (const [field, value] of [
     ["publicSpendKey", wallet.publicSpendKey],
     ["publicViewKey", wallet.publicViewKey],
   ]) {
     if (m[field] && m[field] !== value) {
-      throw new Error(`ключ ${field} из файла не совпал с выведенным из мнемоники: файл изменён`);
+      throw new Error(`key ${field} from the file does not match the one derived from the mnemonic: the file was altered`);
     }
   }
 
   return {
     wallet,
     payload,
-    // Ради этого высота и хранится: без неё кошелёк сканирует историю Monero с нуля (десятки часов).
+    // This is why the height is stored: without it the wallet scans Monero history from scratch (tens of hours).
     restoreHeight: Number.isFinite(m.restoreHeight) && m.restoreHeight > 0 ? m.restoreHeight : 0,
     warnings,
   };
 }
 
-// ВОССТАНОВЛЕНИЕ ИЗ ПОЛОВИН (файл версии 3). Что здесь есть и чего здесь нет:
+// RESTORATION FROM HALVES (v3 file). What is here and what is not:
+//   present: INTEGRITY CHECK. The address is built from our halves and THEIR points and must match the file
+//   address - the same role as the address/mnemonic comparison in v2. No match - the file is corrupted or
+//   substituted, and we must not continue;
+//   present: the VIEW KEY - the sum of our view half and the counterparty half. It lets the wallet SEE arrivals;
+//   NOT present: the spend key. It cannot be assembled: the second spend half is not in the file. It comes from
+//   the chain when the counterparty claims the ETH - then spending becomes possible (sweepSpendSecret verifies
+//   it against the order public key).
 //
-//   есть: ПРОВЕРКА ЦЕЛОСТНОСТИ. Адрес собирается из своих половин и ЧУЖИХ ТОЧЕК и обязан совпасть с адресом
-//   в файле - ровно та же роль, что у сравнения адреса с мнемоникой в ветке v2. Не совпал - файл повреждён или
-//   подменён, и продолжать нельзя;
-//   есть: КЛЮЧ ПРОСМОТРА - сумма своей половины просмотра и половины контрагента (она в файле и не секрет).
-//   Им кошелёк ВИДИТ поступления на общий адрес;
-//   НЕТ: ключ траты. Его нельзя собрать: второй половины траты в файле нет, и это не упущение, а свойство
-//   схемы. Она придёт из цепи, когда контрагент заберёт ETH, - вот тогда трата и станет возможной
-//   (sweepSpendSecret сверяет её с публичным ключом ордера).
 export async function restoreFromHalves(payload, warnings = [], deps = {}) {
   const m = payload.moneroWallet;
   const network = m.network || payload.moneroNetwork;
@@ -86,7 +79,7 @@ export async function restoreFromHalves(payload, warnings = [], deps = {}) {
         });
         return { halves, addressFromKeys, keccak256: vendor.keccak256 };
       })();
-  if (!libs.keccak256) throw new Error("нет keccak256: без него адрес не проверить");
+  if (!libs.keccak256) throw new Error("no keccak256: the address cannot be checked without it");
 
   const built = swapAddressFromHalves({
     halves: libs.halves, addressFromKeys: libs.addressFromKeys, deps: { keccak256: libs.keccak256 },
@@ -94,7 +87,7 @@ export async function restoreFromHalves(payload, warnings = [], deps = {}) {
     otherSpendPoint: m.otherSpendPoint, otherViewPoint: m.otherViewPoint, network,
   });
   if (built.address !== m.address) {
-    throw new Error("адрес из файла не совпал с адресом, собранным из половин и точек контрагента: файл повреждён или изменён");
+    throw new Error("the address from the file does not match the one built from the halves and counterparty points: the file is corrupted or altered");
   }
   const viewSeedHex = watchViewSeedHex({
     halves: libs.halves, ownViewHalf: m.viewHalf, otherViewHalf: m.otherViewHalf,
@@ -111,7 +104,7 @@ export async function restoreFromHalves(payload, warnings = [], deps = {}) {
     otherViewPoint: m.otherViewPoint,
     otherViewHalf: m.otherViewHalf,
     source: "halves",
-    // ЯВНО: этим кошельком ПОКА нельзя распоряжаться. Ключ траты появится после раскрытия половины в цепи.
+    // EXPLICIT: this wallet CANNOT yet spend. The spend key appears after a half is revealed on chain.
     spendable: false,
   };
   return {
@@ -120,49 +113,45 @@ export async function restoreFromHalves(payload, warnings = [], deps = {}) {
     restoreHeight: Number.isFinite(m.restoreHeight) && m.restoreHeight > 0 ? m.restoreHeight : 0,
     warnings: [
       ...warnings,
-      "этот файл описывает схему ПОЛОВИН: ключом просмотра видно поступления, а для траты нужна половина " +
-        "контрагента, которая раскрывается в цепи при заборе ETH",
+      "this file describes the HALVES scheme: the view key sees arrivals, but spending needs the counterparty " +
+        "half, which is revealed on chain at the ETH claim",
     ],
   };
 }
 
-// Полный путь: расшифровать файл паролем и восстановить кошелёк.
+// The full path: decrypt the file with a password and restore the wallet.
 export async function restoreFromFile(fileObject, passphrase, deps = {}) {
   return restoreWalletFromPayload(await decryptFile(fileObject, passphrase), deps);
 }
 
-// Страховка на будущее, вынесена отдельной функцией именно для того, чтобы её можно было
-// проверить тестом: сейчас share собирается по белому списку полей, поэтому секрет в него
-// попасть не может. Но если завтра кто-то добавит в share поле «на всякий случай», падать это
-// должно здесь, а не утекать на сервер. Проверяем двумя способами - по именам полей и по
-// значениям (переименовать поле легко, а значение секрета останется тем же).
+// A safeguard pulled out so it can be tested: today share is built from a field allowlist, so a secret cannot
+// get in. But if someone later adds a just-in-case field, it must fail here instead of leaking to the server.
+// We check by field names and by values (renaming a field is easy, the secret value is not).
 export function assertNoSecretsInShare(share, wallet) {
-  // spendHalf и viewHalf добавлены вместе со схемой половин: это секреты той же силы, что и ключ траты,
-  // и на сервер они попасть не должны - он видит только СУММУ половин просмотра, и этого хватает,
-  // чтобы видеть входящие, и недостаточно, чтобы их потратить.
+  // spendHalf and viewHalf were added with the halves scheme: secrets as strong as the spend key, they must not
+  // reach the server - it sees only the SUM of view halves, enough to see incoming, not to spend.
   for (const name of ["mnemonic", "seed", "seedHex", "privateSpendKey", "spendKey", "subaddressKeys", "spendHalf", "viewHalf"]) {
-    if (Object.hasOwn(share, name)) throw new Error("watch-only share не должен содержать " + name);
+    if (Object.hasOwn(share, name)) throw new Error("the watch-only share must not contain " + name);
   }
   const json = JSON.stringify(share);
   for (const [label, secret] of [
-    ["ключ траты", wallet.privateSpendKey],
-    ["мнемоника", wallet.mnemonic],
+    ["spend key", wallet.privateSpendKey],
+    ["mnemonic", wallet.mnemonic],
     ["seed", wallet.seedHex],
-    ["половина ключа траты", wallet.spendHalf],
-    ["половина ключа просмотра", wallet.viewHalf],
+    ["spend key half", wallet.spendHalf],
+    ["view key half", wallet.viewHalf],
   ]) {
-    if (secret && json.includes(secret)) throw new Error(`в watch-only share попал секрет (${label})`);
+    if (secret && json.includes(secret)) throw new Error(`the watch-only share leaked a secret (${label})`);
   }
   return share;
 }
 
-// То, что уходит на сервер: адрес и view key - этого достаточно, чтобы видеть входящие
-// на кошелёк, и недостаточно, чтобы их потратить.
+// What goes to the server: the address and view key - enough to see incoming, not to spend.
 export function watchOnlyShareFromWallet({ swapId = null, wallet, restoreHeight = null } = {}) {
   if (!wallet || !wallet.address || !wallet.privateViewKey) {
-    throw new Error("для watch-only нужен кошелёк с адресом и приватным view key");
+    throw new Error("a watch-only wallet needs an address and a private view key");
   }
-  // Собираем по белому списку: поля кошелька, которых здесь нет, наружу не попадут никогда.
+  // Built from the allowlist: wallet fields not listed here will never go out.
   return assertNoSecretsInShare(
     {
       swapId: swapId || null,

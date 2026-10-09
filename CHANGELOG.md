@@ -1,3 +1,12 @@
+## Unreleased
+
+THE ENGINE MIRROR (`engine/**`) CROSSES OVER IN ENGLISH, WITHOUT THE OLD BRAND AND WITHOUT A HARDCODED DOMAIN.
+All 45 modules are copied byte-for-byte from the demo repository's `sdk/engine` (`tools/build-sdk-engine.mjs`):
+comments are concise technical English and message strings are translated one to one, `Arrakis` is renamed to
+`Ninsei` (including environment constants and paths), the hardcoded domain is gone from the code - the page's own
+address comes from `location.origin` and node addresses from one named place set at deploy - and the EIP-712
+signing-domain name/version are read from the config, not from a literal in the signer.
+
 ## 0.39.3 — 2026-10-09
 
 A NODE'S ADDRESS DENYLIST REFUSAL REACHES THE APP AS ITS OWN CODE, AND THE INTERFACE CAN CHECK ADDRESSES ITSELF (issue #16).

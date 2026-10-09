@@ -1,55 +1,51 @@
 // GENERATED FILE - a byte-for-byte copy of the engine module www/js/core/preSignGuards.js for the SDK package.
-// Edit the source under www/js, then run: node tools/build-sdk-engine.mjs
-// tools/check-sdk-engine.mjs reddens on any drift, so a stale copy cannot ship silently.
+// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
 // Everything below this header is identical to the source.
 
-// ЗАЩИТЫ ПЕРЕД ПОДПИСЬЮ: НЕДОПУСТИМАЯ СДЕЛКА НЕ НАЧИНАЕТСЯ (док 45).
+// PRE-SIGNING GUARDS: AN INADMISSIBLE DEAL DOES NOT START.
 //
-// ЗАЧЕМ ОТДЕЛЬНЫЙ МОДУЛЬ. До сих пор защиты жили врозь: одна - в реестре маршрутов (evm/dex.js:
-// покрытие суммы и цена DEX-ноги), прочие - в виде проверок, разбросанных по форме и по потоку ордера. От
-// этого заводится ровно тот дефект, из-за которого файл и написан: правило есть, а подпись не
-// останавливается, потому что экран его не спросил. Здесь правила сведены в ОДНО место, у них ОДНА
-// форма ответа, и сводка (signingGateVerdict) отвечает на единственный вопрос, который решает дело:
-// начинать подпись или нет.
+// WHY A SEPARATE MODULE. The guards used to live apart: one in the route registry (the DEX leg's coverage and
+// price), the rest scattered across the form and the order flow. That breeds exactly the defect this file exists
+// for: the rule is there but the signature does not stop, because the screen never asked. Here the rules sit in
+// ONE place with ONE answer shape, and the summary (signingGateVerdict) answers the only question that matters:
+// start the signature or not.
 //
-// ЧТО ЗНАЧИТ ОТВЕТ. Каждый приговор несёт три поля, и они разные по смыслу:
-//   blocks  - подписывать НЕЛЬЗЯ (это и есть защита; вызывающий ОБЯЗАН считаться с этим полем);
-//   checked - удалось ли вообще проверить (true/false);
-//   reason  - слова, и в них ЧИСЛА: человеку нужно не "нельзя", а "нельзя, потому что вот столько".
-// Отличать checked от blocks обязательно, и вот почему на двух примерах из этого файла:
+// WHAT AN ANSWER MEANS. Every verdict carries three fields of different meaning:
+//   blocks  - signing is NOT ALLOWED (the guard itself; the caller MUST honour this field);
+//   checked - whether the check could be performed at all (true/false);
+//   reason  - words, and they carry NUMBERS: a person needs not "no" but "no, because this much".
+// Telling checked from blocks is mandatory; two examples from this file show why:
 //
-//   * НЕПРОВЕРЕННЫЙ БАЛАНС БЛОКИРУЕТ. Прочитать баланс мы умеем всегда, и "не прочитали" здесь значит
-//     "не знаем, хватает ли денег на то, что человек собирается подписать". Пропустить это значило бы
-//     отправить человека подписывать отказ кошелька.
-//   * НЕИЗМЕРЕННЫЙ ЗАПАС НА ГАЗ НЕ БЛОКИРУЕТ, И ЭТО РЕШЕНИЕ, А НЕ ЗАБЫВЧИВОСТЬ. Отличие от проверки
-//     цены DEX-ноги принципиальное: негодная цена означает, что сделка НЕВЕРНАЯ, а неизмеренный газ -
-//     всего лишь "запас неизвестен". Сама сделка от этого не становится недопустимой, а нехватку
-//     топлива на транзакцию назовёт кошелёк. Поэтому такой случай помечается словами (checked: false,
-//     kind reserve-unstated) и НЕ запирает подпись.
-//   * НЕ НАЗВАННЫЙ ПРОВАЙДЕРОМ ДИАПАЗОН ОБЪЁМА - ТАК ЖЕ: помечается, не запирает (решение уже принято
-//     рынком: "объём не назван - ограничивать нечем", www/js/mock/market.js: coversSize).
+//   * AN UNCHECKED BALANCE BLOCKS. Reading a balance always works here, so "could not read" means "we do not
+//     know whether there is enough money for what the person is about to sign". Skipping it would send the person
+//     to sign a wallet refusal.
+//   * AN UNMEASURED GAS RESERVE DOES NOT BLOCK, AND THAT IS A DECISION, NOT AN OVERSIGHT. Unlike the DEX price
+//     check: a bad price means the deal is WRONG, while an unmeasured gas figure only means "the reserve is
+//     unknown". The deal does not become inadmissible, and a wallet will name a shortfall anyway. So this case is
+//     marked (checked: false, kind reserve-unstated) and does NOT lock the signature.
+//   * A SIZE RANGE THE PROVIDER DID NOT NAME - SAME THING: marked, not blocking (the market already decided:
+//     "no size named - nothing to cap", see coversSize in the mock market module).
 //
-// И ЕЩЁ ОДНО, ЧТО ЗДЕСЬ ПРИНЦИПИАЛЬНО. Все приговоры - ЧИСТЫЕ функции: ни сети, ни кошелька, ни DOM.
-// Поэтому каждую защиту можно прогнать на числах, которые её ЛОМАЮТ, и увидеть, что она краснеет:
-// "код есть" не равно "отказ работает" (tools/check-signing-guards.mjs).
+// ONE MORE THING THAT IS FUNDAMENTAL HERE. All verdicts are PURE functions: no network, no wallet, no DOM. So
+// each guard can be run against the numbers that BREAK it and be seen red: "the code is there" is not "the
+// refusal works".
 //
-// ПОРОГИ ПРИХОДЯТ ДАННЫМИ (реестр: SIGNING_GUARDS в core/config.js), а не лежат здесь числами: менять
-// их - правка данных, а не логики.
+// THE THRESHOLDS COME IN AS DATA (the registry: SIGNING_GUARDS in core/config.js), not as numbers here: changing
+// them is a data edit, not a logic edit.
 
-// wei из того, что дал вызывающий (BigInt, строка, число). Не разобралось - null, и это НЕ ноль:
-// ноль баланса и "баланс неизвестен" - два разных состояния, и путать их нельзя.
+// wei from whatever the caller supplied (BigInt, string, number). Unparsable - null, and that is NOT zero: a zero
+// balance and an unknown balance are two different states and must not be confused.
 const wei = (v) => {
   if (v === null || v === undefined || v === "") return null;
   try { const n = BigInt(v); return n >= 0n ? n : null; } catch { return null; }
 };
-// КОЛИЧЕСТВО В ЧЕЛОВЕЧЕСКОМ ВИДЕ - ОТДЕЛЬНО ОТ human. Размер объёма и границы диапазона приходят УЖЕ
-// человеческими числами (единицы ASSET пары, док 41 §5), а не wei, и делить их на 10^decimals нечего:
-// общая функция дала бы в отказе числа, отличающиеся от настоящих в 10^14 раз - то есть уверенный, но
-// неверный ответ ("минимум 0.00001 XMR" вместо "0.1 XMR"). Поэтому формат свой.
+// A QUANTITY IN HUMAN FORM - SEPARATE FROM wei. The swap size and the range bounds arrive ALREADY human (ASSET
+// units of the pair), not wei, so there is nothing to divide by 10^decimals: a shared function would put numbers
+// into the refusal that differ from the real ones by a factor of 10^14 - a confident but wrong answer.
 const qty = (v) => String(Number(Number(v).toFixed(4)));
 const finite = (v) => (v === null || v === undefined || v === "" ? null : (Number.isFinite(Number(v)) ? Number(v) : null));
-// Число в человеческом виде для слов: 6 знаков после запятой хватает и стейблу, и нативу, а полный
-// wei в тексте человек не читает.
+// A number in human form for the words: six decimals suit both a stable and a native, and nobody reads full wei
+// in text.
 const human = (v, decimals = 18) => {
   const n = Number(v) / 10 ** Number(decimals);
   if (!Number.isFinite(n)) return String(v);
@@ -57,11 +53,11 @@ const human = (v, decimals = 18) => {
 };
 
 // ---------------------------------------------------------------------------
-// 1) СУММА ПРОТИВ ДИАПАЗОНА КОТИРОВКИ. Диапазон называет провайдер (min/max/step), и за его границы
-// он не берётся: размер вне диапазона - это НЕ "попробуем", а отказ, и он должен случиться ДО подписи,
-// а не у провайдера после неё.
-// ЕДИНИЦА - ЧАСТЬ ПРОВЕРКИ, А НЕ УКРАШЕНИЕ (док 41, §5): объём и границы обязаны быть в ОДНОЙ единице
-// (ASSET пары), иначе сравниваются разные величины, и "в диапазоне" значит ничего.
+// 1) SIZE AGAINST THE QUOTE RANGE. The range is the provider's (min/max/step) and it will not take a size outside
+// it: a size out of range is a REFUSAL, not a "let us try", and it must happen BEFORE the signature, not at the
+// provider after it.
+// THE UNIT IS PART OF THE CHECK, NOT DECORATION: the size and the bounds must be in ONE unit (the ASSET of the
+// pair), else different quantities are compared and "in range" means nothing.
 // ---------------------------------------------------------------------------
 export function rangeVerdict({ size = null, unit = null, min = null, max = null, step = null, quoteUnit = null } = {}) {
   const u = String(unit || quoteUnit || "").toUpperCase();
@@ -83,7 +79,7 @@ export function rangeVerdict({ size = null, unit = null, min = null, max = null,
   }
   const lo = finite(min), hi = finite(max), st = finite(step);
   if (lo === null && hi === null) {
-    // Провайдер не назвал границ - это его слово, а не наша ошибка: помечаем и не запираем.
+    // The provider named no bounds - that is its word, not our error: mark it and do not block.
     return {
       ok: true, checked: false, blocks: false, kind: "range-unstated",
       reason: "the provider did not state a volume range (min/max), so the size could not be checked against it",
@@ -100,8 +96,8 @@ export function rangeVerdict({ size = null, unit = null, min = null, max = null,
       reason: `the order size ${qty(s)} ${u} is above the provider maximum ${qty(hi)} ${u} - over by ${qty(s - hi)} ${u}: the provider does not take this size` };
   }
   if (st !== null && st > 0) {
-    // Шаг считается ОТ min, а не от нуля: min=0.05 при шаге 0.1 не даёт больше ни одного размера,
-    // и это правило рынка (www/js/mock/market.js: coversSize), а не выдумка этой функции.
+    // The step is counted FROM min, not from zero: min=0.05 with step 0.1 yields no further size, and that is the
+    // market rule, not an invention of this function.
     const from = lo !== null ? lo : 0;
     const grid = (s - from) / st;
     if (Math.abs(grid - Math.round(grid)) > 1e-6) {
@@ -114,9 +110,9 @@ export function rangeVerdict({ size = null, unit = null, min = null, max = null,
 }
 
 // ---------------------------------------------------------------------------
-// 2) БАЛАНС ОПЛАТЫ. Не хватает того, чем платят, - подписывать нечего: транзакция откажет в кошельке,
-// и человек узнает о нехватке ПОСЛЕ подписи. Неизвестный баланс (не прочитан) тоже запирает: см.
-// рассуждение в шапке файла.
+// 2) PAYMENT BALANCE. Not enough of what pays - there is nothing to sign: the transaction would fail in the
+// wallet and the person would learn of the shortfall AFTER signing. An unknown balance (not read) also locks: see
+// the reasoning in the header.
 // ---------------------------------------------------------------------------
 export function payBalanceVerdict({ payBalanceWei = null, payAmountWei = null, symbol = null, decimals = 18 } = {}) {
   const have = wei(payBalanceWei);
@@ -140,11 +136,11 @@ export function payBalanceVerdict({ payBalanceWei = null, payAmountWei = null, s
 }
 
 // ---------------------------------------------------------------------------
-// 3) ЗАПАС НА ГАЗ. Фондирование - транзакция, и она стоит газа в НАТИВНОЙ монете. Поэтому проверяется
-// не только сумма ордера, но и сумма ордера ПЛЮС запас: у аккаунта, где лежит ровно amount, транзакция
-// не пройдёт. Требуемое здесь считает вызывающий (amount + reserve), а не эта функция: одна величина
-// вместо двух веток - меньше места для расхождения.
-// Неизмеренный запас НЕ запирает: см. шапку файла (это отличие от проверки цены осознанное).
+// 3) GAS RESERVE. Funding is a transaction and costs gas in the NATIVE coin, so both the order amount and the
+// order amount PLUS the reserve are checked: an account holding exactly `amount` will not pass. The required value
+// is computed by the caller (amount + reserve), not here: one quantity instead of two branches - less room to
+// diverge.
+// An unmeasured reserve does NOT lock: see the header (the difference from the price check is deliberate).
 // ---------------------------------------------------------------------------
 export function gasReserveVerdict({ nativeBalanceWei = null, requiredNativeWei = null, gasReserveWei = null, symbol = null, decimals = 18 } = {}) {
   const need = wei(requiredNativeWei);
@@ -175,12 +171,11 @@ export function gasReserveVerdict({ nativeBalanceWei = null, requiredNativeWei =
 }
 
 // ---------------------------------------------------------------------------
-// 4) СВЕЖЕСТЬ КОТИРОВКИ. Правило продукта: просроченную (старше её собственного ttlMs) котировку не
-// показывает никто, и подписать по ней нельзя - цена в ней уже не та, что человек видит. Метка
-// считается по СВОЕЙ метке котировки (at), а не по времени ответа: иначе возраст "омолаживался" бы
-// каждым опросом (док 41, §7).
-// Нет метки или нет срока - проверить нечего; это помечается и не запирает (у рынка то же решение:
-// "срок котировки провайдер не назвал" на экране, а не закрытие рынка).
+// 4) QUOTE FRESHNESS. Product rule: nobody shows a stale quote (older than its own ttlMs) and it cannot be signed
+// - the price in it is no longer what the person sees. The age is computed from the quote's OWN timestamp (at),
+// not from the response time: otherwise the age would be rejuvenated by every poll.
+// No timestamp or no ttl - nothing to check; that is marked and does not block (the market decided the same:
+// "the provider named no quote ttl" on screen, not a closed market).
 // ---------------------------------------------------------------------------
 export function quoteFreshnessVerdict({ at = null, ttlMs = null, expiresAt = null, nowMs = null } = {}) {
   const now = finite(nowMs) === null ? Date.now() : Number(nowMs);
@@ -210,12 +205,11 @@ export function quoteFreshnessVerdict({ at = null, ttlMs = null, expiresAt = nul
 }
 
 // ---------------------------------------------------------------------------
-// 5) СРОКИ ОРДЕРА (readyBy / t1). Срок в прошлом означает ордер, созданный уже закрытым: забрать по
-// нему нельзя, деньги повиснут до возврата. Слишком тесные сроки означают то же самое, но незаметно:
-// окно отметки готовности короче, чем занимает само подтверждение XMR, а окно расчёта короче, чем нужно
-// мейкеру на забор. Слишком далёкий срок - третья крайность (issue #88): вернуть ETH можно только до
-// `readyBy` и после `t1`, значит ордер с `t1` в году запирает деньги на год. Отсюда потолок.
-// Пороги - данные (SIGNING_GUARDS).
+// 5) ORDER DEADLINES (readyBy / t1). A deadline in the past means an order created already closed: nothing can be
+// claimed, the money hangs until refund. Deadlines that are too tight mean the same, but invisibly: the readiness
+// window is shorter than the XMR confirmation itself, and the settlement window shorter than the maker needs to
+// claim. A deadline too far off is the third extreme: ETH can be returned only before `readyBy` and after `t1`, so
+// an order with `t1` a year away locks the money for a year. Hence the ceiling. The thresholds are data.
 // ---------------------------------------------------------------------------
 export function deadlineVerdict({ nowSec = null, readyBy = null, t1 = null, minReadyLeadSec = null, minClaimWindowSec = null, maxDeadlineSec = null } = {}) {
   const now = finite(nowSec) === null ? Math.floor(Date.now() / 1000) : Number(nowSec);
@@ -241,9 +235,9 @@ export function deadlineVerdict({ nowSec = null, readyBy = null, t1 = null, minR
     return { ok: false, checked: true, blocks: true, kind: "claim-window-too-short", readyBy: r, t1: c, minClaimWindowSec: claim,
       reason: `the claim window is ${Math.round(c - r)}s while at least ${claim}s is needed to take the funds before the refund opens` };
   }
-  // ПОТОЛОК СРОКА (issue #88). Без него срок можно поставить на год вперёд: обе стороны подпишут ордер,
-  // ETH уйдут в эскроу - и вернуть их будет нельзя ни до `readyBy`, ни до `t1`, то есть целый год. Потолок
-  // считается от `t1` (самого дальнего срока): `readyBy` всегда ближе, значит эта проверка покрывает оба.
+  // THE DEADLINE CEILING. Without it a deadline can be set a year ahead: both sides sign, the ETH goes into the
+  // escrow and cannot be returned before `readyBy` or after `t1` - a whole year. The ceiling is computed from `t1`
+  // (the farthest deadline): `readyBy` is always nearer, so this check covers both.
   const cap = finite(maxDeadlineSec);
   if (cap !== null && c - now > cap) {
     return { ok: false, checked: true, blocks: true, kind: "deadline-too-far", readyBy: r, t1: c, nowSec: now, maxDeadlineSec: cap,
@@ -254,12 +248,12 @@ export function deadlineVerdict({ nowSec = null, readyBy = null, t1 = null, minR
 }
 
 // ---------------------------------------------------------------------------
-// 6) СОСТОЯНИЕ ЭСКРОУ. Контракт запрещает второе внесение (AlreadyFunded) и не даёт забрать дважды,
-// поэтому "подписаться ещё раз" в уже зафондированный, забранный или возвращённый эскроу - это не
-// "на всякий случай проверим": вторая подпись либо откатится, либо создаст ВТОРОЙ ордер вместо
-// прежнего. Читается вызовом status() по предсказанному адресу - до подписи.
-// Отдельно про пустой ответ: по адресу, которого ещё нет, eth_call возвращает пусто - это "ордер
-// новый", а не "проверить не удалось". Ошибка вызова - другое дело, и она запирает.
+// 6) ESCROW STATE. The contract forbids a second deposit (AlreadyFunded) and does not allow claiming twice, so
+// "signing again" at an already funded, claimed or refunded escrow is not a "just in case" check: the second
+// signature either reverts or creates a SECOND order instead of the old one. Read by calling status() at the
+// predicted address - before signing.
+// About an empty answer: for an address that does not exist yet eth_call returns empty - that is "a new order",
+// not "the check failed". A call error is another matter, and it locks.
 // ---------------------------------------------------------------------------
 export function escrowStateVerdict({ status = null, error = null, address = null } = {}) {
   const where = address ? " the escrow at " + address : " the escrow";
@@ -288,16 +282,14 @@ export function escrowStateVerdict({ status = null, error = null, address = null
 }
 
 // ---------------------------------------------------------------------------
-// 7) СОГЛАСИЕ НА ERC-20. Появится вместе с исполнением DEX-ноги: своп токена требует approve, и
-// разрешение на списание - это ОТДЕЛЬНОЕ действие человека, а не следствие подписи свопа. Поэтому
-// здесь две проверки, и обе обязательны: разрешение выдано (allowance хватает) И человек на него
-// согласился явно. Достаток без согласия и согласие без достатка - разные отказы, и называются они
-// по-разному.
-// ПОТРЕБИТЕЛЬ У ЭТОЙ ЗАЩИТЫ УЖЕ ЕСТЬ (24 сентября 2026): сборщик исполнения DEX-ноги
-// (www/js/evm/dexExec.js, swapAllowanceVerdict) зовёт её, чтобы отличить "разрешения не хватает" от
-// "человек на него не согласился" - это РАЗНЫЕ отказы и называются они по-разному. В ПОДПИСЬ формы
-// она по-прежнему не включена: форма ещё не свопает (своп - платный этап, док 48), и включать проверку
-// в подпись раньше появления самого действия значило бы запирать человека на том, чего он ещё не делает.
+// 7) ERC-20 CONSENT. It will arrive with DEX-leg execution: swapping a token requires approve, and permission to
+// spend is a SEPARATE action of the person, not a consequence of signing the swap. So there are two checks, both
+// mandatory: the allowance is granted (enough) AND the person explicitly consented. Enough without consent and
+// consent without enough are different refusals, named differently.
+// THIS GUARD ALREADY HAS A CONSUMER: the DEX-leg execution builder (swapAllowanceVerdict) calls it to tell
+// "allowance short" from "the person did not consent" - different refusals, named differently. It is still NOT
+// part of the form's signature: the form does not swap yet (the swap is a paid stage), and adding the check to the
+// signature before the action exists would lock a person on something he does not yet do.
 // ---------------------------------------------------------------------------
 export function allowanceVerdict({ tokenIsNative = false, allowanceWei = null, amountWei = null, consent = false, symbol = null, decimals = 18 } = {}) {
   if (tokenIsNative) {
@@ -328,10 +320,10 @@ export function allowanceVerdict({ tokenIsNative = false, allowanceWei = null, a
 }
 
 // ---------------------------------------------------------------------------
-// 8) СЕТЬ КОШЕЛЬКА. Балансы читаются через кошелёк, то есть ИЗ ЕГО СЕТИ, и транзакция уйдёт туда же.
-// Поэтому несовпадение сети - не предупреждение, а отказ: "страница на одной сети, кошелёк на другой"
-// означает, что мы не знаем ни балансов, ни того, куда уйдут деньги. Признак сети кошелька берётся из
-// session.js (chainIdOf), признак сети расчёта - из реестра (chainId выбранной сети).
+// 8) WALLET NETWORK. Balances are read through the wallet, i.e. FROM ITS NETWORK, and the transaction goes there
+// too. So a network mismatch is a refusal, not a warning: "page on one network, wallet on another" means we know
+// neither the balances nor where the money goes. The wallet's network marker comes from the session (chainIdOf),
+// the settlement network marker from the registry (chainId of the selected network).
 // ---------------------------------------------------------------------------
 export function networkGateVerdict({ walletChainId = null, selectedChainId = null, settlementChainId = null, selectedChainName = null } = {}) {
   const w = finite(walletChainId), s = finite(selectedChainId), set = finite(settlementChainId);
@@ -356,18 +348,18 @@ export function networkGateVerdict({ walletChainId = null, selectedChainId = nul
 }
 
 // ---------------------------------------------------------------------------
-// СВОДКА. Вызывающий собирает то, что у него есть, и получает ОДИН ответ: можно ли начинать подпись.
-// Порядок проверок задаётся порядком массива: причина называется первая по списку, потому что при
-// неверной сети вопрос о покрытии суммы уже не имеет смысла.
+// THE SUMMARY. The caller assembles what it has and gets ONE answer: whether the signature may start. The order
+// of checks is set by the order of the array: the first cause in the list is named, because with a wrong network
+// the question of size coverage no longer matters.
 // ---------------------------------------------------------------------------
-// ЖИВАЯ СЕТЬ НЕ ПОДПИСЫВАЕТ СДЕЛКУ С ЗАГЛУШКОЙ. В демке сторона контрагента собирается локально и помечена
-// standIn: тогда DLEQ проверяется сам с собой и не доказывает ничего - это режим витрины, а не сделки.
-// На живой сети такой подписи быть не должно: деньги ушли бы против несуществующей стороны.
+// A LIVE NETWORK DOES NOT SIGN A DEAL WITH A STAND-IN. In the demo the counterparty side is assembled locally and
+// marked standIn: then DLEQ is checked against itself and proves nothing - a showcase mode, not a deal. On a live
+// network there must be no such signature: the money would go against a party that does not exist.
 export function counterpartyVerdict({ standIn = false, liveChain = false, network = null, chainId = null } = {}) {
   const v = (ok, kind, words) => ({ ok, checked: true, blocks: !ok, kind, words, reason: words });
-  // СЕТЬ НАЗЫВАЕТСЯ ЧИСЛОМ И КОДОМ, а не словом «боевая»: по отказу должно быть видно, о какой сети речь
-  // (у одной и той же ноды их может быть несколько), и это тот же стандарт, что у прочих отказов - причина
-  // без числа считается дефектом, потому что по ней нельзя понять, что именно случилось.
+  // THE NETWORK IS NAMED BY NUMBER AND CODE, not by the word "live": a refusal must show which network is meant
+  // (one node can serve several), and that is the same standard as elsewhere - a cause without a number is a
+  // defect, because it leaves no way to understand what happened.
   const where = (network || "this network") + (chainId === null || chainId === undefined ? "" : " (chainId " + chainId + ")");
   if (!standIn) return v(true, "real-provider", "counterparty is a real provider: the proof is checked against it");
   if (liveChain) {
@@ -379,12 +371,12 @@ export function counterpartyVerdict({ standIn = false, liveChain = false, networ
 
 
 // ---------------------------------------------------------------------------
-// 9) ТОЧКИ ОРДЕРА В ЦЕПИ ПРОТИВ ТОЧЕК, НА КОТОРЫХ СОШЁЛСЯ DLEQ (находка P0-3 аудита).
-// DLEQ доказывает связь точки с половиной, но сам по себе не мешает положить в ордер ДРУГИЕ точки:
-// доказательство сойдётся на одних, а в createOrderAndFund уйдут другие - и после claim забор XMR
-// не соберётся, потому что ключ траты выведен из других половин. Цепь этого не проверит (в EVM нет
-// ed25519), поэтому проверяет та сторона, которая рискует, и ДО своего действия. Здесь только решается
-// вопрос «заперта ли подпись»; сама сверка берёт точки ИЗ СЛОТОВ ЖИВОГО ЭСКРОУ, а не из памяти формы.
+// 9) ORDER POINTS ON CHAIN AGAINST THE POINTS DLEQ AGREED ON (an audit finding). DLEQ proves a point's link to a
+// half, but by itself does not stop OTHER points from going into the order: the proof would hold for one set while
+// createOrderAndFund gets another - and after claim the XMR sweep would not assemble, because the spend key is
+// derived from other halves. The chain cannot check this (EVM has no ed25519), so the side that risks checks it,
+// BEFORE acting. Here only the question "is the signature locked" is decided; the comparison takes the points
+// FROM THE LIVE ESCROW SLOTS, not from form memory.
 // ---------------------------------------------------------------------------
 const normHex = (v) => (v === null || v === undefined ? "" : String(v).replace(/^0x/i, "").toLowerCase());
 export function escrowPointsVerdict({ role = null, what = null, point = null, onchainPoint = null, commit = null, onchainCommit = null, readError = null } = {}) {
@@ -393,9 +385,9 @@ export function escrowPointsVerdict({ role = null, what = null, point = null, on
     return { ok: false, checked: false, blocks: true, kind: "points-unchecked",
       reason: `${who} of the live escrow could not be read (${String(readError)}): whether the order holds the points that DLEQ proved is unknown - signing is blocked` };
   }
-  // ВЕТКА ВЫБИРАЕТСЯ ТЕМ, ЧТО ПРОСЯТ СВЕРИТЬ. Порядок проверок здесь - не косметика: если спрашивают про
-  // обязательство, а проверять сначала точку, то на отсутствии ТОЧКИ вердикт скажет "точки не прочитаны",
-  // и настоящая причина (обязательство не то) останется неназванной - это уже было поймано зубом.
+  // THE BRANCH IS CHOSEN BY WHAT IS ASKED TO BE COMPARED. The order of checks here is not cosmetic: if the
+  // commitment is asked about while the point is checked first, a missing POINT makes the verdict say "points not
+  // read" and the real cause (a wrong commitment) goes unnamed - already caught by a tooth.
   let compared = false;
   if (normHex(point)) {
     compared = true;
@@ -408,8 +400,8 @@ export function escrowPointsVerdict({ role = null, what = null, point = null, on
         reason: `${who} in the escrow (0x${normHex(onchainPoint)}) is NOT the point DLEQ proved (0x${normHex(point)}): the Monero address would be assembled from other halves and the XMR could not be swept after claim` };
     }
   }
-  // ОБА ПОЛЯ СВЕРЯЮТСЯ НЕЗАВИСИМО. Ветка "иначе" здесь была ошибкой: при совпавшей точке расхождение
-  // обязательства просто не проверялось, и подмена половины проходила мимо вердикта. Поймано зубом.
+  // BOTH FIELDS ARE COMPARED INDEPENDENTLY. An "else" branch here was a bug: when the point matched, a commitment
+  // divergence simply went unchecked and a swapped half slipped past the verdict. Caught by a tooth.
   if (normHex(commit)) {
     compared = true;
     if (!normHex(onchainCommit)) {
@@ -429,10 +421,10 @@ export function escrowPointsVerdict({ role = null, what = null, point = null, on
     reason: `${who} in the escrow matches what we hold${normHex(point) && normHex(commit) ? " (point and commitment)" : ""}` };
 }
 
-// СЛОТЫ ЖИВОГО ОРДЕРА ПРОТИВ СОБРАННОГО СТРАНИЦЕЙ (блок C аудита). Один вопрос, четыре ответа: точки обеих
-// сторон и обязательства на обе половины. Сверяется КАЖДОЕ поле, которое у нас есть, и отсутствие поля у
-// цепи запирает так же, как несовпадение. Собрано из того же примитива, что и одиночная сверка точки
-// (escrowPointsVerdict), чтобы формулировки отказов и правила сравнения были одни на всех.
+// LIVE ORDER SLOTS AGAINST WHAT THE PAGE ASSEMBLED. One question, four answers: the points of both sides and the
+// commitments to both halves. EVERY field we have is compared, and a field missing on chain locks just like a
+// mismatch. Built from the same primitive as the single point check (escrowPointsVerdict), so refusals and
+// comparison rules are one for all.
 export function liveOrderSlotsVerdict({ slots = null, expect = null, readError = null } = {}) {
   if (readError || !slots) {
     return { ok: false, checked: false, blocks: true, kind: "slots-unchecked",
@@ -448,7 +440,7 @@ export function liveOrderSlotsVerdict({ slots = null, expect = null, readError =
   const checked = [];
   const missing = [];
   for (const [key, what, kind] of fields) {
-    if (!normHex(expect && expect[key])) continue;   // чего у нас нет, того и не сверяем - и это названо ниже
+    if (!normHex(expect && expect[key])) continue;   // what we do not have we do not compare - and that is named below
     if (!normHex(slots[key])) { missing.push(what); continue; }
     const v = kind === "point"
       ? escrowPointsVerdict({ what, point: expect[key], onchainPoint: slots[key] })
@@ -479,14 +471,14 @@ export function signingGateVerdict(checks = []) {
     reason: blocking.length ? blocking.map((c) => c.reason).filter(Boolean).join("; ") : null,
     blockedBy: blocking.map((c) => c.kind),
     unchecked: unchecked.map((c) => c.kind),
-    // САМО ПРОВЕРЕННОЕ ВОЗВРАЩАЕТСЯ ЦЕЛИКОМ: экран и отчёт обязаны называть не только вердикт, но и
-    // из чего он взят, а числа там уже посчитаны.
+    // WHAT WAS CHECKED IS RETURNED WHOLE: the screen and the report must name not only the verdict but what it was
+    // taken from, and the numbers there are already computed.
     checks: list,
   };
 }
 
-// Слова для кнопки и подписи под ней. Одна фраза на вердикт - чтобы экран и отчёт говорили одно и то
-// же: разойдясь, они начнут объяснять человеку одно, а оператору другое.
+// Words for the button and the caption under it. One phrase per verdict, so the screen and the report say the
+// same thing: once they diverge they will explain one thing to the person and another to the operator.
 export function signingGateWords(gate) {
   if (!gate || !gate.blocked) return null;
   const first = (gate.checks || []).find((c) => c.blocks === true) || null;

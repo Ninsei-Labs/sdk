@@ -1,29 +1,18 @@
 // GENERATED FILE - a byte-for-byte copy of the engine module www/js/monero/address.js for the SDK package.
-// Edit the source under www/js, then run: node tools/build-sdk-engine.mjs
-// tools/check-sdk-engine.mjs reddens on any drift, so a stale copy cannot ship silently.
+// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
 // Everything below this header is identical to the source.
 
-// Проверка и сборка Monero-адресов: формат + настоящий checksum + префиксы всех сетей.
-//
-// Важная деталь, на которой легко ошибиться: у Monero СВОЙ base58 - блочный
-// (8 байт кодируются 11 символами, остаток идёт в конце). Он НЕ совместим с обычным
-// биткойн-base58: там ведущий символ '1' означает нулевой байт, а у Monero блок кодируется
-// как ЧИСЛО, и '1' может быть просто цифрой внутри числа. Поэтому ни bs58.decode, ни
-// bs58.encode здесь не годятся - base58 реализован ниже численно (см. base58ToBlock).
-//
-// Зачем это нужно в демке: без проверки checksum опечатка в адресе получения
-// выглядит валидной, а в atomic-свопе ошибка в адресе означает потерянные деньги.
-//
-// Префиксы сетей (из src/cryptonote_config.h, официальные значения):
-//   mainnet: 18 обычный, 19 с payment id, 42 суб-адрес
-//   stagenet: 24 / 25 / 36
-//   testnet: 53 / 54 / 63
-// Вендоренная monero-js умеет ТОЛЬКО mainnet (у неё в address.js жёстко 18/19/42),
-// поэтому здесь свой энкодер: библиотека даёт публичные ключи, а строку адреса собираем мы.
+// Monero address checks and assembly: format + real checksum + network prefixes.
+// A detail easy to get wrong: Monero has its OWN base58 - block-based (8 bytes -> 11 chars, the remainder last).
+// It is NOT compatible with bitcoin-base58, where a leading '1' means a zero byte; here a block is a NUMBER and
+// '1' can be just a digit. So bs58 does not fit and base58 is implemented numerically below.
+// Without the checksum a typo in the payout address looks valid, and in an atomic swap that means lost money.
+// Network prefixes (official): mainnet 18 plain, 19 with payment id, 42 subaddress.
+// The vendored monero-js knows ONLY mainnet, so we have our own encoder: the library gives public keys, we build the string.
 
 const BLOCK_CHARS = 11;
 
-// encoded bytes -> chars (из monero-js/src/base58.js, ENC_BLOCK_BYTE_LENS)
+// encoded bytes -> chars (from the vendored base58 table)
 const CHARS_BY_BYTES = { 1: 2, 2: 3, 3: 5, 4: 6, 5: 7, 6: 9, 7: 10, 8: 11 };
 const BYTES_BY_CHARS = { 2: 1, 3: 2, 5: 3, 6: 4, 7: 5, 9: 6, 10: 7, 11: 8 };
 
@@ -39,7 +28,7 @@ const PREFIXES = {
   63: { network: "testnet", kind: "subaddress" },
 };
 
-// обратная таблица: сеть + вид -> байт префикса (для сборки адреса)
+// reverse table: network + kind -> prefix byte (for address assembly)
 export const PREFIX_BY_NETWORK = {
   mainnet: { primary: 18, integrated: 19, subaddress: 42 },
   stagenet: { primary: 24, integrated: 25, subaddress: 36 },
@@ -54,16 +43,16 @@ export function prefixFor(network, kind = "primary") {
   return prefix;
 }
 
-// Синхронная проверка формата (для UI до загрузки библиотеки).
+// Synchronous format check (for the UI before the library loads).
 export function formatCheck(addr) {
   const a = String(addr || "").trim();
   if (![95, 106].includes(a.length)) return false;
   if (!/^[1-9A-HJ-NP-Za-km-z]+$/.test(a)) return false;
-  // первая буква адреса определяется префиксом сети: 4/8 mainnet, 5/7 stagenet, 9/A/B testnet
+  // the first letter is set by the network prefix: 4/8 mainnet, 5/7 stagenet, 9/A/B testnet
   return ["4", "5", "7", "8", "9", "A", "B"].includes(a[0]);
 }
 
-// Первая буква адреса прямо следует из префикса: 4/8 - mainnet, 5/7 - stagenet, 9/A/B - testnet
+// The first letter follows directly from the prefix: 4/8 mainnet, 5/7 stagenet, 9/A/B testnet
 export function networkFromShape(addr) {
   const a = String(addr || "").trim();
   if (!formatCheck(a)) return null;
@@ -93,7 +82,7 @@ async function loadLib() {
   }
 }
 
-// Алфавит Monero-base58 (тот же, что у Bitcoin, но правила кодирования другие).
+// The Monero-base58 alphabet (same as Bitcoin, different encoding rules).
 const B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const B58_VALUES = (() => {
   const m = new Map();
@@ -101,7 +90,7 @@ const B58_VALUES = (() => {
   return m;
 })();
 
-// Блок байтов -> base58-строка (числом: никакого «ведущий '1' = нулевой байт»).
+// Block of bytes -> base58 string (as a number: no "leading '1' = zero byte").
 function blockToBase58(block) {
   let num = 0n;
   for (const b of block) num = (num << 8n) | BigInt(b);
@@ -113,12 +102,10 @@ function blockToBase58(block) {
   return s;
 }
 
-// base58-строка блока -> ровно `bytes` байтов, выравнивание по ПРАВОМУ краю.
+// base58 block string -> exactly `bytes` bytes, right-aligned.
 //
-// Почему не bs58 из npm: его декодер трактует каждый ведущий символ '1' как нулевой БАЙТ
-// (биткойн-семантика). В Monero блок кодируется как число, и '1' может быть просто цифрой
-// внутри числа - тогда bs58 выдаёт лишний нулевой байт, payload разъезжается, и checksum
-// ложно не сходится. На этом ловились: 18 адресов из 120 (15%) проверялись как «с опечаткой».
+// Why not bs58 from npm: its decoder treats every leading '1' as a zero BYTE (bitcoin semantics). In Monero a
+// block is a number and '1' can be just a digit, so bs58 adds a spurious zero byte and the checksum falsely fails.
 function base58ToBlock(str, bytes) {
   let num = 0n;
   for (const ch of str) {
@@ -135,11 +122,10 @@ function base58ToBlock(str, bytes) {
   return out;
 }
 
-// Блочный Monero-base58: строка -> байты.
+// Block-based Monero base58: string -> bytes.
 //
-// Порядок блоков важен: Monero сначала кодирует полные 8-байтовые блоки (по 11 символов),
-// а НЕПОЛНЫЙ остаток идёт В КОНЦЕ и занимает меньше символов (см. monero-js/src/base58.js:
-// сначала tot_block_cnt блоков, затем last_block_enc_len). Поэтому остаток берём с конца строки.
+// Block order matters: Monero encodes full 8-byte blocks first (11 chars each), and the PARTIAL remainder goes
+// LAST with fewer chars. So the remainder is taken from the end of the string.
 export function decodeMoneroBase58(str) {
   const s = String(str);
   const L = s.length;
@@ -159,8 +145,8 @@ export function decodeMoneroBase58(str) {
   return out;
 }
 
-// Блочный Monero-base58: байты -> строка (обратная к decode выше).
-// Полные 8-байтовые блоки кодируются по 11 символов (слева дополняются '1'), остаток - в конце.
+// Block-based Monero base58: bytes -> string (inverse of decode above). Full 8-byte blocks are 11 chars
+// (left-padded with '1'), the remainder goes last.
 export function encodeMoneroBase58(bytes) {
   const arr = Array.from(bytes);
   const L = arr.length;
@@ -178,7 +164,7 @@ export function encodeMoneroBase58(bytes) {
   return out;
 }
 
-// Полезная нагрузка адреса (без checksum): префикс + публичный spend + публичный view [+ payment id]
+// Address payload (without checksum): prefix + public spend + public view [+ payment id]
 export function addressPayload({ network, kind = "primary", spendPub, viewPub, paymentId }) {
   const prefix = prefixFor(network, kind);
   const spend = hexToBytes(spendPub, 32, "public spend key");
@@ -201,8 +187,8 @@ function hexToBytes(hex, expectedBytes, label) {
   return out;
 }
 
-// Сборка адреса из публичных ключей: deps = { keccak256 } (в браузере - из бандла monero-js).
-// bs58 здесь не нужен: base58 у Monero блочный и числовой, см. комментарий у base58ToBlock.
+// Assembly of the address from public keys: deps = { keccak256 } (in the browser, from the monero-js bundle).
+// bs58 is not needed: Monero base58 is block-based and numeric, see the comment at base58ToBlock.
 export function addressFromKeys({ network, kind = "primary", spendPub, viewPub, paymentId }, deps) {
   if (!deps?.keccak256) throw new Error("addressFromKeys needs { keccak256 }");
   const payload = addressPayload({ network, kind, spendPub, viewPub, paymentId });
@@ -213,9 +199,9 @@ export function addressFromKeys({ network, kind = "primary", spendPub, viewPub, 
   return encodeMoneroBase58(full);
 }
 
-// Полная проверка: формат + блочный декод + keccak256-checksum + сеть.
-// expectNetwork (необязательно): если задан, адрес чужой сети считается ошибкой -
-// в свапе на stagenet mainnet-адрес это потерянные деньги, а не придирка.
+// Full check: format + block decode + keccak256 checksum + network.
+// expectNetwork (optional): if set, an address of another network is an error - on a stagenet swap a mainnet
+// address is lost money, not a nitpick.
 export async function checkAddress(addr, opts = {}) {
   const a = String(addr || "").trim();
   if (!formatCheck(a)) {
@@ -235,13 +221,12 @@ export async function checkAddress(addr, opts = {}) {
     if (payloadLen < 65) throw new Error("Address is too short");
     const payload = bytes.slice(0, payloadLen);
     const checksum = bytes.slice(payloadLen);
-    // keccak256 из бандла требует Buffer: Uint8Array он не принимает
+    // keccak256 from the bundle needs Buffer: it does not take Uint8Array
     const digest = Uint8Array.from(l.keccak256(l.Buffer.from(payload)));
     const match = checksum.length === 4 && checksum.every((b, i) => b === digest[i]);
     if (!match) {
-      // Мок-адреса демки (wallet.js, режим mock) намеренно без checksum: они помечены в UI как
-      // фиктивные. Если такой адрес попадёт сюда, «опечатка» - не единственная версия, и текст
-      // должен это говорить, иначе отладка уходит не туда.
+      // The demo mock addresses (wallet.js, mock mode) intentionally have no checksum: the UI marks them as fake,
+      // so a "typo" is not the only explanation for such an address and the text must say so.
       return { ok: false, reason: "Checksum mismatch: the address has a typo, is corrupted, or is a demo mock address (mock addresses have no checksum)" };
     }
 
@@ -257,7 +242,7 @@ export async function checkAddress(addr, opts = {}) {
   }
 }
 
-// Хелпер для кода, который уже загрузил бандл: собрать адрес нужной сети из ключей кошелька.
+// Helper for code that has already loaded the bundle: build an address of the right network from wallet keys.
 export async function addressForNetwork({ network, kind = "primary", spendPub, viewPub }) {
   const l = await loadLib();
   if (!l) throw new Error("monero-js bundle is not available");

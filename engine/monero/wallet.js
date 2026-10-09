@@ -1,19 +1,17 @@
 // GENERATED FILE - a byte-for-byte copy of the engine module www/js/monero/wallet.js for the SDK package.
-// Edit the source under www/js, then run: node tools/build-sdk-engine.mjs
-// tools/check-sdk-engine.mjs reddens on any drift, so a stale copy cannot ship silently.
+// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
 // Everything below this header is identical to the source.
 
-// Одноразовый Monero-кошелёк свапа.
+// The one-shot Monero wallet of a swap.
 //
-// Ключи считает monero-js (ebellocchia/monero-js, MIT, вендорен в www/assets/vendors/monero-js):
-// мнемоника и ключи чистым JS - реальные и мгновенные. Библиотека умеет только mainnet-префиксы
-// адресов, поэтому строку адреса собирает наш энкодер (monero/address.js) для сети из конфига -
-// так работает и stagenet (24/36).
+// Keys are computed by monero-js (ebellocchia/monero-js, MIT, vendored under www/assets/vendors/monero-js):
+// a mnemonic and keys in pure JS, real and instant. The library only knows mainnet address prefixes, so the
+// address string is built by our encoder (monero/address.js) for the network from the config - which is how
+// stagenet (24/36) also works.
 //
-// Ключи НЕ покидают браузер: наружу (на бэкенд, для watch-only кошелька) уходит только view key,
-// и делает это отдельная явная функция - recovery/restore.js::watchOnlyShareFromWallet. Так это
-// и описано в litepaper §5.4: кошелёк одноразовый, на одну сделку, seed основного кошелька
-// пользователя никогда не импортируется.
+// Keys NEVER leave the browser: only the view key goes out (to the backend, for a watch-only wallet), and a
+// separate explicit function does it - recovery/restore.js::watchOnlyShareFromWallet. The wallet is one-shot,
+// for one deal, and the user's main-wallet seed is never imported.
 
 import { MONERO } from "../core/config.js";
 import { randomHex, toHex } from "../core/format.js";
@@ -32,11 +30,11 @@ function base58(bytes) {
   return out;
 }
 
-// Псевдо-адрес для мок-режима: правильная длина (95) и префикс сети, но БЕЗ checksum.
-// В UI он всегда помечен как mock - чтобы никто не отправил туда XMR.
+// A pseudo-address for mock mode: the right length (95) and network prefix, but WITHOUT a checksum.
+// The UI always marks it as mock, so nobody sends XMR there.
 
 // ---------------------------------------------------------------------------
-// monero-js (мнемоника + ключи + адреса, чистый JS)
+// monero-js (mnemonic + keys + addresses, pure JS)
 // ---------------------------------------------------------------------------
 
 let moneroJsModule = null;
@@ -50,9 +48,9 @@ export async function loadMoneroJs() {
     moneroJsModule = mod.default || mod;
     return moneroJsModule;
   } catch (e) {
-    // Причину не подменяем: «бандл не собран», «не залит» и «заблокирован CSP» - разные проблемы
+    // The reason is not replaced: "bundle not built", "not uploaded" and "blocked by CSP" are different problems
     moneroJsError = "monero-js unavailable: " + e.message +
-      " (соберите npm run build:vendor; про CSP см. .hermes/docs/06-deploy.md)";
+      " (run npm run build:vendor; for CSP see the deploy notes)";
     throw new Error(moneroJsError);
   }
 }
@@ -61,20 +59,19 @@ async function withMoneroJs({ mnemonic: phrase, network = MONERO.networkType } =
   const lib = await loadMoneroJs();
   await lib.wallet.initEcc();
 
-  // Если фразу передали - она обязана быть валидной. Раньше невалидная фраза молча заменялась
-  // свежесгенерированной, и восстановление из испорченного recovery-файла давало ДРУГОЙ кошелёк:
-  // ошибка выглядела бы как успех, а средства остались бы недоступны. Генерация - только когда
-  // фразы нет вовсе.
+  // A supplied phrase must be valid. An invalid phrase used to be silently replaced by a fresh one, so
+  // recovering from a corrupt file gave a DIFFERENT wallet: the error looked like success and the funds stayed
+  // out of reach. Generation happens only when there is no phrase at all.
   let words;
   if (phrase) {
     if (!lib.mnemonic.isValid(phrase)) {
-      throw new Error("мнемоника не прошла проверку контрольной суммы (файл или форма повреждены?)");
+      throw new Error("the mnemonic failed its checksum check (file or form corrupted?)");
     }
     words = String(phrase).trim();
   } else {
     words = lib.mnemonic.generateWithChecksum();
   }
-  const seed = lib.mnemonic.toSeed(words); // 32 байта: для Monero сид == декодированная мнемоника
+  const seed = lib.mnemonic.toSeed(words); // 32 bytes: for Monero the seed == the decoded mnemonic
   const w = lib.wallet.fromSeed(seed);
 
   const net = network || "mainnet";
@@ -82,8 +79,8 @@ async function withMoneroJs({ mnemonic: phrase, network = MONERO.networkType } =
   const spendPub = toHex(w.publicSpendKey);
   const viewPub = toHex(w.publicViewKey);
   const sub = w.subaddress(1, 0);
-  // адрес своей сети собираем сами (библиотека умеет только mainnet);
-  // addressMainnet оставляем для сверки: на mainnet они обязаны совпадать
+  // the address of our own network is built here (the library only knows mainnet);
+  // addressMainnet is kept for cross-checking: on mainnet the two must match
   const address = addressFromKeys({ network: net, kind: "primary", spendPub, viewPub }, deps);
   const subaddress = addressFromKeys(
     { network: net, kind: "subaddress", spendPub: toHex(sub.publicSpendKey), viewPub: toHex(sub.publicViewKey) },
@@ -109,19 +106,13 @@ async function withMoneroJs({ mnemonic: phrase, network = MONERO.networkType } =
 }
 
 // ---------------------------------------------------------------------------
-// monero-ts убран
+// monero-ts removed
 // ---------------------------------------------------------------------------
-// Здесь был второй режим кошелька - WebAssembly wallet2 (woodser/monero-ts), который собирался
-// в www/assets/vendors/monero/monero-ts-browser.js. Он удалён из демки по двум причинам:
-//   1) WASM-кошельку нужен SharedArrayBuffer, то есть COOP/COEP, а на домене демки COEP заблокировал
-//      бы сторонние ресурсы (шрифты, Verify WalletConnect);
-//   2) сам бандл переехал в sweep/ - у него свой домен с COOP/COEP (см. .hermes/docs/09-sweep-origin.md).
-// Раньше здесь называлась третья причина - «политика демки не пускает webpack-сборку monero-ts, она
-// использует eval». Причина была настоящей, но перестала ею быть: с monero-ts 0.11.16 бандл под
-// строгой политикой (script-src 'self' 'wasm-unsafe-eval', без 'unsafe-eval') работает, и это
-// доказано прогоном tools/check-csp-eval.mjs - прежний 0.11.15 под ней же падает на импорте.
-// Пока ветка кода оставалась, она тянула import по несуществующему пути - то есть была мёртвой
-// и при этом выглядела рабочей. Ключи в демке считает monero-js, и это единственный путь.
+// A second wallet mode lived here - a WebAssembly wallet2 (woodser/monero-ts) built into the vendors. It was
+// removed for two reasons: the WASM wallet needs SharedArrayBuffer, i.e. COOP/COEP, which on the demo domain
+// would block third-party resources; and the bundle moved to the sweep app, which has its own COOP/COEP domain.
+// While the branch of code stayed, it pulled an import along a path that no longer existed - dead, yet looking
+// alive. Keys in the demo are computed by monero-js, and that is the only path.
 
 // ---------------------------------------------------------------------------
 
@@ -129,7 +120,7 @@ export async function createSwapWallet({ network = MONERO.networkType, seed } = 
   return withMoneroJs({ mnemonic: seed, network });
 }
 
-// Доступна ли библиотека ключей (панель Demo controls показывает это одной строкой).
+// Whether the key library is available (the Demo controls panel shows this as one line).
 export async function probeMode() {
   try {
     const lib = await loadMoneroJs();
@@ -140,10 +131,9 @@ export async function probeMode() {
   }
 }
 
-// Совместный адрес свапа. В реальном протоколе это адрес из СУММЫ публичных ключей
-// двух сторон (S_a + S_b, V_a + V_b): потратить выход можно только собрав обе половины
-// spend-ключа, а DLEQ-доказательство связывает половины с секретом.
-// В демке сумма считается по хешу от ключей: интерфейс и поток те же, криптография подменена явно.
+// The joint swap address. In the real protocol it is the SUM of both sides' public keys (S_a + S_b, V_a + V_b):
+// the output can be spent only with both halves of the spend key, and the DLEQ proof binds the halves to the
+// secret. In the demo the sum is a hash of the keys: same interface and flow, cryptography openly replaced.
 export function combineAddress({ swapId, userPublicSpendKey, userPublicViewKey, makerKeySeed }) {
   const mk = (salt) => {
     const payload = `${salt}|${swapId}|${userPublicSpendKey}|${userPublicViewKey}`;
@@ -159,7 +149,7 @@ export function combineAddress({ swapId, userPublicSpendKey, userPublicViewKey, 
     address: "8" + mk(makerKeySeed).slice(0, 94),
     spendShare: "0x" + mk("spend-share").slice(0, 64),
     viewShare: "0x" + mk("view-share").slice(0, 64),
-    note: "mock: в реальном протоколе это сумма публичных ключей обеих сторон с DLEQ-доказательством",
+    note: "mock: in the real protocol this is the sum of both sides' public keys with a DLEQ proof",
   };
 }
 

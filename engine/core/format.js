@@ -1,9 +1,8 @@
 // GENERATED FILE - a byte-for-byte copy of the engine module www/js/core/format.js for the SDK package.
-// Edit the source under www/js, then run: node tools/build-sdk-engine.mjs
-// tools/check-sdk-engine.mjs reddens on any drift, so a stale copy cannot ship silently.
+// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
 // Everything below this header is identical to the source.
 
-// Форматирование чисел, времени и адресов.
+// Formatting of numbers, time and addresses.
 
 const nf = (min, max) => new Intl.NumberFormat("en-US", { minimumFractionDigits: min, maximumFractionDigits: max });
 
@@ -11,10 +10,10 @@ export function amount(v, dp = 2) {
   const n = Number(v);
   if (!isFinite(n)) return "-";
   const max = Math.min(dp, 6);
-  // ПЫЛЬ НЕ ИСЧЕЗАЕТ. Раньше печать была жёстко «шесть знаков», и сумма меньше 0.000001 показывалась как
-  // 0.000000 - то есть ненулевое значение выглядело нулём. Для денег это худший вид отображения: человек
-  // видит ноль там, где у него что-то есть. Знаки добавляются ровно в том случае, когда печать обнулила
-  // ненулевое, и не больше 18 (предел точности wei).
+  // DUST DOES NOT VANISH. Before, printing was hard-wired to "six digits", and an amount below 0.000001 showed as
+  // 0.000000 - a non-zero value looked like zero. For money this is the worst kind of display: the person
+  // sees zero where they actually have something. Extra digits are added only when the print zeroed a
+  // non-zero value, and never more than 18 (the wei precision limit).
   if (n !== 0 && Math.abs(n) < Math.pow(10, -max)) {
     const need = Math.min(18, Math.max(max + 1, -Math.floor(Math.log10(Math.abs(n)))));
     return nf(need, need).format(n).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
@@ -49,7 +48,7 @@ export function shortHash(h, head = 6, tail = 4) {
   return s.slice(0, head) + "..." + s.slice(-tail);
 }
 
-// sim-время -> настенные часы демки (UTC, как в макетах литпепера)
+// sim-time -> the demo's wall clock (UTC, as in the litepaper mockups)
 export function clockTime(ms) {
   const d = new Date(ms);
   const hh = String(d.getUTCHours()).padStart(2, "0");
@@ -62,7 +61,7 @@ export function clockTimeShort(ms) {
   return clockTime(ms).slice(0, 5);
 }
 
-// Длительность в секундах -> "12m 30s"
+// Duration in seconds -> "12m 30s"
 export function duration(ms) {
   const total = Math.max(0, Math.round(ms / 1000));
   const m = Math.floor(total / 60);
@@ -92,49 +91,49 @@ export function randomHex(bytes = 16) {
   return toHex(a);
 }
 
-// Байты (Uint8Array/Buffer) -> hex-строка без префикса 0x.
+// Bytes (Uint8Array/Buffer) -> hex string without the 0x prefix.
 export function toHex(bytes) {
   const a = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes || []);
   return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-// РАЗБОР СУММЫ, КОТОРУЮ ВВЁЛ ЧЕЛОВЕК.
+// PARSING AN AMOUNT ENTERED BY A PERSON.
 //
-// ПОЧЕМУ ЭТО ОТДЕЛЬНАЯ ФУНКЦИЯ, А НЕ replace ПРЯМО В ПОЛЕ. В полях суммы стояло
-// `e.target.value.replace(/[^0-9.]/g, "")`: всё, кроме цифр и точки, СТИРАЛОСЬ. Европейская запятая
-// ("0,05" - так пишут в половине стран) превращалась в "005", то есть в 5 - ошибка в СТО РАЗ, и заметить её
-// в интерфейсе почти невозможно: поле показывает "005", котировка считается по пяти, человек платит в сто
-// раз больше. Запятая без точки - десятичный разделитель, запятая при наличии точки - разделитель тысяч;
-// так же это делают кошельки Monero.
+// WHY A SEPARATE FUNCTION, NOT A replace RIGHT IN THE FIELD. The amount fields had
+// `e.target.value.replace(/[^0-9.]/g, "")`: everything but digits and a dot was ERASED. The European comma
+// ("0,05" - the way half the world writes) turned into "005", that is 5 - an error by A HUNDREDFOLD, and spotting
+// it in the interface is nearly impossible: the field shows "005", the quote is computed for five, the person pays
+// a hundred times more. A comma without a dot is a decimal separator; a comma when a dot is present is a
+// thousands separator; the Monero wallets do the same.
 //
-// Возвращает КАНОНИЧЕСКУЮ строку (только цифры и максимум одна точка). Именно её видно в поле и именно её
-// парсит остальной код - поэтому «что написано» и «что посчитано» не могут разойтись.
+// Returns a CANONICAL string (digits and at most one dot). It is exactly what is shown in the field and exactly
+// what the rest of the code parses - so "what is written" and "what is computed" cannot diverge.
 export function normalizeAmountInput(raw) {
   let s = String(raw == null ? "" : raw).trim().replace(/[^0-9.,]/g, "");
   if (s.includes(".")) {
-    // Точка есть - запятые разделяют тысячи ("1,234.5" -> "1234.5").
+    // A dot is present - commas separate thousands ("1,234.5" -> "1234.5").
     s = s.replace(/,/g, "");
   } else if (s.includes(",")) {
-    // Одна запятая без точки - десятичный разделитель ("0,05" -> "0.05"). Всё, что стоит ПОСЛЕ второй
-    // запятой, отбрасываем: угадывать, что "1,2,3" значило 123, значит на опечатке увеличить платёж в сто раз.
+    // A single comma without a dot is the decimal separator ("0,05" -> "0.05"). Everything AFTER the second
+    // comma is dropped: guessing that "1,2,3" meant 123 would, on a typo, inflate the payment a hundredfold.
     const i = s.indexOf(",");
     const rest = s.slice(i + 1);
     const cut = rest.indexOf(",");
     s = s.slice(0, i) + "." + (cut < 0 ? rest : rest.slice(0, cut));
   }
-  // Вторая точка - тоже опечатка, и хвост за ней отбрасывается, а не склеивается с числом ("1.2.3" -> "1.2").
+  // A second dot is also a typo, and the tail after it is dropped, not glued to the number ("1.2.3" -> "1.2").
   const dot = s.indexOf(".");
   if (dot >= 0) {
     const rest = s.slice(dot + 1);
     const cut = rest.indexOf(".");
     s = s.slice(0, dot + 1) + (cut < 0 ? rest : rest.slice(0, cut));
   }
-  s = s.replace(/^0+(?=\d)/, "");                     // "005" -> "5", но "0.5" не трогаем
+  s = s.replace(/^0+(?=\d)/, "");                     // "005" -> "5", but "0.5" is left alone
   if (!/[0-9]/.test(s)) return "";
   return s;
 }
 
-/** Число из введённого человеком или null, если числа там нет. Никаких «догадок»: пусто - значит пусто. */
+/** Number from a human-entered value, or null if there is no number. No "guessing": empty means empty. */
 export function parseAmount(raw) {
   const s = normalizeAmountInput(raw);
   if (!s) return null;
@@ -143,22 +142,22 @@ export function parseAmount(raw) {
 }
 
 export function shortId() {
-  // 16 hex-символов (8 байт = 2^64). Раньше было 4 символа (randomHex(2)): при 100 000 сделок совпадение
-  // практически неизбежно - 68.8% на 8 символах и 100% на 4, - а id служит ключом в состоянии и именем файла
-  // восстановления, поэтому совпадение означало бы потерю записи, за которой стоят средства.
-  // ВАЖНО: у уже созданных сделок id остаются короткими. Переименовывать их нельзя: id лежит в файле
-  // восстановления, в ссылках и в состоянии - они бы разъехались.
+  // 16 hex chars (8 bytes = 2^64). Before it was 4 chars (randomHex(2)): with 100 000 swaps a collision is
+  // practically inevitable - 68.8% at 8 chars and 100% at 4 - and the id is a key in the state and the name of
+  // the recovery file, so a collision would mean losing a record that backs funds.
+  // IMPORTANT: already-created swaps keep short ids. They must not be renamed: the id lives in the recovery
+  // file, in links and in the state - they would fall out of sync.
   return randomHex(8);
 }
 
-// БЫСТРАЯ ПРИКИДКА ФОРМЫ Monero-адреса: base58, длина 95 (обычный) / 106 (integrated), префикс сети.
+// QUICK CHECK OF A Monero ADDRESS SHAPE: base58, length 95 (plain) / 106 (integrated), network prefix.
 //
-// ЧЕГО ЭТА ФУНКЦИЯ НЕ ДЕЛАЕТ: НЕ ПРОВЕРЯЕТ КОНТРОЛЬНУЮ СУММУ. Любая опечатка внутри адреса пройдёт здесь
-// незамеченной. Раньше она называлась isValidMoneroAddress - и это имя было ловушкой: функция, которую
-// зовут "проверкой адреса", но которая пропускает опечатку, рано или поздно попадает на путь денег.
+// WHAT THIS FUNCTION DOES NOT DO: IT DOES NOT VERIFY THE CHECKSUM. Any typo inside the address passes here
+// unnoticed. It used to be named isValidMoneroAddress - and that name was a trap: a function called
+// "address check" that lets a typo through ends up on the money path sooner or later.
 //
-// НАСТОЯЩАЯ ПРОВЕРКА - checkAddress() из ../monero/address.js: формат + разбор base58 + keccak256-контрольная
-// сумма + совпадение сети. Именно её зовёт форма. Здесь - только чтобы отсеять явный мусор до тяжёлого разбора.
+// THE REAL CHECK IS checkAddress() from ../monero/address.js: format + base58 decode + keccak256 checksum
+// + network match. The form calls that one. This one only screens out obvious garbage before the heavy decode.
 export function looksLikeMoneroAddress(addr) {
   const a = String(addr || "").trim();
   if (![95, 106].includes(a.length)) return false;

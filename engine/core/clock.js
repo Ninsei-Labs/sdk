@@ -1,17 +1,16 @@
 // GENERATED FILE - a byte-for-byte copy of the engine module www/js/core/clock.js for the SDK package.
-// Edit the source under www/js, then run: node tools/build-sdk-engine.mjs
-// tools/check-sdk-engine.mjs reddens on any drift, so a stale copy cannot ship silently.
+// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
 // Everything below this header is identical to the source.
 
-// Sim-часы демки.
+// Demo sim-clock.
 //
-// Идея: реальное время сжимается множителем speed. speed=60 означает, что одна
-// реальная секунда равна одной sim-минуте. Все тайминги сделки живут в sim-времени,
-// поэтому демку можно показывать быстро, а на speed=1 она идёт в реальном темпе
-// (20-40 минут на сделку, как в литпепере).
+// Idea: real time is compressed by the speed multiplier. speed=60 means one
+// real second equals one sim-minute. All swap timings live in sim-time,
+// so the demo can be shown fast, while at speed=1 it runs at real pace
+// (20-40 minutes per swap, as in the litepaper).
 //
-// swap.realStart  - Date.now() в момент создания сделки
-// swap.simStartWall - настенное время демки в этот же момент (для отображения UTC)
+// swap.realStart    - Date.now() at the moment the swap was created
+// swap.simStartWall - the demo's wall time at that same moment (for UTC display)
 // simElapsed(swap) = (Date.now() - realStart) * speed
 
 export function nowReal() {
@@ -22,15 +21,15 @@ export function simElapsed(swap, now = nowReal()) {
   return Math.max(0, (now - swap.realStart) * swap.speed);
 }
 
-// Настенное время демки в момент, когда прошло simMs sim-времени с начала сделки.
+// The demo's wall time at the moment when simMs of sim-time has passed since the swap started.
 export function simWall(swap, simMs) {
   return swap.simStartWall + simMs;
 }
 
 
 
-// Пересчёт базовой точки при смене скорости: sim-прогресс сохраняется,
-// дальше сделка идёт с новой скоростью.
+// Rescale the base point when the speed changes: sim-progress is preserved,
+// after that the swap runs at the new speed.
 export function rescaleStart(swap, newSpeed, now = nowReal()) {
   const elapsed = simElapsed(swap, now);
   swap.speed = newSpeed;

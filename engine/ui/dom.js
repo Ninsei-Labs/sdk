@@ -1,9 +1,8 @@
 // GENERATED FILE - a byte-for-byte copy of the engine module www/js/ui/dom.js for the SDK package.
-// Edit the source under www/js, then run: node tools/build-sdk-engine.mjs
-// tools/check-sdk-engine.mjs reddens on any drift, so a stale copy cannot ship silently.
+// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
 // Everything below this header is identical to the source.
 
-// Крошечные DOM-хелперы. Никаких фреймворков: демка должна читаться глазами.
+// Tiny DOM helpers. No frameworks: the demo must be readable by eye.
 
 export function h(tag, attrs = {}, children = []) {
   const el = document.createElement(tag);
@@ -12,8 +11,8 @@ export function h(tag, attrs = {}, children = []) {
     if (k === "class") el.className = v;
     else if (k === "html") el.innerHTML = v;
     else if (k === "text") el.textContent = v;
-    // style пишем только через CSSOM: атрибут style="..." запрещён политикой CSP
-    // (style-src-attr), а el.style.* и cssText - разрешены. Так эта ловушка не вернётся.
+    // style is written only through CSSOM: the style="..." attribute is banned by the CSP policy
+    // (style-src-attr), while el.style.* and cssText are allowed. So this trap does not return.
     else if (k === "style") {
       if (typeof v === "string") el.style.cssText = v;
       else Object.assign(el.style, v);

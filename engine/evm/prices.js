@@ -1,32 +1,23 @@
 // GENERATED FILE - a byte-for-byte copy of the engine module www/js/evm/prices.js for the SDK package.
-// Edit the source under www/js, then run: node tools/build-sdk-engine.mjs
-// tools/check-sdk-engine.mjs reddens on any drift, so a stale copy cannot ship silently.
+// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
 // Everything below this header is identical to the source.
 
-// Живые рыночные числа для EVM-ноги: цена нейтива (Chainlink on-chain) и стоимость газа (RPC).
-//
-// ПОЧЕМУ ON-CHAIN, А НЕ API. Цена берётся вызовом контракта через тот же RPC, что уже разрешён
-// в CSP (`connect-src`), поэтому:
-//   - не появляется ни одного нового внешнего домена (и ни одного нового доверенного сервиса);
-//   - нет ключей, лимитов и «мы упали, потому что у CoinGecko 429»;
-//   - значение нельзя перепутать с ценой другой сети: адрес фида свой у каждой цепи.
-// Адреса фидов НЕ выдуманы: каждый подтверждён вызовом в сети - описание `description()` должно
-// совпасть с ожидаемой парой, а ответ - попасть в разумный коридор и быть свежим. Проверка живёт
-// в tools/check-prices.mjs (работает на заглушке RPC, без сети).
-//
-// ЧЕГО ЗДЕСЬ НЕТ: если фида для сети нет или он молчит - возвращаем null, и вызывающий код обязан
-// показать, что число демонстрационное, а не подставить вчерашнюю константу молча.
+// LIVE MARKET NUMBERS FOR THE EVM LEG: the native price (Chainlink on-chain) and the gas cost (RPC).
+// WHY ON-CHAIN, NOT AN API: the price is a contract call over the same RPC already allowed by the CSP
+// (connect-src), so no new external domain appears, there are no keys or rate limits, and the feed address is
+// per chain. The feed addresses are NOT invented: each is confirmed by a call on chain (description() must match).
+// WHAT IS NOT HERE: if a network has no feed or it is silent, return null and let the caller mark the number as demo.
 
 const SELECTOR = {
   description: "0x7284e416", // description()
   latestRoundData: "0xfeaf968c", // latestRoundData() -> (roundId, answer, startedAt, updatedAt, answeredInRound)
 };
 
-const CACHE_MS = 60_000; // цена: минута - компромисс между свежестью и числом запросов
-const GAS_CACHE_MS = 30_000; // газ меняется чаще, но и он не обязан бегать на каждый ввод символа
-const MAX_AGE_MS = 24 * 60 * 60 * 1000; // старше суток фид считаем несвежим и не показываем как живой
+const CACHE_MS = 60_000; // price: a minute balances freshness and request count
+const GAS_CACHE_MS = 30_000; // gas changes more often, but it need not run on every keystroke
+const MAX_AGE_MS = 24 * 60 * 60 * 1000; // older than a day, the feed is stale and not shown as live
 
-const cache = new Map(); // ключ: chainId + вид запроса
+const cache = new Map(); // key: chainId + request kind
 
 function cached(key, ttlMs) {
   const hit = cache.get(key);
@@ -47,14 +38,14 @@ async function rpc(chain, method, params = []) {
   });
   if (!res.ok) throw new Error(method + ": HTTP " + res.status);
   const j = await res.json();
-  if (j.error) throw new Error(method + ": " + (j.error.message || "ошибка RPC"));
+  if (j.error) throw new Error(method + ": " + (j.error.message || "RPC error"));
   return j.result;
 }
 
 const word = (data, i) => BigInt("0x" + String(data).slice(2).slice(i * 64, (i + 1) * 64));
 
-// Декодирование строки ABI: [offset][length][bytes]. Нужно, чтобы отличить фид ETH/USD от любого
-// другого, который кто-то подставил в конфиг. TextDecoder, а не Buffer: этот код живёт в браузере.
+// ABI string decode: [offset][length][bytes]. Needed to tell the ETH/USD feed from another one. TextDecoder,
+// not Buffer: this code runs in the browser.
 function decodeString(data) {
   const s = String(data || "");
   if (s.length < 2 + 128) return "";
@@ -65,7 +56,7 @@ function decodeString(data) {
   return new TextDecoder().decode(bytes);
 }
 
-// Цена нейтива в USD. null - если фида нет, он молчит или значения не проходят проверку.
+// Native price in USD. null if the feed is missing, silent, or fails validation.
 export async function nativeUsd(chain, { force = false } = {}) {
   const feed = chain && chain.priceFeed;
   if (!feed || !feed.address) return null;
@@ -87,7 +78,7 @@ export async function nativeUsd(chain, { force = false } = {}) {
     const fresh = updatedAt > 0 && Date.now() - updatedAt < MAX_AGE_MS;
     const sane = value >= (feed.min || 0.01) && value <= (feed.max || 1e7);
     if (desc !== feed.pair || !fresh || !sane) {
-      return put(key, null); // null, а не «примерно столько»: молчание честнее выдумки
+      return put(key, null); // null, not "roughly this": silence is more honest than a guess
     }
     return put(key, { usd: value, updatedAt, source: "chainlink", pair: desc });
   } catch {
@@ -95,9 +86,8 @@ export async function nativeUsd(chain, { force = false } = {}) {
   }
 }
 
-// Стоимость газа в USD: оценка лимита × цена газа × цена нейтива.
-// На Arbitrum в цену газа уже входит L1-составляющая (так устроен их gas price), поэтому
-// отдельный вызов NodeInterface не нужен - обычная оценка даёт сопоставимую с кошельками цифру.
+// Gas cost in USD: limit estimate x gas price x native price. On Arbitrum the L1 part is already in the gas
+// price, so no separate NodeInterface call is needed.
 export async function gasUsd(chain, { from = null, payToken = null, amountWei = null } = {}) {
   const key = chain.id + ":gas";
   const hit = cached(key, GAS_CACHE_MS);
@@ -108,15 +98,12 @@ export async function gasUsd(chain, { from = null, payToken = null, amountWei = 
     const gasPrice = BigInt(await rpc(chain, "eth_gasPrice"));
     let gasLimit = null;
     let measured = false;
-    // Оцениваем ту транзакцию, которую человек и подпишет: перевод оплачиваемого токена.
-    // Эскроу ещё не задеплоен, поэтому это честная нижняя оценка, а не «газ свопа».
+    // We estimate the transaction the person will actually sign: a transfer of the paying token.
+    // The escrow is not deployed yet, so this is an honest lower bound, not the swap gas.
     try {
-      // Без аккаунта eth_estimateGas подставляет НУЛЕВОЙ адрес, и перевод токена справедливо
-      // падает с "ERC20: transfer from the zero address". Поэтому без from не оцениваем вовсе:
-      // берём типовой лимит и честно помечаем, что он не измерен (в интерфейсе это видно).
-      // ВАЖНО: признак "перевод токена" и признак "есть аккаунт" - РАЗНЫЕ условия. Раньше они
-      // были слиты в одну ветку, и без аккаунта перевод токена получал лимит нативного перевода
-      // (21000 вместо 65000) - поймал tools/check-prices.mjs.
+      // Without an account eth_estimateGas uses the ZERO address and a token transfer fails with
+      // "ERC20: transfer from the zero address". So without `from` we do not estimate: we take a typical
+      // limit and mark it as unmeasured. NOTE: "token transfer" and "has account" are DIFFERENT conditions.
       const tokenTransfer = Boolean(payToken && !payToken.native);
       if (tokenTransfer && from) {
         // transfer(address,uint256) = 0xa9059cbb
@@ -128,7 +115,7 @@ export async function gasUsd(chain, { from = null, payToken = null, amountWei = 
         gasLimit = BigInt(await rpc(chain, "eth_estimateGas", [{ from, to: from, value: "0x1" }]));
         measured = true;
       } else {
-        // Ни аккаунта, ни измерения: типовой лимит и честный признак «не измерено».
+        // No account and no measurement: a typical limit and an honest 'not measured' flag.
         gasLimit = BigInt(chain.gasLimitFallback || (tokenTransfer ? 65000 : 21000));
       }
     } catch {
@@ -142,21 +129,19 @@ export async function gasUsd(chain, { from = null, payToken = null, amountWei = 
   }
 }
 
-// Одна точка обновления: подтянуть цену и газ для сети и вернуть то, чем можно подписать интерфейс.
+// One refresh point: fetch price and gas for the network and return what the interface can sign with.
 export async function refreshChainPrices(chain, opts = {}) {
   if (!chain || !chain.rpcUrl) return { nativeUsd: null, gasUsd: null, source: "none" };
   const [price, gas] = await Promise.all([nativeUsd(chain), gasUsd(chain, opts)]);
-  // Цена нейтива - общая для всех расчётов сети (балансы, «≈ $», оценка газа), поэтому пишем её
-  // в конфиг сети: иначе одна и та же цифра жила бы в двух местах и разъезжалась.
+  // The native price is shared by all network maths (balances, '~ $', gas), so it is written into the
+  // network config, else the same number would live in two places and drift.
   if (price && Number.isFinite(price.usd)) chain.native.usd = price.usd;
   return {
     nativeUsd: price ? price.usd : null,
     nativeUpdatedAt: price ? price.updatedAt : null,
     gasUsd: gas ? gas.usd : null,
-    // ЦЕНА ГАЗА В ВЕЙ - НАРУЖУ, А НЕ ТОЛЬКО СТОИМОСТЬ ОЦЕНКИ. Из неё считается запас газа на действия ордера
-    // (www/js/evm/gasReserve.js): отметка готовности и возврат - другие транзакции, у них свои пределы, и
-    // «стоимость одной оценки» их не заменяет. Нет газа у цепи - null, и вызывающий обязан сказать, что запас
-    // не измерен, а не подставить ноль.
+    // GAS PRICE IN WEI GOES OUT, not just the estimate cost. The order-action gas reserve is derived from it
+    // (gasReserve.js): the mark and refund are different transactions with their own limits. No gas - null.
     gasPriceWei: gas ? gas.gasPrice : null,
     gasSource: gas ? gas.source : null,
     gasMeasured: gas ? Boolean(gas.measured) : false,
@@ -164,8 +149,8 @@ export async function refreshChainPrices(chain, opts = {}) {
   };
 }
 
-// Коротко и в одну строку, но про ОБЕ половины: строка называется «Gas & price», значит и газ,
-// и цена должны быть в значении. Живая цена видна по самому тексту (Chainlink), демо - по «demo values».
+// Short and one line, but covering BOTH halves: the string is "Gas & price", so both gas and price must be
+// in the value. A live price shows as Chainlink, a demo one as 'demo values'.
 export function priceLabel(info) {
   if (!info || !info.source || info.source === "none") return "demo values";
   if (info.source !== "chainlink") return "demo values";
