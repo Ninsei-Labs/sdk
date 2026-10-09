@@ -68,7 +68,15 @@ import { height as nodeHeightValue } from "../monero/node.js";
 
 // THE CORE ADDRESS AS A STRING - THE BUILT BUNDLE UNDER www/: the page gets the core as ONE module, not a pile
 // of sdk/ sources; ?v=<hash> keeps the cache fresh.
-const SDK_BUNDLE = "/assets/vendors/sdk/sdk-browser.js?v=7c3f501b";
+const SDK_BUNDLE = "/assets/vendors/sdk/sdk-browser.js?v=ab70ca17";
+
+// A NAMED SEAM FOR CHECKS - THE SAME TECHNIQUE AS sdkBookUse BELOW. The asynchronous path is driven against a
+// stand-in order book (the demo network has no provider), and the ordinary escrow funding that follows a settled
+// swap can be replaced while that runs, because deploying an escrow factory on a throwaway chain is the stand's
+// job, not a check's. The replacement is named, set only by a check, and unset by the same function; production
+// never calls it, so the real funding path is what ships.
+let startSwapOverride = null;
+export function useStartSwap(fn = null) { startSwapOverride = typeof fn === "function" ? fn : null; return Boolean(startSwapOverride); }
 
 // ONE LOAD PER PAGE. A refusal is a state, not a breakdown: it is named in the console and the caller decides.
 let loading = null;
@@ -426,6 +434,9 @@ export async function sdkOrderQuote({ chain, providerId, amountWei, finality = n
 // (sdk/src/swaps.mjs, swaps.start). The screen passes only data: the quote, where to receive, the password, the
 // wallet and the file-confirmation handler. The page assembles no order side, no addresses and no transactions here.
 export async function sdkStartSwap(request) {
+  // THE CHECK SEAM (see useStartSwap above): a stand-in for the escrow funding while the asynchronous path is
+  // exercised. Absent in production - the real core path below is what runs.
+  if (startSwapOverride) return startSwapOverride({ ...(request || {}) });
   const ctx = await instanceFor(request && request.chain);
   if (!ctx) return null;
   const req = { ...(request || {}) };

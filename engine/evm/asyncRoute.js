@@ -21,6 +21,22 @@
 // follow against sdk/src/swap-flow.mjs.
 import { ASYNC_ROUTE_PROVIDERS } from "../core/config.js";
 
+// A NAMED SEAM FOR CHECKS: a route record injected for a network the table does not serve, so the asynchronous path
+// can be exercised end to end against a local stand-in order book. PRODUCTION NEVER SETS IT - the page reads the
+// table, and the table is what the guard cross-checks against the package. The injection is explicit, named at the
+// call site and cleared by the same function, so "the path was taken against a stand-in" is never mistaken for
+// "a real provider serves this network". The verdict stays a VALUE either way.
+let injectedRoute = null;
+export const setAsyncRouteInjection = (route = null) => { injectedRoute = route || null; return injectedRoute; };
+export const asyncRouteInjection = () => injectedRoute;
+// The injection matches a chain (and, when named, a provider id); a record for another chain is ignored.
+const injectedFor = (chainId, providerId) => {
+  if (!injectedRoute) return null;
+  if (Number(injectedRoute.chainId) !== Number(chainId)) return null;
+  if (providerId && injectedRoute.id !== providerId) return null;
+  return injectedRoute;
+};
+
 /** The provider record by id, or null. */
 export const asyncRouteProvider = (id) => (id && ASYNC_ROUTE_PROVIDERS[id]) || null;
 
@@ -33,6 +49,9 @@ export const asyncRouteChains = (id) => Object.keys((asyncRouteProvider(id) || {
 
 /** The provider record for a network, or null: { id, venue, shape, chainId, slug, orderbook }. */
 export const asyncRouteForChain = (chainId, providerId = null) => {
+  // THE SEAM FIRST: an injected stand-in for this chain (checks only). It is a full record of the same shape.
+  const injected = injectedFor(chainId, providerId);
+  if (injected) return { id: injected.id, venue: injected.venue || injected.id, shape: injected.shape || "async", chainId: Number(chainId), slug: injected.slug ?? null, orderbook: injected.orderbook ?? null };
   const id = providerId || asyncRouteProviderIds()[0] || null;
   if (!id) return null;
   const provider = asyncRouteProvider(id);

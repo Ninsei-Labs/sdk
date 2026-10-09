@@ -36,6 +36,10 @@ export * from "./funding.js";
 // engine seam: the page and the SDK share one protocol code, not two lookalikes.
 export * from "./depositor.js";
 export * from "./permit.js";
+// THE ASYNCHRONOUS ROUTE, EXECUTED - through the same engine seam as the decision that chooses it. The page reaches
+// it through the bridge; the SDK carries the same module in its engine mirror (tools/build-sdk-engine.mjs).
+export * from "./asyncRoute.js";
+export * from "./asyncExec.js";
 
 // currentProvider - the wallet provider goes OUT to the SDK core (evm-wallet.mjs) so signing uses the same
 // key as the page. Screens do not need it; they read status()/isConnected().
