@@ -70,7 +70,7 @@ export async function restoreFromHalves(payload, warnings = [], deps = {}) {
   const libs = deps.halves && deps.addressFromKeys
     ? { halves: deps.halves, addressFromKeys: deps.addressFromKeys, keccak256: deps.keccak256 }
     : await (async () => {
-        const vendor = await import("../../assets/vendors/atomic/atomic-browser.js?v=0951c3dc");
+        const vendor = await import("../../assets/vendors/atomic/atomic-browser.js?v=77cc4725");
         const { createHalves } = await import("../atomic/halves.js");
         const { addressFromKeys } = await import("../monero/address.js");
         const halves = createHalves({

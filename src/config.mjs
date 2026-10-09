@@ -99,7 +99,7 @@ export const DEFAULT_XMR_NODES = Object.freeze({
     { url: "https://mainnet.xmr.kernal.eu:18089", operator: "kernal.eu" },
   ],
   stagenet: [
-    { url: "https://xmr.arrakisswap.trade", operator: "arrakisswap" },
+    { url: "https://xmr.arrakisswap.trade", operator: "ninseiswap" },
     { url: "https://stagenet.xmr.kernal.eu:38089", operator: "kernal.eu" },
   ],
 });

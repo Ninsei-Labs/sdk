@@ -29,7 +29,7 @@ import { config as engineConfig, xmrAddress } from "../engine.mjs";
 
 const XMR_VM = "monero";
 // The wallet session label - the same as the withdrawal page's. This is not a secret and not an address, but a session name.
-const DEFAULT_PASSWORD = "arrakis-wallet-session";
+const DEFAULT_PASSWORD = "ninsei-wallet-session";
 
 /** Monero network names declared by the core's registry. The adapter keeps no table of its own. */
 const knownNetworks = () => {

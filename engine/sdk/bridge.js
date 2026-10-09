@@ -68,7 +68,7 @@ import { height as nodeHeightValue } from "../monero/node.js";
 
 // THE CORE ADDRESS AS A STRING - THE BUILT BUNDLE UNDER www/: the page gets the core as ONE module, not a pile
 // of sdk/ sources; ?v=<hash> keeps the cache fresh.
-const SDK_BUNDLE = "/assets/vendors/sdk/sdk-browser.js?v=2f46188e";
+const SDK_BUNDLE = "/assets/vendors/sdk/sdk-browser.js?v=fbc82629";
 
 // ONE LOAD PER PAGE. A refusal is a state, not a breakdown: it is named in the console and the caller decides.
 let loading = null;

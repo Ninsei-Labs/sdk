@@ -478,7 +478,7 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
       }
       // BINDING THE QUOTE TO OUR TERMS. The signature confirms the provider signed THIS quote, but not that it is
       // about our swap: we are responsible for the binding. The context string is computed by OUR engine module
-      // (format arrakis-order-v3; the field order is part of the protocol and must not be rearranged). There is
+      // (format ninsei-order-v3; the field order is part of the protocol and must not be rearranged). There is
       // deliberately no copy of the format here: a copy would silently drift from the protocol.
       //
       // THE ORDER OF THE GATES: signature first, then binding. So a refusal names the nearest reason, not the first
