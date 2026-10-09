@@ -96,7 +96,7 @@ Terminal states (`state.terminal`): `success`, `refunded_eth`, `xmr_returned`, `
 ### Errors (`error.code`, `SdkError.code`)
 
 `not-implemented`, `bad-input`, `wallet-not-connected`, `wallet-rejected`, `wrong-chain`, `quote-unavailable`,
-`quote-refused`, `quote-stale`, `recovery-declined`, `recovery-failed`, `storage-unavailable`,
+`quote-refused`, `address-denied`, `quote-stale`, `recovery-declined`, `recovery-failed`, `storage-unavailable`,
 `server-unavailable`, `server-refused`, `xmr-timeout`, `xmr-locked`, `contract-reverted`, `insufficient-funds`, `unknown`.
 
 Three refusals that are easy to merge into one are named DIFFERENTLY, because the advice differs:
@@ -105,6 +105,9 @@ reason and status are in `params`; investigate); `xmr-timeout` — the wait for 
 state of the money, not a breakdown); `xmr-locked` — XMR is on the address but the transaction's `unlock_time`
 barred it until a height or a date (`params.until`), so the funds are not an arrival and the ready mark is not
 signed (issue #84).
+`address-denied` (issue #16) - the address is on the interface's `denylist` (refused before any
+request) or the node's own `denied-address` refusal, WITHOUT the node's `why` text and WITHOUT the address: the
+interface shows its own neutral message.
 
 ## Quotes
 

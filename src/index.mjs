@@ -105,6 +105,12 @@ const normalizeOptions = (options) => {
   if (o.knownImplementationCodes !== undefined && o.knownImplementationCodes !== null && !Array.isArray(o.knownImplementationCodes)) {
     fail("bad-input", { field: "knownImplementationCodes" });
   }
+  // THE INTERFACE'S ADDRESS DENYLIST (issue #16): policy, like allowedProviders - addresses the interface will not
+  // trade to or from. An empty/absent list means "no check"; an entry that is not a string is a typo, not a silent
+  // no-op. The SDK fetches nothing: the interface brings the list in.
+  if (o.denylist !== undefined && o.denylist !== null) {
+    if (!Array.isArray(o.denylist) || o.denylist.some((a) => typeof a !== "string")) fail("bad-input", { field: "denylist" });
+  }
   // A PASS TO OUR SERVICE - A SEAM FROM OUTSIDE, like the wallet: only a wallet can sign the sign-in message
   // (www/js/evm/auth.js, signIn), and requiring it of the core would mean opening windows and signing messages
   // inside the SDK. The core receives a ready pass and presents it. A missing pass is NOT an option error: the
@@ -146,6 +152,7 @@ const normalizeOptions = (options) => {
     allowedProviders: o.allowedProviders === undefined ? null : o.allowedProviders,
     knownFactoryCodes: o.knownFactoryCodes === undefined ? null : o.knownFactoryCodes,
     knownImplementationCodes: o.knownImplementationCodes === undefined ? null : o.knownImplementationCodes,
+    denylist: o.denylist === undefined ? null : o.denylist,
     serverAuth: o.serverAuth || null,
     watch: o.watch || null,
     createRecord: o.createRecord || null,
@@ -194,8 +201,15 @@ export function createNinsei(options) {
     const set = new Set(a.map((v) => String(v).toLowerCase()));
     return (provider) => set.has(String(provider).toLowerCase());
   })();
+  // THE DENYLIST IS LOWER-CASED ONCE HERE, so the comparison rule (case-insensitive membership) lives in ONE
+  // place and BOTH the quote check (`quotes.firm`) and the lock check (`swaps.start`) use it. An empty list is
+  // "no policy" (null), not an empty check.
+  const denylist = Array.isArray(o.denylist) && o.denylist.length
+    ? new Set(o.denylist.map((a) => String(a).toLowerCase()))
+    : null;
   const quotes = createQuotes({ config, http, now: o.now || (() => Date.now()), evmCall: o.evmCall || null,
-    evmCode: o.evmCode || null, providerAllowed, knownFactoryCodes: o.knownFactoryCodes, knownImplementationCodes: o.knownImplementationCodes });
+    evmCode: o.evmCode || null, providerAllowed, knownFactoryCodes: o.knownFactoryCodes, knownImplementationCodes: o.knownImplementationCodes,
+    denylist });
   // THE SAME CHAIN-READ SEAM AS THE LOCK AND THE CORE: checking the slots and signing must go one way, otherwise
   // part of the check goes past the wallet and part does not.
   const actions = createActions({ call: o.evmCall });
@@ -246,7 +260,7 @@ export function createNinsei(options) {
     // would not know where to knock, and without the pass there is nothing to present to the service (and that
     // is a refusal with a CODE, not an invented path).
     swaps: createSwaps({ preflight, http, mode: o.mode, xmrNetwork: o.xmrNetwork, call: o.evmCall,
-      config, auth: o.serverAuth, watch: o.watch,
+      config, auth: o.serverAuth, denylist, watch: o.watch,
       // THE RECORD IS BUILT HERE ITSELF, and one brought from outside is only the caller's preference.
       createRecord: o.createRecord }),
     // XMR WITHDRAWAL: parsing the file and requesting data work; the withdrawal itself is named (the Monero
