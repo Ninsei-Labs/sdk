@@ -23,12 +23,23 @@
 // confirmed by a call", not "no DEX": the interface must say so in words.
 
 // DEPLOYMENT ENDPOINTS. THE ONE PLACE a deployment names node addresses; nothing else in the code hard-codes a host,
-// and no default domain is invented. Set window.NINSEI_DEPLOY = { moneroNode, evmRpc, sweepOrigin } at deploy.
-const DEPLOY_ENV = (typeof window !== "undefined" && window.NINSEI_DEPLOY) || {};
+// and no production domain is invented. ONE source, read by BOTH environments by the SAME names:
+//   * in the browser - window.NINSEI_DEPLOY = { moneroNode, evmRpc, sweepOrigin } set at deploy;
+//   * in Node (checks, tools) - the environment: NINSEI_MONERO_NODE, NINSEI_EVM_RPC, NINSEI_SWEEP_ORIGIN.
+// With nothing set, the LOCAL CONTOUR is the honest default (our own Monero node, our own anvil, our own sweep
+// page): checks then run in Node with no live stand, and no production address lives in the code. A deployment
+// overrides all three.
+const BROWSER_DEPLOY = (typeof window !== "undefined" && window.NINSEI_DEPLOY) ? window.NINSEI_DEPLOY : null;
+const NODE_ENV = (typeof process !== "undefined" && process.env) ? process.env : null;
+const LOCAL_ENDPOINTS = Object.freeze({
+  moneroNode: "http://127.0.0.1:38081",
+  evmRpc: "http://127.0.0.1:8545",
+  sweepOrigin: "http://localhost:5195",
+});
 export const ENDPOINTS = Object.freeze({
-  moneroNode: DEPLOY_ENV.moneroNode || null,
-  evmRpc: DEPLOY_ENV.evmRpc || null,
-  sweepOrigin: DEPLOY_ENV.sweepOrigin || null,
+  moneroNode: (BROWSER_DEPLOY && BROWSER_DEPLOY.moneroNode) || (NODE_ENV && NODE_ENV.NINSEI_MONERO_NODE) || LOCAL_ENDPOINTS.moneroNode,
+  evmRpc: (BROWSER_DEPLOY && BROWSER_DEPLOY.evmRpc) || (NODE_ENV && NODE_ENV.NINSEI_EVM_RPC) || LOCAL_ENDPOINTS.evmRpc,
+  sweepOrigin: (BROWSER_DEPLOY && BROWSER_DEPLOY.sweepOrigin) || (NODE_ENV && NODE_ENV.NINSEI_SWEEP_ORIGIN) || LOCAL_ENDPOINTS.sweepOrigin,
 });
 
 // THE PAGE'S OWN ADDRESS comes from the environment, not from a constant: WalletConnect compares the metadata url
