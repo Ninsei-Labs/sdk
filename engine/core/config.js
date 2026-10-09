@@ -220,6 +220,36 @@ export const DEX_ROUTES = {
   },
 };
 
+// ASYNCHRONOUS ROUTE PROVIDERS - A NETWORK IS SERVED OR IT IS NOT, AND THAT IS DATA, NOT A GUESS.
+//
+// The declared routes above are ROUTER swaps: the swap runs INSIDE the person's own transaction (shape "sync").
+// A person coming from USDC who holds NO native coin of their own cannot pay for that transaction at all - there
+// is nothing to pay the gas with. So a second kind of route is declared here: an INTENT AUCTION, where the person
+// SIGNS an intent and the settlement arrives LATER as a separate transaction sent by someone else (shape "async";
+// CoWSwap is the first such provider, see the step-1 package layer sdk/src/legs/cow.mjs). The wallet's own
+// balance then decides the path (www/js/evm/permit.js: usdcWithoutEthVerdict) and the asynchronous one is taken
+// when the wallet cannot cover the gas - the swap settles first, and the escrow deposit (and its gas) comes after.
+//
+// KEYED BY EVM chainId. A network ABSENT here is NOT served asynchronously: the path choice must refuse BY NAME
+// (www/js/evm/asyncRoute.js: asyncRouteVerdict, reason "no-async-provider") rather than pretend. The order book
+// base URLs are the provider's own public endpoints (the CoWSwap order book OpenAPI `servers` list), the same
+// ones pinned in sdk/src/legs/cow.mjs; tools/check-buy-async-route.mjs cross-checks the two tables so the engine
+// and the package cannot drift apart silently.
+export const ASYNC_ROUTE_PROVIDERS = {
+  cowswap: {
+    venue: "CoWSwap",
+    shape: "async",
+    networks: {
+      1: { slug: "mainnet", orderbook: "https://api.cow.fi/mainnet" },
+      100: { slug: "xdai", orderbook: "https://api.cow.fi/xdai" },
+      42161: { slug: "arbitrum_one", orderbook: "https://api.cow.fi/arbitrum_one" },
+      8453: { slug: "base", orderbook: "https://api.cow.fi/base" },
+      56: { slug: "bnb", orderbook: "https://api.cow.fi/bnb" },
+      11155111: { slug: "sepolia", orderbook: "https://api.cow.fi/sepolia" },
+    },
+  },
+};
+
 export const CHAINS = [
   {
     id: "arbitrum-sepolia",

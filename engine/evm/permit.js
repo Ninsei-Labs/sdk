@@ -16,10 +16,21 @@
 // WHY THERE IS NO SINGLE-TRANSACTION PATH HERE, AND IT IS NOT AN OVERSIGHT. The router sees msg.sender as the payer.
 // A user without ETH cannot send approve, swap or deposit. Only an EXECUTOR CONTRACT could deposit for them and
 // pull USDC by their signature (an EOA cannot present someone else's signature). No such contract exists here, so
-// usdcWithoutEthVerdict REFUSES to call the path executable and says what is missing.
+// the SINGLE-TRANSACTION path stays refused and says what is missing (kind "no-orchestrator"). BUT A PERSON WITH
+// NO OWN NATIVE COIN IS NO LONGER SENT AWAY BY THAT ALONE: the wallet's balance decides the path first, and an
+// ASYNCHRONOUS provider (an intent auction, whose settlement arrives later) carries the purchase when the wallet
+// cannot cover the gas - the swap settles first and the escrow is funded after it. See usdcWithoutEthVerdict below
+// and www/js/evm/asyncRoute.js - and it is a NAMED refusal only when no provider serves the network.
 //
 // THE DEPOSITOR SIGNATURE IS A DIFFERENT ALLOWANCE. It lets a relayer SEND the order-creation transaction, but
 // not pull the token. Pulling USDC needs a separate TOKEN allowance (approve or permit) addressed to the puller.
+
+// THE BALANCE-DRIVEN PATH CHOICE. Whether a provider serves a network ASYNCHRONOUSLY (an intent auction whose
+// settlement arrives later - see www/js/evm/asyncRoute.js) is what decides the path for a person with no own
+// native coin: covered gas -> the ordinary route; short native + a served network -> the asynchronous route;
+// short native + an unserved network -> a NAMED refusal. That answer comes from the same table the package's
+// provider layer pins (sdk/src/legs/cow.mjs).
+import { asyncRouteVerdict } from "./asyncRoute.js";
 
 // ERC-20 and EIP-2612 selectors. Next to each is the signature string it was computed from, and a check
 // recomputes keccak256 of those strings, so a selector cannot diverge from its signature silently.
@@ -43,6 +54,13 @@ const wordBytes = (hex) => {
   // AN EMPTY ANSWER IS "NOT READ", NOT "ZERO BYTES". This is how eth_call answers for an address without code.
   if (b.length === 0) return null;
   return b.length % 2 ? null : b.length / 2;
+};
+
+// A quantity as BigInt, or null. An empty/unreadable value is null ("not known"), never zero: a zero balance
+// and an unread balance are different states, and the path choice must not confuse them.
+const toBig = (v) => {
+  if (v === null || v === undefined || v === "") return null;
+  try { return BigInt(typeof v === "bigint" ? v : String(v)); } catch { return null; }
 };
 
 // calldata for a signature allowance (EIP-2612). Signature is r || s || v (65 bytes); v in {27,28}.
@@ -86,17 +104,81 @@ export function permitSupportVerdict({ code = null, domainSeparator = null, nonc
 }
 
 /**
- * Whether a token purchase WITHOUT own ETH is possible in a single transaction. The verdict says exactly what
- * is missing and does NOT hand out calldata until the path is fully executable.
- * @param {{ orchestrator?: string|null, permitSupported?: boolean|null, token?: string|null }} args
+ * WHICH WAY A "BUY WITHOUT OWN NATIVE COIN" GOES - DECIDED BY THE WALLET'S BALANCE, NOT BY A FIXED REFUSAL.
+ *
+ * The wallet's own native coin decides the path BEFORE any token question:
+ *   * the wallet covers the gas the deal needs (`gasNeedWei`) - the ordinary, synchronous path is taken: the
+ *     person pays with their own gas and nothing has to be asked of anyone (`kind: "own-gas"`, `path: "sync"`);
+ *   * the wallet does NOT cover it - the ASYNCHRONOUS path is taken (`kind: "async-route"`, `path: "async"`):
+ *     the swap settles FIRST and the escrow is funded AFTER it, so the deposit and its gas come later. This is
+ *     NOT a refusal as long as a provider serves the network - the "stop being a refusal" rule;
+ *   * no provider serves the network - a NAMED refusal (`kind: "no-async-provider"`, blocked): "the wallet cannot
+ *     cover the gas and there is no asynchronous path here" - never silence and never a silent "yes".
+ *
+ * An unread balance or an unmeasured gas need is its OWN state: "not known" must not look like "covered", but it
+ * is not a refusal either - the caller reads `blocked`.
+ *
+ * The single-transaction executor branch lives BELOW and stays reachable when the balance question cannot be
+ * answered at all (no gas need given): an executor contract could still carry the whole purchase in one
+ * transaction. That branch is the older verdict and is kept so existing callers see the same kinds.
+ *
+ * @param {{ orchestrator?: string|null, permitSupported?: boolean|null, token?: string|null,
+ *           nativeBalanceWei?: *, gasNeedWei?: *, asyncProvider?: object|null, chainId?: * }} args
  */
-export function usdcWithoutEthVerdict({ orchestrator = null, permitSupported = null, token = null } = {}) {
-  // THE FIRST AND MAIN REFUSAL, and it is not about the token. The swap pays msg.sender (the router), and only
-  // a CONTRACT can present someone else's pull signature. Without an executor the one-transaction path does
-  // not exist AT ALL, regardless of the token.
+export function usdcWithoutEthVerdict({
+  orchestrator = null, permitSupported = null, token = null,
+  nativeBalanceWei = null, gasNeedWei = null, asyncProvider = null, chainId = null,
+} = {}) {
+  const need = toBig(gasNeedWei);
+  // THE ASYNC ANSWER - from the caller's explicit verdict (the package layer's own answer) or from the engine's
+  // table by chainId. Either way it is a VALUE with a named reason, never silence.
+  const async = asyncProvider && typeof asyncProvider === "object"
+    ? asyncProvider
+    : (chainId === null || chainId === undefined ? null : asyncRouteVerdict({ chainId }));
+  const asyncOk = Boolean(async && async.ok === true);
+  const asyncReason = async && async.ok === false && async.reason ? String(async.reason) : "no-async-provider";
+
+  if (need !== null && need > 0n) {
+    const have = toBig(nativeBalanceWei);
+    if (have === null) {
+      return {
+        ok: false, blocked: false, checked: false, kind: "balance-unread", path: null,
+        gasNeedWei: need.toString(),
+        reason: "the wallet's native balance was not read, so it is unknown which path fits - read the balance before choosing",
+      };
+    }
+    if (have >= need) {
+      return {
+        ok: true, blocked: false, checked: true, kind: "own-gas", path: "sync",
+        nativeBalanceWei: have.toString(), gasNeedWei: need.toString(),
+        reason: "the wallet's own native covers the gas this deal needs, so the ordinary synchronous path is taken",
+      };
+    }
+    const base = {
+      checked: true, nativeBalanceWei: have.toString(), gasNeedWei: need.toString(),
+      shortfallWei: (need - have).toString(),
+    };
+    if (asyncOk) {
+      return {
+        ok: true, blocked: false, ...base, kind: "async-route", path: "async",
+        provider: async.provider ?? null, venue: async.venue ?? null,
+        reason: "the wallet's own native does not cover the gas this deal needs, but an asynchronous provider serves this network: the swap settles first and the escrow is funded after it, so the deposit's gas is paid later",
+      };
+    }
+    return {
+      ok: false, blocked: true, ...base, kind: "no-async-provider", path: null,
+      reason: "the wallet's own native does not cover the gas this deal needs and no asynchronous provider serves this network (" + asyncReason + "): there is no path for a purchase without own native coin here",
+    };
+  }
+
+  // GAS NOT MEASURED: the balance cannot decide anything - fall through to the single-transaction executor
+  // verdict (unchanged behaviour for callers that pass no gas need).
+  // THE REFUSAL WITHOUT AN EXECUTOR, and it is not about the token. The swap pays msg.sender (the router), and
+  // only a CONTRACT can present someone else's pull signature. Without an executor the one-transaction path
+  // does not exist AT ALL, regardless of the token.
   if (!isAddr(orchestrator)) {
     return {
-      ok: false, blocked: true, kind: "no-orchestrator",
+      ok: false, blocked: true, kind: "no-orchestrator", path: null,
       reason: "no executor contract: only a contract could pull a token by the user signature and deposit native into the escrow in one transaction, and this build has none. The depositor signature without it lets a relayer SEND the order creation, but not pull the token",
     };
   }
@@ -112,5 +194,5 @@ export function usdcWithoutEthVerdict({ orchestrator = null, permitSupported = n
       reason: "unknown whether the token supports a signature allowance: \"not checked\" is not \"possible\". The capability must be read from the chain before assembling the path",
     };
   }
-  return { ok: true, blocked: false, kind: "one-tx-possible", reason: "an executor is present and the token declares EIP-2612: the one-transaction path assembles" };
+  return { ok: true, blocked: false, kind: "one-tx-possible", path: "sync", reason: "an executor is present and the token declares EIP-2612: the one-transaction path assembles" };
 }
