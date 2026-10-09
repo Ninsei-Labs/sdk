@@ -655,7 +655,7 @@ export const DEFAULT_CHAIN = "arbitrum-sepolia";
 //
 // WHY A SEPARATE LIST AND NOT A READ FROM THE BACKEND. Selection is the interface's business: it changes here,
 // without redeploying contracts or editing someone else's node. The backend has the same kind of list
-// (`NINSEI_ALLOWED_PROVIDERS`, in the backend env) - TWO independent steps of one decision, not a copy: the page
+// (`ARRAKIS_ALLOWED_PROVIDERS`, in the backend env) - TWO independent steps of one decision, not a copy: the page
 // guards itself even if the service is configured differently.
 //
 // THE ADDRESSES ARE LOWERCASE, as the quote gives them (field `provider`). A network with no entry here means

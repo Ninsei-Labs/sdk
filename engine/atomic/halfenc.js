@@ -20,13 +20,13 @@
 //
 
 //
-// PERMISSION IS GIVEN EXPLICITLY: globalThis.NINSEI_ALLOW_HALFENC = true (only a check sets it, with a separate locked case).
+// PERMISSION IS GIVEN EXPLICITLY: globalThis.ARRAKIS_ALLOW_HALFENC = true (only a check sets it, with a separate locked case).
 export const HALFENC_LOCK_REASON =
   "halfenc is locked: the sealed-half envelope is not part of the live flow (keccak commit/reveal replaced it). " +
-  "Set globalThis.NINSEI_ALLOW_HALFENC = true to work with it in a test or a spike.";
+  "Set globalThis.ARRAKIS_ALLOW_HALFENC = true to work with it in a test or a spike.";
 
 export function halfencUnlocked() {
-  return globalThis.NINSEI_ALLOW_HALFENC === true;
+  return globalThis.ARRAKIS_ALLOW_HALFENC === true;
 }
 
 export function createHalfEnc({ secp256k1, ed25519, keccak256, randomBytes }) {
