@@ -1,3 +1,31 @@
+## 0.39.3 — 2026-10-09
+
+A NODE'S ADDRESS DENYLIST REFUSAL REACHES THE APP AS ITS OWN CODE, AND THE INTERFACE CAN CHECK ADDRESSES ITSELF (issue #16).
+A maker's node refuses a firm quote to an address on the maker's denylist (`PUT /v1/denylist`) and answers
+`{ok:false, code:"denied-address", why:"..."}`. Until now `quotes.firm` read the answer with `http.json`, which throws
+`server-unavailable` and LOSES the body on any non-2xx: the app was told the node was unavailable when the node had
+answered and refused, and it could not tell "did not answer" from "answered and refused".
+
+- **`quotes.firm` reads the answer as a VALUE** (`http.tryJson`, `src/quotes.mjs`): a failed CONNECTION is still
+  `server-unavailable`, while an answer that refused is its own refusal code (`quote-refused`), not "unavailable".
+- **The node's `denied-address` refusal reaches the app under the SDK code `address-denied`** (`src/codes.mjs`,
+  `index.d.ts`), WITHOUT the node's `why` text and WITHOUT the address: the node names both, and the interface shows
+  its own neutral message. A backend relaying the quote passes the node's `code` through (the demo's
+  `app/server.mjs` `/api/order-quote` relay now forwards it).
+- **A new optional address check: `createNinsei({ ..., denylist: [addresses] })`** (`src/index.mjs`, `src/quotes.mjs`,
+  `src/swaps.mjs`, `index.d.ts`). Compared WITHOUT CASE; an empty/absent list means "no check"; the SDK fetches
+  nothing - the interface brings the list in. Before `quotes.firm` the order's `locker` is checked (on a purchase the
+  claimer is the node's own address, so it is deliberately not checked); before `swaps.start` the ACTUAL sender is
+  checked - the address the funding transaction will really be sent from, read from the wallet adapter's `address()`
+  (`eth_accounts[0]`) at the moment of sending, because the person may have switched accounts. A barred address is
+  refused with `address-denied` BEFORE any request; an adapter that cannot hand out the current account is refused
+  with `bad-input` rather than skipping the policy silently.
+- Checks (`tools/check-sdk.mjs`): the node's `denied-address` answer yields `address-denied` with neither the address
+  nor the `why` in `params`; a plain refusal yields `quote-refused` while a failed connection yields
+  `server-unavailable`; a denylisted `order.locker` is refused before any request (zero calls seen); a denylisted
+  actual sender stops the lock before it signs (no transaction); the comparison is case-insensitive; an empty list
+  changes nothing. The breaking run removes the `denied-address` mapping and the pre-send check and must redden.
+
 ## Unreleased — 2026-10-08
 
 EVERY ORDER'S ESCROW IS A CLONE, AND THE CLIENT NOW CHECKS THE IMPLEMENTATION IT WILL EXECUTE (issue #114).

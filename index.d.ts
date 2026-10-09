@@ -106,6 +106,18 @@ export interface NinseiOptions {
    */
   knownImplementationCodes?: readonly string[];
   /**
+   * THE INTERFACE'S ADDRESS DENYLIST (issue #16) - policy, not proof, next to allowedProviders. Addresses the
+   * interface will not trade to or from, compared WITHOUT CASE. The SDK fetches nothing: the interface brings the
+   * list in. An empty/absent list means "no check".
+   * Before `quotes.firm` the order's `locker` is checked (on a purchase the claimer is the node's own address, so
+   * it is deliberately not checked), and before `swaps.start` the ACTUAL sender - the address the funding will be
+   * sent from (`eth_accounts[0]` read from the wallet adapter at the moment of sending on demand; the person may
+   * have switched accounts). A barred address is refused with `address-denied` BEFORE any request. A node's own
+   * `denied-address` refusal reaches the app under the same code, WITHOUT the node's `why` text and WITHOUT the
+   * address: the interface shows its own neutral message.
+   */
+  denylist?: readonly string[];
+  /**
    * A PASS TO OUR SERVICE for the "server" step (recording the swap with us). Only a wallet can sign the sign-in
    * message, and the wallet's role in the SDK is an adapter: windows and message signatures remain the interface's,
    * and the core receives a READY pass through the same seam the interface obtains it with today
@@ -1278,6 +1290,12 @@ export type ErrorCode =
   | "wrong-chain"
   | "quote-unavailable"
   | "quote-refused"
+  /**
+   * An address on the interface's `denylist` refused BEFORE any request - the order's `locker` before `quotes.firm`,
+   * or the actual sender before `swaps.start` (issue #16). Also names the node's own `denied-address` refusal as it
+   * reaches the app: WITHOUT the node's `why` text and WITHOUT the address, so the interface shows its own message.
+   */
+  | "address-denied"
   | "quote-stale"
   /** The order-quote signature (EIP-712, v6) did not recover to any address. */
   | "quote-signature-invalid"

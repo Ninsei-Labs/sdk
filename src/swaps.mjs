@@ -264,6 +264,10 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
   // adapter (send/receipt): windows and message signatures remain the interface's. A READY pass arrives here (as
   // www/js/evm/auth.js, signIn obtains it today), and the core merely presents it.
   auth = null,
+  // THE INTERFACE'S ADDRESS DENYLIST (issue #16), a Set of lower-cased addresses already assembled by the facade.
+  // The check on the ACTUAL sender is done in start() below, ONE place, right before the send - the wallet adapter
+  // only HANDS OUT the current account (`address()`), it does not carry the policy.
+  denylist = null,
   watch: watchOptions = null } = {}) {
   // WHAT READS THE CHAIN AT THE LOCK IS A SEAM, as in actions.mjs: by default the engine's read, from outside you can
   // substitute your own. Otherwise the lock step could not be checked beyond predicting the address - and "the address
@@ -756,6 +760,19 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       const wallet = request.wallet;
       if (!wallet || typeof wallet.send !== "function" || typeof wallet.receipt !== "function") {
         throw new SdkError("bad-input", { field: "wallet", missing: ["send", "receipt"], surface: "swaps.start", step: "lock" });
+      }
+      // THE INTERFACE'S ADDRESS DENYLIST, ON THE ACTUAL SENDER (issue #16). The person may have switched accounts
+      // in the wallet, so what matters is the address the funding transaction will really be sent from AT THIS
+      // MOMENT, not `order.locker` checked earlier. The wallet adapter hands out the current account (the adapter's
+      // `address()` reads `eth_accounts[0]`); the comparison lives HERE, one place, right before the send - not
+      // inside the adapter. The refusal happens BEFORE any request: no transaction is signed or sent.
+      if (denylist) {
+        const sender = typeof wallet.address === "function" ? await wallet.address() : null;
+        if (typeof sender !== "string" || !sender) {
+          // A HALF-ADAPTER CANNOT BE APPLIED THE POLICY TO: silently skipping would make the list skippable.
+          throw new SdkError("bad-input", { field: "wallet", missing: ["address"], surface: "swaps.start", step: "lock" });
+        }
+        if (denylist.has(sender.toLowerCase())) throw new SdkError("address-denied", { step: "lock" });
       }
       // THE LOCK TERMS ARE THE SAME AS THE ORDER'S, and are taken from the caller: exactly these fields enter the
       // context the DLEQ proof is bound to (orderContext.js, FIELDS). The deadlines and composition are checked by the

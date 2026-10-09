@@ -208,7 +208,7 @@ const compactOffer = (o) => ({
 // the price of the failed row to tell the person WHY there is no offer (and not just "none").
 const compactRefusal = (r) => ({ ...compactOffer(r), code: r.code, why: r.why });
 
-export function createQuotes({ config, http, now = () => Date.now(), evmCall = null, evmCode = null, providerAllowed = null, knownFactoryCodes = null, knownImplementationCodes = null }) {
+export function createQuotes({ config, http, now = () => Date.now(), evmCall = null, evmCode = null, providerAllowed = null, knownFactoryCodes = null, knownImplementationCodes = null, denylist = null }) {
   // THE INTERFACE'S FACTORY POLICY (#103): the code hashes of factories it is willing to trade through
   // (extcodehash semantics = keccak256 of the runtime code). An EMPTY list is "no policy" (like
   // allowedProviders); a NON-EMPTY one refuses any factory whose code is not on it. Lower-cased once.
@@ -340,9 +340,19 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
       if (!request || typeof request !== "object") fail("bad-input", { field: "request" });
       if (typeof request.providerId !== "string" || !request.providerId) fail("bad-input", { field: "providerId" });
       if (!request.order || typeof request.order !== "object") fail("bad-input", { field: "order" });
-      let body = null;
+      // THE INTERFACE'S OWN ADDRESS DENYLIST (issue #16): POLICY, not proof - the interface refuses to ask for a
+      // quote for an address on its own list, and does it BEFORE any request is made. `order.locker` is the
+      // address the funds come from on a purchase (the claimer there is the node's own address, so it is
+      // deliberately not checked). An empty/absent list is "no policy"; the comparison is WITHOUT CASE.
+      if (denylist && typeof request.order.locker === "string" && denylist.has(request.order.locker.toLowerCase())) {
+        fail("address-denied", { step: "order-quote" });
+      }
+      let res = null;
       try {
-        body = await http.json(config.route("orderQuote"), {
+        // THE ANSWER IS READ AS A VALUE (tryJson), NOT AS AN EXCEPTION: "did not answer" and "answered and
+        // refused" must stay different, and a refusal's own body carries the reason. `json` throws
+        // server-unavailable and LOSES that body.
+        res = await http.tryJson(config.route("orderQuote"), {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ providerId: request.providerId, order: request.order }),
@@ -351,7 +361,15 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
         if (error && error.code === "bad-input") throw error;
         fail("server-unavailable", { step: "order-quote" });
       }
-      if (!body || body.ok !== true || !body.quote) fail("quote-refused", { step: "order-quote" });
+      // A NODE'S DENYLIST REFUSAL REACHES THE APP UNDER ITS OWN NEUTRAL SDK CODE, WITHOUT the `why` text and
+      // WITHOUT the address: the node names both (the maker's denylist and the address), and the interface shows
+      // the person its own neutral message. Every other refusal keeps its existing code (quote-refused etc.).
+      const refusedCode = res && res.body && typeof res.body.code === "string" ? res.body.code : null;
+      if (refusedCode === "denied-address") fail("address-denied", { step: "order-quote" });
+      if (!res || res.ok !== true || !res.body || res.body.ok !== true || !res.body.quote) {
+        fail("quote-refused", { step: "order-quote" });
+      }
+      const body = res.body;
       const quote = body.quote;
       // A MISSING FIELD OF THE SIGNED SET IS NOT "PROBABLY ZERO": the digest cannot be built, so the quote is
       // not verifiable and is refused (its own code, so the interface can say which field is unbound).

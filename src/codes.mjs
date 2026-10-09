@@ -42,6 +42,11 @@ export const ERROR_CODES = [
   "wrong-chain",
   "quote-unavailable",
   "quote-refused",
+  // A NODE'S ADDRESS DENYLIST REFUSAL (issue #16): the maker's node answers {ok:false, code:"denied-address", why}
+  // before it prices the order, and that refusal reaches the app under THIS code - WITHOUT the node's `why` text
+  // and WITHOUT the address, because the interface shows the person its own neutral message. It is its own code,
+  // not "quote-refused": the advice to the interface differs ("this address is barred" vs "the quote was refused").
+  "address-denied",
   "quote-stale",
   // THE ORDER-QUOTE SIGNATURE (EIP-712, quote format v7). Four different refusals, because the interface owes the
   // person a different piece of advice for each:
