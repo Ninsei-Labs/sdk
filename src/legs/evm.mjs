@@ -158,3 +158,30 @@ export const requireProvider = (id) => {
   if (!verdict.ok) return { ok: false, reason: verdict.reason, provider: provider.id, shape: verdict.shape ?? null, missing: verdict.missing ?? null };
   return { ok: true, provider };
 };
+
+// --- WHAT A PROVIDER SETTLES: THE COMPOSITION CAPABILITY --------------------------------------------
+//
+// A native need (the escrow is funded with the chain's NATIVE coin) can be carried by a provider only if the
+// provider SETTLES native. A provider that settles the WRAPPED native (KyberSwap Limit Order) can never be the last
+// mile: it is usable only as the LIQUIDITY leg of a COMPOSITION, and the composition needs a native-capable provider
+// on the SAME network to finish (WETH -> native). So the capability is DATA on each provider (`settles`) and the
+// question is answered HERE by a VALUE, never assumed from the provider's name - the same rule the engine's
+// composition follows (www/js/evm/asyncRoute.js, asyncRouteChoice).
+export const SETTLES = Object.freeze({ NATIVE: "native", WRAPPED: "wrapped" });
+
+/** WHAT A PROVIDER SETTLES ("native" | "wrapped"), or null when it does not say. */
+export const providerSettles = (provider) => (provider && provider.settles ? provider.settles : null);
+
+/**
+ * CAN THIS PROVIDER CARRY A NATIVE NEED ALL THE WAY - a VALUE, by name.
+ *   { ok: true,  settles: "native", provider }                     - it settles native: it can be the native leg;
+ *   { ok: false, reason: "settles-wrapped", settles, provider }    - wrapped native only: a liquidity leg at most;
+ *   { ok: false, reason: "settles-unstated", settles: null, ... }  - it does not say: refused, never assumed native.
+ */
+export const carriesNativeVerdict = (provider) => {
+  const settles = providerSettles(provider);
+  const id = provider && provider.id ? provider.id : null;
+  if (settles === SETTLES.NATIVE) return { ok: true, settles, provider: id };
+  if (settles === SETTLES.WRAPPED) return { ok: false, reason: "settles-wrapped", settles, provider: id };
+  return { ok: false, reason: "settles-unstated", settles: null, provider: id };
+};

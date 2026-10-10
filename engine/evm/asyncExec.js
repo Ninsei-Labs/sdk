@@ -24,6 +24,12 @@
 //
 // EVERY FAILURE IS A NAMED VALUE, NEVER SILENCE AND NEVER A FUNDED DEAL WITH NO SWAP BEHIND IT.
 import { asyncRouteForChain } from "./asyncRoute.js";
+// THE LIQUIDITY LEG (KyberSwap Limit Order) - its own module, whose contract is cross-checked against the
+// package (tools/check-async-route-compose.mjs). Kept apart from the CoW leg so each leg keeps its own named
+// refusals and one implementation each.
+import {
+  kyberLegPlan, kyberLegUnsigned, kyberLegSign, kyberLegSubmit, kyberLegSettled, kyberLegRefusalWords,
+} from "./asyncLegs.js";
 
 // THE SETTLEMENT CONTRACT AND THE NATIVE MARKER - the same two facts the package pins (sdk/src/legs/cow-spec.mjs):
 // GPv2Settlement is deterministic and identical on every CoW network, and buying native uses the BUY_ETH_ADDRESS
@@ -323,7 +329,12 @@ export function asyncStageWords(stage, detail = "") {
     "async-submit": "Submitting the swap intent to the order book",
     "async-wait": "Waiting for the swap to settle",
     "async-settled": "Swap settled - now funding the escrow",
-    "async-fund": "Funding the escrow with the settled funds",
+    // THE THREE STEPS OF A COMPOSED ROUTE, NAMED AS THREE: the swap (liquidity leg, token -> WETH), the conversion
+    // to native (the native leg, WETH -> native coin), and the funding. Each is its own word, so the screen shows a
+    // person what they are going through and not a single opaque "processing".
+    "async-swap": "Swapping your token for WETH",
+    "async-convert": "Converting WETH into native ETH",
+    "async-fund": "Funding the escrow with the settled native ETH",
   }[stage] || null;
   return base ? base + (line ? ": " + line : "") : (line || String(stage || ""));
 }
@@ -341,9 +352,172 @@ export const asyncRefusalWords = (result) => {
     "cow-bad-response": "the order book answered in a shape we do not know",
     "cow-not-settled": "the swap did not settle in time",
     "async-order-dead": "the swap order was cancelled or expired - nothing was funded",
+    // THE LIQUIDITY LEG'S OWN REFUSALS (KyberSwap Limit Order), named so a failure there never looks like a failure
+    // of the native leg.
+    "kyber-unknown-network": "no KyberSwap liquidity provider serves this network",
+    "kyber-bad-order": "the liquidity swap intent is incomplete and was not sent",
+    "kyber-sign-failed": "the wallet did not sign the liquidity swap intent",
+    "kyber-unreachable": "the KyberSwap order book could not be reached",
+    "kyber-order-unknown": "the KyberSwap order book does not know this order",
+    "kyber-refused": "the KyberSwap order book did not accept the order",
+    "kyber-bad-response": "the KyberSwap order book answered in a shape we do not know",
+    "kyber-not-settled": "the liquidity swap did not settle in time",
+    // THE COMPOSITION'S OWN REFUSALS.
+    "async-bad-composition": "this route is not a two-leg composition (a liquidity leg and a native leg are both required)",
+    "composition-short": "the swap does not cover the escrow deposit, its reserve and the conversion fee",
   };
   return map[code] || (code ? code : "the asynchronous route stopped");
 };
+
+// ------------------------------------------------------------------------------------------------
+// THE COMPOSITION: TWO ASYNCHRONOUS LEGS, IN ORDER, THEN THE ORDINARY FUNDING.
+//
+// WHY TWO LEGS. The escrow is funded with NATIVE coin, and not every asynchronous provider can deliver it. KyberSwap
+// Limit Order settles the WRAPPED native (WETH) only, so it cannot be the last mile; CoWSwap can buy native directly
+// (the BUY_ETH_ADDRESS marker). So when a person needs native and only a wrapped (liquidity) leg is available, the
+// route is COMPOSED: leg one turns the token into WETH (KyberSwap), leg two turns that WETH into native coin
+// (CoWSwap), and only then is the escrow funded. Both legs must SETTLE, in order - a failure in either leg stops the
+// flow with a NAMED refusal and NEVER reaches the funding step.
+//
+// THE COVERAGE IS CHECKED BEFORE ANYTHING IS SIGNED. The conversion is not free: the second leg takes its own fee out
+// of the WETH. So the money the person receives is the first leg's output minus that fee, and it must still cover the
+// escrow deposit and the reserve (mark + refund gas) they must keep. `compositionVerdict` below is that check, and
+// the composition is refused (composition-short) rather than entered when it would leave the person short.
+
+// A quantity as BigInt, or null. An unread value is null ("not measured"), never zero.
+const toBig = (v) => {
+  if (v === null || v === undefined || v === "") return null;
+  try { return BigInt(typeof v === "bigint" ? v : String(v)); } catch { return null; }
+};
+
+/**
+ * WHETHER A COMPOSED ROUTE COVERS THE DEPOSIT - a pure VALUE, no network and no wallet.
+ *
+ * The liquidity leg gives `wethOutWei` (gross). The native leg keeps `leg2FeeWei` of it as its own fee, so the person
+ * ends with `wethOutWei - leg2FeeWei` native. That must cover the escrow deposit (`depositWei`) PLUS the reserve the
+ * person must keep for the mark and the refund (`reserveWei`). Equivalently the gross WETH must cover
+ * deposit + reserve + leg2Fee - i.e. the reserve ACCOUNTS FOR the extra fee the second leg costs.
+ *   { ok: true,  wethOutWei, nativeOutWei, needWei, ... }                     - the composition covers the deposit;
+ *   { ok: false, code: "composition-short", shortfallWei, ... }               - it would leave the person short: refuse.
+ * An unmeasured amount is a refusal too (measured: false), never a silent pass.
+ */
+export function compositionVerdict({ wethOutWei = null, leg2FeeWei = "0", depositWei = null, reserveWei = "0" } = {}) {
+  const gross = toBig(wethOutWei);
+  const fee = leg2FeeWei === null || leg2FeeWei === undefined || leg2FeeWei === "" ? 0n : toBig(leg2FeeWei);
+  const deposit = toBig(depositWei);
+  const reserve = reserveWei === null || reserveWei === undefined || reserveWei === "" ? 0n : toBig(reserveWei);
+  if (gross === null || fee === null || fee < 0n || deposit === null || reserve === null || reserve < 0n) {
+    return { ok: false, code: "composition-short", measured: false, reason: "the composition's amounts or the deposit were not measured" };
+  }
+  // THE GROSS WETH THE LIQUIDITY LEG MUST GIVE: the deposit, the reserve the person keeps, and the second leg's fee.
+  const needWei = deposit + reserve + fee;
+  const nativeOutWei = gross - fee;
+  if (gross < needWei) {
+    return {
+      ok: false, code: "composition-short", measured: true,
+      wethOutWei: gross.toString(), leg2FeeWei: fee.toString(), depositWei: deposit.toString(), reserveWei: reserve.toString(),
+      nativeOutWei: (nativeOutWei > 0n ? nativeOutWei : 0n).toString(), needWei: needWei.toString(), shortfallWei: (needWei - gross).toString(),
+      reason: "the liquidity leg does not cover the escrow deposit, its reserve and the conversion fee",
+    };
+  }
+  return {
+    ok: true, measured: true, wethOutWei: gross.toString(), leg2FeeWei: fee.toString(), nativeOutWei: nativeOutWei.toString(),
+    needWei: needWei.toString(), depositWei: deposit.toString(), reserveWei: reserve.toString(),
+  };
+}
+
+/**
+ * RUN A COMPOSED ROUTE: the liquidity leg (KyberSwap, token -> WETH), then the native leg (CoWSwap, WETH -> native),
+ * then - and only then - the ordinary funding. The caller supplies:
+ *   route    - a composition verdict from evm/asyncRoute.js ({ kind: "composition", chainId, legs: [liquidity, native] });
+ *   request  - { chainId, owner, sellToken, sellAmountWei, wrappedToken, wethOutWei, leg2FeeWei, validTo,
+ *                expiredAt, depositWei, reserveWei };
+ *   wallet   - the page wallet (adapter or EIP-1193 provider) - it signs BOTH intents;
+ *   fund     - async () => {...} the ordinary escrow funding, called ONCE and only after BOTH legs settled;
+ *   onStep   - (stage, detail, words) -> the screen shows asyncStageWords(stage, detail).
+ * Returns { ok: true, kind: "composition", legs: [{provider, id, status}], funded } or { ok: false, stage, code, leg? }.
+ */
+export async function runComposedRoute({
+  route = {}, request = {}, wallet = null, fund = null,
+  fetchImpl = null, pollMs = 5_000, timeoutMs = 300_000, now = null, sleep = null, onStep = null,
+} = {}) {
+  const say = (stage, detail) => { if (typeof onStep === "function") onStep(stage, detail, asyncStageWords(stage, detail)); };
+  const legs = Array.isArray(route.legs) ? route.legs : [];
+  const liquidity = legs.find((l) => l && l.settles === "wrapped") || null;
+  const native = legs.find((l) => l && l.settles === "native") || null;
+  if (!liquidity || !native) {
+    const bad = { ok: false, code: "async-bad-composition", params: { legs: legs.map((l) => l && l.settles) } };
+    return { ok: false, stage: "plan", ...bad, words: asyncRefusalWords(bad) };
+  }
+  const chainId = route.chainId !== undefined && route.chainId !== null ? route.chainId : request.chainId;
+  const owner = request.owner;
+  const wrapped = request.wrappedToken;
+  const leg2FeeWei = request.leg2FeeWei === undefined || request.leg2FeeWei === null ? "0" : request.leg2FeeWei;
+
+  say("async-plan", "token -> WETH -> native coin");
+  // THE COVERAGE CHECK FIRST: never enter a composition that cannot cover the deposit plus the reserve plus the fee.
+  const cover = compositionVerdict({ wethOutWei: request.wethOutWei, leg2FeeWei, depositWei: request.depositWei, reserveWei: request.reserveWei });
+  if (!cover.ok) return { ok: false, stage: "plan", ...cover, words: asyncRefusalWords(cover) };
+  const wethOutWei = cover.wethOutWei;
+
+  // ---- LEG 1: THE LIQUIDITY LEG (KyberSwap Limit Order) - token -> WETH ------------------------------------
+  const book1 = liquidity.orderbook || null;
+  const plan1 = kyberLegPlan({
+    chainId, maker: owner, receiver: owner,
+    makerAsset: request.sellToken, takerAsset: wrapped,
+    makingAmount: request.sellAmountWei, takingAmount: wethOutWei, expiredAt: request.expiredAt,
+  });
+  if (!plan1.ok) return { ok: false, stage: "swap", leg: "liquidity", ...plan1, words: asyncRefusalWords(plan1) };
+  say("async-swap", "building the liquidity intent");
+  const unsigned1 = await kyberLegUnsigned({ params: plan1.params, chainId, orderbook: book1, fetchImpl });
+  if (!unsigned1.ok) return { ok: false, stage: "swap", leg: "liquidity", ...unsigned1, words: asyncRefusalWords(unsigned1) };
+  say("async-swap", "waiting for the wallet to sign the swap intent");
+  const sig1 = await kyberLegSign({ typedData: unsigned1.typedData, wallet, address: owner });
+  if (!sig1.ok) return { ok: false, stage: "swap", leg: "liquidity", ...sig1, words: asyncRefusalWords(sig1) };
+  say("async-swap", "submitting the liquidity order");
+  const sub1 = await kyberLegSubmit({ params: plan1.params, salt: unsigned1.salt, signature: sig1.signature, orderbook: book1, chainId, fetchImpl });
+  if (!sub1.ok) return { ok: false, stage: "swap", leg: "liquidity", ...sub1, words: asyncRefusalWords(sub1) };
+  say("async-swap", "order " + sub1.id);
+  const settled1 = await kyberLegSettled({ id: sub1.id, chainId, maker: owner, orderbook: book1, fetchImpl, pollMs, timeoutMs, now, sleep,
+    onTick: (status) => say("async-swap", "status " + status) });
+  if (!settled1.ok) return { ok: false, stage: "swap", leg: "liquidity", ...settled1, words: asyncRefusalWords(settled1) };
+  if (!settled1.settled) {
+    const dead = { ok: false, code: "async-order-dead", params: { leg: "liquidity", id: sub1.id, status: settled1.status } };
+    return { ok: false, stage: "swap", leg: "liquidity", ...dead, words: asyncRefusalWords(dead) };
+  }
+  const leg1 = { provider: liquidity.id, id: sub1.id, status: settled1.status };
+
+  // ---- LEG 2: THE NATIVE LEG (CoWSwap) - WETH -> native coin -------------------------------------------------
+  say("async-convert", "building the conversion order");
+  const intent2 = asyncIntentVerdict({
+    chainId, orderbook: native.orderbook || null, owner,
+    sellToken: wrapped, buyToken: ASYNC_BUY_ETH_ADDRESS, receiver: owner,
+    sellAmountWei: wethOutWei, buyAmountWei: cover.nativeOutWei, validTo: request.validTo,
+    feeAmountWei: cover.leg2FeeWei, kind: "sell",
+  });
+  if (!intent2.ok) return { ok: false, stage: "convert", leg: "native", ...intent2, words: asyncRefusalWords(intent2) };
+  say("async-convert", "waiting for the wallet to sign the conversion intent");
+  const sig2 = await asyncSignVerdict({ typedData: intent2.typedData, wallet, address: owner });
+  if (!sig2.ok) return { ok: false, stage: "convert", leg: "native", ...sig2, words: asyncRefusalWords(sig2) };
+  say("async-convert", "submitting the conversion order");
+  const sub2 = await asyncSubmitVerdict({ orderbook: intent2.orderbook, order: intent2.order, signature: sig2.signature, owner, fetchImpl });
+  if (!sub2.ok) return { ok: false, stage: "convert", leg: "native", ...sub2, words: asyncRefusalWords(sub2) };
+  say("async-convert", "order " + String(sub2.uid).slice(0, 12));
+  const settled2 = await asyncSettledVerdict({ orderbook: intent2.orderbook, uid: sub2.uid, fetchImpl, pollMs, timeoutMs, now, sleep,
+    onTick: (status) => say("async-convert", "status " + status) });
+  if (!settled2.ok) return { ok: false, stage: "convert", leg: "native", ...settled2, words: asyncRefusalWords(settled2) };
+  if (!settled2.settled) {
+    const dead = { ok: false, code: "async-order-dead", params: { leg: "native", uid: sub2.uid, status: settled2.status } };
+    return { ok: false, stage: "convert", leg: "native", ...dead, words: asyncRefusalWords(dead) };
+  }
+  const leg2 = { provider: native.id, uid: sub2.uid, status: settled2.status };
+
+  // ---- AND ONLY NOW THE ORDINARY FUNDING ---------------------------------------------------------------------
+  say("async-fund", "funding the escrow with the converted native coin");
+  if (typeof fund !== "function") return { ok: false, stage: "fund", code: "async-no-fund", legs: [leg1, leg2], words: asyncRefusalWords({ code: "async-no-fund" }) };
+  const funded = await fund({ kind: "composition", uid: sub2.uid, status: settled2.status, nativeOutWei: cover.nativeOutWei, liquidity: leg1, native: leg2 });
+  return { ok: true, kind: "composition", uid: sub2.uid, status: settled2.status, legs: [leg1, leg2], nativeOutWei: cover.nativeOutWei, funded };
+}
 
 /**
  * RUN THE ASYNCHRONOUS ROUTE, THEN THE ORDINARY FUNDING - AND ONLY THEN.
@@ -365,6 +539,10 @@ export async function runAsyncRoute({
   fetchImpl = null, pollMs = 5_000, timeoutMs = 300_000, now = null, sleep = null, onStep = null,
 } = {}) {
   const say = (stage, detail) => { if (typeof onStep === "function") onStep(stage, detail, asyncStageWords(stage, detail)); };
+  // A COMPOSED ROUTE TAKES A DIFFERENT DRIVER: two legs (liquidity + native), each settled in turn, then the funding.
+  if (route && (route.kind === "composition" || (Array.isArray(route.legs) && route.legs.length > 1))) {
+    return await runComposedRoute({ route, request, wallet, fund, fetchImpl, pollMs, timeoutMs, now, sleep, onStep });
+  }
   const chainId = route.chainId !== undefined && route.chainId !== null ? route.chainId : request.chainId;
   const orderbook = asyncOrderbookFor(chainId, route.orderbook || request.orderbook || null, route.providerId || request.providerId || null);
 

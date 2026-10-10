@@ -794,6 +794,72 @@ export const kyberRefusalCheck = async () => {
 };
 
 
+
+// ---------------------------------------------------------------------------------------------------
+// 11. COMPOSE - WHAT EACH PROVIDER SETTLES, AND THAT A WRAPPED PROVIDER CANNOT CARRY A NATIVE NEED ALONE.
+//
+// WHY THIS IS ABOUT AGREEMENT. The escrow is funded with NATIVE coin, so a provider that settles the WRAPPED native
+// (KyberSwap Limit Order) can never be the last mile: it is the LIQUIDITY leg of a composition, and reaching native
+// is a second order on a native-capable provider (CoWSwap). The capability is DATA (`provider.settles`), not a
+// property of the name. This check pins the two values, asserts the native-carrier verdict, and REDDENS a copy whose
+// wrapped provider claims native - so the verdict is load-bearing, not decorative.
+// ---------------------------------------------------------------------------------------------------
+
+export const composeCheck = async () => {
+  const problems = [];
+  const notes = [];
+  const evm = await loadFresh(p("src", "legs", "evm.mjs"));
+  const cow = await loadFresh(p("src", "legs", "cow.mjs"));
+  const kyber = await loadFresh(p("src", "legs", "kyber.mjs"));
+
+  // (a) THE TWO CAPABILITIES ARE DECLARED, AND THEY DIFFER.
+  if (cow.cowProvider.settles !== evm.SETTLES.NATIVE) problems.push(`cowswap settles ${String(cow.cowProvider.settles)}, expected ${evm.SETTLES.NATIVE}`);
+  else notes.push(`cowswap settles ${evm.SETTLES.NATIVE} (it can buy native directly)`);
+  if (kyber.kyberProvider.settles !== evm.SETTLES.WRAPPED) problems.push(`kyberswap settles ${String(kyber.kyberProvider.settles)}, expected ${evm.SETTLES.WRAPPED}`);
+  else notes.push(`kyberswap settles ${evm.SETTLES.WRAPPED} (ERC20-only order book: liquidity leg, not a native leg)`);
+
+  // (b) WHO CARRIES A NATIVE NEED ALL THE WAY.
+  const cowCarry = evm.carriesNativeVerdict(cow.cowProvider);
+  if (cowCarry.ok !== true) problems.push(`cowswap does not carry a native need: ${JSON.stringify(cowCarry)}`);
+  else notes.push("cowswap carries a native need all the way (ok: true)");
+  const kyberCarry = evm.carriesNativeVerdict(kyber.kyberProvider);
+  if (kyberCarry.ok !== false || kyberCarry.reason !== "settles-wrapped") problems.push(`kyberswap should refuse a native need with settles-wrapped, got ${JSON.stringify(kyberCarry)}`);
+  else notes.push("kyberswap refuses a native need by name (settles-wrapped) - never the sole provider for native");
+  const unstated = evm.carriesNativeVerdict({ id: "mystery", shape: evm.ASYNC, settled() {} });
+  if (unstated.ok !== false || unstated.reason !== "settles-unstated") problems.push(`a provider that does not say what it settles should refuse with settles-unstated, got ${JSON.stringify(unstated)}`);
+  else notes.push("a provider that does not declare its settling is refused by name (settles-unstated), never assumed native");
+
+  // (c) THE ASYNC SEAM IS UNTOUCHED: both are complete async providers.
+  for (const id of ["cowswap", "kyberswap"]) {
+    if (!evm.requireAsyncProvider(id).ok) problems.push(`requireAsyncProvider(${id}) refused after the capability was declared`);
+  }
+
+  // (d) THE BREAKING RUN: a copy whose wrapped provider claims native MUST stop refusing a native need. The copy is
+  // mutated in a temp dir; the working tree is untouched.
+  {
+    const dir = mkdtempSync(join(tmpdir(), "compose-breaking-"));
+    try {
+      const src = p("src", "legs", "kyber.mjs");
+      const source = readFileSync(src, "utf8");
+      const mutated = source.replace('settles: "wrapped",', 'settles: "native",');
+      if (mutated === source) throw new Error("the breaking-run mutation did not apply: settles: \"wrapped\" was not found");
+      // RELATIVE IMPORTS BECOME ABSOLUTE: the copy lives in a temp dir, so "./shape.mjs" would not resolve there.
+      const rewritten = mutated.replace(/from\s+"(\.[^"]+)"/g, (whole, rel) =>
+        `from "${pathToFileURL(resolve(dirname(src), rel)).href}"`);
+      const file = join(dir, "kyber.mjs");
+      writeFileSync(file, rewritten, "utf8");
+      const broken = await loadFresh(file);
+      const brokenCarry = evm.carriesNativeVerdict(broken.kyberProvider);
+      if (brokenCarry.ok !== true) problems.push(`BREAKING RUN did not redden as expected: claiming native still refused (${JSON.stringify(brokenCarry)})`);
+      else notes.push("breaking run REDDENS: a wrapped provider claiming native would pass as a native leg - the verdict is load-bearing");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  return { note: `capabilities declared and the native-carrier verdict holds (${evm.routeProviders().length} providers)`, problems, notes };
+};
+
 // ---------------------------------------------------------------------------------------------------
 // RUNNER
 // ---------------------------------------------------------------------------------------------------
@@ -809,6 +875,7 @@ const CHECKS = {
   "cow-refusal": cowRefusalCheck,
   kyber: kyberCheck,
   "kyber-refusal": kyberRefusalCheck,
+  compose: composeCheck,
 };
 
 export const runCheck = async (name) => {

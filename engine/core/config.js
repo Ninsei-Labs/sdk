@@ -231,6 +231,10 @@ export const DEX_ROUTES = {
 // when the wallet cannot cover the gas - the swap settles first, and the escrow deposit (and its gas) comes after.
 // STEP 4 ADDS A SECOND ONE (kyberswap, below): an intent auction is a KIND, not a single venue, so the table is keyed
 // by provider id and each provider declares its own networks and book. CoW is unchanged.
+// STEP 5 ADDS WHAT A PROVIDER SETTLES (`settles`): the escrow is funded with NATIVE coin, so the choice must only
+// pick a provider able to carry the route ALL THE WAY there. CoW settles native; KyberSwap settles the WRAPPED
+// native, so it is a LIQUIDITY leg and is usable only inside a composition (see www/js/evm/asyncRoute.js:
+// asyncRouteChoice) - never as the sole provider for a native need.
 //
 // KEYED BY EVM chainId. A network ABSENT here is NOT served asynchronously: the path choice must refuse BY NAME
 // (www/js/evm/asyncRoute.js: asyncRouteVerdict, reason "no-async-provider") rather than pretend. The order book
@@ -241,6 +245,10 @@ export const ASYNC_ROUTE_PROVIDERS = {
   cowswap: {
     venue: "CoWSwap",
     shape: "async",
+    // WHAT IT SETTLES: native coin. A CoW order can buy native directly (buyToken = the BUY_ETH_ADDRESS marker,
+    // sdk/src/legs/cow-spec.mjs), so this provider can carry the route ALL THE WAY to the escrow, which is funded
+    // with native coin. tools/check-buy-async-route.mjs cross-checks this against cowProvider.settles.
+    settles: "native",
     networks: {
       1: { slug: "mainnet", orderbook: "https://api.cow.fi/mainnet" },
       100: { slug: "xdai", orderbook: "https://api.cow.fi/xdai" },
@@ -262,6 +270,11 @@ export const ASYNC_ROUTE_PROVIDERS = {
   kyberswap: {
     venue: "KyberSwap Limit Order",
     shape: "async",
+    // WHAT IT SETTLES: the WRAPPED native (WETH), not native coin - its orders trade ERC20 against ERC20 and its
+    // API refuses native as an order asset (error 4004). So it is a LIQUIDITY leg: it can never be the sole provider
+    // for a native need; reaching native is a SECOND order on a native-capable provider (CoW above). See the scope
+    // note in sdk/src/legs/kyber.mjs.
+    settles: "wrapped",
     networks: {
       1: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
       10: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
@@ -785,6 +798,14 @@ export function nativeOf(chainId) {
     cls: "ar-token-eth",
     native: true,
   };
+}
+
+// A network's WRAPPED native token (WETH/WBNB...), or null. It is what the liquidity leg settles (KyberSwap Limit
+// Order trades ERC20 against ERC20 and cannot deliver native) and what the native leg sells to buy native coin: the
+// engine's composed route (www/js/evm/asyncExec.js) turns the token into this wrapped token first, then into native.
+export function wrappedNativeOf(chainId) {
+  const c = chainById(chainId);
+  return (c.tokens || []).find((t) => t && t.peg === "native") || null;
 }
 
 // A token by its composite id "<chainId>:<SYMBOL>" or by two arguments.

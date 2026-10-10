@@ -298,6 +298,9 @@ export const cowProvider = Object.freeze({
   kind: "cow",
   venue: "CoWSwap",
   shape: ASYNC,
+  // WHAT IT SETTLES: native coin. A CoW order buys native directly (buyToken = COW_BUY_ETH_ADDRESS), so this
+  // provider can carry a native need ALL THE WAY - it is the native leg of a composed route.
+  settles: "native",
   networks: COW_NETWORKS,
   settlement: COW_SETTLEMENT,
   buyEthAddress: COW_BUY_ETH_ADDRESS,

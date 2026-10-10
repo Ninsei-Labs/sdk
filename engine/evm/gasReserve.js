@@ -49,7 +49,7 @@ const toBig = (v) => {
 // HOW MANY WEI IS NEEDED FOR BOTH CALLS. The gas price comes from the chain, the limits are ours. A zero price
 // and an unreadable number mean "not measured", and this is NOT zero gas: an unknown requirement must be named,
 // not passed off as zero (the same rule as for the claim gas: rfq/reverseGas.mjs).
-export function orderGasReserveWei({ gasPriceWei, readyGasLimit = ORDER_READY_GAS_LIMIT, refundGasLimit = ORDER_REFUND_GAS_LIMIT, depositGasLimit = 0n } = {}) {
+export function orderGasReserveWei({ gasPriceWei, readyGasLimit = ORDER_READY_GAS_LIMIT, refundGasLimit = ORDER_REFUND_GAS_LIMIT, depositGasLimit = 0n, extraFeeWei = 0n } = {}) {
   const gp = toBig(gasPriceWei);
   if (gp === null || gp <= 0n) return null;
   const ready = toBig(readyGasLimit);
@@ -58,9 +58,13 @@ export function orderGasReserveWei({ gasPriceWei, readyGasLimit = ORDER_READY_GA
   // (and the checks that pin 370 000 gas). A no-own-native path passes ORDER_DEPOSIT_GAS_LIMIT here so the reserve
   // it is judged against includes the deposit it will pay after the swap. A negative deposit is a defect -> null.
   const deposit = toBig(depositGasLimit);
-  if (ready === null || refund === null || deposit === null) return null;
-  if (ready <= 0n || refund <= 0n || deposit < 0n) return null;
-  return gp * (ready + refund + deposit);
+  // THE SECOND LEG'S EXTRA FEE (a composed route) IS ADDED ON TOP, and it is a FLAT wei amount, not gas: the
+  // conversion WETH->native costs the person that fee, so the native the path must cover is larger by it. Defaults to
+  // zero so every existing caller (and the checks pinning the mark+refund reserve) is unchanged.
+  const extra = toBig(extraFeeWei);
+  if (ready === null || refund === null || deposit === null || extra === null) return null;
+  if (ready <= 0n || refund <= 0n || deposit < 0n || extra < 0n) return null;
+  return gp * (ready + refund + deposit) + extra;
 }
 
 // DISPLAY IN BOTH UNITS. A person coming from USDC has no sense of ETH scale, so the reserve is shown both
@@ -86,11 +90,14 @@ export function gasReserveChoice({ nativeBalanceWei, reserveWei } = {}) {
 
 // THE WHOLE DECISION IN ONE OBJECT - exactly what is fixed in the form state before the quote. All numeric fields
 // are strings or null: so the plan survives writing and reading, and BigInt does not become "[object BigInt]".
-export function orderGasReservePlan({ gasPriceWei = null, nativeBalanceWei = null, nativeUsd = null, decimals = 18, depositGasLimit = 0n } = {}) {
+export function orderGasReservePlan({ gasPriceWei = null, nativeBalanceWei = null, nativeUsd = null, decimals = 18, depositGasLimit = 0n, extraFeeWei = 0n } = {}) {
   // depositGasLimit is carried INTO the reserve (see orderGasReserveWei): on the no-own-native path the plan must
-  // be honest about the deposit the wallet will pay after the swap, so the reserve it decides on is larger.
-  const reserveWei = orderGasReserveWei({ gasPriceWei, depositGasLimit });
+  // be honest about the deposit the wallet will pay after the swap, so the reserve it decides on is larger. On a
+  // COMPOSED route extraFeeWei additionally carries the second leg's own fee, which is deducted from the swap
+  // proceeds - so the reserve must cover it too.
+  const reserveWei = orderGasReserveWei({ gasPriceWei, depositGasLimit, extraFeeWei });
   const deposit = toBig(depositGasLimit);
+  const extra = toBig(extraFeeWei);
   const display = reserveWei === null ? null : gasReserveDisplay({ reserveWei, nativeUsd, decimals });
   const choice = gasReserveChoice({ nativeBalanceWei, reserveWei });
   return {
@@ -100,6 +107,9 @@ export function orderGasReservePlan({ gasPriceWei = null, nativeBalanceWei = nul
     // THE DEPOSIT IS REPORTED SEPARATELY as well: a reader must be able to see how much of the reserve is the
     // escrow deposit rather than the mark/refund, and a drift between this field and the constant reddens a check.
     depositGasLimit: deposit === null ? null : deposit.toString(),
+    // THE SECOND LEG'S FEE IS REPORTED SEPARATELY as well, so a reader sees how much of the reserve is the
+    // conversion fee rather than gas or the deposit, and a drift between this field and the number reddens a check.
+    extraFeeWei: extra === null ? null : extra.toString(),
     native: display ? display.native : null,
     usd: display ? display.usd : null,
     enough: choice.enough,

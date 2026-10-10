@@ -218,7 +218,7 @@ export async function kyberUnsignedOrder({ params, chainId = null, fetchImpl = n
   if (!data || typeof data !== "object") return refusal("kyber-bad-response", { where: "sign-message" });
   const domain = data.domain || {};
   const message = data.message || {};
-  const typeNames = (data.types && Array.isArray(data.types.Order)) ? data.types.Order.map((t) => t && t.name + ":" + t && t.type).join(",") : null;
+  const typeNames = (data.types && Array.isArray(data.types.Order)) ? data.types.Order.map((t) => (t ? t.name : "") + ":" + (t ? t.type : "")).join(",") : null;
   const expectedNames = KYBER_ORDER_FIELDS.map(([name, type]) => name + ":" + type).join(",");
   const contract = kyberContractFor(id);
   const domainOk = domain.name === undefined ? false : String(domain.name) === ["Kyber", "DSLO", "Protocol"].join(" ")
@@ -407,6 +407,11 @@ export const kyberProvider = Object.freeze({
   kind: "kyber",
   venue: KYBER_VENUE,
   shape: ASYNC,
+  // WHAT IT SETTLES: the WRAPPED native (WETH), not native coin - its orders trade ERC20 against ERC20 and its API
+  // refuses native as an order asset (error 4004). So it can NEVER carry a native need alone: it is the LIQUIDITY
+  // leg of a composed route (token -> WETH), and the native last mile is a SECOND order on a native-capable
+  // provider (cowProvider.settles === "native").
+  settles: "wrapped",
   networks: KYBER_NETWORKS,
   settlement: KYBER_LIMIT_ORDER_CONTRACT,
   orderFields: KYBER_ORDER_FIELDS,
