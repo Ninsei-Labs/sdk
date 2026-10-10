@@ -47,6 +47,8 @@ export interface NinseiOptions {
    * transaction, so the swap and the escrow funding are one transaction (Uniswap, SushiSwap); "async" - the
    * settlement arrives later as a separate action, and then the record must also say what ends execution
    * (CoWSwap). A path that assumes "one transaction" refuses an asynchronous provider BY NAME, not silently.
+   * The registered identifiers are `declared` (our own router routes, "sync") and `cowswap` (the CoWSwap intent
+   * auction, "async") - see `sdk.config.routing.providers`.
    */
   routing?: { prefer?: readonly string[] };
   /**
@@ -348,6 +350,12 @@ export interface WalletAdapter {
    * by the caller, not the adapter - otherwise two calls would wait differently.
    */
   receipt(txHash: string): Promise<unknown>;
+  /**
+   * SIGN TYPED DATA (EIP-712). Not a transaction: no gas, no money moves, so a person without their own coin can
+   * give it. What is signed is decided by the CALLER (ready typed data arrives here). Optional - a wallet that
+   * cannot sign typed data leaves it out, and a caller sees `not-implemented`, not silence.
+   */
+  signTypedData?(typedData: unknown): Promise<string>;
   /** Switching the network, if this VM can do it from the SDK. No method - `not-implemented`, not silence. */
   switchChain?(chainId: number | string): Promise<void>;
   driver(): unknown;

@@ -31,6 +31,10 @@ export * as order from "../engine/atomic/order.js";
 export * as halfenc from "../engine/atomic/halfenc.js";
 // The engine's EVM layer: talking to the chain (order terms, sending, reading) - through this seam.
 export * as evm from "../engine/evm/index.js";
+// THE DEX LEG'S OWN GUARDS - THROUGH THE SAME SEAM. priceGateVerdict ("the price is not the market") and
+// dexLegVerdict (amount coverage + price) live in www/js/evm/dex.js and are re-exported here so a route provider
+// that is NOT the declared Uniswap path (CoWSwap, an aggregator) applies THE SAME guards rather than lookalikes.
+export * as dex from "../engine/evm/dex.js";
 // THE DEAL ENGINE NO LONGER LIVES IN www/js (#32, wave 3): the order flow moved into the package
 // (sdk/src/swap-flow.mjs) and is declared in sdk/index.d.ts. The page reaches it through the bridge, so the
 // mirror no longer carries core/swap-flow.js - what stays in the seam is the ORDER CLIENT (the half worker),
