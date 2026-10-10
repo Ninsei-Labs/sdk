@@ -1,3 +1,18 @@
+## 0.40.0-develop.1 — 2026-10-10
+
+A build of the asynchronous route-provider work, published for the demo and for our own testing. This build does NOT
+move `latest`: install it as `@ninsei-labs/sdk@develop`, or pin this exact version.
+
+- Four asynchronous route providers: CoWSwap (settles native), KyberSwap Limit Order (settles wrapped), UniswapX
+  (settles native; publishing needs a Uniswap Trading API key and a submitter URL of your own), and the relayed
+  Uniswap route through the UniversalRouter.
+- `submitUniswapxOrder` publishes through a submitter you name; the package never carries an API key.
+- A route can be composed of two legs - liquidity to the wrapped token, then a native leg - and a provider that
+  cannot carry the route to what the person needs can never be chosen alone.
+- The engine mirror is regenerated from the source of truth, and the vendored browser bundle is rebuilt.
+
+Nothing that already existed changed behaviour: the synchronous swap path is untouched.
+
 ## Unreleased — 2026-10-09
 
 THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
