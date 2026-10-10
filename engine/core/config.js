@@ -299,6 +299,11 @@ export const ASYNC_ROUTE_PROVIDERS = {
   // order is a different type the package does not build. The order service base URL is the UniswapX orders API
   // (shared by every chain); there is no per-chain slug, so the record carries `reactor` instead.
   // tools/check-buy-async-route.mjs cross-checks this table against sdk/src/legs/uniswapx.mjs so the two cannot drift.
+  // `submitter` IS OUR OWN ENDPOINT, NOT A THIRD PARTY. Publishing a signed order needs the Uniswap Trading API key,
+  // and the key lives ONLY in the backend's environment (app/, UNISWAPX_API_KEY). The page posts the signed order to
+  // this SAME-ORIGIN path - so no CSP change, and no key anywhere in the browser - and the backend attaches the API
+  // key server-side. The provider takes the submitter from configuration and refuses by name
+  // ("uniswapx-no-submitter") when it is absent. tools/check-uniswapx-submit.mjs holds this entry against the package.
   uniswapx: {
     venue: "UniswapX",
     shape: "async",
@@ -307,7 +312,7 @@ export const ASYNC_ROUTE_PROVIDERS = {
     // Uniswap Trading API and an API key, and the order is cosigned by Uniswap Labs).
     settles: "native",
     networks: {
-      1: { orderbook: "https://api.uniswap.org/v2", reactor: "0x00000011F84B9aa48e5f8aA8B9897600006289Be" },
+      1: { orderbook: "https://api.uniswap.org/v2", reactor: "0x00000011F84B9aa48e5f8aA8B9897600006289Be", submitter: "/api/uniswapx/order" },
     },
   },
 // UNISWAP RELAY - the fourth such provider (step 7), and the one that needs no key. These are Uniswap's own

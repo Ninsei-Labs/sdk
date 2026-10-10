@@ -20,9 +20,10 @@
 //      `cosignature` are produced by the cosigner AFTER the swapper signs. Uniswap's own documentation states that
 //      the Uniswap Interface and the Uniswap API set the cosigner to Uniswap Labs ("Auction Types"), and orders
 //      reach fillers through the Uniswap API: "Order submission is handled by the Uniswap Trading API" (the UniswapX
-//      orders OpenAPI). That endpoint (POST /order on the Trading API) REQUIRES AN API KEY in the `x-api-key` header
-//      - so PUBLISHING AN ORDER IS BLOCKED WITHOUT A KEY AND A HOSTED QUOTER. This provider says so plainly: with
-//      no key it refuses by name ("uniswapx-no-api-key") instead of inventing an endpoint. It does NOT invent one.
+//      orders OpenAPI). That endpoint needs an API key, so PUBLISHING IS A HOSTED, KEYED STEP - and THIS PACKAGE
+//      HOLDS NO KEY. It posts the signed order to OUR SUBMITTER, a URL taken from configuration (the caller's
+//      `submitter`), and the submitter adds the key SERVER-SIDE. With no submitter it refuses by name
+//      ("uniswapx-no-submitter") instead of inventing an endpoint and instead of asking the browser for a key.
 //   4) READ THE OUTCOME from the UniswapX orders service (GET /orders on https://api.uniswap.org/v2 - the endpoint
 //      Uniswap's own filler documentation tells fillers to poll), by the order hash, and read `orderStatus`.
 //
@@ -56,10 +57,7 @@ import * as engine from "../engine.mjs";
 
 // THE ORDER SERVICE (read side): the UniswapX orders API, one base URL for every chain (api.uniswap.org/v2).
 export const UNISWAPX_API = "https://api.uniswap.org/v2";
-// THE TRADING API (write side): where a signed gasless order is published. Requires an API key.
-export const UNISWAPX_TRADING_API = "https://trade-api.gateway.uniswap.org/v1";
 export const UNISWAPX_ORDER_PATH = "/orders";
-export const UNISWAPX_SUBMIT_PATH = "/order";
 // The venue name, in one word (no assembly needed: it is a single token).
 export const UNISWAPX_VENUE = "UniswapX";
 
@@ -87,14 +85,13 @@ export const UNISWAPX_SETTLED_STATUS = "filled";
 export const UNISWAPX_OPEN_STATUSES = ["open"];
 
 // THE NAMED REFUSALS OF THIS PROVIDER. Every one is a VALUE ({ ok: false, code }), never silence and never null: a
-// caller must always be able to tell "unreachable" from "refused" from "not settled yet", and "no key" from "no
-// submitter configured" - the two ways publishing is blocked here.
+// caller must always be able to tell "unreachable" from "refused" from "not settled yet", and a missing submitter
+// ("uniswapx-no-submitter") from every other refusal - publishing is blocked one way here, and it is named.
 export const UNISWAPX_REFUSAL_CODES = [
   "uniswapx-unknown-network", // the chain has no V2 Dutch reactor here
   "uniswapx-bad-order",      // the order is incomplete or malformed - nothing to sign
   "uniswapx-sign-failed",    // the wallet did not produce a signature
-  "uniswapx-no-api-key",     // publishing needs the Uniswap Trading API key, and none was given
-  "uniswapx-no-submitter",   // no order service to publish to was named
+  "uniswapx-no-submitter",   // no submitter URL was configured - publishing is refused, never guessed
   "uniswapx-unreachable",    // no answer from the order service (connection or timeout)
   "uniswapx-order-unknown",  // the service does not know this order hash
   "uniswapx-refused",        // the service answered and did not accept (it carries the status and its reason)
@@ -218,23 +215,24 @@ export async function uniswapxSignOrder({ typedData, wallet, address = null } = 
 }
 
 /**
- * PUBLISH THE SIGNED ORDER. POST {signature, quote, routing} to the Uniswap Trading API's /order ("Create a gasless
- * order"), with the API key in `x-api-key` (Trading API OpenAPI). The `quote` is the object the host returned from
- * POST /quote - this provider does not fabricate it, and the cosigner is Uniswap Labs' (see the header). With no key
- * it refuses by name ("uniswapx-no-api-key"); with no submitter URL it refuses with "uniswapx-no-submitter". The
- * endpoint is NEVER guessed.
+ * PUBLISH THE SIGNED ORDER TO OUR SUBMITTER. The submitter is OUR proxy - a URL from configuration (the caller's
+ * `submitter`), NEVER a host baked into this package. It holds the Uniswap Trading API key SERVER-SIDE and forwards
+ * the order on, so the browser never sees a key and this function NEVER sends one: it posts `{signature, quote,
+ * routing}` with a JSON content-type and nothing else. The `quote` is the object the host returned from its own
+ * quote call - this provider does not fabricate it, and the cosigner is Uniswap Labs' (see the header). With no
+ * submitter URL it refuses by name ("uniswapx-no-submitter"). The endpoint is NEVER guessed.
  */
-export async function submitUniswapxOrder({ quote = null, signature = null, routing = "DUTCH_V2", apiKey = null, fetchImpl = null, timeoutMs = 20_000, base = null, tradingApi = UNISWAPX_TRADING_API } = {}) {
+export async function submitUniswapxOrder({ quote = null, signature = null, routing = "DUTCH_V2", submitter = null, fetchImpl = null, timeoutMs = 20_000 } = {}) {
   if (typeof signature !== "string" || !/^0x[0-9a-fA-F]{130}$/.test(signature)) return refusal("uniswapx-bad-order", { field: "signature" });
   if (!quote || typeof quote !== "object") return refusal("uniswapx-bad-order", { field: "quote" });
-  const target = base ? String(base) : (tradingApi ? String(tradingApi) : null);
-  if (!target) return refusal("uniswapx-no-submitter", { field: "tradingApi" });
-  if (typeof apiKey !== "string" || apiKey === "") return refusal("uniswapx-no-api-key", { field: "apiKey" });
+  const target = submitter === undefined || submitter === null || submitter === "" ? null : String(submitter);
+  if (!target) return refusal("uniswapx-no-submitter", { field: "submitter" });
   const http = createHttp({ apiBase: target, fetchImpl, timeoutMs });
+  // NO `x-api-key` HERE, EVER: the submitter adds it server-side, so the package and the browser stay key-free.
   const body = JSON.stringify({ signature, quote, routing });
   let res;
   try {
-    res = await http.tryJson(UNISWAPX_SUBMIT_PATH, { method: "POST", headers: { "content-type": "application/json", "x-api-key": apiKey }, body });
+    res = await http.tryJson("", { method: "POST", headers: { "content-type": "application/json" }, body });
   } catch (error) {
     return refusal("uniswapx-unreachable", { why: String((error && error.params && error.params.why) || (error && error.code) || error) });
   }

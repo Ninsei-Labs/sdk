@@ -1062,9 +1062,10 @@ export const uniswapxCheck = async () => {
 };
 
 // ---------------------------------------------------------------------------------------------------
-// 13. UNISWAPX REFUSALS - UNREACHABLE, AN UNEXPECTED SHAPE, AN UNKNOWN NETWORK, A REFUSAL, A MISSING API KEY, A
-//     MISSING SUBMITTER AND A TIMEOUT ARE NAMED, NEVER SILENCE OR null. A stand-in transport (no network) drives the
-//     provider down each failure path.
+// 13. UNISWAPX REFUSALS - UNREACHABLE, AN UNEXPECTED SHAPE, AN UNKNOWN NETWORK, A REFUSAL, A MISSING SUBMITTER AND
+//     A TIMEOUT ARE NAMED, NEVER SILENCE OR null. A stand-in transport (no network) drives the provider down each
+//     failure path. PUBLISHING GOES TO OUR SUBMITTER: the package holds no key and no host, so a configured submitter
+//     publishes WITHOUT a key at all, and a missing one is refused by name.
 // ---------------------------------------------------------------------------------------------------
 
 export const uniswapxRefusalCheck = async () => {
@@ -1087,7 +1088,7 @@ export const uniswapxRefusalCheck = async () => {
 
   // (1) unreachable: the transport throws (connection or timeout) - not an exception escaping to the caller.
   const throwing = async () => { throw new TypeError("network down"); };
-  named("submit: unreachable", await ux.submitUniswapxOrder({ quote: {}, signature: sig, apiKey: "k", fetchImpl: throwing }), "uniswapx-unreachable");
+  named("submit: unreachable", await ux.submitUniswapxOrder({ quote: {}, signature: sig, submitter: "http://stand-in.test/order", fetchImpl: throwing }), "uniswapx-unreachable");
   named("status: unreachable", await ux.uniswapxOrderStatus({ orderHash: HASH, chainId: 1, fetchImpl: throwing }), "uniswapx-unreachable");
   named("settled: unreachable", await ux.uniswapxSettled({ orderHash: HASH, chainId: 1 }, { fetchImpl: throwing, now: () => 0, sleep: async () => {} }), "uniswapx-unreachable");
 
@@ -1095,7 +1096,7 @@ export const uniswapxRefusalCheck = async () => {
   // submit answer with no orderId).
   named("status: orders not an array", await ux.uniswapxOrderStatus({ orderHash: HASH, chainId: 1, fetchImpl: async () => response(200, { orders: "nope" }) }), "uniswapx-bad-response");
   named("status: unknown status word", await ux.uniswapxOrderStatus({ orderHash: HASH, chainId: 1, fetchImpl: async () => response(200, ordersBody({ orderStatus: "teleported" })) }), "uniswapx-bad-response");
-  named("submit: no orderId", await ux.submitUniswapxOrder({ quote: {}, signature: sig, apiKey: "k", fetchImpl: async () => response(201, { requestId: "r", orderStatus: "open" }) }), "uniswapx-bad-response");
+  named("submit: no orderId", await ux.submitUniswapxOrder({ quote: {}, signature: sig, submitter: "http://stand-in.test/order", fetchImpl: async () => response(201, { requestId: "r", orderStatus: "open" }) }), "uniswapx-bad-response");
   named("settled: unknown status word", await ux.uniswapxSettled({ orderHash: HASH, chainId: 1 }, { fetchImpl: async () => response(200, ordersBody({ orderStatus: "wat" })), now: () => 0, sleep: async () => {} }), "uniswapx-bad-response");
 
   // (3) not settled in time: the order stays open and the clock passes the timeout.
@@ -1103,18 +1104,26 @@ export const uniswapxRefusalCheck = async () => {
   const open = async () => response(200, ordersBody({ orderStatus: "open" }));
   named("settled: timeout", await ux.uniswapxSettled({ orderHash: HASH, chainId: 1 }, { fetchImpl: open, now: () => (t += 1000), sleep: async () => {}, pollMs: 1000, timeoutMs: 3000 }), "uniswapx-not-settled");
 
-  // (4) THE TWO WAYS PUBLISHING IS BLOCKED, NAMED: no API key, and no submitter configured. A published UniswapX
-  // order is a gasless order on the Uniswap Trading API, which requires a key; the provider does not invent a path.
+  // (4) THE ONE WAY PUBLISHING IS BLOCKED HERE, NAMED: no submitter configured. A published UniswapX order is a
+  // gasless order on the Uniswap Trading API, which needs a key - and the key lives in OUR submitter, never in this
+  // package. So a caller either names a submitter (and no key is needed in the package) or gets a named refusal.
   named("plan: unknown network", ux.uniswapxPlan({ ...planRequest, chainId: 5 }), "uniswapx-unknown-network");
   named("plan: incomplete order", ux.uniswapxPlan({ chainId: 1 }), "uniswapx-bad-order");
   named("status: unknown network", await ux.uniswapxOrderStatus({ orderHash: HASH, chainId: 5, fetchImpl: open }), "uniswapx-unknown-network");
-  named("submit: no API key", await ux.submitUniswapxOrder({ quote: {}, signature: sig, fetchImpl: open }), "uniswapx-no-api-key");
-  named("submit: no submitter", await ux.submitUniswapxOrder({ quote: {}, signature: sig, apiKey: "k", tradingApi: null, fetchImpl: open }), "uniswapx-no-submitter");
-  named("submit: bad signature", await ux.submitUniswapxOrder({ quote: {}, signature: "0x00", apiKey: "k", fetchImpl: open }), "uniswapx-bad-order");
+  named("submit: no submitter", await ux.submitUniswapxOrder({ quote: {}, signature: sig, fetchImpl: open }), "uniswapx-no-submitter");
+  named("submit: bad signature", await ux.submitUniswapxOrder({ quote: {}, signature: "0x00", submitter: "http://stand-in.test/order", fetchImpl: open }), "uniswapx-bad-order");
+  // A CONFIGURED SUBMITTER PUBLISHES WITH NO KEY: this is the whole point of the step - our proxy holds the key.
+  const submitsOk = async () => response(200, { orderId: HASH, orderStatus: "open" });
+  const published = await ux.submitUniswapxOrder({ quote: {}, signature: sig, submitter: "http://stand-in.test/order", fetchImpl: submitsOk });
+  if (!(published.ok === true && published.orderId === HASH && published.orderStatus === "open")) problems.push(`submit: a configured submitter did not publish without a key (${JSON.stringify(published)})`);
+  else notes.push("submit: a configured submitter publishes WITHOUT any key (our proxy holds it, the package does not)");
+  // THE PACKAGE CARRIES NO HARDCODED HOST: the submitter is the caller's, never a constant in the module.
+  if (typeof ux.UNISWAPX_TRADING_API !== "undefined") problems.push("the provider still exports a hardcoded Uniswap Trading API host (UNISWAPX_TRADING_API)");
+  else notes.push("the provider carries NO hardcoded Uniswap Trading API host: the submitter comes from the caller");
   named("sign: no wallet", await ux.uniswapxSignOrder({ typedData: { a: 1 } }), "uniswapx-sign-failed");
 
   // (5) a bounded refusal from the service, and an unknown order - also named.
-  named("submit: refused by the service", await ux.submitUniswapxOrder({ quote: {}, signature: sig, apiKey: "k", fetchImpl: async () => response(401, { detail: "bad key" }) }), "uniswapx-refused");
+  named("submit: refused by the service", await ux.submitUniswapxOrder({ quote: {}, signature: sig, submitter: "http://stand-in.test/order", fetchImpl: async () => response(401, { detail: "bad key" }) }), "uniswapx-refused");
   named("status: refused by the service", await ux.uniswapxOrderStatus({ orderHash: HASH, chainId: 1, fetchImpl: async () => response(500, {}) }), "uniswapx-refused");
   named("status: unknown order", await ux.uniswapxOrderStatus({ orderHash: HASH, chainId: 1, fetchImpl: async () => response(200, { orders: [] }) }), "uniswapx-order-unknown");
 
