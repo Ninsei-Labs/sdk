@@ -8,6 +8,7 @@
 // both depend on it without an import cycle. The CoWSwap provider is registered below like any other route provider.
 import { SYNC, ASYNC, providerShapeVerdict } from "./shape.mjs";
 import { cowProvider } from "./cow.mjs";
+import { kyberProvider } from "./kyber.mjs";
 
 export const vm = "evm";
 
@@ -100,6 +101,11 @@ const ROUTE_PROVIDERS = {
   // transaction sent by someone else. Its record therefore carries `settled(...)` - what ends its execution (the
   // order book reporting the order settled or finally dead). The provider itself lives in ./cow.mjs.
   cowswap: cowProvider,
+  // KYBERSWAP LIMIT ORDER - A SECOND INTENT AUCTION, ALSO "async". Same role as CoW (the person signs an
+  // order, someone else settles it later), a different book and contract. It is the LIQUIDITY leg: its order
+  // trades ERC20 against ERC20 and settles WETH, not native coin (see the scope note in ./kyber.mjs). The
+  // provider itself lives in ./kyber.mjs.
+  kyberswap: kyberProvider,
 };
 
 /** Who can execute a route at all. The list is needed by the "no such provider" error. */

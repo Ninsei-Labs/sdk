@@ -229,6 +229,8 @@ export const DEX_ROUTES = {
 // CoWSwap is the first such provider, see the step-1 package layer sdk/src/legs/cow.mjs). The wallet's own
 // balance then decides the path (www/js/evm/permit.js: usdcWithoutEthVerdict) and the asynchronous one is taken
 // when the wallet cannot cover the gas - the swap settles first, and the escrow deposit (and its gas) comes after.
+// STEP 4 ADDS A SECOND ONE (kyberswap, below): an intent auction is a KIND, not a single venue, so the table is keyed
+// by provider id and each provider declares its own networks and book. CoW is unchanged.
 //
 // KEYED BY EVM chainId. A network ABSENT here is NOT served asynchronously: the path choice must refuse BY NAME
 // (www/js/evm/asyncRoute.js: asyncRouteVerdict, reason "no-async-provider") rather than pretend. The order book
@@ -246,6 +248,34 @@ export const ASYNC_ROUTE_PROVIDERS = {
       8453: { slug: "base", orderbook: "https://api.cow.fi/base" },
       56: { slug: "bnb", orderbook: "https://api.cow.fi/bnb" },
       11155111: { slug: "sepolia", orderbook: "https://api.cow.fi/sepolia" },
+    },
+  },
+  // KYBERSWAP LIMIT ORDER - THE SECOND SUCH PROVIDER (step 4). Same shape as CoW (an intent auction: the person signs
+  // an off-chain order, a taker settles it on chain later), so it is declared HERE the same way. ONE order book base
+  // URL serves every chain (docs.kyberswap.com "Base URL: https://limit-order.kyberswap.com"), and the settlement
+  // contract is the same DSLOProtocol 0xcab2... on each chain (docs.kyberswap.com, "Contracts & Addresses"); there is
+  // no per-chain slug, so the record carries `contract` instead of `slug`. The networks are the chains KyberSwap
+  // Limit Order serves (Ethereum, Optimism, BSC, Polygon, Fantom, zkSync, Mantle, Base, Arbitrum, Avalanche, Linea,
+  // Scroll, Blast). SCOPE: this provider settles WETH, not native coin - it is the LIQUIDITY leg, see the scope note
+  // in sdk/src/legs/kyber.mjs; reaching native is a second order on a native-capable provider (CoW above). The guard
+  // tools/check-buy-async-route.mjs cross-checks this table against sdk/src/legs/kyber.mjs so the two cannot drift.
+  kyberswap: {
+    venue: "KyberSwap Limit Order",
+    shape: "async",
+    networks: {
+      1: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      10: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      56: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      137: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      250: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      324: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      5000: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      8453: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      42161: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      43114: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      59144: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      534352: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      81457: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
     },
   },
 };
