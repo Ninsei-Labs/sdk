@@ -310,24 +310,25 @@ export const ASYNC_ROUTE_PROVIDERS = {
       1: { orderbook: "https://api.uniswap.org/v2", reactor: "0x00000011F84B9aa48e5f8aA8B9897600006289Be" },
     },
   },
-  // UNISWAP RELAY - ЧЕТВЁРТЫЙ ТАКОЙ ПРОВАЙДЕР (шаг 7) И ТОТ, ЧТО ОБХОДИТСЯ БЕЗ КЛЮЧА. Это контракты из САМОГО
-  // репозитория Uniswap (Uniswap/relayer): RelayOrderReactor принимает подписанную заявку и ретранслирует один
-  // вызов в UniversalRouter; газ платит релейер, а возмещается он КОМИССИЕЙ ЗАЯВКИ в том же входном токене. Книги
-  // заявок тут нет вообще: заявка - самодостаточная инструкция Permit2, и реактор вызывает любой, у кого есть
-  // подпись. ЧТО ЭТО ЗНАЧИТ НА ПРАКТИКЕ: реактор у Uniswap объявлен ТОЛЬКО на Ethereum mainnet (README
-  // Uniswap/relayer, "Deployment Addresses": 0x0000000000A4e21E2597DCac987455c48b12edBF вместе с UniversalRouter
-  // 0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD), на Arbitrum его нет НИ В ОДНОМ источнике Uniswap; а КАК
-  // подписанная заявка попадает к релейеру - в репозитории Uniswap НЕ ОПИСАНО (раздел "Integrating as a filler"
-  // пуст, у службы заявок UniswapX типа relay нет). Поэтому запись несёт реактор и роутер вместо книги, а путь
-  // доставки в пакете назван отказом uniswap-relay-no-discovery, а не выдуманным адресом.
-  // tools/check-buy-async-route.mjs и tools/check-async-route-relay.mjs сверяют эту таблицу с
-  // sdk/src/legs/uniswaprelay.mjs (реактор и роутер), чтобы повторённая правда не разошлась молча.
+// UNISWAP RELAY - the fourth such provider (step 7), and the one that needs no key. These are Uniswap's own
+// contracts (Uniswap/relayer): RelayOrderReactor takes a signed order and relays one call into the
+// UniversalRouter; the relayer pays the gas and is repaid by the order's fee in the same input token.
+// There is no order book at all: the order is a self-contained Permit2 instruction, and anyone holding the
+// signature may call the reactor. WHAT THIS MEANS IN PRACTICE: Uniswap deploys this reactor on Ethereum
+// mainnet ONLY (Uniswap/relayer README, "Deployment Addresses": 0x0000000000A4e21E2597DCac987455c48b12edBF
+// together with UniversalRouter 0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD); no Uniswap source places it on
+// Arbitrum; and HOW a signed order reaches a relayer is NOT DESCRIBED in Uniswap's repository (the
+// "Integrating as a filler" section is empty and the UniswapX order service has no relay order type). The
+// entry therefore carries the reactor and the router instead of a book, and the delivery path is refused in
+// the package by name (uniswap-relay-no-discovery) rather than by an invented address.
+// tools/check-buy-async-route.mjs and tools/check-async-route-relay.mjs cross-check this table against
+// sdk/src/legs/uniswaprelay.mjs (reactor and router), so a repeated truth cannot drift silently.
   uniswaprelay: {
     venue: "Uniswap Relay",
     shape: "async",
-    // WHAT IT SETTLES: native coin - ретранслируемый своп снимает обёртку обёрнутого натива на получателя, а взнос
-    // в эскроу идёт нативом, поэтому провайдер несёт нативную нужду ДО КОНЦА (нативная нога композиции или
-    // одиночный маршрут). См. заметку об области в sdk/src/legs/uniswaprelay.mjs.
+  // WHAT IT SETTLES: the native coin - a relayed swap unwraps the wrapped native to the recipient, and the
+  // escrow deposit is paid in native, so this provider carries a native need to the END (the native leg of a
+  // composition, or a single route). See the scope note in sdk/src/legs/uniswaprelay.mjs.
     settles: "native",
     networks: {
       1: { reactor: "0x0000000000A4e21E2597DCac987455c48b12edBF", universalRouter: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD" },
