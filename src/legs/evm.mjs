@@ -10,6 +10,7 @@ import { SYNC, ASYNC, providerShapeVerdict } from "./shape.mjs";
 import { cowProvider } from "./cow.mjs";
 import { kyberProvider } from "./kyber.mjs";
 import { uniswapxProvider } from "./uniswapx.mjs";
+import { uniswapRelayProvider } from "./uniswaprelay.mjs";
 
 export const vm = "evm";
 
@@ -113,6 +114,13 @@ const ROUTE_PROVIDERS = {
   // key and the order is cosigned by Uniswap Labs (see the scope note in ./uniswapx.mjs). The provider itself
   // lives in ./uniswapx.mjs.
   uniswapx: uniswapxProvider,
+  // THE RELAYED UNISWAP ROUTE - A FOURTH INTENT AUCTION, ALSO "async", AND THE KEY-FREE ONE. Same role as CoW (the
+  // person signs an order, someone else settles it later) and the same native capability (the relayed swap unwraps
+  // to native), so it is a THIRD native leg as well as a single native route. Its discovery path is the point:
+  // Uniswap's own relayer repository documents NO submission endpoint and NO gossip service for a signed relay
+  // order, so this provider refuses that step BY NAME ("uniswap-relay-no-discovery") instead of inventing one (see
+  // the scope note in ./uniswaprelay.mjs). The provider itself lives in ./uniswaprelay.mjs.
+  uniswaprelay: uniswapRelayProvider,
 };
 
 /** Who can execute a route at all. The list is needed by the "no such provider" error. */

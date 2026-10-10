@@ -812,6 +812,7 @@ export const composeCheck = async () => {
   const cow = await loadFresh(p("src", "legs", "cow.mjs"));
   const kyber = await loadFresh(p("src", "legs", "kyber.mjs"));
   const uniswapx = await loadFresh(p("src", "legs", "uniswapx.mjs"));
+  const uniswapRelay = await loadFresh(p("src", "legs", "uniswaprelay.mjs"));
 
   // (a) THE TWO CAPABILITIES ARE DECLARED, AND THEY DIFFER.
   if (cow.cowProvider.settles !== evm.SETTLES.NATIVE) problems.push(`cowswap settles ${String(cow.cowProvider.settles)}, expected ${evm.SETTLES.NATIVE}`);
@@ -820,6 +821,8 @@ export const composeCheck = async () => {
   else notes.push(`kyberswap settles ${evm.SETTLES.WRAPPED} (ERC20-only order book: liquidity leg, not a native leg)`);
   if (uniswapx.uniswapxProvider.settles !== evm.SETTLES.NATIVE) problems.push(`uniswapx settles ${String(uniswapx.uniswapxProvider.settles)}, expected ${evm.SETTLES.NATIVE}`);
   else notes.push(`uniswapx settles ${evm.SETTLES.NATIVE} (an output may be the native sentinel)`);
+  if (uniswapRelay.uniswapRelayProvider.settles !== evm.SETTLES.NATIVE) problems.push(`uniswaprelay settles ${String(uniswapRelay.uniswapRelayProvider.settles)}, expected ${evm.SETTLES.NATIVE}`);
+  else notes.push(`uniswaprelay settles ${evm.SETTLES.NATIVE} (the relayed swap unwraps to native)`);
 
   // (b) WHO CARRIES A NATIVE NEED ALL THE WAY.
   const cowCarry = evm.carriesNativeVerdict(cow.cowProvider);
@@ -831,15 +834,18 @@ export const composeCheck = async () => {
   const uniswapxCarry = evm.carriesNativeVerdict(uniswapx.uniswapxProvider);
   if (uniswapxCarry.ok !== true) problems.push(`uniswapx does not carry a native need: ${JSON.stringify(uniswapxCarry)}`);
   else notes.push("uniswapx carries a native need all the way (ok: true) - it is eligible as the native leg of a composition");
+  const relayCarry = evm.carriesNativeVerdict(uniswapRelay.uniswapRelayProvider);
+  if (relayCarry.ok !== true) problems.push(`uniswaprelay does not carry a native need: ${JSON.stringify(relayCarry)}`);
+  else notes.push("uniswaprelay carries a native need all the way (ok: true) - the fourth provider is eligible as the native leg of a composition");
   const unstated = evm.carriesNativeVerdict({ id: "mystery", shape: evm.ASYNC, settled() {} });
   if (unstated.ok !== false || unstated.reason !== "settles-unstated") problems.push(`a provider that does not say what it settles should refuse with settles-unstated, got ${JSON.stringify(unstated)}`);
   else notes.push("a provider that does not declare its settling is refused by name (settles-unstated), never assumed native");
 
-  // (c) THE ASYNC SEAM IS UNTOUCHED: both are complete async providers.
-  for (const id of ["cowswap", "kyberswap", "uniswapx"]) {
+  // (c) THE ASYNC SEAM IS UNTOUCHED: all four are complete async providers.
+  for (const id of ["cowswap", "kyberswap", "uniswapx", "uniswaprelay"]) {
     if (!evm.requireAsyncProvider(id).ok) problems.push(`requireAsyncProvider(${id}) refused after the capability was declared`);
   }
-  if (evm.routeProviders().length !== 4) problems.push(`the registry should carry four routes (declared + three providers), it carries ${evm.routeProviders().length}`);
+  if (evm.routeProviders().length !== 5) problems.push(`the registry should carry five routes (declared + four providers), it carries ${evm.routeProviders().length}`);
 
   // (d) THE BREAKING RUN: a copy whose wrapped provider claims native MUST stop refusing a native need. The copy is
   // mutated in a temp dir; the working tree is untouched.
@@ -881,6 +887,28 @@ export const composeCheck = async () => {
       const brokenCarry = evm.carriesNativeVerdict(broken.uniswapxProvider);
       if (brokenCarry.ok !== false || brokenCarry.reason !== "settles-wrapped") problems.push(`BREAKING RUN did not redden as expected: claiming wrapped still carried a native need (${JSON.stringify(brokenCarry)})`);
       else notes.push("breaking run REDDENS: a native provider claiming wrapped would lose its native eligibility - the declaration is load-bearing");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  // (f) THE BREAKING RUN FOR THE FOURTH PROVIDER: a copy whose native relay provider claims wrapped MUST stop being
+  // eligible as a native leg. The copy is mutated in a temp dir; the working tree is untouched.
+  {
+    const dir = mkdtempSync(join(tmpdir(), "compose-uniswaprelay-breaking-"));
+    try {
+      const src = p("src", "legs", "uniswaprelay.mjs");
+      const source = readFileSync(src, "utf8");
+      const mutated = source.replace('settles: "native",', 'settles: "wrapped",');
+      if (mutated === source) throw new Error("the breaking-run mutation did not apply: settles: \"native\" was not found");
+      const rewritten = mutated.replace(/from\s+"(\.[^"]+)"/g, (whole, rel) =>
+        `from "${pathToFileURL(resolve(dirname(src), rel)).href}"`);
+      const file = join(dir, "uniswaprelay.mjs");
+      writeFileSync(file, rewritten, "utf8");
+      const broken = await loadFresh(file);
+      const brokenCarry = evm.carriesNativeVerdict(broken.uniswapRelayProvider);
+      if (brokenCarry.ok !== false || brokenCarry.reason !== "settles-wrapped") problems.push(`BREAKING RUN did not redden as expected: the relay provider claiming wrapped still carried a native need (${JSON.stringify(brokenCarry)})`);
+      else notes.push("breaking run REDDENS: the relay provider claiming wrapped loses its native eligibility - the fourth declaration is load-bearing");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -1104,6 +1132,254 @@ export const uniswapxRefusalCheck = async () => {
 };
 
 // ---------------------------------------------------------------------------------------------------
+// 14. UNISWAP RELAY - THE FOURTH ASYNCHRONOUS ROUTE PROVIDER, THE KEY-FREE ONE. A golden vector for the relay order
+//     (the EIP-712 type hashes against the reactor's own constants, the order hash and the Permit2 batch-witness
+//     digest), the UniversalRouter calldata against Uniswap's OWN generated fixture, and a BREAKING RUN that shows
+//     the vector is load-bearing.
+//
+// WHY THESE ASSERTIONS ARE ABOUT AGREEMENT, NOT AN IMPRESSION. The RelayOrder type, the fee/input/info sub-types and
+// the batch-witness permit all come from Uniswap's own sources (Uniswap/relayer and Uniswap/uniswapx-sdk) and are
+// RECOMPUTED here with the repository's own keccak256/secp256k1. The order's digest has NO external signature to
+// anchor it (there is no live relay order service), so the DIGEST IS PINNED AS A DEV-TIME VALUE produced by an
+// INDEPENDENT Keccak-256 (not @noble), and the SIGNATURE is SELF-GENERATED BY THIS REPOSITORY'S OWN SIGNER over
+// that digest - it is NOT an external signature. The UniversalRouter calldata IS anchored outside: it must equal the
+// fixture Uniswap's own relayer repository generates for a token -> native relayed swap.
+// ---------------------------------------------------------------------------------------------------
+
+const UNISWAPRELAY_SDK_SPEC = () => p("src", "legs", "uniswaprelay-spec.mjs");
+
+// THE UNIVERSALROUTER CALLDATA FOR "DAI -> native", EXACTLY as Uniswap/relayer's own integration tests generated it
+// with the universal-router-sdk (payerIsRouter: true). Source: Uniswap/relayer,
+// test/foundry-tests/interop.json, key _UNISWAP_V3_DAI_ETH (produced by test/integration-tests/RelayOrderReactor.test.ts
+// "basic v3 swap to native, DAI -> ETH").
+const UNISWAPRELAY_CALLDATA_VECTOR = "0x24856bc3000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000002000c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000160000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000056bc75e2d6310000000000000000000000000000000000000000000000000000000b78088a89f723100000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002b6b175474e89094c44da98b954eedeac495271d0f000bb8c02aaa39b223fe8d0a0e5c4f27ead9083c756cc20000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000040000000000000000000000000342079f0e9da82bb28a27a6edc814a336602038300000000000000000000000000000000000000000000000000b78088a89f7231";
+const UNISWAPRELAY_CALLDATA_INPUTS = {
+  tokenIn: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+  weth: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+  fee: 3000,
+  amountInWei: "100000000000000000000",
+  amountOutMinimumWei: "51651245170979377",
+  recipient: "0x342079F0E9Da82bb28A27a6Edc814A3366020383",
+};
+
+// THE DEV-TIME GOLDEN VALUES for one fixed relay order. They were produced by an INDEPENDENT Keccak-256 (a
+// standalone implementation, not @noble), and the signature is this repository's own signer; the check recomputes
+// every one of them with the repository's primitives and demands they agree.
+const UNISWAPRELAY_VECTOR = {
+  chainId: 1,
+  orderTypeHash: "0x356a26e7c5955b7b24a8bff954c96c53622e6a8471513bb66b69bc7069243ff0",
+  permitTypeHash: "0x918f75c8e25ec281e8dc3255229111f447dc1c210102666cc63cd9da2dee620c",
+  orderHash: "0xf31302c2171de3c6764d645f886203c2a7c2e70da36b074da2355a16a19eded9",
+  domainSeparator: "0x866a5aba21966af95d6c7ab78eb2b2fc913915c28be3b9aa07cc04ff903e3f28",
+  digest: "0x22981cae00e1ec10bd3221d3c861dfec1002281838189a3872d562aa485792a6",
+  selfSignature: "0x1f7c8e9d36a69c085a45c4cdb64e2749d1289440d57765cd5ea6c3b3f86b0b6d0f1071c1362f2805fa11f1d14348ad0d3c749facee91c62b3ea2db95e9e713ab1b",
+  selfAddress: "0x19e7e376e7c213b7e7e7e46cc70a5dd086daff2a",
+  order: {
+    info: { reactor: "0x0000000000A4e21E2597DCac987455c48b12edBF", swapper: "0x342079F0E9Da82bb28A27a6Edc814A3366020383", nonce: "100", deadline: "1791625986" },
+    input: { token: "0x6B175474E89094C44Da98b954EedeAC495271d0F", amount: "100000000000000000000", recipient: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD" },
+    fee: { token: "0x6B175474E89094C44Da98b954EedeAC495271d0F", startAmount: "900000000000000000", endAmount: "1000000000000000000", startTime: "1791624986", endTime: "1791625986" },
+    universalRouterCalldata: UNISWAPRELAY_CALLDATA_VECTOR,
+  },
+};
+
+const UNISWAPRELAY_TEST_KEY = "0x" + "11".repeat(32);
+
+export const uniswapRelayCheck = async () => {
+  const problems = [];
+  const notes = [];
+  const relay = await loadFresh(p("src", "legs", "uniswaprelay.mjs"));
+  const spec = await loadFresh(UNISWAPRELAY_SDK_SPEC());
+  const evm = await loadFresh(p("src", "legs", "evm.mjs"));
+  const { keccak256 } = await import(pathToFileURL(p("src", "primitives.mjs")).href);
+  const toHex = (bytes) => { let out = "0x"; for (const b of bytes) out += b.toString(16).padStart(2, "0"); return out; };
+
+  // (a) THE ORDER TYPE AGAINST THE REACTOR'S OWN CONSTANT. RelayOrderLib.FULL_RELAY_ORDER_TYPEHASH is keccak256 of
+  // the order type ++ FeeEscalator ++ Input ++ RelayOrderInfo. A typo in the field list would move the hash and sign
+  // orders no reactor accepts.
+  const recomputedOrderTypeHash = toHex(keccak256(spec.UNISWAPRELAY_HASHED_ORDER_TYPE));
+  if (recomputedOrderTypeHash !== spec.UNISWAPRELAY_ORDER_TYPE_HASH) problems.push(`the order type does not hash to the pinned RelayOrderLib type hash: computed ${recomputedOrderTypeHash}, constant ${spec.UNISWAPRELAY_ORDER_TYPE_HASH}`);
+  if (recomputedOrderTypeHash !== UNISWAPRELAY_VECTOR.orderTypeHash) problems.push(`the order type hash is ${recomputedOrderTypeHash}, expected the golden ${UNISWAPRELAY_VECTOR.orderTypeHash}`);
+  else notes.push(`the order type hashes to the golden FULL_RELAY_ORDER_TYPEHASH ${UNISWAPRELAY_VECTOR.orderTypeHash}`);
+  const recomputedPermitTypeHash = toHex(keccak256(spec.UNISWAPRELAY_PERMIT_TYPE));
+  if (recomputedPermitTypeHash !== spec.UNISWAPRELAY_PERMIT_TYPE_HASH) problems.push(`the permit type does not hash to the pinned value: computed ${recomputedPermitTypeHash}, constant ${spec.UNISWAPRELAY_PERMIT_TYPE_HASH}`);
+  if (recomputedPermitTypeHash !== UNISWAPRELAY_VECTOR.permitTypeHash) problems.push(`the permit type hash is ${recomputedPermitTypeHash}, expected the golden ${UNISWAPRELAY_VECTOR.permitTypeHash}`);
+  else notes.push(`the Permit2 batch-witness type string hashes to the golden ${UNISWAPRELAY_VECTOR.permitTypeHash}`);
+
+  // (b) THE GOLDEN ORDER HASH, DOMAIN AND DIGEST, RECOMPUTED FROM THE ORDER'S FIELDS ALONE.
+  const vector = UNISWAPRELAY_VECTOR;
+  const missingVector = spec.uniswapRelayOrderMissingFields(vector.order);
+  if (missingVector.length) problems.push(`the golden order is missing fields: ${missingVector.join(", ")}`);
+  let orderHash = null;
+  try { orderHash = spec.uniswapRelayOrderHashHex(vector.order); } catch (error) { problems.push(`the golden order hash did not compute (${error && error.message})`); }
+  if (orderHash !== null && orderHash !== vector.orderHash) problems.push(`the golden order hash is ${String(orderHash)}, expected ${vector.orderHash}`);
+  else if (orderHash !== null) notes.push(`the golden order hash is ${vector.orderHash} (recomputed from the fields alone)`);
+  let digest = null;
+  try { digest = spec.uniswapRelayOrderDigestHex({ order: vector.order, chainId: vector.chainId }); } catch (error) { problems.push(`the golden permit digest did not compute (${error && error.message})`); }
+  if (digest !== null && digest !== vector.digest) problems.push(`the golden permit digest is ${String(digest)}, expected ${vector.digest}`);
+  else if (digest !== null) notes.push(`the golden Permit2 batch-witness digest is ${vector.digest}`);
+  const domainSeparator = toHex(spec.uniswapRelayDomainSeparator({ chainId: vector.chainId }));
+  if (domainSeparator !== vector.domainSeparator) problems.push(`the Permit2 domain separator is ${domainSeparator}, expected ${vector.domainSeparator}`);
+  else notes.push(`the Permit2 domain separator (chainId ${vector.chainId}) is the golden ${vector.domainSeparator}`);
+
+  // (c) THE SELF-GENERATED SIGNATURE (this repository's signer over the golden digest) - NOT an external signature.
+  const digestBytes = spec.uniswapRelayOrderDigest({ order: vector.order, chainId: vector.chainId });
+  const selfSig = spec.signUniswapRelayOrderDigest({ digest: digestBytes, privateKey: UNISWAPRELAY_TEST_KEY });
+  if (selfSig !== vector.selfSignature) problems.push(`the self-generated signature over the golden digest is ${selfSig}, expected ${vector.selfSignature}`);
+  else notes.push("the self-generated signature over the golden digest is the fixed vector (this repository's signer)");
+  const recoveredSelf = spec.recoverUniswapRelayOrderSigner({ digest: digestBytes, signature: selfSig });
+  if (recoveredSelf !== vector.selfAddress) problems.push(`the self-generated signature recovers ${recoveredSelf}, expected ${vector.selfAddress}`);
+  else notes.push(`the self-generated signature recovers ${vector.selfAddress}`);
+
+  // (d) THE UNIVERSALROUTER CALLDATA AGAINST UNISWAP'S OWN FIXTURE, byte for byte, and read back to what it means.
+  const rebuilt = spec.uniswapRelayRouterCalldata({
+    tokenIn: UNISWAPRELAY_CALLDATA_INPUTS.tokenIn, weth: UNISWAPRELAY_CALLDATA_INPUTS.weth,
+    fee: UNISWAPRELAY_CALLDATA_INPUTS.fee, amountInWei: UNISWAPRELAY_CALLDATA_INPUTS.amountInWei,
+    amountOutMinimumWei: UNISWAPRELAY_CALLDATA_INPUTS.amountOutMinimumWei, recipient: UNISWAPRELAY_CALLDATA_INPUTS.recipient,
+  });
+  if (rebuilt.toLowerCase() !== UNISWAPRELAY_CALLDATA_VECTOR.toLowerCase()) problems.push(`the token -> native calldata does not equal Uniswap's own _UNISWAP_V3_DAI_ETH fixture (rebuilt ${rebuilt.slice(0, 20)}..., fixture ${UNISWAPRELAY_CALLDATA_VECTOR.slice(0, 20)}...)`);
+  else notes.push("the token -> native UniversalRouter calldata equals Uniswap/relayer's own _UNISWAP_V3_DAI_ETH fixture, byte for byte");
+  const back = spec.uniswapRelayRouterDecode(rebuilt);
+  if (!back) problems.push("the built calldata does not decode back as V3_SWAP_EXACT_IN + UNWRAP_WETH");
+  else {
+    if (back.commands !== "0x000c") problems.push(`the decoded commands are ${back.commands}, expected 0x000c (V3_SWAP_EXACT_IN, UNWRAP_WETH)`);
+    if (back.swap.recipient.toLowerCase() !== spec.UNISWAPRELAY_ADDRESS_THIS.toLowerCase()) problems.push(`the swap recipient is ${back.swap.recipient}, expected ADDRESS_THIS (the router pays from its own balance)`);
+    if (back.swap.payerIsUser !== false) problems.push("the swap pays as the user, but a relayed swap must pay from the router's own balance (payerIsUser false)");
+    const decodedPath = spec.uniswapRelayDecodePath(back.swap.path);
+    if (!decodedPath || decodedPath.tokens[0].toLowerCase() !== UNISWAPRELAY_CALLDATA_INPUTS.tokenIn.toLowerCase() || decodedPath.tokens[1].toLowerCase() !== UNISWAPRELAY_CALLDATA_INPUTS.weth.toLowerCase() || decodedPath.fees[0] !== UNISWAPRELAY_CALLDATA_INPUTS.fee) problems.push(`the decoded path is not tokenIn -> weth at the declared fee (${JSON.stringify(decodedPath)})`);
+    if (back.unwrap.recipient.toLowerCase() !== UNISWAPRELAY_CALLDATA_INPUTS.recipient.toLowerCase()) problems.push(`the native recipient is ${back.unwrap.recipient}, expected ${UNISWAPRELAY_CALLDATA_INPUTS.recipient}`);
+    if (back.unwrap.amountMinimumWei !== BigInt(UNISWAPRELAY_CALLDATA_INPUTS.amountOutMinimumWei)) problems.push("the unwrap minimum does not carry the swap's amountOutMinimum");
+    if (back.swap.amountOutMinimumWei === 0n) problems.push("the swap amountOutMinimum is zero: the order would not protect the person's output");
+    if (!problems.length) notes.push("the decoded calldata is V3_SWAP_EXACT_IN(ADDRESS_THIS, payerIsUser false) + UNWRAP_WETH to the recipient at the swap minimum");
+  }
+
+  // (e) THE SEAM: the registered provider is the fourth async one and is complete.
+  if (!evm.routeProviders().includes("uniswaprelay")) problems.push("the registry does not carry the uniswaprelay provider");
+  const okRelay = evm.requireAsyncProvider("uniswaprelay");
+  if (!okRelay.ok) problems.push(`requireAsyncProvider("uniswaprelay") refused: ${JSON.stringify(okRelay)}`);
+  else notes.push("the registry carries the uniswaprelay provider and it is complete (async + settled)");
+  if (relay.uniswapRelayReactorFor(1) !== "0x0000000000A4e21E2597DCac987455c48b12edBF") problems.push(`the reactor for chainId 1 is ${relay.uniswapRelayReactorFor(1)}, expected the README's mainnet reactor`);
+  if (relay.uniswapRelayReactorFor(42161) !== null) problems.push("the reactor for Arbitrum (42161) is not null, but Uniswap declares no relay reactor there");
+
+  // (f) THE BREAKING RUN: swap two of the relay order's INPUT fields in a copy of the spec and the golden order hash
+  // MUST stop matching (the field ORDER is the protocol). The copy is mutated in a temp dir; the tree is untouched.
+  {
+    const dir = mkdtempSync(join(tmpdir(), "uniswaprelay-breaking-"));
+    try {
+      const source = readFileSync(UNISWAPRELAY_SDK_SPEC(), "utf8").replace(/\r\n/g, "\n");
+      const before = source;
+      const mutated = source.replace(
+        '  ["amount", "uint256"],\n  ["recipient", "address"],\n',
+        '  ["recipient", "address"],\n  ["amount", "uint256"],\n');
+      if (mutated === before) throw new Error("the breaking-run mutation did not apply: the input field lines were not found");
+      const rewritten = mutated.replace(/from\s+"(\.[^"]+)"/g, (whole, rel) =>
+        `from "${pathToFileURL(resolve(dirname(UNISWAPRELAY_SDK_SPEC()), rel)).href}"`);
+      const file = join(dir, "uniswaprelay-spec.mjs");
+      writeFileSync(file, rewritten, "utf8");
+      const broken = await loadFresh(file);
+      let brokenHash = null;
+      try { brokenHash = broken.uniswapRelayOrderHashHex(vector.order); } catch { brokenHash = null; }
+      if (brokenHash === vector.orderHash || brokenHash === null) problems.push(`BREAKING RUN did not redden as expected: the order hash is ${String(brokenHash)}`);
+      else notes.push(`breaking run REDDENS: reordering the input fields moves the order hash off the golden value (${String(brokenHash).slice(0, 12)}...)`);
+      const brokenTypeHash = (() => { try { return toHex(keccak256(broken.UNISWAPRELAY_HASHED_ORDER_TYPE)); } catch { return null; } })();
+      if (brokenTypeHash === spec.UNISWAPRELAY_ORDER_TYPE_HASH) problems.push("BREAKING RUN did not redden the type hash either");
+      else notes.push("breaking run also moves the recomputed type hash off the golden FULL_RELAY_ORDER_TYPEHASH");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  notes.push("the digest and signature vectors are DEV-TIME (independent Keccak-256 + this repository's signer); the calldata vector is Uniswap's own fixture from Uniswap/relayer test/foundry-tests/interop.json");
+  return { note: `1 golden digest vector (dev-time), 1 self-generated signature, Uniswap's own calldata fixture, 1 breaking run`, problems, notes };
+};
+
+// ---------------------------------------------------------------------------------------------------
+// 15. UNISWAP RELAY REFUSALS - UNKNOWN NETWORK, A BAD ORDER, NO WALLET, THE UNDOCUMENTED DISCOVERY PATH, AN
+//     UNREACHABLE CHAIN, A SHAPE WE DO NOT KNOW, A TIMEOUT AND AN EXPIRED ORDER ARE NAMED, NEVER SILENCE OR null.
+//     Stand-in transports (no network, no chain) drive the provider down each failure path.
+// ---------------------------------------------------------------------------------------------------
+
+export const uniswapRelayRefusalCheck = async () => {
+  const problems = [];
+  const notes = [];
+  const relay = await loadFresh(p("src", "legs", "uniswaprelay.mjs"));
+  const SWAPPER = "0x" + "11".repeat(20);
+  const TOKEN = "0x" + "22".repeat(20);
+  const WETH = "0x" + "33".repeat(20);
+  const HASH = "0x" + "ab".repeat(32);
+  const named = (label, result, code) => {
+    if (!result || typeof result !== "object") { problems.push(`${label}: the result is not a refusal value (${JSON.stringify(result)})`); return; }
+    if (result.ok === true) { problems.push(`${label}: expected a refusal, got ok:true (${JSON.stringify(result).slice(0, 120)})`); return; }
+    if (typeof result.code !== "string" || !relay.UNISWAPRELAY_REFUSAL_CODES.includes(result.code)) { problems.push(`${label}: the refusal code is not named (${JSON.stringify(result.code)})`); return; }
+    if (code && result.code !== code) { problems.push(`${label}: expected code ${code}, got ${result.code}`); return; }
+    notes.push(`${label}: refused with ${result.code}`);
+  };
+  const now = () => 1_000_000;
+  const noSleep = async () => {};
+  const sig = "0x" + "ab".repeat(65);
+  const orderReq = () => ({
+    chainId: 1, swapper: SWAPPER, sellToken: TOKEN, wrappedToken: WETH, fee: 3000,
+    sellAmountWei: "1000000", buyAmountWei: "500000", feeToken: TOKEN, feeEndAmountWei: "1000",
+    deadline: 1800000000, recipient: SWAPPER,
+  });
+
+  // (1) THE PLAN: an unknown network and an incomplete order are named, and a valid request builds a native order.
+  named("plan: unknown network", relay.uniswapRelayPlan({ ...orderReq(), chainId: 42161 }), "uniswap-relay-unknown-network");
+  named("plan: incomplete order", relay.uniswapRelayPlan({ chainId: 1 }), "uniswap-relay-bad-order");
+  const plan = relay.uniswapRelayPlan(orderReq());
+  if (plan.ok !== true || plan.nativeOutput !== true || typeof plan.calldata !== "string" || !plan.calldata.startsWith("0x24856bc3")) problems.push(`plan: a valid request did not build a native route (${JSON.stringify(plan).slice(0, 160)})`);
+  else notes.push("plan: a valid request builds a native route carrying the UniversalRouter calldata");
+
+  // (2) THE SUBMIT STEP: the discovery path is UNDOCUMENTED, so it refuses BY NAME - and never invents a URL.
+  named("submit: unknown network", relay.uniswapRelaySubmit({ chainId: 42161, order: plan.order, signature: sig }), "uniswap-relay-unknown-network");
+  named("submit: bad signature", relay.uniswapRelaySubmit({ chainId: 1, order: plan.order, signature: "0x00" }), "uniswap-relay-bad-order");
+  const noDiscovery = relay.uniswapRelaySubmit({ chainId: 1, order: plan.order, signature: sig });
+  named("submit: the discovery path", noDiscovery, "uniswap-relay-no-discovery");
+  if (noDiscovery.ok === false && noDiscovery.params && noDiscovery.params.documentedSubmissionEndpoint !== null) problems.push("submit: the no-discovery refusal invented an endpoint");
+  else if (noDiscovery.ok === false) notes.push("submit: the no-discovery refusal names NO endpoint (nothing fabricated)");
+
+  // (3) SIGNING: a wallet that will not sign is named.
+  named("sign: no wallet", await relay.uniswapRelaySignOrder({ typedData: { a: 1 } }), "uniswap-relay-sign-failed");
+
+  // (4) READING THE CHAIN. An unknown network, an unreachable driver, a logs answer that is not an array, and a log
+  // whose topics are not this event are all named; a matching Relay event IS settled, empty logs are open/expired.
+  const throwing = async () => { throw new TypeError("rpc down"); };
+  named("status: unknown network", await relay.uniswapRelayStatus({ orderHash: HASH, chainId: 42161, driver: { request: throwing } }), "uniswap-relay-unknown-network");
+  named("status: unreachable", await relay.uniswapRelayStatus({ orderHash: HASH, chainId: 1, driver: { request: throwing } }), "uniswap-relay-unreachable");
+  named("status: no driver", await relay.uniswapRelayStatus({ orderHash: HASH, chainId: 1 }), "uniswap-relay-unreachable");
+  named("status: logs not an array", await relay.uniswapRelayStatus({ orderHash: HASH, chainId: 1, getLogs: async () => "nope" }), "uniswap-relay-bad-response");
+  named("status: a log that is not ours", await relay.uniswapRelayStatus({ orderHash: HASH, chainId: 1, getLogs: async () => ([{ topics: ["0x" + "00".repeat(32), HASH] }]) }), "uniswap-relay-bad-response");
+  const filled = await relay.uniswapRelayStatus({ orderHash: HASH, chainId: 1, getLogs: async () => ([{ topics: [relay.UNISWAPRELAY_EVENT_TOPIC0, HASH, "0x" + "11".repeat(32), "0x" + "22".repeat(32)] }]) });
+  if (!(filled.ok === true && filled.status === "filled")) problems.push(`status: a matching Relay event did not read as filled (${JSON.stringify(filled)})`);
+  else notes.push("status: a matching Relay event reads as filled (the real on-chain effect)");
+  const open = await relay.uniswapRelayStatus({ orderHash: HASH, chainId: 1, getLogs: async () => ([]), deadline: 2_000_000, nowSec: 1_000_000 });
+  if (!(open.ok === true && open.status === "open")) problems.push(`status: no event before the deadline did not read as open (${JSON.stringify(open)})`);
+  else notes.push("status: no event before the deadline reads as open");
+  const expired = await relay.uniswapRelayStatus({ orderHash: HASH, chainId: 1, getLogs: async () => ([]), deadline: 900_000, nowSec: 1_000_000 });
+  if (!(expired.ok === true && expired.status === "expired")) problems.push(`status: a passed deadline did not read as expired (${JSON.stringify(expired)})`);
+  else notes.push("status: a passed deadline with no event reads as expired");
+
+  // (5) WHAT ENDS EXECUTION. A filled order ends settled; an expired one ends not-settled; an order that never fills
+  // times out by name; an unreachable chain is a refusal.
+  named("settled: unreachable", await relay.uniswapRelaySettled({ orderHash: HASH, chainId: 1 }, { getLogs: throwing, now, sleep: noSleep }), "uniswap-relay-unreachable");
+  const t = { v: 0 };
+  named("settled: timeout (stays open)", await relay.uniswapRelaySettled({ orderHash: HASH, chainId: 1, deadline: 2_000_000 }, { getLogs: async () => ([]), now: () => (t.v += 1000), sleep: noSleep, pollMs: 1000, timeoutMs: 3000, nowSec: 1_000_000 }), "uniswap-relay-not-settled");
+  const done = await relay.uniswapRelaySettled({ orderHash: HASH, chainId: 1 }, { getLogs: async () => ([{ topics: [relay.UNISWAPRELAY_EVENT_TOPIC0, HASH] }]), now, sleep: noSleep });
+  if (!(done.ok === true && done.done === true && done.settled === true && done.status === "filled")) problems.push(`settled: a filled order did not end as settled (${JSON.stringify(done)})`);
+  else notes.push("settled: a filled order ends as done + settled with status filled");
+  const dead = await relay.uniswapRelaySettled({ orderHash: HASH, chainId: 1, deadline: 900_000 }, { getLogs: async () => ([]), now, sleep: noSleep, nowSec: 1_000_000 });
+  if (!(dead.ok === true && dead.done === true && dead.settled === false && dead.status === "expired")) problems.push(`settled: an expired order did not end as done + not-settled (${JSON.stringify(dead)})`);
+  else notes.push("settled: an expired order ends as done + not-settled with status expired");
+
+  // (6) THE GUARD IS ON THIS PROVIDER TOO: no order blocks, and a native input is refused the allowance check by the
+  // same shared guard the other providers use.
+  const blocked = relay.uniswapRelayGate({});
+  if (blocked.blocked !== true) problems.push(`gate: no order did not block (${JSON.stringify(blocked)})`);
+  else notes.push("gate: no order blocks (uniswap-relay-no-order)");
+
+  return { note: `${relay.UNISWAPRELAY_REFUSAL_CODES.length} named refusals, exit paths covered`, problems, notes };
+};
+
+// ---------------------------------------------------------------------------------------------------
 // RUNNER
 // ---------------------------------------------------------------------------------------------------
 
@@ -1120,6 +1396,8 @@ const CHECKS = {
   "kyber-refusal": kyberRefusalCheck,
   uniswapx: uniswapxCheck,
   "uniswapx-refusal": uniswapxRefusalCheck,
+  "uniswap-relay": uniswapRelayCheck,
+  "uniswap-relay-refusal": uniswapRelayRefusalCheck,
   compose: composeCheck,
 };
 
