@@ -68,7 +68,7 @@ import { height as nodeHeightValue } from "../monero/node.js";
 
 // THE CORE ADDRESS AS A STRING - THE BUILT BUNDLE UNDER www/: the page gets the core as ONE module, not a pile
 // of sdk/ sources; ?v=<hash> keeps the cache fresh.
-const SDK_BUNDLE = "/assets/vendors/sdk/sdk-browser.js?v=ab70ca17";
+const SDK_BUNDLE = "/assets/vendors/sdk/sdk-browser.js?v=3ce64c53";
 
 // A NAMED SEAM FOR CHECKS - THE SAME TECHNIQUE AS sdkBookUse BELOW. The asynchronous path is driven against a
 // stand-in order book (the demo network has no provider), and the ordinary escrow funding that follows a settled
