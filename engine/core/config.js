@@ -291,6 +291,25 @@ export const ASYNC_ROUTE_PROVIDERS = {
       81457: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
     },
   },
+  // UNISWAPX - THE THIRD SUCH PROVIDER (step 6). Same shape as CoW (an intent auction: the swapper signs an EIP-712
+  // order and fillers settle it on chain LATER), and the SAME native capability: an UniswapX output token may be the
+  // protocol's native sentinel address(0) (sdk/src/legs/uniswapx-spec.mjs), so this provider can carry a route ALL
+  // THE WAY to native - a SECOND native leg beside CoW. Declared for the chains whose reactor takes the V2 Dutch
+  // order the package builds (Ethereum mainnet, V2DutchOrderReactor); other chains run the Dutch V3 reactor, whose
+  // order is a different type the package does not build. The order service base URL is the UniswapX orders API
+  // (shared by every chain); there is no per-chain slug, so the record carries `reactor` instead.
+  // tools/check-buy-async-route.mjs cross-checks this table against sdk/src/legs/uniswapx.mjs so the two cannot drift.
+  uniswapx: {
+    venue: "UniswapX",
+    shape: "async",
+    // WHAT IT SETTLES: native coin - an output may be the NATIVE sentinel address(0), so it can be a native leg or,
+    // on its own, carry a native need all the way. See the note in sdk/src/legs/uniswapx.mjs (publishing needs the
+    // Uniswap Trading API and an API key, and the order is cosigned by Uniswap Labs).
+    settles: "native",
+    networks: {
+      1: { orderbook: "https://api.uniswap.org/v2", reactor: "0x00000011F84B9aa48e5f8aA8B9897600006289Be" },
+    },
+  },
 };
 
 export const CHAINS = [

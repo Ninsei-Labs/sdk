@@ -9,6 +9,7 @@
 import { SYNC, ASYNC, providerShapeVerdict } from "./shape.mjs";
 import { cowProvider } from "./cow.mjs";
 import { kyberProvider } from "./kyber.mjs";
+import { uniswapxProvider } from "./uniswapx.mjs";
 
 export const vm = "evm";
 
@@ -106,6 +107,12 @@ const ROUTE_PROVIDERS = {
   // trades ERC20 against ERC20 and settles WETH, not native coin (see the scope note in ./kyber.mjs). The
   // provider itself lives in ./kyber.mjs.
   kyberswap: kyberProvider,
+  // UNISWAPX - A THIRD INTENT AUCTION, ALSO "async". Same role as CoW (the person signs an order, someone else
+  // settles it later) and the same native capability (an output may be the NATIVE sentinel), so it is a SECOND
+  // native leg as well as a single native route. Unlike CoW, publishing needs the Uniswap Trading API and an API
+  // key and the order is cosigned by Uniswap Labs (see the scope note in ./uniswapx.mjs). The provider itself
+  // lives in ./uniswapx.mjs.
+  uniswapx: uniswapxProvider,
 };
 
 /** Who can execute a route at all. The list is needed by the "no such provider" error. */

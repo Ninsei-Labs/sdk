@@ -811,12 +811,15 @@ export const composeCheck = async () => {
   const evm = await loadFresh(p("src", "legs", "evm.mjs"));
   const cow = await loadFresh(p("src", "legs", "cow.mjs"));
   const kyber = await loadFresh(p("src", "legs", "kyber.mjs"));
+  const uniswapx = await loadFresh(p("src", "legs", "uniswapx.mjs"));
 
   // (a) THE TWO CAPABILITIES ARE DECLARED, AND THEY DIFFER.
   if (cow.cowProvider.settles !== evm.SETTLES.NATIVE) problems.push(`cowswap settles ${String(cow.cowProvider.settles)}, expected ${evm.SETTLES.NATIVE}`);
   else notes.push(`cowswap settles ${evm.SETTLES.NATIVE} (it can buy native directly)`);
   if (kyber.kyberProvider.settles !== evm.SETTLES.WRAPPED) problems.push(`kyberswap settles ${String(kyber.kyberProvider.settles)}, expected ${evm.SETTLES.WRAPPED}`);
   else notes.push(`kyberswap settles ${evm.SETTLES.WRAPPED} (ERC20-only order book: liquidity leg, not a native leg)`);
+  if (uniswapx.uniswapxProvider.settles !== evm.SETTLES.NATIVE) problems.push(`uniswapx settles ${String(uniswapx.uniswapxProvider.settles)}, expected ${evm.SETTLES.NATIVE}`);
+  else notes.push(`uniswapx settles ${evm.SETTLES.NATIVE} (an output may be the native sentinel)`);
 
   // (b) WHO CARRIES A NATIVE NEED ALL THE WAY.
   const cowCarry = evm.carriesNativeVerdict(cow.cowProvider);
@@ -825,14 +828,18 @@ export const composeCheck = async () => {
   const kyberCarry = evm.carriesNativeVerdict(kyber.kyberProvider);
   if (kyberCarry.ok !== false || kyberCarry.reason !== "settles-wrapped") problems.push(`kyberswap should refuse a native need with settles-wrapped, got ${JSON.stringify(kyberCarry)}`);
   else notes.push("kyberswap refuses a native need by name (settles-wrapped) - never the sole provider for native");
+  const uniswapxCarry = evm.carriesNativeVerdict(uniswapx.uniswapxProvider);
+  if (uniswapxCarry.ok !== true) problems.push(`uniswapx does not carry a native need: ${JSON.stringify(uniswapxCarry)}`);
+  else notes.push("uniswapx carries a native need all the way (ok: true) - it is eligible as the native leg of a composition");
   const unstated = evm.carriesNativeVerdict({ id: "mystery", shape: evm.ASYNC, settled() {} });
   if (unstated.ok !== false || unstated.reason !== "settles-unstated") problems.push(`a provider that does not say what it settles should refuse with settles-unstated, got ${JSON.stringify(unstated)}`);
   else notes.push("a provider that does not declare its settling is refused by name (settles-unstated), never assumed native");
 
   // (c) THE ASYNC SEAM IS UNTOUCHED: both are complete async providers.
-  for (const id of ["cowswap", "kyberswap"]) {
+  for (const id of ["cowswap", "kyberswap", "uniswapx"]) {
     if (!evm.requireAsyncProvider(id).ok) problems.push(`requireAsyncProvider(${id}) refused after the capability was declared`);
   }
+  if (evm.routeProviders().length !== 4) problems.push(`the registry should carry four routes (declared + three providers), it carries ${evm.routeProviders().length}`);
 
   // (d) THE BREAKING RUN: a copy whose wrapped provider claims native MUST stop refusing a native need. The copy is
   // mutated in a temp dir; the working tree is untouched.
@@ -857,7 +864,243 @@ export const composeCheck = async () => {
     }
   }
 
-  return { note: `capabilities declared and the native-carrier verdict holds (${evm.routeProviders().length} providers)`, problems, notes };
+  // (e) THE BREAKING RUN FOR THE THIRD PROVIDER: a copy whose native provider claims wrapped MUST stop being
+  // eligible as a native leg. The copy is mutated in a temp dir; the working tree is untouched.
+  {
+    const dir = mkdtempSync(join(tmpdir(), "compose-uniswapx-breaking-"));
+    try {
+      const src = p("src", "legs", "uniswapx.mjs");
+      const source = readFileSync(src, "utf8");
+      const mutated = source.replace('settles: "native",', 'settles: "wrapped",');
+      if (mutated === source) throw new Error("the breaking-run mutation did not apply: settles: \"native\" was not found");
+      const rewritten = mutated.replace(/from\s+"(\.[^"]+)"/g, (whole, rel) =>
+        `from "${pathToFileURL(resolve(dirname(src), rel)).href}"`);
+      const file = join(dir, "uniswapx.mjs");
+      writeFileSync(file, rewritten, "utf8");
+      const broken = await loadFresh(file);
+      const brokenCarry = evm.carriesNativeVerdict(broken.uniswapxProvider);
+      if (brokenCarry.ok !== false || brokenCarry.reason !== "settles-wrapped") problems.push(`BREAKING RUN did not redden as expected: claiming wrapped still carried a native need (${JSON.stringify(brokenCarry)})`);
+      else notes.push("breaking run REDDENS: a native provider claiming wrapped would lose its native eligibility - the declaration is load-bearing");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  return { note: `capabilities declared and the native-carrier verdict holds (${evm.routeProviders().length} routes)`, problems, notes };
+};
+
+
+// ---------------------------------------------------------------------------------------------------
+// 12. UNISWAPX - THE THIRD ASYNCHRONOUS ROUTE PROVIDER, THE ONE THAT CAN DELIVER NATIVE ETH. A golden vector from
+//     a REAL mainnet Dutch_V2 order, the EIP-712 type against the reactor's own type-hash, the NATIVE sentinel, and
+//     a BREAKING RUN that shows the vector is load-bearing.
+//
+// WHY THESE ASSERTIONS ARE ABOUT AGREEMENT, NOT AN IMPRESSION. The order type, the Permit2 domain, the witness
+// typehash (which includes the sub-type definitions - see the spec header) and the NATIVE sentinel all come from
+// Uniswap's own sources; here they are RECOMPUTED with the repository's own keccak256/secp256k1 and compared. One
+// REAL order the UniswapX order API serves is pinned: the order hash recomputed from its fields alone must equal the
+// orderHash the API reports, and the order's OWN signature over the recomputed Permit2 digest must recover its
+// swapper. That is the anchor no amount of reasoning replaces.
+// ---------------------------------------------------------------------------------------------------
+
+const UNISWAPX_SDK_SPEC = () => p("src", "legs", "uniswapx-spec.mjs");
+
+// THE REAL ORDER (fetched live from the UniswapX order service; the fields are the order the swapper signed, the
+// signature is the swapper's own). Source: GET https://api.uniswap.org/v2/orders?chainId=1&orderType=Dutch_V2
+//   (type Dutch_V2, orderStatus filled, swapper 0xA7fb5F39eea6BCc2309f6A3C3Cc9954dE5914415).
+const UNISWAPX_VECTOR = {
+  chainId: 1,
+  orderHash: "0x76d2d19315fbf50d2be93985f82bf84e1aab460e9da3e74c7faaff62984de7b3",
+  digest: "0xdee763b7288f9a556c48797baf0df9ce6175cf62535ec88ad93bd92a4c05b37a",
+  swapper: "0xA7fb5F39eea6BCc2309f6A3C3Cc9954dE5914415",
+  signature: "0x387f7ca1b2ae3a7147c54a24670204bfbbe46ff3776417b01737a94cccb293e3541e30a30137834de86012cee6416178917baeafcd2da1ff3faa02ec7cdbb06f1b",
+  order: {
+    reactor: "0x00000011F84B9aa48e5f8aA8B9897600006289Be",
+    swapper: "0xA7fb5F39eea6BCc2309f6A3C3Cc9954dE5914415",
+    nonce: "67671623772721360974440381964468983840772806707480559648299766986261008225807",
+    deadline: 1791625986,
+    additionalValidationContract: "0x0000000000000000000000000000000000000000",
+    additionalValidationData: "0x",
+    cosigner: "0x4449Cd34d1eb1FEDCF02A1Be3834FfDe8E6A6180",
+    baseInputToken: "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
+    baseInputStartAmount: "414534182228591181824",
+    baseInputEndAmount: "414534182228591181824",
+    baseOutputs: [{
+      token: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+      startAmount: "3087782687", endAmount: "3072343774",
+      recipient: "0xA7fb5F39eea6BCc2309f6A3C3Cc9954dE5914415",
+    }],
+  },
+};
+
+// A deterministic signature vector: the same private key always signs the same digest the same way (RFC 6979), so a
+// fixed signature catches any change to the encoding. THIS SIGNATURE IS SELF-GENERATED BY THIS REPOSITORY'S SIGNER
+// over the golden digest - it is NOT an external signature; only the vector above carries a real one.
+const UNISWAPX_TEST_KEY = "0x" + "11".repeat(32);
+const UNISWAPX_TEST_SIG = "0x02ea7cdfaa0c7f9cde94e8d9ad9cdbee2c660dadcedc0758da7b51718e052fbd6eb833a15123b887846327d007c0b2f6a4fa00dff81e9fcb17d4b56bb76d5b6b1b";
+const UNISWAPX_TEST_ADDRESS = "0x19e7e376e7c213b7e7e7e46cc70a5dd086daff2a";
+
+export const uniswapxCheck = async () => {
+  const problems = [];
+  const notes = [];
+  const routes = await loadFresh(p("src", "legs", "uniswapx.mjs"));
+  const spec = await loadFresh(UNISWAPX_SDK_SPEC());
+  const evm = await loadFresh(p("src", "legs", "evm.mjs"));
+  const { keccak256 } = await import(pathToFileURL(p("src", "primitives.mjs")).href);
+  const toHex = (bytes) => { let out = "0x"; for (const b of bytes) out += b.toString(16).padStart(2, "0"); return out; };
+
+  // (a) THE ORDER TYPE AGAINST THE REACTOR'S OWN CONSTANT. The reactor's ORDER_TYPE_HASH is keccak256 of the order
+  // type ++ DutchOutput ++ OrderInfo. A typo in the field list would move the hash and sign orders no reactor takes.
+  const recomputed = toHex(keccak256(spec.UNISWAPX_HASHED_ORDER_TYPE));
+  if (recomputed !== spec.UNISWAPX_ORDER_TYPE_HASH) {
+    problems.push(`the order type does not hash to V2DutchOrderLib.ORDER_TYPE_HASH: computed ${recomputed}, constant ${spec.UNISWAPX_ORDER_TYPE_HASH}`);
+  } else {
+    notes.push(`the order type hashes to V2DutchOrderLib.ORDER_TYPE_HASH ${spec.UNISWAPX_ORDER_TYPE_HASH}`);
+  }
+
+  // (b) THE GOLDEN VECTOR: a real order, its hash from fields alone, and its OWN signature recovering the swapper.
+  const vector = UNISWAPX_VECTOR;
+  let orderHash;
+  try { orderHash = spec.uniswapxOrderHashHex(vector.order); }
+  catch (error) { problems.push(`the golden order hash did not compute (${error && error.message})`); orderHash = null; }
+  if (orderHash !== null && orderHash !== vector.orderHash) problems.push(`the golden order hash is ${String(orderHash)}, expected ${vector.orderHash}`);
+  else if (orderHash !== null) notes.push(`the golden order hash matches the UniswapX API (real Dutch_V2 order, chainId ${vector.chainId})`);
+  let digest;
+  try { digest = spec.uniswapxOrderDigestHex({ order: vector.order, chainId: vector.chainId }); }
+  catch (error) { problems.push(`the golden permit digest did not compute (${error && error.message})`); digest = null; }
+  if (digest !== null && digest !== vector.digest) problems.push(`the golden permit digest is ${String(digest)}, expected ${vector.digest}`);
+  const recoveredReal = digest === null ? null : spec.recoverUniswapxOrderSigner({ digest: spec.uniswapxOrderDigest({ order: vector.order, chainId: vector.chainId }), signature: vector.signature });
+  if (recoveredReal !== vector.swapper.toLowerCase()) problems.push(`the real order's signature recovers ${recoveredReal}, expected the swapper ${vector.swapper}`);
+  else notes.push(`the real order's own signature recovers its swapper ${vector.swapper} - the Permit2 digest is anchored to UniswapX`);
+  const missingVector = spec.uniswapxOrderMissingFields(vector.order);
+  if (missingVector.length) problems.push(`the golden order is missing fields: ${missingVector.join(", ")}`);
+
+  // (c) THE SELF-GENERATED SIGNATURE VECTOR (this repository's signer over the golden digest).
+  const digestBytes = spec.uniswapxOrderDigest({ order: vector.order, chainId: vector.chainId });
+  const selfSig = spec.signUniswapxOrderDigest({ digest: digestBytes, privateKey: UNISWAPX_TEST_KEY });
+  if (selfSig !== UNISWAPX_TEST_SIG) problems.push(`the self-generated signature over the golden digest is ${selfSig}, expected ${UNISWAPX_TEST_SIG}`);
+  else notes.push("the self-generated signature over the golden digest is the fixed vector (this repository's signer)");
+  const recoveredSelf = spec.recoverUniswapxOrderSigner({ digest: digestBytes, signature: selfSig });
+  if (recoveredSelf !== UNISWAPX_TEST_ADDRESS) problems.push(`the self-generated signature recovers ${recoveredSelf}, expected ${UNISWAPX_TEST_ADDRESS}`);
+  else notes.push(`the self-generated signature recovers ${UNISWAPX_TEST_ADDRESS}`);
+
+  // (d) THE NATIVE OUTPUT MECHANISM: address(0) is the native sentinel, and an order whose output token is it is
+  // built and marked nativeOutput - this is what lets the provider carry a route all the way to native ETH.
+  if (spec.UNISWAPX_NATIVE !== "0x0000000000000000000000000000000000000000") problems.push(`the native sentinel is ${spec.UNISWAPX_NATIVE}, expected address zero`);
+  const nativePlan = routes.uniswapxPlan({
+    chainId: 1, swapper: vector.swapper, sellToken: vector.order.baseInputToken, sellAmountWei: "1000000",
+    buyToken: spec.UNISWAPX_NATIVE, buyAmountWei: "500000000000000", deadline: 1800000000, nonce: "1",
+  });
+  if (nativePlan.ok !== true || nativePlan.nativeOutput !== true) problems.push(`an order whose output is the native sentinel was not built as a native route (${JSON.stringify(nativePlan).slice(0, 140)})`);
+  else notes.push("an order whose output token is address(0) is built and marked nativeOutput - native ETH as the output");
+
+  // (e) THE SEAM: the registered provider is the third async one and is complete.
+  if (!evm.routeProviders().includes("uniswapx")) problems.push("the registry does not carry the uniswapx provider");
+  const okUx = evm.requireAsyncProvider("uniswapx");
+  if (!okUx.ok) problems.push(`requireAsyncProvider("uniswapx") refused: ${JSON.stringify(okUx)}`);
+  else notes.push("the registry carries the uniswapx provider and it is complete (async + settled)");
+
+  // (f) THE BREAKING RUN: swap the two base-input amount fields in a copy of the spec and the golden order hash MUST
+  // stop matching. The field ORDER is the protocol (EIP-712), so a valid hash is still produced - a DIFFERENT one,
+  // which is exactly what "the vector is load-bearing" means. A copy is mutated in a temp dir; the tree is untouched.
+  {
+    const dir = mkdtempSync(join(tmpdir(), "uniswapx-breaking-"));
+    try {
+      const source = readFileSync(UNISWAPX_SDK_SPEC(), "utf8").replace(/\r\n/g, "\n");
+      const before = source;
+      const mutated = source.replace(
+        '  ["baseInputStartAmount", "uint256"],\n  ["baseInputEndAmount", "uint256"],\n',
+        '  ["baseInputEndAmount", "uint256"],\n  ["baseInputStartAmount", "uint256"],\n');
+      if (mutated === before) throw new Error("the breaking-run mutation did not apply: the base-input amount field lines were not found");
+      const rewritten = mutated.replace(/from\s+"(\.[^"]+)"/g, (whole, rel) =>
+        `from "${pathToFileURL(resolve(dirname(UNISWAPX_SDK_SPEC()), rel)).href}"`);
+      const file = join(dir, "uniswapx-spec.mjs");
+      writeFileSync(file, rewritten, "utf8");
+      const broken = await loadFresh(file);
+      let brokenHash = null;
+      try { brokenHash = broken.uniswapxOrderHashHex(vector.order); } catch { brokenHash = null; }
+      if (brokenHash === vector.orderHash || brokenHash === null) problems.push(`BREAKING RUN did not redden as expected: the order hash is ${String(brokenHash)}`);
+      else notes.push(`breaking run REDDENS: reordering the base-input amount fields moves the order hash off the golden value (${String(brokenHash).slice(0, 12)}…)`);
+      const brokenTypeHash = (() => { try { return toHex(keccak256(broken.UNISWAPX_HASHED_ORDER_TYPE)); } catch { return null; } })();
+      if (brokenTypeHash === spec.UNISWAPX_ORDER_TYPE_HASH) problems.push("BREAKING RUN did not redden the type hash either");
+      else notes.push("breaking run also moves the recomputed type hash off V2DutchOrderLib.ORDER_TYPE_HASH");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  notes.push("the golden vector is a REAL Dutch_V2 order served by the UniswapX order API (see the URL in the source); its signature is real, the self-generated one is this repository's");
+  return { note: `1 real-order vector, 1 self-generated signature vector, the native sentinel, the async seam`, problems, notes };
+};
+
+// ---------------------------------------------------------------------------------------------------
+// 13. UNISWAPX REFUSALS - UNREACHABLE, AN UNEXPECTED SHAPE, AN UNKNOWN NETWORK, A REFUSAL, A MISSING API KEY, A
+//     MISSING SUBMITTER AND A TIMEOUT ARE NAMED, NEVER SILENCE OR null. A stand-in transport (no network) drives the
+//     provider down each failure path.
+// ---------------------------------------------------------------------------------------------------
+
+export const uniswapxRefusalCheck = async () => {
+  const problems = [];
+  const notes = [];
+  const ux = await loadFresh(p("src", "legs", "uniswapx.mjs"));
+  const SWAPPER = "0x" + "11".repeat(20);
+  const HASH = "0x" + "ab".repeat(32);
+  const response = (status, body) => ({ ok: status < 400, status, json: async () => (typeof body === "function" ? body() : body) });
+  const named = (label, result, code) => {
+    if (!result || typeof result !== "object") { problems.push(`${label}: the result is not a refusal value (${JSON.stringify(result)})`); return; }
+    if (result.ok === true) { problems.push(`${label}: expected a refusal, got ok:true (${JSON.stringify(result).slice(0, 120)})`); return; }
+    if (typeof result.code !== "string" || !ux.UNISWAPX_REFUSAL_CODES.includes(result.code)) { problems.push(`${label}: the refusal code is not named (${JSON.stringify(result.code)})`); return; }
+    if (code && result.code !== code) { problems.push(`${label}: expected code ${code}, got ${result.code}`); return; }
+    notes.push(`${label}: refused with ${result.code}`);
+  };
+  const planRequest = { chainId: 1, swapper: SWAPPER, sellToken: "0x" + "22".repeat(20), sellAmountWei: "1000000", buyToken: "0x" + "33".repeat(20), buyAmountWei: "500000", deadline: 1800000000, nonce: "1" };
+  const sig = "0x" + "ab".repeat(65);
+  const ordersBody = (over = {}) => ({ orders: [{ orderHash: HASH, orderStatus: "open", ...over }] });
+
+  // (1) unreachable: the transport throws (connection or timeout) - not an exception escaping to the caller.
+  const throwing = async () => { throw new TypeError("network down"); };
+  named("submit: unreachable", await ux.submitUniswapxOrder({ quote: {}, signature: sig, apiKey: "k", fetchImpl: throwing }), "uniswapx-unreachable");
+  named("status: unreachable", await ux.uniswapxOrderStatus({ orderHash: HASH, chainId: 1, fetchImpl: throwing }), "uniswapx-unreachable");
+  named("settled: unreachable", await ux.uniswapxSettled({ orderHash: HASH, chainId: 1 }, { fetchImpl: throwing, now: () => 0, sleep: async () => {} }), "uniswapx-unreachable");
+
+  // (2) an unexpected shape: a body that is not the shape we know (orders not an array; an unknown status word; a
+  // submit answer with no orderId).
+  named("status: orders not an array", await ux.uniswapxOrderStatus({ orderHash: HASH, chainId: 1, fetchImpl: async () => response(200, { orders: "nope" }) }), "uniswapx-bad-response");
+  named("status: unknown status word", await ux.uniswapxOrderStatus({ orderHash: HASH, chainId: 1, fetchImpl: async () => response(200, ordersBody({ orderStatus: "teleported" })) }), "uniswapx-bad-response");
+  named("submit: no orderId", await ux.submitUniswapxOrder({ quote: {}, signature: sig, apiKey: "k", fetchImpl: async () => response(201, { requestId: "r", orderStatus: "open" }) }), "uniswapx-bad-response");
+  named("settled: unknown status word", await ux.uniswapxSettled({ orderHash: HASH, chainId: 1 }, { fetchImpl: async () => response(200, ordersBody({ orderStatus: "wat" })), now: () => 0, sleep: async () => {} }), "uniswapx-bad-response");
+
+  // (3) not settled in time: the order stays open and the clock passes the timeout.
+  let t = 0;
+  const open = async () => response(200, ordersBody({ orderStatus: "open" }));
+  named("settled: timeout", await ux.uniswapxSettled({ orderHash: HASH, chainId: 1 }, { fetchImpl: open, now: () => (t += 1000), sleep: async () => {}, pollMs: 1000, timeoutMs: 3000 }), "uniswapx-not-settled");
+
+  // (4) THE TWO WAYS PUBLISHING IS BLOCKED, NAMED: no API key, and no submitter configured. A published UniswapX
+  // order is a gasless order on the Uniswap Trading API, which requires a key; the provider does not invent a path.
+  named("plan: unknown network", ux.uniswapxPlan({ ...planRequest, chainId: 5 }), "uniswapx-unknown-network");
+  named("plan: incomplete order", ux.uniswapxPlan({ chainId: 1 }), "uniswapx-bad-order");
+  named("status: unknown network", await ux.uniswapxOrderStatus({ orderHash: HASH, chainId: 5, fetchImpl: open }), "uniswapx-unknown-network");
+  named("submit: no API key", await ux.submitUniswapxOrder({ quote: {}, signature: sig, fetchImpl: open }), "uniswapx-no-api-key");
+  named("submit: no submitter", await ux.submitUniswapxOrder({ quote: {}, signature: sig, apiKey: "k", tradingApi: null, fetchImpl: open }), "uniswapx-no-submitter");
+  named("submit: bad signature", await ux.submitUniswapxOrder({ quote: {}, signature: "0x00", apiKey: "k", fetchImpl: open }), "uniswapx-bad-order");
+  named("sign: no wallet", await ux.uniswapxSignOrder({ typedData: { a: 1 } }), "uniswapx-sign-failed");
+
+  // (5) a bounded refusal from the service, and an unknown order - also named.
+  named("submit: refused by the service", await ux.submitUniswapxOrder({ quote: {}, signature: sig, apiKey: "k", fetchImpl: async () => response(401, { detail: "bad key" }) }), "uniswapx-refused");
+  named("status: refused by the service", await ux.uniswapxOrderStatus({ orderHash: HASH, chainId: 1, fetchImpl: async () => response(500, {}) }), "uniswapx-refused");
+  named("status: unknown order", await ux.uniswapxOrderStatus({ orderHash: HASH, chainId: 1, fetchImpl: async () => response(200, { orders: [] }) }), "uniswapx-order-unknown");
+
+  // (6) AND THE OTHER WAY: a final status is NOT a refusal - it is the outcome (settled / dead).
+  const filled = async () => response(200, ordersBody({ orderStatus: "filled" }));
+  const done = await ux.uniswapxSettled({ orderHash: HASH, chainId: 1 }, { fetchImpl: filled, now: () => 0, sleep: async () => {} });
+  if (!(done.ok === true && done.done === true && done.settled === true && done.status === "filled")) problems.push(`settled: a filled order did not end as settled (${JSON.stringify(done)})`);
+  else notes.push("settled: a filled order ends as done + settled with status filled");
+  const expired = async () => response(200, ordersBody({ orderStatus: "expired" }));
+  const dead = await ux.uniswapxSettled({ orderHash: HASH, chainId: 1 }, { fetchImpl: expired, now: () => 0, sleep: async () => {} });
+  if (!(dead.ok === true && dead.done === true && dead.settled === false && dead.status === "expired")) problems.push(`settled: an expired order did not end as done + not-settled (${JSON.stringify(dead)})`);
+  else notes.push("settled: an expired order ends as done + not-settled with status expired");
+
+  return { note: `${ux.UNISWAPX_REFUSAL_CODES.length} named refusals, exit paths covered`, problems, notes };
 };
 
 // ---------------------------------------------------------------------------------------------------
@@ -875,6 +1118,8 @@ const CHECKS = {
   "cow-refusal": cowRefusalCheck,
   kyber: kyberCheck,
   "kyber-refusal": kyberRefusalCheck,
+  uniswapx: uniswapxCheck,
+  "uniswapx-refusal": uniswapxRefusalCheck,
   compose: composeCheck,
 };
 
