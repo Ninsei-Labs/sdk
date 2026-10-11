@@ -29,6 +29,18 @@
     },
     "./adapters": {
       "default": "./src/adapters/index.mjs"
+    },
+    "./xmr": {
+      "default": "./src/public/xmr.mjs"
+    },
+    "./order": {
+      "default": "./src/public/order.mjs"
+    },
+    "./evm": {
+      "default": "./src/public/evm.mjs"
+    },
+    "./core": {
+      "default": "./src/public/core.mjs"
     }
   },
   "files": [
