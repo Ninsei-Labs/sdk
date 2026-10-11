@@ -363,14 +363,19 @@ export const CHAINS = [
     explorerName: "arbiscan (sepolia)",
     gasUsd: 0.01,
     routeType: "atomic",
-    // THE DEMO'S MAIN NETWORK: the escrow went here, and the FEE ROUTER IS DEPLOYED here - also the factory (it
-    // spawns escrows, keeps the rate, holds the fee cashier). The address is a FACT, not an intention:
-    // 0xaEB1c0455C76551dcEb2E6B1245B65F0458b0aE8 (height 314323871, transaction
-    // 0x7a88c0249867b76b11c6cb678e6092fdc19404b51540a64c5fd03f5a32f74826, code 8223 bytes, keccak256
-    // 0x90f26f641b48a2a630463195d4429b0818d29187563e09711a40811fcf08a0ba); it added EARLY REFUND in the dead
-    // zone - with no mark, refund is open right after readyBy and it publishes the depositor's half. The code
-    // matches the current repo build byte for byte.
-    // `npm run check:deployed -- --address=0xaEB1c0455C76551dcEb2E6B1245B65F0458b0aE8`).
+    // THE DEMO'S MAIN NETWORK: the Ninsei escrow factory, the interface's fee cashier and the maker registry live
+    // here; the ArrakisFeeRouter is gone. The factory is a FACT, not an intention:
+    // 0x1029D6bC53f6b9919F8ec6Ac922327F7e5A3DdF2 (height 318033203, transaction
+    // 0x0f82c556f056f2dcaba5c12da75a749c257dfb1ccbf0eb6962a4e7f0119d166d, code 4226 bytes, keccak256
+    // 0x4b515f600c641bffde054b3a98f4e26bd43d2dd2b2d8e60e8cfe36ee03686dd9); every order is an EIP-1167 clone and
+    // the factory carries the pair (implementation(), implementationCodeHash()). The fee cashier is the second CREATE
+    // of the same pass - 0x7E84035B4f42219F3fCE22855c6Dd7D36942B019 (height 318033206, code 573 bytes, keccak256
+    // 0xcca1d8bc53d1d1c98901570800e093d0933f84637c6cdc727153b3ef8d8c3c36); the maker registry is the third -
+    // 0x416d548B497d3AE808807172a5Bc3549512a64E5 (height 318033209, code 4557 bytes). The code matches the current
+    // repo build byte for byte.
+    // `npm run check:deployed -- --address=0x1029D6bC53f6b9919F8ec6Ac922327F7e5A3DdF2`).
+    // PREVIOUS (the ArrakisFeeRouter of the previous rules, now removed): 0xaEB1c0455C76551dcEb2E6B1245B65F0458b0aE8
+    // (height 314323871, code 8223 bytes, keccak256 0x90f26f641b48a2a630463195d4429b0818d29187563e09711a40811fcf08a0ba).
     // PREVIOUS (ceiling 3%, no early refund): 0xEa619bDC78989627093B7830990367B2ECE52CE5 (height 314309038,
     // code 8143 bytes). PREVIOUS live (router with a 10% ceiling): 0x9f856cd9c14fd9493961473b804039b09a4012ef
     // (height 313597131, code 8723 bytes). PREVIOUS before it (factory without a fee):
@@ -379,9 +384,9 @@ export const CHAINS = [
     // (createOrderAndFund; the escrow has no separate funding function - an order is born funded, see FACTORY_METHODS
     // in www/js/evm/factory.js and ESCROW_METHODS in escrow.js). The old lock(sealedHalf) and hashlock are gone: the
     // half is not sent but revealed by presentation. Switching back to "simulated" is one edit, to show a demo with
-    // no money movement. cashier: the INTERFACE's fee cashier, named in quotes. The contracts on chain are still the
-    // previous ones, so there is no cashier there: the field is filled in the same pass as the factory address.
-    escrow: { address: "0xaEB1c0455C76551dcEb2E6B1245B65F0458b0aE8", mode: "live", cashier: null },
+    // no money movement. cashier: the INTERFACE's fee cashier, named in quotes and now deployed (the second CREATE of
+    // the same pass). implementationCodeHash: the escrow implementation the factory carries, checked against the chain.
+    escrow: { address: "0x1029D6bC53f6b9919F8ec6Ac922327F7e5A3DdF2", mode: "live", cashier: "0x7E84035B4f42219F3fCE22855c6Dd7D36942B019", implementationCodeHash: "0xfd1ef12c1d96d3ee7060bd5901e06108723783403fad00c9630dcdeb6193674b" },
     tokens: [
       // Test USDC (Circle): decimals 6 and symbol "USDC" verified on chain by the same node.
       { symbol: "USDC", address: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d", decimals: 6, usd: 1, cls: "ar-token-usdc" },
