@@ -220,6 +220,127 @@ export const DEX_ROUTES = {
   },
 };
 
+// ASYNCHRONOUS ROUTE PROVIDERS - A NETWORK IS SERVED OR IT IS NOT, AND THAT IS DATA, NOT A GUESS.
+//
+// The declared routes above are ROUTER swaps: the swap runs INSIDE the person's own transaction (shape "sync").
+// A person coming from USDC who holds NO native coin of their own cannot pay for that transaction at all - there
+// is nothing to pay the gas with. So a second kind of route is declared here: an INTENT AUCTION, where the person
+// SIGNS an intent and the settlement arrives LATER as a separate transaction sent by someone else (shape "async";
+// CoWSwap is the first such provider, see the step-1 package layer sdk/src/legs/cow.mjs). The wallet's own
+// balance then decides the path (www/js/evm/permit.js: usdcWithoutEthVerdict) and the asynchronous one is taken
+// when the wallet cannot cover the gas - the swap settles first, and the escrow deposit (and its gas) comes after.
+// STEP 4 ADDS A SECOND ONE (kyberswap, below): an intent auction is a KIND, not a single venue, so the table is keyed
+// by provider id and each provider declares its own networks and book. CoW is unchanged.
+// STEP 5 ADDS WHAT A PROVIDER SETTLES (`settles`): the escrow is funded with NATIVE coin, so the choice must only
+// pick a provider able to carry the route ALL THE WAY there. CoW settles native; KyberSwap settles the WRAPPED
+// native, so it is a LIQUIDITY leg and is usable only inside a composition (see www/js/evm/asyncRoute.js:
+// asyncRouteChoice) - never as the sole provider for a native need.
+//
+// KEYED BY EVM chainId. A network ABSENT here is NOT served asynchronously: the path choice must refuse BY NAME
+// (www/js/evm/asyncRoute.js: asyncRouteVerdict, reason "no-async-provider") rather than pretend. The order book
+// base URLs are the provider's own public endpoints (the CoWSwap order book OpenAPI `servers` list), the same
+// ones pinned in sdk/src/legs/cow.mjs; tools/check-buy-async-route.mjs cross-checks the two tables so the engine
+// and the package cannot drift apart silently.
+export const ASYNC_ROUTE_PROVIDERS = {
+  cowswap: {
+    venue: "CoWSwap",
+    shape: "async",
+    // WHAT IT SETTLES: native coin. A CoW order can buy native directly (buyToken = the BUY_ETH_ADDRESS marker,
+    // sdk/src/legs/cow-spec.mjs), so this provider can carry the route ALL THE WAY to the escrow, which is funded
+    // with native coin. tools/check-buy-async-route.mjs cross-checks this against cowProvider.settles.
+    settles: "native",
+    networks: {
+      1: { slug: "mainnet", orderbook: "https://api.cow.fi/mainnet" },
+      100: { slug: "xdai", orderbook: "https://api.cow.fi/xdai" },
+      42161: { slug: "arbitrum_one", orderbook: "https://api.cow.fi/arbitrum_one" },
+      8453: { slug: "base", orderbook: "https://api.cow.fi/base" },
+      56: { slug: "bnb", orderbook: "https://api.cow.fi/bnb" },
+      11155111: { slug: "sepolia", orderbook: "https://api.cow.fi/sepolia" },
+    },
+  },
+  // KYBERSWAP LIMIT ORDER - THE SECOND SUCH PROVIDER (step 4). Same shape as CoW (an intent auction: the person signs
+  // an off-chain order, a taker settles it on chain later), so it is declared HERE the same way. ONE order book base
+  // URL serves every chain (docs.kyberswap.com "Base URL: https://limit-order.kyberswap.com"), and the settlement
+  // contract is the same DSLOProtocol 0xcab2... on each chain (docs.kyberswap.com, "Contracts & Addresses"); there is
+  // no per-chain slug, so the record carries `contract` instead of `slug`. The networks are the chains KyberSwap
+  // Limit Order serves (Ethereum, Optimism, BSC, Polygon, Fantom, zkSync, Mantle, Base, Arbitrum, Avalanche, Linea,
+  // Scroll, Blast). SCOPE: this provider settles WETH, not native coin - it is the LIQUIDITY leg, see the scope note
+  // in sdk/src/legs/kyber.mjs; reaching native is a second order on a native-capable provider (CoW above). The guard
+  // tools/check-buy-async-route.mjs cross-checks this table against sdk/src/legs/kyber.mjs so the two cannot drift.
+  kyberswap: {
+    venue: "KyberSwap Limit Order",
+    shape: "async",
+    // WHAT IT SETTLES: the WRAPPED native (WETH), not native coin - its orders trade ERC20 against ERC20 and its
+    // API refuses native as an order asset (error 4004). So it is a LIQUIDITY leg: it can never be the sole provider
+    // for a native need; reaching native is a SECOND order on a native-capable provider (CoW above). See the scope
+    // note in sdk/src/legs/kyber.mjs.
+    settles: "wrapped",
+    networks: {
+      1: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      10: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      56: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      137: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      250: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      324: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      5000: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      8453: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      42161: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      43114: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      59144: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      534352: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+      81457: { orderbook: "https://limit-order.kyberswap.com", contract: "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C" },
+    },
+  },
+  // UNISWAPX - THE THIRD SUCH PROVIDER (step 6). Same shape as CoW (an intent auction: the swapper signs an EIP-712
+  // order and fillers settle it on chain LATER), and the SAME native capability: an UniswapX output token may be the
+  // protocol's native sentinel address(0) (sdk/src/legs/uniswapx-spec.mjs), so this provider can carry a route ALL
+  // THE WAY to native - a SECOND native leg beside CoW. Declared for the chains whose reactor takes the V2 Dutch
+  // order the package builds (Ethereum mainnet, V2DutchOrderReactor); other chains run the Dutch V3 reactor, whose
+  // order is a different type the package does not build. The order service base URL is the UniswapX orders API
+  // (shared by every chain); there is no per-chain slug, so the record carries `reactor` instead.
+  // tools/check-buy-async-route.mjs cross-checks this table against sdk/src/legs/uniswapx.mjs so the two cannot drift.
+  // `submitter` IS OUR OWN ENDPOINT, NOT A THIRD PARTY. Publishing a signed order needs the Uniswap Trading API key,
+  // and the key lives ONLY in the backend's environment (app/, UNISWAPX_API_KEY). The page posts the signed order to
+  // this SAME-ORIGIN path - so no CSP change, and no key anywhere in the browser - and the backend attaches the API
+  // key server-side. The provider takes the submitter from configuration and refuses by name
+  // ("uniswapx-no-submitter") when it is absent. tools/check-uniswapx-submit.mjs holds this entry against the package.
+  uniswapx: {
+    venue: "UniswapX",
+    shape: "async",
+    // WHAT IT SETTLES: native coin - an output may be the NATIVE sentinel address(0), so it can be a native leg or,
+    // on its own, carry a native need all the way. See the note in sdk/src/legs/uniswapx.mjs (publishing needs the
+    // Uniswap Trading API and an API key, and the order is cosigned by Uniswap Labs).
+    settles: "native",
+    networks: {
+      1: { orderbook: "https://api.uniswap.org/v2", reactor: "0x00000011F84B9aa48e5f8aA8B9897600006289Be", submitter: "/api/uniswapx/order" },
+    },
+  },
+// UNISWAP RELAY - the fourth such provider (step 7), and the one that needs no key. These are Uniswap's own
+// contracts (Uniswap/relayer): RelayOrderReactor takes a signed order and relays one call into the
+// UniversalRouter; the relayer pays the gas and is repaid by the order's fee in the same input token.
+// There is no order book at all: the order is a self-contained Permit2 instruction, and anyone holding the
+// signature may call the reactor. WHAT THIS MEANS IN PRACTICE: Uniswap deploys this reactor on Ethereum
+// mainnet ONLY (Uniswap/relayer README, "Deployment Addresses": 0x0000000000A4e21E2597DCac987455c48b12edBF
+// together with UniversalRouter 0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD); no Uniswap source places it on
+// Arbitrum; and HOW a signed order reaches a relayer is NOT DESCRIBED in Uniswap's repository (the
+// "Integrating as a filler" section is empty and the UniswapX order service has no relay order type). The
+// entry therefore carries the reactor and the router instead of a book, and the delivery path is refused in
+// the package by name (uniswap-relay-no-discovery) rather than by an invented address.
+// tools/check-buy-async-route.mjs and tools/check-async-route-relay.mjs cross-check this table against
+// sdk/src/legs/uniswaprelay.mjs (reactor and router), so a repeated truth cannot drift silently.
+  uniswaprelay: {
+    venue: "Uniswap Relay",
+    shape: "async",
+  // WHAT IT SETTLES: the native coin - a relayed swap unwraps the wrapped native to the recipient, and the
+  // escrow deposit is paid in native, so this provider carries a native need to the END (the native leg of a
+  // composition, or a single route). See the scope note in sdk/src/legs/uniswaprelay.mjs.
+    settles: "native",
+    networks: {
+      1: { reactor: "0x0000000000A4e21E2597DCac987455c48b12edBF", universalRouter: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD" },
+    },
+  },
+};
+
 export const CHAINS = [
   {
     id: "arbitrum-sepolia",
@@ -725,6 +846,14 @@ export function nativeOf(chainId) {
     cls: "ar-token-eth",
     native: true,
   };
+}
+
+// A network's WRAPPED native token (WETH/WBNB...), or null. It is what the liquidity leg settles (KyberSwap Limit
+// Order trades ERC20 against ERC20 and cannot deliver native) and what the native leg sells to buy native coin: the
+// engine's composed route (www/js/evm/asyncExec.js) turns the token into this wrapped token first, then into native.
+export function wrappedNativeOf(chainId) {
+  const c = chainById(chainId);
+  return (c.tokens || []).find((t) => t && t.peg === "native") || null;
 }
 
 // A token by its composite id "<chainId>:<SYMBOL>" or by two arguments.

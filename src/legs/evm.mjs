@@ -4,6 +4,14 @@
 // land here in stage 2. Already here: what the network is called for the wallet, how to tell that the wallet is on
 // the right network, how balances are read, and the ROUTE-PROVIDER REGISTRY (our declared routes today, an
 // external aggregator when it arrives).
+// THE SHARED SHAPE VOCABULARY lives in its own module (./shape.mjs) so the registry and the concrete providers can
+// both depend on it without an import cycle. The CoWSwap provider is registered below like any other route provider.
+import { SYNC, ASYNC, providerShapeVerdict } from "./shape.mjs";
+import { cowProvider } from "./cow.mjs";
+import { kyberProvider } from "./kyber.mjs";
+import { uniswapxProvider } from "./uniswapx.mjs";
+import { uniswapRelayProvider } from "./uniswaprelay.mjs";
+
 export const vm = "evm";
 
 /** What this network is called for the wallet: for EVM - a numeric chainId. */
@@ -78,8 +86,7 @@ export async function balances({ driver, address, tokens }) {
 // REQUIREMENT FOR A PROVIDER: id, kind, shape ("sync" | "async"), plan(...) -> { ok, expectedOutWei | code,
 // route?, calldata?, to? } and, for shape "async", settled(...). Execution (assembling and sending the
 // transaction) is stage 3; for now only our provider is declared, and its plan honestly answers with a code.
-export const SYNC = "sync";
-export const ASYNC = "async";
+export { SYNC, ASYNC };
 
 const ROUTE_PROVIDERS = {
   declared: {
@@ -92,6 +99,28 @@ const ROUTE_PROVIDERS = {
       return { ok: false, code: "not-implemented", stage: 3 };
     },
   },
+  // COWSWAP - AN INTENT AUCTION: "async". The person signs an intent, and the settlement arrives LATER as a separate
+  // transaction sent by someone else. Its record therefore carries `settled(...)` - what ends its execution (the
+  // order book reporting the order settled or finally dead). The provider itself lives in ./cow.mjs.
+  cowswap: cowProvider,
+  // KYBERSWAP LIMIT ORDER - A SECOND INTENT AUCTION, ALSO "async". Same role as CoW (the person signs an
+  // order, someone else settles it later), a different book and contract. It is the LIQUIDITY leg: its order
+  // trades ERC20 against ERC20 and settles WETH, not native coin (see the scope note in ./kyber.mjs). The
+  // provider itself lives in ./kyber.mjs.
+  kyberswap: kyberProvider,
+  // UNISWAPX - A THIRD INTENT AUCTION, ALSO "async". Same role as CoW (the person signs an order, someone else
+  // settles it later) and the same native capability (an output may be the NATIVE sentinel), so it is a SECOND
+  // native leg as well as a single native route. Unlike CoW, publishing needs the Uniswap Trading API and an API
+  // key and the order is cosigned by Uniswap Labs (see the scope note in ./uniswapx.mjs). The provider itself
+  // lives in ./uniswapx.mjs.
+  uniswapx: uniswapxProvider,
+  // THE RELAYED UNISWAP ROUTE - A FOURTH INTENT AUCTION, ALSO "async", AND THE KEY-FREE ONE. Same role as CoW (the
+  // person signs an order, someone else settles it later) and the same native capability (the relayed swap unwraps
+  // to native), so it is a THIRD native leg as well as a single native route. Its discovery path is the point:
+  // Uniswap's own relayer repository documents NO submission endpoint and NO gossip service for a signed relay
+  // order, so this provider refuses that step BY NAME ("uniswap-relay-no-discovery") instead of inventing one (see
+  // the scope note in ./uniswaprelay.mjs). The provider itself lives in ./uniswaprelay.mjs.
+  uniswaprelay: uniswapRelayProvider,
 };
 
 /** Who can execute a route at all. The list is needed by the "no such provider" error. */
@@ -115,4 +144,59 @@ export const requireSyncProvider = (id) => {
     return { ok: false, reason: "provider-not-synchronous", provider: provider.id, shape: provider.shape === undefined ? null : provider.shape };
   }
   return { ok: true, provider };
+};
+
+/**
+ * THE GATE OF A PATH THAT ASSUMES AN ASYNCHRONOUS INTENT. The mirror of requireSyncProvider: it accepts a provider
+ * whose swap settles in a LATER, separate action, and refuses by NAME - never silently - a provider that is
+ * unknown, that is in fact synchronous, or that declares itself asynchronous without naming what ends execution
+ * (`settled`). Refusals are VALUES: { ok: true, provider } or { ok: false, reason, ... }.
+ */
+export const requireAsyncProvider = (id) => {
+  const provider = routeProviderFor(id);
+  if (!provider) return { ok: false, reason: "provider-unknown", provider: typeof id === "string" ? id : null, known: routeProviders() };
+  if (provider.shape !== ASYNC) return { ok: false, reason: "provider-not-asynchronous", provider: provider.id, shape: provider.shape === undefined ? null : provider.shape };
+  const verdict = providerShapeVerdict(provider);
+  if (!verdict.ok) return { ok: false, reason: verdict.reason, provider: provider.id, shape: provider.shape === undefined ? null : provider.shape, missing: verdict.missing ?? null };
+  return { ok: true, provider };
+};
+
+/**
+ * A GENERAL GATE: may a path use this provider at all, whatever the shape, and is the provider complete (an
+ * asynchronous one names what ends its execution). The shape itself is NOT required to match a path's assumption
+ * here - that is what requireSyncProvider / requireAsyncProvider are for.
+ */
+export const requireProvider = (id) => {
+  const provider = routeProviderFor(id);
+  if (!provider) return { ok: false, reason: "provider-unknown", provider: typeof id === "string" ? id : null, known: routeProviders() };
+  const verdict = providerShapeVerdict(provider);
+  if (!verdict.ok) return { ok: false, reason: verdict.reason, provider: provider.id, shape: verdict.shape ?? null, missing: verdict.missing ?? null };
+  return { ok: true, provider };
+};
+
+// --- WHAT A PROVIDER SETTLES: THE COMPOSITION CAPABILITY --------------------------------------------
+//
+// A native need (the escrow is funded with the chain's NATIVE coin) can be carried by a provider only if the
+// provider SETTLES native. A provider that settles the WRAPPED native (KyberSwap Limit Order) can never be the last
+// mile: it is usable only as the LIQUIDITY leg of a COMPOSITION, and the composition needs a native-capable provider
+// on the SAME network to finish (WETH -> native). So the capability is DATA on each provider (`settles`) and the
+// question is answered HERE by a VALUE, never assumed from the provider's name - the same rule the engine's
+// composition follows (www/js/evm/asyncRoute.js, asyncRouteChoice).
+export const SETTLES = Object.freeze({ NATIVE: "native", WRAPPED: "wrapped" });
+
+/** WHAT A PROVIDER SETTLES ("native" | "wrapped"), or null when it does not say. */
+export const providerSettles = (provider) => (provider && provider.settles ? provider.settles : null);
+
+/**
+ * CAN THIS PROVIDER CARRY A NATIVE NEED ALL THE WAY - a VALUE, by name.
+ *   { ok: true,  settles: "native", provider }                     - it settles native: it can be the native leg;
+ *   { ok: false, reason: "settles-wrapped", settles, provider }    - wrapped native only: a liquidity leg at most;
+ *   { ok: false, reason: "settles-unstated", settles: null, ... }  - it does not say: refused, never assumed native.
+ */
+export const carriesNativeVerdict = (provider) => {
+  const settles = providerSettles(provider);
+  const id = provider && provider.id ? provider.id : null;
+  if (settles === SETTLES.NATIVE) return { ok: true, settles, provider: id };
+  if (settles === SETTLES.WRAPPED) return { ok: false, reason: "settles-wrapped", settles, provider: id };
+  return { ok: false, reason: "settles-unstated", settles: null, provider: id };
 };

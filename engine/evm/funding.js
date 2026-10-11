@@ -109,7 +109,11 @@ export function toWei(human, decimals = 18) {
 // MEASURED: a full createOrderAndFund after the move to EIP-1167 clones - 315 530 gas (the old whole contract was
 // 1,190,683). The limit is about twice the measured value: a shortfall costs the person a signature, while spare
 // gas in a limit costs almost nothing.
-const GAS_CREATE_ORDER_AND_FUND = 700_000n;
+// EXPORTED ON PURPOSE: the buyer's gas reserve (evm/gasReserve.js) must account for THIS deposit on the path
+// where the wallet holds no native of its own - there the deposit is paid AFTER the swap, not before it, so
+// its gas is part of what the wallet has to be able to afford. One constant, one source (the check ties the
+// reserve's copy to this declaration).
+export const GAS_CREATE_ORDER_AND_FUND = 700_000n;
 // THERE IS NO SEPARATE "CREATE WITHOUT A DEPOSIT" CONSTANT: no whole contract is created any more - each order's
 // escrow is an EIP-1167 clone of one shared implementation, the terms live in the clone's code, and the factory
 // only knows createOrderAndFund. The old lock(bytes) call and its gas constant are gone: the deposit rides in the
