@@ -14,10 +14,7 @@
 // keccak256 is passed in as a dependency, as in the address module: the caller loads the key library, not this
 // module. Monero and Ethereum share Keccak-256, so the hash computed by the bundle matches what Solidity checks.
 
-import { encodeCreateOrderAndFund, encodeCreateOrderAndFundByDepositor, encodePredict, decodeAddress, ORDER_CREATED_TOPIC } from "./factory.js";
-// THE DEPOSITOR BY SIGNATURE: the signature shape comes from one place (evm/depositor.js), next to the protocol
-// shape. Checking the shape here would be a second record of the same rule.
-import { depositorSignatureShape } from "./depositor.js";
+import { encodeCreateOrderAndFund, encodePredict, decodeAddress, ORDER_CREATED_TOPIC } from "./factory.js";
 import { encodeStatus, decodeStatus } from "./escrow.js";
 // THE FEE: rate, amount and recipient are PART OF THE SIGNED QUOTE. The factory no longer has them (the router was
 // removed), so the amount comes from the quote and is cross-checked by the formula mirror. Without a quote there
@@ -152,7 +149,7 @@ async function waitReceipt(receiptReader, hash, { tries = 12, delayMs = 1500 } =
 
 // The full funding path. Steps are returned outward so the interface can show each one: predict is a free call,
 // createOrder and lock are transactions in the user's wallet.
-export async function fundOrder({ factory, locker, claimer, commitHalfLocker, commitHalfClaimer, edPointLocker, edPointClaimer, edViewPointLocker, salt: providedSalt, amountWei, amountLabel, claimWindowSeconds, readyWindowSeconds, readyBy, t1, quote, depositorSignature = null, call, send, receipt, onStep }) {
+export async function fundOrder({ factory, locker, claimer, commitHalfLocker, commitHalfClaimer, edPointLocker, edPointClaimer, edViewPointLocker, salt: providedSalt, amountWei, amountLabel, claimWindowSeconds, readyWindowSeconds, readyBy, t1, quote, call, send, receipt, onStep }) {
   if (!factory) throw new Error("no escrow factory address set for this network");
   if (!locker) throw new Error("no EVM wallet connected: there is nobody to deposit");
   if (!claimer) throw new Error("the order recipient (claimer) is not set");
@@ -243,20 +240,10 @@ export async function fundOrder({ factory, locker, claimer, commitHalfLocker, co
     ? " (order " + amountWei + " + fee " + fee.feeWei + ")"
     : "";
   onStep?.("locking " + (amountLabel || "funds") + feeWords + " in one transaction - confirm in wallet");
-  // WHICH FACTORY DOOR THE DEPOSIT GOES THROUGH, AND IT IS NOT DECORATION. If a depositor signature is present, we
-  // deposit via part A: createOrderAndFundByDepositor recovers the depositor FROM THE SIGNATURE over the quote
-  // digest, so anyone may send the transaction (a relayer, our service) while the `locker` role (right to refund,
-  // right to mark readiness) stays with the signer. Without a signature, the old createOrderAndFund: one wallet
-  // deposits and sends, and the direct swap works as before. On neither path may the sender change the order terms
-  // - both signatures cover THE SAME quote digest.
-  if (depositorSignature !== null && depositorSignature !== undefined && depositorSignature !== "") {
-    const shape = depositorSignatureShape(depositorSignature);
-    if (!shape.ok) throw new Error("the depositor signature is unusable: " + shape.reason);
-  }
-  const relayedByDepositor = Boolean(depositorSignature);
-  const createData = relayedByDepositor
-    ? encodeCreateOrderAndFundByDepositor(quoteEnc, depositorSignature)
-    : encodeCreateOrderAndFund(quoteEnc);
+  // WHICH FACTORY DOOR THE DEPOSIT GOES THROUGH. There is ONE path: createOrderAndFund, where the wallet that
+  // sends the transaction becomes the locker. The sender may not change the order terms - the quote signature
+  // covers THE SAME digest the escrow checks.
+  const createData = encodeCreateOrderAndFund(quoteEnc);
   const createHash = await send({
     to: factory,
     data: createData,
@@ -300,8 +287,5 @@ export async function fundOrder({ factory, locker, claimer, commitHalfLocker, co
   // THE FEE GOES OUTWARD: it went into the transaction and the deal record must keep it - otherwise the record
   // cannot tell how much the person deposited, and it would diverge from what the chain shows.
   return { feeWei: fee.feeWei, feeTotalWei: totalValueWei, feeBps: fee.bps, feeWasLegacyFactory: Boolean(fee.legacy),
-           // WHICH FACTORY PATH RAN: visible outside, not only in the wallet's calldata. By it the checks and the
-           // deal record know whether the ETH returns to the signer and not to the sender.
-           depositorPath: relayedByDepositor,
            escrow: escrowToUse, predictedEscrow: escrow, escrowMismatch: Boolean(actualEscrow && actualEscrow !== String(escrow).toLowerCase()), salt, birthBlock, terms, createHash, lockHash };
 }

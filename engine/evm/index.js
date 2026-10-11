@@ -32,9 +32,8 @@ import { fundOrder } from "./funding.js";
 export * from "./factory.js";
 export * from "./escrow.js";
 export * from "./funding.js";
-// The depositor signature form (evm/depositor.js) and the permit verdict (evm/permit.js) go through the SAME
-// engine seam: the page and the SDK share one protocol code, not two lookalikes.
-export * from "./depositor.js";
+// The permit verdict (evm/permit.js) goes through the SAME engine seam: the page and the SDK share one
+// protocol code, not two lookalikes.
 export * from "./permit.js";
 // THE ASYNCHRONOUS ROUTE, EXECUTED - through the same engine seam as the decision that chooses it. The page reaches
 // it through the bridge; the SDK carries the same module in its engine mirror (tools/build-sdk-engine.mjs).
@@ -87,13 +86,10 @@ export async function simulateEscrowFunding(tx) {
 // could not pass even the first step. Neither syntax nor checks saw this, because the live path is never run.
 // FOUR FIELDS AND TWO DEADLINES EXPLICITLY. The deadlines come ready (readyBy, t1), not computed from now:
 // they go into the context the proof binds to, so they must be fixed before it.
-export async function fundOrderLive({ factory, locker, claimer, commitHalfLocker, commitHalfClaimer, edPointLocker, edPointClaimer, edViewPointLocker, salt, amountWei, amountLabel, claimWindowSeconds = 3600, readyWindowSeconds = 14400, readyBy, t1, quote, depositorSignature, onStep }) {
+export async function fundOrderLive({ factory, locker, claimer, commitHalfLocker, commitHalfClaimer, edPointLocker, edPointClaimer, edViewPointLocker, salt, amountWei, amountLabel, claimWindowSeconds = 3600, readyWindowSeconds = 14400, readyBy, t1, quote, onStep }) {
   return fundOrder({
     factory,
     quote,                         // signed quote: carries the fee, registry address and provider
-    // THE DEPOSITOR SIGNATURE OVER THE QUOTE DIGEST. Present: funding goes via
-    // createOrderAndFundByDepositor and anyone may send the transaction. Absent: the old path.
-    depositorSignature,
     locker,
     claimer,
     commitHalfLocker,

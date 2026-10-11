@@ -22,8 +22,8 @@
 // cannot cover the gas - the swap settles first and the escrow is funded after it. See usdcWithoutEthVerdict below
 // and www/js/evm/asyncRoute.js - and it is a NAMED refusal only when no provider serves the network.
 //
-// THE DEPOSITOR SIGNATURE IS A DIFFERENT ALLOWANCE. It lets a relayer SEND the order-creation transaction, but
-// not pull the token. Pulling USDC needs a separate TOKEN allowance (approve or permit) addressed to the puller.
+// A RELAYED ORDER NEEDS A SEPARATE TOKEN ALLOWANCE. Letting a relayer SEND the order-creation transaction does
+// not let it pull the token. Pulling USDC needs a separate TOKEN allowance (approve or permit) addressed to the puller.
 
 // THE BALANCE-DRIVEN PATH CHOICE. Whether a provider serves a network ASYNCHRONOUSLY (an intent auction whose
 // settlement arrives later - see www/js/evm/asyncRoute.js) is what decides the path for a person with no own
@@ -179,7 +179,7 @@ export function usdcWithoutEthVerdict({
   if (!isAddr(orchestrator)) {
     return {
       ok: false, blocked: true, kind: "no-orchestrator", path: null,
-      reason: "no executor contract: only a contract could pull a token by the user signature and deposit native into the escrow in one transaction, and this build has none. The depositor signature without it lets a relayer SEND the order creation, but not pull the token",
+      reason: "no executor contract: only a contract could pull a token by the user signature and deposit native into the escrow in one transaction, and this build has none",
     };
   }
   if (permitSupported === false) {

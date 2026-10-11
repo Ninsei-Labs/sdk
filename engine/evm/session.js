@@ -551,12 +551,10 @@ export async function signMessage(message) {
 }
 
 // SIGNING TYPED DATA with the wallet (EIP-712, eth_signTypedData_v4). This is also NOT a transaction: the
-// signature moves no money and costs no gas, so a person WITHOUT their own ETH can give it. With it the
-// depositor lets the factory record his address in the order, and anyone may send the transaction for him
-// (the createOrderAndFundByDepositor path).
+// signature moves no money and costs no gas, so a wallet without its own ETH can give it.
 //
-// WHAT EXACTLY IS SIGNED IS DECIDED BY THE CALLER: ready typed data arrives here (www/js/evm/depositor.js),
-// not a string. Assembling the shape here would be a second record of the protocol next to the real one.
+// WHAT EXACTLY IS SIGNED IS DECIDED BY THE CALLER: ready typed data arrives here as an object, not a string.
+// Assembling the shape here would be a second record of the protocol next to the real one.
 export async function signTypedData(typedData) {
   if (!provider || state.status !== "connected") {
     throw new Error("wallet not connected: typed-data signing is impossible");
