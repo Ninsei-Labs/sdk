@@ -18,7 +18,7 @@
     "check:mirror": "node tools/check.mjs --only=mirror",
     "check:pack": "node tools/check.mjs --only=pack",
     "check:secrets": "node tools/check.mjs --only=secrets",
-    "check:sweep": "node tools/sweep-refusal.test.mjs"
+    "check:sweep": "node tools/sweep-refusal.test.mjs", "sync:version": "node tools/sync-version.mjs"
   },
   "types": "./index.d.ts",
   "exports": {
@@ -52,7 +52,7 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "keywords": [
     "xmr",

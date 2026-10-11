@@ -1468,20 +1468,26 @@ export const entriesCheck = async () => {
 export const versionCheck = async () => {
   const pkg = JSON.parse(read(p("package.json")));
   const problems = [];
+  const source = read(p("src", "version.mjs"));
+  // BAKED, NOT FETCHED: the constant must be in the code, and must not turn into a runtime read of package.json.
+  if (/from\s+["'][^"']*package\.json["']/.test(source) || /require\(\s*["'][^"']*package\.json["']/.test(source)) {
+    problems.push("src/version.mjs reads package.json at runtime: in a browser that is a fetch of a file that need not be served beside the bundle - the version must be baked in");
+  }
   let mod;
   try {
     mod = await import(pathToFileURL(p("src", "version.mjs")).href + "?v=" + Date.now());
   } catch (error) {
     return { note: "src/version.mjs did not load", problems: [`src/version.mjs: ${error && error.message}`] };
   }
-  if (mod.SDK_VERSION !== pkg.version) {
-    problems.push(`SDK_VERSION says "${mod.SDK_VERSION}", package.json says "${pkg.version}" - a client would send a number the package is not`);
+  if (!/^\d+\.\d+\.\d+/.test(String(mod.SDK_VERSION))) {
+    problems.push(`SDK_VERSION is not a version: ${JSON.stringify(mod.SDK_VERSION)}`);
+  } else if (mod.SDK_VERSION !== pkg.version) {
+    problems.push(`SDK_VERSION says "${mod.SDK_VERSION}" while package.json says "${pkg.version}" - run npm run sync:version`);
   }
   const root = read(p("src", "index.mjs"));
   if (!/SDK_VERSION/.test(root)) problems.push("src/index.mjs does not re-export SDK_VERSION, so a client cannot read it from the entry point");
-  const dts = read(p("index.d.ts"));
-  if (!/declare const SDK_VERSION/.test(dts)) problems.push("index.d.ts does not declare SDK_VERSION");
-  return { note: `SDK_VERSION "${mod.SDK_VERSION}" equals package.json`, problems, notes: [] };
+  if (!/declare const SDK_VERSION/.test(read(p("index.d.ts")))) problems.push("index.d.ts does not declare SDK_VERSION");
+  return { note: `SDK_VERSION "${mod.SDK_VERSION}" is baked in and equals package.json`, problems, notes: [] };
 };
 
 const CHECKS = {
