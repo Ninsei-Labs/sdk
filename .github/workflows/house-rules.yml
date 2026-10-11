@@ -1,0 +1,13 @@
+name: house-rules
+# The organisation's rules for text and commits (CONTRIBUTING.md in Ninsei-Labs/.github), checked by its
+# shared workflow.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  house-rules:
+    uses: Ninsei-Labs/.github/.github/workflows/house-rules.yml@main
