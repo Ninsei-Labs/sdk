@@ -46,7 +46,7 @@ export const ENDPOINTS = Object.freeze({
 // with the page's actual origin, so a hard-coded host breaks the session on any other host.
 const PAGE_ORIGIN = typeof location !== "undefined" ? location.origin : "";
 
-// THE EIP-712 SIGNING DOMAIN (name/version) for the depositor signature. It is NOT a brand literal in the signer: it
+// THE EIP-712 SIGNING DOMAIN (name/version) for a signed order quote. It is NOT a brand literal in the signer: it
 // belongs to the registry contract (it returns DOMAIN_SEPARATOR()), so it is taken from the config here. The defaults
 // reproduce today's result byte for byte.
 export const SIGNING_DOMAIN = Object.freeze({ name: "NinseiEscrowFactory", version: "1" });

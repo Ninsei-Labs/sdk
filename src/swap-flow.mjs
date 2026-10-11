@@ -66,10 +66,6 @@ export function escrowCashierAddress(chainSlug) {
 // The full flow. onStage(stage, detail) is called on every step - the interface must show what is going on.
 export async function runAtomicOrder({
   chainSlug, locker, claimer, amountWei, amountLabel, providerId = null,
-  // THE DEPOSITOR'S SIGNATURE (issue #97, parts A/C): when given, the order is placed through
-  // createOrderAndFundByDepositor - any wallet may send the transaction, while the signer is recorded as the
-  // depositor.
-  depositorSignature = null,
   claimWindowSeconds = 3600, readyWindowSeconds = 14400, salt: providedSalt, onStage,
   // THE SUBSTITUTION POINTS FOR THE SAKE OF THE CHECK, and they are not decoration. The live flow could be
   // neither run in a check nor covered otherwise: it requires a browser Worker and a signature in the wallet.
@@ -261,9 +257,6 @@ export async function runAtomicOrder({
       // (or from the caller in a simulation) and already participates in the context over which our half was
       // computed.
       factory, locker, claimer: order.claimer,
-      // WE PASS THE DEPOSITOR'S SIGNATURE FURTHER instead of losing it halfway: without it the funding would go
-      // the previous way, and the relayer would get a NotLocker refusal only after the person had signed.
-      depositorSignature,
       // THE DEADLINES GO INTO THE CONTRACT EXACTLY THE ONES THAT ENTERED THE CONTEXT. This is not duplication but
       // a condition: diverge by even a second - and the proof by which the provider confirms the half stops
       // agreeing.

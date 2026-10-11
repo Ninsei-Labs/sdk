@@ -19,9 +19,6 @@ export const FACTORY_METHODS = {
   predict: "0x0824d205",
   // create the escrow AND deposit funds in ONE transaction (a value transfer with the call).
   createOrderAndFund: "0x4703a9d3",
-  // create the escrow and deposit when the DEPOSITOR is recovered FROM THE SIGNATURE over the quote digest:
-  // anyone may send the transaction, and `locker` is set to the signer.
-  createOrderAndFundByDepositor: "0x2acd187b",
 };
 
 // The OrderCreated event topic. It grew the registry address, the provider and the signing key:
@@ -127,15 +124,6 @@ export function encodePredict(quote) {
 // checks it against the sender.
 export function encodeCreateOrderAndFund(quote) {
   return FACTORY_METHODS.createOrderAndFund + quoteCallArgs(quote);
-}
-
-// CREATE AND DEPOSIT when the depositor is recovered FROM ITS SIGNATURE over the quote digest. Anyone may send
-// the transaction, so there are TWO signers: quote.signature (the provider, checked by the escrow) and
-// depositorSignature (the depositor, checked by the factory, which requires the recovered address to equal
-// quote.locker). Both over ONE digest.
-export function encodeCreateOrderAndFundByDepositor(quote, depositorSignature) {
-  return FACTORY_METHODS.createOrderAndFundByDepositor + quoteWords(quote) +
-    signatureWords(quote.signature) + signatureWords(depositorSignature) + lockerHalfWords(quote);
 }
 
 // predict() answer - one address in a 32-byte word.

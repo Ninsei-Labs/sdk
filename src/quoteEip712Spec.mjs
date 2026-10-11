@@ -22,7 +22,7 @@
 //                          signature covers exactly the XMR the chain verifies at order birth. Earlier this field
 //                          rode in the quote object OUTSIDE the digest on purpose - a field the chain could not
 //                          see must not be signed; once the contract learned it, it moved in here together with
-//                          the typehash, the depositor form and the independent vector.
+//                          the typehash, the order-quote form and the independent vector.
 //   commitHalfClaimer,   - the provider's own commitment and ed25519 spend point: both are inputs to the
 //   edPointClaimer         escrow's termsHash, so they are bound and cannot be swapped for another order's.
 //   chainId              - bound in the domain AND in the message. A quote signed for one network does not
