@@ -43,8 +43,11 @@ export const CLAIMER_ENV = "NINSEI_TEST_EVM_CLAIMER";
 // the registry's production networks the escrow is marked "simulated", that is, by the letter of the rule they are
 // not production. So the test key would also sign on mainnet - the engine would not notice, and the engine's rule
 // must not be changed (it is shared by the page and all legs). So the "signing is ALLOWED here" marker is set
-// separately and EXPLICITLY: only what is listed, and nothing more. First - the local anvil by chainId 31337.
-export const TEST_CHAIN_IDS = Object.freeze([31337]);
+// separately and EXPLICITLY: only what is listed, and nothing more. The local anvil by chainId 31337, and the
+// demo testnet arbitrum-sepolia by chainId 421614 - the network the demo escrow lives on (the registry entry
+// marks it testnet: true with a live escrow, so the second line below already passes; without it in THIS list
+// the first line refuses the whole demo contour, and no headless run can sign).
+export const TEST_CHAIN_IDS = Object.freeze([31337, 421614]);
 
 const envOf = (name) => {
   const box = typeof process !== "undefined" && process ? process.env : null;
@@ -302,7 +305,16 @@ export function nodeTestEvmWallet({ privateKey, rpcUrl, chainId = null, id = "no
       const remote = await assertTestContour();
       const valueWei = BigInt(value === undefined || value === null ? 0 : value);
       const nonce = Number(BigInt(await provider.request({ method: "eth_getTransactionCount", params: [owner, "pending"] })));
-      const gasPrice = BigInt(await provider.request({ method: "eth_gasPrice" }));
+      // NEVER SIGN BELOW THE BLOCK BASE FEE. On a live node eth_gasPrice answers a tick behind and comes out
+      // slightly BELOW the next block's base - the signature is then rejected with "max fee per gas less than
+      // block base fee". The node's own sender already carries this rule (rfq/evm.mjs: base + base/8); the test
+      // adapter must not diverge from it, or a headless run cannot send anything on such a network.
+      let gasPrice = BigInt(await provider.request({ method: "eth_gasPrice" }));
+      try {
+        const block = await provider.request({ method: "eth_getBlockByNumber", params: ["latest", false] });
+        const baseFee = block && block.baseFeePerGas ? BigInt(block.baseFeePerGas) : 0n;
+        if (baseFee > 0n && gasPrice <= baseFee) gasPrice = baseFee + baseFee / 8n;
+      } catch { /* the base fee was not read - the node's own price stays */ }
       let gasLimit = gas === null || gas === undefined ? null : BigInt(gas);
       if (gasLimit === null) {
         const est = BigInt(await provider.request({
