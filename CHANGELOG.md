@@ -1,3 +1,23 @@
+## 0.40.0 — 2026-10-11
+
+THE ASYNCHRONOUS ROUTE PROVIDERS REACH `latest`. This release moves the tag from 0.39.3; the demo pins this exact
+version rather than the tag.
+
+- Four asynchronous route providers, each declaring what it settles: CoWSwap (native), KyberSwap Limit Order
+  (wrapped: a liquidity leg, never the sole provider for a native need), UniswapX (native), and the relayed
+  Uniswap route through the UniversalRouter (native).
+- `submitUniswapxOrder` publishes an order through a submitter you name; the package never carries an API key.
+- A route can be composed of two legs - liquidity to the wrapped token, then a native leg - and a provider that
+  cannot carry the route to what the person needs can never be chosen alone.
+- The engine mirror is regenerated from the source of truth and the vendored browser bundle is rebuilt.
+- The config names the demo's current escrow (factory `0x1029D6bC53f6b9919F8ec6Ac922327F7e5A3DdF2`, cashier
+  `0x7E84035B4f42219F3fCE22855c6Dd7D36942B019`, registry `0x416d548B497d3AE808807172a5Bc3549512a64E5`): the
+  demo redeployed on 2026-10-11 and the retired router is gone from the configuration.
+- The test wallet adapter signs on the demo network: `arbitrum-sepolia` is on its allowlist, and it no longer
+  takes a gas price from a tick behind, which came out below the next block's base fee and was rejected.
+
+The synchronous swap path is untouched: nothing that already existed changed behaviour.
+
 ## 0.40.0-develop.1 — 2026-10-10
 
 A build of the asynchronous route-provider work, published for the demo and for our own testing. This build does NOT
