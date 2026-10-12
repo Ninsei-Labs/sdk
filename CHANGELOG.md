@@ -1,3 +1,54 @@
+## 0.43.1 — 2026-10-12
+
+THE DECLINE, THE REFUND AND THE MAKER'S RECLAIM EACH CARRY THEIR OWN STATE, AND THE TERMINAL CHECK READS THE
+DECLARATIONS RATHER THAN ONLY THE MAP. A maker's decline is a terminal state of its own, a refund reports
+`refunded_eth` instead of the `closed` fallback, the maker's reclaimed XMR is the phase code `xmr_reclaimed`, and
+`xmr_returned` - a terminal no code path could ever produce - is gone from the public union and from the table.
+Five comments that claimed this package keeps a second, byte-identical copy of the levels walk and of the EIP-712
+spec are corrected: it keeps no such copy.
+
+- A MAKER'S DECLINE IS A TERMINAL STATE OF ITS OWN (`declined`). The escrow's `Declined` event and the node's
+  `declined` + `compliance` status are two independent sources of the same state and either one is enough; the
+  wait for XMR stops at once, the state is written down, and it carries no reason, category or provider at any
+  depth. It is told apart from an ordinary refund, which keeps `refunded_eth`.
+- A REFUND REPORTS ITS OWN STATE, NOT THE FALLBACK. The terminal map in src/swaps.mjs was keyed by names no code
+  path writes (`refunded` for a refund the engine writes as `kind: "refund_eth"`), so every refund missed its key
+  and told the app `closed` about an order whose ETH was already back in the wallet. The map is now keyed by the
+  kinds the engine and this package really write - `success`, `refund_eth`, `declined` - exhaustively, and a kind
+  nobody knows still comes out as the declared fallback `closed` (`closed` is a fallback, not a key).
+- THE MAKER'S RECLAIMED XMR IS A PHASE CODE OF ITS OWN: `state.phase === "xmr_reclaimed"` (engine/core/swap.js
+  `derive`). It was visible only as a label - the shared `refund_available`, which the maker who never locked sets
+  too - so an interface had to compare `state.phaseLabel` to tell the two apart. The code is what it branches on
+  now; the maker who never locked keeps `refund_available`.
+- `xmr_returned` IS REMOVED from the public `TerminalCode` union (index.d.ts), from the engine's `TERMINAL` table
+  and from the code table in src/codes.mjs, with the reason named where each stood. No code path anywhere wrote
+  it, and a declared terminal nothing can produce reads as coverage.
+- BREAKING FOR A TYPESCRIPT CONSUMER, ON PURPOSE: a consumer that branched on `xmr_returned` no longer compiles,
+  because the member is gone from the union. That is the intent, not a regression - no settlement with that kind
+  exists, so no value could ever reach that branch.
+- WHAT A CONSUMER SEES INSTEAD: a swap whose XMR the maker has taken back carries the phase code
+  `xmr_reclaimed` with `terminal` still `null` (and not settled) - the depositor's ETH is still in the escrow, so
+  the swap has NOT ended; it ends later as `refunded_eth` when the ETH goes back to the wallet.
+- THE TERMINAL CHECK READS THE DECLARATIONS, NOT ONLY THE MAP: `node tools/check.mjs --only=terminal` compared the
+  map against the writers, which is exactly how a dead entry outside the map survived. It now reads the engine's
+  own `TERMINAL` table and the public `TerminalCode` union as well and asserts BOTH directions against the writers
+  - every kind a writer produces has an entry, and every declared terminal is one a writer can produce (or the
+  fallback an unknown kind comes out as). A declared-but-unwritable terminal is RED naming the declaration it came
+  from. The check also drives the reclaim to its own phase and holds `terminal: null` there.
+- `tools/check-terminal-teeth.mjs` exercises it with EIGHT breaking runs: the dead key put back, the refund's code
+  sent to another declared code, a key nothing writes, the decline's own key dropped, a rename in the engine's
+  mirror, a terminal with no writer in the engine's table, the same in the public union, and the reclaim's phase
+  renamed - each RED, naming its own reason, every file restored byte for byte with sha256 compared.
+- COMMENT-ONLY CORRECTIONS IN FIVE FILES (index.d.ts, src/index.mjs, src/levelsWalkSpec.mjs, src/quoteEip712.mjs,
+  src/quoteEip712Spec.mjs): their headers claimed this package exists as two byte-identical copies of the levels
+  walk and of the EIP-712 spec, pinned by sha256. Neither is true - only the package has the implementation, a
+  node runs it from the entry and is bound to it by the guard on its imports, and the behaviour is pinned by the
+  vectors. No assertion, no line of logic, no signature and no export name changed.
+
+Checks: `node tools/check.mjs` - all 21 green; `node tools/check-terminal-teeth.mjs` (8 breaking runs),
+`node tools/check-decline-teeth.mjs` (5), `node tools/check-types-teeth.mjs` (4), `node tools/check-refusals-teeth.mjs`
+(5), `node tools/npm-tag.test.mjs` (28 cases) and `node tools/sweep-refusal.test.mjs` (11 checks) are green too.
+
 ## 0.42.1 — 2026-10-12
 
 THE BID SIDE OF THE QUOTE WALK ROUNDED THE WRONG WAY. The specification fixes a rounding DIRECTION per side, and
