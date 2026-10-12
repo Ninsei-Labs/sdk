@@ -41,6 +41,9 @@
     },
     "./core": {
       "default": "./src/public/core.mjs"
+    },
+    "./recovery": {
+      "default": "./src/public/recovery.mjs"
     }
   },
   "files": [
