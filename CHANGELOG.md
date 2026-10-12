@@ -1,3 +1,19 @@
+## 0.42.1 — 2026-10-12
+
+THE BID SIDE OF THE QUOTE WALK ROUNDED THE WRONG WAY. The specification fixes a rounding DIRECTION per side, and
+the walk rounded both sides alike: a bid price came out up to 3 wei high and disagreed with the reference at a
+level boundary.
+
+- Per-level rounding follows the side now: a level's cost rounds up on the ask side, where the user pays, and down
+  on the bid side, where the user is paid; the XMR amount a budget yields at a level rounds up on the bid side.
+- The level-fits test is asymmetric: a level is taken whole when `remaining >= full` on the ask side and when
+  `remaining > full` on the bid side.
+- This removes a systematic 1-to-3-wei over-charge on bid prices and the disagreement with the reference at level
+  boundaries.
+
+Checks: `node tools/check.mjs` - all 19 green; `node tools/sync-version.mjs`, `node tools/npm-tag.test.mjs`, the two
+teeth runs and `tools/sweep-refusal.test.mjs` are green too.
+
 ## 0.42.0 — 2026-10-12
 
 EVERY ENTRY THIS PACKAGE PUBLISHES CARRIES ITS OWN DECLARATIONS, AND THE SWEEP PAGE'S TWO PRIMITIVES ARE ON
