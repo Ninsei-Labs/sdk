@@ -1983,15 +1983,17 @@ export const declineCheck = async () => {
   }
 
   // (g) THE CONTROL FOR (f): AN ORDINARY REFUND IS NOT A DECLINE, and neither is a live swap. A record settled by
-  // the engine's own refund keeps ITS terminal state (whatever the engine's kind translates to - a decline never
-  // rewrites it), and a swap with no settlement keeps `terminal: null`: the decline branch is specific, not
+  // the engine's own refund must keep the refund's OWN state - the exact code `refunded_eth`, not merely something
+  // that is not a decline: this control used to accept any other value, and the fallback `closed` (what every
+  // refund was reported as while the terminal map was keyed by a kind nothing writes) passed it. A decline never
+  // rewrites the state, and a swap with no settlement keeps `terminal: null`: the decline branch is specific, not
   // "anything that is closed".
   const refunded = declineRecord(engine);
   refunded.settlement = { kind: "refund_eth", phase: "refunded_eth", atSim: 0, txHash: "0x" + "bb".repeat(32), by: "you" };
   engine.swap.saveSwap(refunded);
   const refundedState = await swapsMod.toState(engine.swap.getSwap(refunded.id));
-  if (refundedState.terminal === "declined" || refundedState.settled !== true) {
-    problems.push(`a refunded swap was reported as a decline (or as live): ${JSON.stringify({ terminal: refundedState.terminal, settled: refundedState.settled })}`);
+  if (refundedState.terminal !== "refunded_eth") {
+    problems.push(`a refunded swap was reported as ${JSON.stringify(refundedState.terminal)} instead of the refund's own state "refunded_eth" (settled=${refundedState.settled}), so the app is shown the wrong end state`);
   }
   if (engine.swap.getSwap(refunded.id).settlement.kind !== "refund_eth") {
     problems.push("the settlement of an ordinary refund was rewritten");
@@ -2022,7 +2024,7 @@ export const declineCheck = async () => {
     problems.push(`the watch reports a decline with the fields [${watchShape}], not with the declared set [${watchDeclared}]`);
   }
   notes.push("the decline carries the state, the node's own `compliance` and WHERE it was seen - and no reason, category or provider, at any depth");
-  notes.push("an ordinary refund (a HalfRevealed footprint, or a record settled as refund_eth) is NOT a decline, a bare `declined` without its code is not one either, and a wait with no decline still ends as xmr-timeout");
+  notes.push("an ordinary refund (a HalfRevealed footprint, or a record settled as refund_eth) is NOT a decline and keeps the refund's own state `refunded_eth`, a bare `declined` without its code is not one either, and a wait with no decline still ends as xmr-timeout");
 
   const green = problems.length === 0;
   return {
@@ -2032,6 +2034,245 @@ export const declineCheck = async () => {
     problems,
     notes,
   };
+};
+
+// ---------------------------------------------------------------------------------------------------
+// 19. TERMINAL - THE STATE THE APP IS TOLD WHEN A SWAP ENDS. The map in src/swaps.mjs must be keyed by the kinds
+//     the engine really writes and by nothing else, and a REFUND DRIVEN TO THE END must be reported as
+//     `refunded_eth` - not as the fallback `closed`.
+//
+// WHY THE MAP IS READ FROM THE SOURCE. There is no runtime handle on it, and it is deliberately NOT exported:
+// exporting it would change the package's surface (index.d.ts, the README and the surface check all hang off the
+// named exports). So the keys come from the module's own text, while the KINDS come from the modules that WRITE a
+// settlement - the engine's (engine/core/swap.js) and ours (src/decline.mjs) - and the behaviour is not taken on
+// trust: a refund is driven to the end and the state the app is told is read back through the SDK's own surfaces.
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * The settlement assignments in a module: how many there are, the kinds written as literals and the kinds written
+ * through a name (a constant this check has to resolve, rather than guess).
+ */
+const settlementKindsWritten = (file) => {
+  const found = { writes: 0, literals: new Set(), names: new Set() };
+  for (const m of read(file).matchAll(/\.settlement\s*=\s*\{([\s\S]{0,300}?)\}/g)) {
+    found.writes += 1;
+    const kind = /(?:^|[\s{,])kind\s*:\s*(?:"([^"]+)"|([A-Za-z_$][\w$]*))/.exec(m[1]);
+    if (!kind) continue;
+    if (kind[1] !== undefined) found.literals.add(kind[1]);
+    else found.names.add(kind[2]);
+  }
+  return found;
+};
+
+/**
+ * `const TERMINAL = { ... }` of a module as entries: the key (and whether it is written as a name), the value (and
+ * whether it is a literal). A key or a value written as a name is resolved by the caller - the map is the only
+ * place that knows which constant it means.
+ */
+const terminalMapEntries = (file) => {
+  const text = read(file).replace(/\r\n/g, "\n");
+  const start = text.indexOf("const TERMINAL = {");
+  if (start < 0) return null;
+  const body = text.slice(text.indexOf("{", start) + 1, text.indexOf("};", start));
+  const entries = [];
+  for (const m of body.matchAll(/(?:^|[\s,{])(?:\[([A-Za-z_$][\w$]*)\]|([A-Za-z_$][\w$]*))\s*:\s*(?:"([^"]+)"|([A-Za-z_$][\w$]*))/g)) {
+    entries.push({ key: m[1] !== undefined ? m[1] : m[2], keyIsName: m[1] !== undefined,
+      value: m[3] !== undefined ? m[3] : m[4], valueIsLiteral: m[3] !== undefined });
+  }
+  return entries;
+};
+
+export const terminalCheck = async () => {
+  const problems = [];
+  const notes = [];
+  const k = async (relative) => import(pathToFileURL(p(...relative.split("/"))).href);
+  const [engine, decline, codes, indexMod] = await Promise.all([
+    k("src/engine.mjs"), k("src/decline.mjs"), k("src/codes.mjs"), k("src/index.mjs"),
+  ]);
+
+  // (a) THE COMPARISON, BOTH WAYS. The kinds are taken from the modules that WRITE a settlement; the keys from the
+  // map itself. A kind without a key is the defect this check exists for; a key without a writer is the other half
+  // of it - a mapping nothing can reach, which no run can hold to account and a reader takes for coverage.
+  const engineKinds = settlementKindsWritten(p("engine", "core", "swap.js"));
+  const sdkKinds = { writes: 0, literals: new Set(), names: new Set() };
+  for (const file of listFiles(p("src")).filter((f) => CODE_EXT.has(extname(f)))) {
+    const found = settlementKindsWritten(file);
+    sdkKinds.writes += found.writes;
+    for (const value of found.literals) sdkKinds.literals.add(value);
+    for (const value of found.names) sdkKinds.names.add(value);
+  }
+  const resolveName = (name) => (name in decline ? decline[name] : null);
+  if (engineKinds.writes === 0) {
+    problems.push("no settlement is written in engine/core/swap.js, so the comparison below would be vacuous: the engine's kinds cannot be read");
+  }
+  // THE TWO WRITERS ARE KEPT APART: a kind the ENGINE writes and a kind THIS PACKAGE writes are reported as such,
+  // so a red run says which side moved rather than only that the sets differ.
+  const engineEmitted = new Set(engineKinds.literals);
+  const sdkEmitted = new Set(sdkKinds.literals);
+  const resolveInto = (into, names) => {
+    for (const name of names) {
+      const value = resolveName(name);
+      if (typeof value !== "string" || !value) {
+        problems.push(`a settlement kind is written through the name \`${name}\`, which this check cannot resolve to a kind: name it here, or the comparison below is only as good as the names it understands`);
+        continue;
+      }
+      into.add(value);
+    }
+  };
+  resolveInto(engineEmitted, engineKinds.names);
+  resolveInto(sdkEmitted, sdkKinds.names);
+  const emitted = new Set([...engineEmitted, ...sdkEmitted]);
+
+  const entries = terminalMapEntries(p("src", "swaps.mjs"));
+  if (!entries) {
+    problems.push("src/swaps.mjs: the terminal map could not be read (no `const TERMINAL = { ... }`), so the kinds and the keys cannot be compared");
+    return { note: "the terminal-state map could not be read", problems, notes };
+  }
+  const keys = new Set();
+  for (const entry of entries) {
+    const key = entry.keyIsName ? resolveName(entry.key) : entry.key;
+    if (typeof key !== "string" || !key) {
+      problems.push(`the terminal map's key \`${entry.key}\` does not resolve to a kind: the key must be the kind the engine writes`);
+      continue;
+    }
+    keys.add(key);
+  }
+  for (const [who, kinds] of [["the engine", engineEmitted], ["this package", sdkEmitted]]) {
+    for (const kind of kinds) {
+      if (!keys.has(kind)) {
+        problems.push(`${who} writes the settlement kind "${kind}" and the terminal map has no key for it: an order settled that way is reported to the app as the fallback "closed" instead of its own state`);
+      }
+    }
+  }
+  for (const key of keys) {
+    if (!emitted.has(key)) {
+      problems.push(`the terminal map has the key "${key}" and no code path writes that kind: a mapping nothing can reach is a mapping no run can be held to`);
+    }
+  }
+
+  // (b) THE CODES. Every value of the map is a code the CONTRACT declares, and the refund's own mapping is PINNED:
+  // a map that is merely consistent with itself would let the refund be reported as any other declared code.
+  const declaredCodes = new Set(codes.TERMINAL_CODES);
+  const codeOf = (entry) => (entry.valueIsLiteral ? entry.value : resolveName(entry.value));
+  for (const entry of entries) {
+    const code = codeOf(entry);
+    if (typeof code !== "string" || !code) {
+      problems.push(`the terminal map's entry for \`${entry.key}\` does not resolve to a code`);
+      continue;
+    }
+    if (!declaredCodes.has(code)) {
+      problems.push(`the terminal map sends \`${entry.key}\` to "${code}", which is not a declared TerminalCode (${codes.TERMINAL_CODES.join(", ")})`);
+    }
+  }
+  const refundEntry = entries.find((entry) => (entry.keyIsName ? resolveName(entry.key) : entry.key) === "refund_eth");
+  const refundCode = refundEntry ? codeOf(refundEntry) : null;
+  if (refundCode !== "refunded_eth") {
+    problems.push(`the map sends the refund's kind "refund_eth" to ${JSON.stringify(refundCode === undefined ? null : refundCode)}, not to the refund's own state "refunded_eth"`);
+  }
+
+  // (c) THE REFUND, DRIVEN TO THE END - AND THE STATE THE APP IS TOLD. The record is the engine's own (createSwap:
+  // a sandbox deal on the mock chain, funded by the mock escrow), the clock is the demo's own
+  // (simElapsed = (now - realStart) * speed), the refund goes through the SDK's OWN surface (`swaps.refundEth`,
+  // the one the demonstration screen calls) and the state is read the way the app reads it: `swaps.get`/`list`.
+  const sdk = indexMod.createNinsei({ settlement: { chain: "arbitrum-sepolia" }, xmrNetwork: "stagenet", mode: "sim" });
+  const created = [];
+  const sandboxRecord = (scenario) => {
+    const swap = engine.swap.createSwap({ side: "buy", scenario, chainMode: "mock", xmrSource: "mock",
+      network: "arbitrum-sepolia", payToken: "eth", payAmount: 0.01, xmrAmount: 0.5, rate: 2_000, fee: 0.1,
+      makerId: "check-maker", makerName: "check-maker",
+      receiveAddress: "59DnddZzVBCevVg9YB3zCs24DSRH4ByS2FMBafPpYxSEB6FMegQNEbtNzbLjrrEUPNAg9NhK5uMiiAZpAvENBS4D4mEPcRq" });
+    engine.swap.saveSwap(swap);
+    created.push(swap.id);
+    return swap;
+  };
+  // THE CLOCK OF THE DEMO: `simElapsed(swap) = (Date.now() - realStart) * speed`, so moving `realStart` back is how
+  // the sandbox is taken forward - the same lever the demonstration screen's speed control pulls.
+  const sandboxAt = (id, simMs) => {
+    const swap = engine.swap.getSwap(id);
+    swap.realStart = Date.now() - simMs / swap.speed;
+    engine.swap.saveSwap(swap);
+    return engine.swap.getSwap(id);
+  };
+  const watchState = async (who, id) => {
+    const state = await sdk.swaps.get(id);
+    if (!state) { problems.push(`${who}: the record is not in the SDK's own list`); return null; }
+    if (state.terminal !== "refunded_eth") problems.push(`${who} reports ${JSON.stringify(state.terminal)}, not "refunded_eth"`);
+    if (state.settled !== true) problems.push(`${who} is not reported as settled (${JSON.stringify(state.settled)})`);
+    if (state.phase !== "refunded_eth") problems.push(`${who} carries the phase ${JSON.stringify(state.phase)}, not the engine's own "refunded_eth"`);
+    const record = engine.swap.getSwap(id);
+    const kind = record && record.settlement ? record.settlement.kind : null;
+    if (kind !== "refund_eth") problems.push(`${who}: the engine's record does not carry the kind "refund_eth" (it carries ${JSON.stringify(kind)}), so this run would not be about a refund at all`);
+    return state;
+  };
+
+  // (c1) THE PERSON'S OWN REFUND, taken at the moment the engine opens it: the maker did not lock the XMR by the
+  // funding deadline, so the refund is available and the depositor takes his ETH back himself.
+  const own = sandboxRecord("maker_no_lock");
+  sandboxAt(own.id, 20 * 60_000);
+  const beforeRefund = engine.swap.derive(engine.swap.getSwap(own.id));
+  if (beforeRefund.can.refund !== true) {
+    problems.push(`the refund was not open at the funding deadline (can.refund=${JSON.stringify(beforeRefund.can.refund)}), so the drive below would prove nothing`);
+  }
+  await sdk.swaps.refundEth(own.id, "you");
+  const ownState = await watchState("a refund the depositor made himself", own.id);
+  const listed = (await sdk.swaps.list()).filter((state) => state.id === own.id);
+  if (!listed.length || listed[0].terminal !== "refunded_eth") {
+    problems.push(`the SDK's list reports a refunded order as ${JSON.stringify(listed.length ? listed[0].terminal : null)}, and it must agree with \`get\``);
+  }
+
+  // (c2) THE WATCHTOWER'S REFUND, with nobody acting: the deadline passes and the ticker refunds the ETH itself.
+  // THIS IS THE SECOND WRITER OF THE SAME KIND - the reason the map needs one key for the refund and not two.
+  const tower = sandboxRecord("maker_no_lock");
+  sandboxAt(tower.id, 40 * 60_000);
+  engine.swap.tick();
+  const towerRecord = engine.swap.getSwap(tower.id);
+  const towerBy = towerRecord && towerRecord.settlement ? towerRecord.settlement.by : null;
+  if (towerBy !== "watchtower") {
+    problems.push(`the ticker did not refund the order whose deadline has passed (by=${JSON.stringify(towerBy)}), so the refund's second writer was not exercised`);
+  }
+  const towerState = await watchState("the watchtower's refund", tower.id);
+
+  // (d) THE CONTROLS THAT KEEP (c) HONEST. A kind the map does not know must still come out as the fallback (the
+  // fallback is not dead), no kind the engine can write may be reported AS that fallback, and a swap that has not
+  // settled must keep `terminal: null` - the map describes settlements, not "anything that is over".
+  const unknown = sandboxRecord("happy");
+  unknown.settlement = { kind: "check-made-up-kind", phase: "check-made-up-kind" };
+  engine.swap.saveSwap(unknown);
+  const unknownState = await sdk.swaps.get(unknown.id);
+  const fallback = unknownState ? unknownState.terminal : null;
+  if (!declaredCodes.has(fallback)) {
+    problems.push(`an unknown settlement kind is reported as ${JSON.stringify(fallback)}, which is not a declared TerminalCode`);
+  }
+  for (const kind of emitted) {
+    const probe = sandboxRecord("happy");
+    probe.settlement = { kind, phase: kind };
+    engine.swap.saveSwap(probe);
+    const state = await sdk.swaps.get(probe.id);
+    const terminal = state ? state.terminal : null;
+    if (terminal === fallback) {
+      problems.push(`a settlement of the kind "${kind}" is reported as the fallback ${JSON.stringify(fallback)}: a state the engine can settle is thrown away for one the map does not carry`);
+    }
+    if (!declaredCodes.has(terminal)) {
+      problems.push(`a settlement of the kind "${kind}" is reported as ${JSON.stringify(terminal)}, which is not a declared TerminalCode`);
+    }
+  }
+  const live = sandboxRecord("happy");
+  const liveState = await sdk.swaps.get(live.id);
+  if (!liveState || liveState.terminal !== null || liveState.settled !== false) {
+    problems.push(`a swap with no settlement was given a terminal state (${JSON.stringify({ terminal: liveState && liveState.terminal, settled: liveState && liveState.settled })})`);
+  }
+
+  // THIS CHECK LEAVES THE STORE AS IT FOUND IT: the records it drove are forgotten, so a later check that reads the
+  // list is not reading this one's sandbox deals.
+  for (const id of created) engine.swap.forgetSwap(id);
+  const left = (await sdk.swaps.list()).filter((state) => created.includes(state.id)).length;
+  if (left) problems.push(`${left} sandbox record(s) of this check were left in the store`);
+
+  const emittedList = [...emitted].sort().join(", ");
+  notes.push(`the kinds the engine and this package write: ${emittedList} - every one of them has a key in the map, and the map has no key without a writer`);
+  notes.push(`both writers of the refund's kind were driven to the end: the depositor's own refund reports ${JSON.stringify(ownState && ownState.terminal)} and the watchtower's ${JSON.stringify(towerState && towerState.terminal)}`);
+  notes.push(`an unknown kind still comes out as the declared fallback ${JSON.stringify(fallback)}, and a swap with no settlement keeps \`terminal: null\`; the declared code \`xmr_returned\` has NO writer in the engine or in this package, and \`closed\` is the fallback rather than a key`);
+  return { note: `${emitted.size} settlement kind(s) against ${keys.size} map key(s), a refund driven to the end by both of its writers`, problems, notes };
 };
 
 const CHECKS = {
@@ -2055,6 +2296,7 @@ const CHECKS = {
   version: versionCheck,
   refusals: refusalsCheck,
   decline: declineCheck,
+  terminal: terminalCheck,
 };
 
 export const runCheck = async (name) => {

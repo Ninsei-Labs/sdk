@@ -24,6 +24,8 @@
     "check:refusals-teeth": "node tools/check-refusals-teeth.mjs",
     "check:decline": "node tools/check.mjs --only=decline",
     "check:decline-teeth": "node tools/check-decline-teeth.mjs",
+    "check:terminal": "node tools/check.mjs --only=terminal",
+    "check:terminal-teeth": "node tools/check-terminal-teeth.mjs",
     "check:sweep": "node tools/sweep-refusal.test.mjs", "sync:version": "node tools/sync-version.mjs"
   },
   "types": "./index.d.ts",
