@@ -1,13 +1,13 @@
 // THE MAKER'S LEVEL SET: THE REFERENCE WALK OVER IT (issue #110, part B).
 //
 // WHY. The maker sends the node a LEVEL SET - chunks of volume with their own prices - and the node computes a
-// firm price by WALKING it. The client (SDK) needs the same walk to show the same price before signing. This is
-// the SINGLE implementation of the walk and of the level-set rules; the file exists as BYTE-IDENTICAL copies in
-// two places, and tools/check-levels-walk.mjs verifies that:
-//     node: rfq/lib/levelsWalkSpec.mjs        SDK: sdk/src/levelsWalkSpec.mjs
-// Two copies, not an import: the node runs on the provider's machine and sees neither www/ nor sdk/, and the SDK
-// package does not see rfq/ - each starts on its own (the same argument as rfq/lib/quoteEip712Spec.mjs). A
-// divergence would mean the node and the client name a DIFFERENT price for the same set.
+// firm price by WALKING it. The client (SDK) needs the same walk to show the same price before signing. This file
+// is the SINGLE implementation of the walk and of the level-set rules, and BOTH sides run it from here: the node
+// imports the package entry, so it keeps no copy of its own. A second copy would let the node and the client name
+// a DIFFERENT price for the same set.
+// WHAT HOLDS IT: the node is bound to the package by the guard on its imports (no copy may come back under
+// rfq/lib), and the behaviour of this one implementation is pinned by the vectors in tools/check-levels-walk.mjs,
+// computed independently of this code - not by comparing two files.
 //
 // NUMBERS ARE INTEGERS ONLY, BigInt ONLY (rule 10). XMR is in atomic units (1 XMR = 1e12). A price is in the
 // asset's atomic units PER 1 WHOLE XMR (for a wei asset that is wei per 1 XMR). No Number for money.

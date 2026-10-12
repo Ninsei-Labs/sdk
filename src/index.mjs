@@ -293,7 +293,7 @@ export { SDK_VERSION } from "./version.mjs";
 
 // THE LEVEL WALK IS ON THE PACKAGE SURFACE. A maker publishes a level set (chunks of volume with their own prices)
 // and both the node and the client compute a firm price by WALKING it - the client must reach the SAME price before
-// signing. `levelsWalkSpec.mjs` is the ONE implementation, a byte-identical twin of the node's copy, and it is
-// exported so a consumer can run the same walk: the set in, the answer out. Answers are values with a `reason`
-// token on refusal, never exceptions.
+// signing. `levelsWalkSpec.mjs` is the ONE implementation, which the node takes from the package entry rather than
+// copying, and it is exported so a consumer can run the same walk: the set in, the answer out. Answers are values
+// with a `reason` token on refusal, never exceptions.
 export { checkLevels, xmrForAsset, assetForXmr, toBigInt, XMR_ATOMIC_PER_ONE } from "./levelsWalkSpec.mjs";
