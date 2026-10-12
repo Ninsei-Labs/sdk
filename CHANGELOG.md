@@ -1,3 +1,14 @@
+## 0.41.0 — 2026-10-11
+
+THE DEPOSITOR PATH IS GONE. The factory no longer offers `createOrderAndFundByDepositor`, so the package must
+stop building a call to a selector that does not exist in the deployed factory.
+
+- `src/swap-flow.mjs` no longer carries or relays `depositorSignature`: the funding path is the one where the
+  payer and the refund recipient are always the same address.
+- The engine mirror loses `evm/depositor.js` (47 modules instead of 48) and the EIP-712 spec comment now names
+  the order-quote form.
+- A consumer that meant to fund someone else's quote funds through `createOrderAndFund`.
+
 ## 0.40.0 — 2026-10-11
 
 THE ASYNCHRONOUS ROUTE PROVIDERS REACH `latest`. This release moves the tag from 0.39.3; the demo pins this exact
