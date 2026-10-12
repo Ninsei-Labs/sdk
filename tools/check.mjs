@@ -1496,6 +1496,49 @@ export const versionCheck = async () => {
   return { note: `SDK_VERSION "${mod.SDK_VERSION}" is baked in and equals package.json`, problems, notes: [] };
 };
 
+// ---------------------------------------------------------------------------------------------------
+// 14. REFUSALS - every code a route provider refuses with is DECLARED as a type, and no extra one is.
+// ---------------------------------------------------------------------------------------------------
+
+/** The four tables a provider names its own refusals in. The type must say exactly the same. */
+export const REFUSAL_TABLES = {
+  cow: ["src", "legs", "cow.mjs"],
+  kyber: ["src", "legs", "kyber.mjs"],
+  uniswapx: ["src", "legs", "uniswapx.mjs"],
+  "uniswap-relay": ["src", "legs", "uniswaprelay.mjs"],
+};
+
+/** The codes inside one provider's `*_REFUSAL_CODES` table. */
+export const refusalCodesOf = (source) => {
+  const block = /[A-Z_]*REFUSAL_CODES\s*=\s*\[([\s\S]*?)\]/.exec(source);
+  if (!block) return null;
+  // ONLY CODE-SHAPED NAMES: a provider's table carries comments too, and a quoted phrase in a comment is not a
+  // code. A code here is a family-prefixed kebab name, or the shared `broken`.
+  return new Set([...block[1].matchAll(/"((?:cow|kyber|uniswapx|uniswap-relay)-[a-z][a-z0-9-]*|broken)"/g)].map((m) => m[1]));
+};
+
+export const refusalsCheck = () => {
+  const problems = [];
+  const named = new Set();
+  const sizes = [];
+  for (const [family, parts] of Object.entries(REFUSAL_TABLES)) {
+    const codes = refusalCodesOf(read(p(...parts)));
+    if (!codes) { problems.push(`${parts.join("/")}: no REFUSAL_CODES table found`); continue; }
+    sizes.push(`${family} ${codes.size}`);
+    for (const code of codes) named.add(code);
+  }
+  const union = /export type RouteRefusalCode =([\s\S]*?);/.exec(read(p("index.d.ts")));
+  if (!union) return { note: "index.d.ts declares no RouteRefusalCode", problems: ["index.d.ts: RouteRefusalCode is missing"] };
+  const declared = new Set([...union[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]));
+  const missing = [...named].filter((c) => !declared.has(c)).sort();
+  const extra = [...declared].filter((c) => !named.has(c)).sort();
+  if (missing.length) problems.push(`refused by a provider but not declared in RouteRefusalCode: ${missing.join(", ")}`);
+  if (extra.length) problems.push(`RouteRefusalCode declares codes no provider refuses with: ${extra.join(", ")}`);
+  return problems.length
+    ? { note: "the refusal tables and RouteRefusalCode disagree", problems }
+    : { note: `${declared.size} route refusal codes declared (${sizes.join(", ")}), tables and type agree`, problems };
+};
+
 const CHECKS = {
   syntax: syntaxCheck,
   import: importCheck,
@@ -1514,6 +1557,7 @@ const CHECKS = {
   compose: composeCheck,
   entries: entriesCheck,
   version: versionCheck,
+  refusals: refusalsCheck,
 };
 
 export const runCheck = async (name) => {

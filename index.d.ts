@@ -494,6 +494,58 @@ export interface QuoteOffer {
   readonly networks: { readonly asset: string | null; readonly currency: string | null; readonly stated: boolean };
 }
 
+/**
+ * Every code a route provider of this package refuses with.
+ *
+ * The providers already name them in their own tables (`COW_REFUSAL_CODES` and its three siblings), and the
+ * battery proves each of those is reachable; what was missing was the TYPE, so an interface could enumerate
+ * them instead of meeting a string it cannot switch on. `broken` is shared by all four: it is the code for a
+ * case a provider could not classify.
+ *
+ * These are OUR codes, and they are what a person's message should be phrased from. A provider's OWN reason
+ * stays opaque on purpose (`QuoteRefusal.why`): that is data the provider sent, not a name of ours, so it is
+ * deliberately NOT part of this union.
+ */
+export type RouteRefusalCode =
+  // cow
+  | "cow-bad-order"
+  | "cow-bad-response"
+  | "cow-not-settled"
+  | "cow-order-unknown"
+  | "cow-refused"
+  | "cow-sign-failed"
+  | "cow-unknown-network"
+  | "cow-unreachable"
+  // kyber
+  | "kyber-bad-order"
+  | "kyber-bad-response"
+  | "kyber-not-settled"
+  | "kyber-order-unknown"
+  | "kyber-refused"
+  | "kyber-sign-failed"
+  | "kyber-unknown-network"
+  | "kyber-unreachable"
+  // uniswapx
+  | "uniswapx-bad-order"
+  | "uniswapx-bad-response"
+  | "uniswapx-no-submitter"
+  | "uniswapx-not-settled"
+  | "uniswapx-order-unknown"
+  | "uniswapx-refused"
+  | "uniswapx-sign-failed"
+  | "uniswapx-unknown-network"
+  | "uniswapx-unreachable"
+  // uniswap-relay
+  | "uniswap-relay-bad-order"
+  | "uniswap-relay-bad-response"
+  | "uniswap-relay-no-discovery"
+  | "uniswap-relay-not-settled"
+  | "uniswap-relay-sign-failed"
+  | "uniswap-relay-unknown-network"
+  | "uniswap-relay-unreachable"
+  // shared
+  | "broken";
+
 export interface QuoteRefusal {
   readonly providerId: string;
   readonly displayName: string | null;
