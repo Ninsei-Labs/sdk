@@ -47,6 +47,10 @@
     "./core": {
       "types": "./src/public/core.d.ts",
       "default": "./src/public/core.mjs"
+    },
+    "./recovery": {
+      "types": "./src/public/recovery.d.ts",
+      "default": "./src/public/recovery.mjs"
     }
   },
   "files": [
