@@ -52,11 +52,12 @@ import { declineOf, logReaderOf, blockBoundaryOf, DECLINED_TOPIC0, DECLINED_TERM
 //
 // AND WHAT IS NOT A KEY: an unknown kind is named, not invented - it comes out as "closed", the fallback in
 // toState below, which is why `closed` is a code here and not a key (no settlement carries that kind; the string
-// `closed` in the engine is the XMR SESSION's status vocabulary, not a settlement). The declared code
-// `xmr_returned` has no writer either: the engine keeps the phase (swap.js, TERMINAL.xmr_returned, "Swap
-// cancelled, funds returned"), but that situation - the maker took the XMR back without a ready mark - is DERIVED
-// (xmrReclaimed plus the phase refund_available) and the swap stays live until the ETH is refunded. Both facts are
-// asserted by the `terminal` check rather than left to a reader.
+// `closed` in the engine is the XMR SESSION's status vocabulary, not a settlement). The maker taking the XMR back
+// without a ready mark is NOT a kind either: it does not end a swap - the depositor's ETH is still in the escrow -
+// so it is a PHASE of a live swap (`xmr_reclaimed`, engine/core/swap.js, told apart by that code from the maker who
+// never locked), and the swap ends later as `refunded_eth`. `xmr_returned`, which stood in the engine's terminal
+// table and in the `TerminalCode` type as a state nothing could produce, is gone with it. Every one of these facts
+// is asserted by the `terminal` check rather than left to a reader.
 const TERMINAL = {
   success: "success",
   refund_eth: "refunded_eth",

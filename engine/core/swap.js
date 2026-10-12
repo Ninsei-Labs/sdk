@@ -41,10 +41,13 @@ export const STEP_LABELS = [
   ["swept", "Sent to your address"],
 ];
 
+// THE STATES A SWAP ENDS IN. `xmr_returned` STOOD HERE AND IS GONE ON PURPOSE: it was declared with a phase and a
+// label and NO code path anywhere wrote it. The maker taking the XMR back does not END a swap - the depositor's ETH
+// is still in the escrow - so that situation is a PHASE of a live swap (`xmr_reclaimed`, in derive below), and a
+// terminal nothing can produce is worse than no terminal at all: a reader takes the declaration for coverage.
 export const TERMINAL = {
   success: { phase: "success", label: "XMR delivered" },
   refunded_eth: { phase: "refunded_eth", label: "ETH refunded" },
-  xmr_returned: { phase: "xmr_returned", label: "Swap cancelled, funds returned" },
 };
 
 export function createSwap(input) {
@@ -592,7 +595,12 @@ export function derive(swap, now = nowReal()) {
     phase = "maker_locking";
     phaseLabel = "Maker is locking XMR";
   } else if (xmrReclaimed) {
-    phase = "refund_available";
+    // THE MAKER TOOK THE XMR BACK - A PHASE OF ITS OWN, NOT A TERMINAL AND NOT A STEP. The depositor's ETH is
+    // still in the escrow, so the swap is LIVE (`terminal` stays empty) and ends later as `refunded_eth`; and the
+    // ordered stepper has no passage for a deal that is taken back. It used to be the shared `refund_available`,
+    // which the "maker never locked" situation sets too, so the two could only be told apart by reading the label -
+    // `xmr_reclaimed` is the code an interface branches on.
+    phase = "xmr_reclaimed";
     phaseLabel = "XMR returned to the maker";
     refundAfterSim = makerReclaimAt;
     can.refund = true;

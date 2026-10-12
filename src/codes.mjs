@@ -16,7 +16,10 @@ export const STEP_CODES = [
 // `declined` IS A TERMINAL STATE OF ITS OWN (issue #40): the maker refused a funded order, so the whole balance -
 // the fee included - is already back in the depositor's wallet and NO half was revealed. It is told apart from
 // `refunded_eth`, which is the depositor taking the ETH back and DOES reveal a half (src/decline.mjs).
-export const TERMINAL_CODES = ["success", "refunded_eth", "xmr_returned", "closed", "declined"];
+// `xmr_returned` WAS DECLARED HERE AND IS GONE (it had no writer anywhere): the maker's reclaim of the XMR does
+// NOT end a swap - the depositor's ETH is still in the escrow - so it is a PHASE of a live swap (`xmr_reclaimed`,
+// engine/core/swap.js), never a terminal state. A declared terminal nothing can produce reads as coverage.
+export const TERMINAL_CODES = ["success", "refunded_eth", "closed", "declined"];
 
 export const CHECK_CODES = [
   "balance",
