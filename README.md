@@ -31,6 +31,13 @@ value that looks like data is more dangerous than a refusal.
 `index.d.ts` is the single source of truth about the API shape, and this is checked: `tools/check-sdk.mjs`
 compares the list of what the SDK returns with what is declared in the contract (both ways).
 
+EVERY PUBLISHED SUBPATH CARRIES ITS OWN DECLARATIONS: `.` (`index.d.ts`), `./xmr`, `./order`, `./evm` and
+`./core` (`src/public/<entry>.d.ts`). Each of them declares exactly the symbols its barrel re-exports, so a
+typed consumer sees the same surface the runtime has, and nothing else. `tools/check.mjs --only=types` keeps
+the two sides equal (a subpath without a `types` target, a declarations file that does not read as
+declarations, or a symbol declared on one side only is red), and `tools/check-types-teeth.mjs` is its
+breaking run.
+
 ```js
 import { createNinsei } from "@ninsei-labs/sdk";
 

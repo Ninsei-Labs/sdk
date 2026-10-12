@@ -57,6 +57,17 @@ jobs:
       - name: Check for secrets
         run: pnpm run check:secrets
 
+      # Every published subpath must carry declarations: a subpath without a `types` target resolves to
+      # nothing in a TypeScript consumer, and the entry a node needs then shows up as `any`. The check reads
+      # the exports map, the declarations and the barrels - it needs no compiler.
+      - name: Check entry types (every subpath declares what its barrel exports)
+        run: pnpm run check:types
+
+      # The guard above is exercised on a deliberately broken file: it must come back RED and NAME the
+      # reason, and the file must be restored byte for byte. A guard without a breaking run is unverified.
+      - name: Break the entry-types guard (RED, then restored)
+        run: pnpm run check:types-teeth
+
       # The release workflow's tag rule is a decision, so it is exercised on every change, not only at release time.
       - name: Check the release tag rule (version -> npm dist-tag)
         run: node tools/npm-tag.test.mjs
