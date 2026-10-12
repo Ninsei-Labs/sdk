@@ -68,6 +68,17 @@ jobs:
       - name: Break the entry-types guard (RED, then restored)
         run: pnpm run check:types-teeth
 
+      # The route-refusal vocabulary is a package agreement as well: every code a provider refuses with is
+      # DECLARED, the four tables answer to that union, the union is used by a declaration instead of standing
+      # beside the tables as a comment, and the `*Gate` verdict vocabulary is held out of both.
+      - name: Check the route refusals (the tables against RouteRefusalCode)
+        run: pnpm run check:refusals
+
+      # And that guard is exercised on deliberately broken files too: the tables' declared type, the union's use
+      # and the `*Gate` vocabulary each have their own case, each RED with its own reason, every file restored.
+      - name: Break the refusals guard (RED, then restored)
+        run: pnpm run check:refusals-teeth
+
       # The release workflow's tag rule is a decision, so it is exercised on every change, not only at release time.
       - name: Check the release tag rule (version -> npm dist-tag)
         run: node tools/npm-tag.test.mjs

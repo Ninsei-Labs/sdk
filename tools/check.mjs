@@ -1628,7 +1628,10 @@ export const versionCheck = async () => {
 };
 
 // ---------------------------------------------------------------------------------------------------
-// 14. REFUSALS - every code a route provider refuses with is DECLARED as a type, and no extra one is.
+// ---------------------------------------------------------------------------------------------------
+// 14. REFUSALS - every code a route provider refuses with is DECLARED as a type, no extra one is, the union
+//     the tables answer to is USED by a declaration instead of standing beside them as a comment, and the
+//     `*Gate` verdict vocabulary is held OUT of both.
 // ---------------------------------------------------------------------------------------------------
 
 /** The four tables a provider names its own refusals in. The type must say exactly the same. */
@@ -1648,26 +1651,108 @@ export const refusalCodesOf = (source) => {
   return new Set([...block[1].matchAll(/"((?:cow|kyber|uniswapx|uniswap-relay)-[a-z][a-z0-9-]*|broken)"/g)].map((m) => m[1]));
 };
 
+/** The NAME that provider's module gives its refusal table (`COW_REFUSAL_CODES` and its three siblings). */
+export const refusalTableNameOf = (source) => {
+  const name = /([A-Z_]*REFUSAL_CODES)\s*=\s*\[/.exec(source);
+  return name ? name[1] : null;
+};
+
+/**
+ * THE `*Gate` VOCABULARY - A GATE VERDICT'S `reason`, DELIBERATELY NOT A ROUTE REFUSAL.
+ *
+ * `cowGate` and its three siblings answer `{ ok: false, blocked: true, reason: "cow-no-order", checks: [] }` while
+ * there is no order to check yet: that word says "do not sign THIS", while a refusal code says "the provider
+ * answered, and this is why it would not". Two vocabularies, two audiences - so this check holds them APART in both
+ * directions: every token below must still be in its provider's own source (the note below cannot go stale in
+ * silence), and no token below may appear in a refusal table or in `RouteRefusalCode`.
+ */
+export const GATE_REASONS = {
+  cow: ["cow-no-order"],
+  kyber: ["kyber-no-order"],
+  uniswapx: ["uniswapx-no-order"],
+  "uniswap-relay": ["uniswap-relay-no-order"],
+};
+
 export const refusalsCheck = () => {
   const problems = [];
+  const notes = [];
   const named = new Set();
   const sizes = [];
+  const tables = [];
   for (const [family, parts] of Object.entries(REFUSAL_TABLES)) {
-    const codes = refusalCodesOf(read(p(...parts)));
+    const source = read(p(...parts));
+    const codes = refusalCodesOf(source);
     if (!codes) { problems.push(`${parts.join("/")}: no REFUSAL_CODES table found`); continue; }
+    const name = refusalTableNameOf(source);
+    if (name) tables.push({ family, parts, name });
+    else problems.push(`${parts.join("/")}: the refusal table has no name`);
     sizes.push(`${family} ${codes.size}`);
     for (const code of codes) named.add(code);
   }
-  const union = /export type RouteRefusalCode =([\s\S]*?);/.exec(read(p("index.d.ts")));
-  if (!union) return { note: "index.d.ts declares no RouteRefusalCode", problems: ["index.d.ts: RouteRefusalCode is missing"] };
+  const dts = read(p("index.d.ts"));
+  const union = /export type RouteRefusalCode =([\s\S]*?);/.exec(dts);
+  if (!union) return { note: "index.d.ts declares no RouteRefusalCode", problems: ["index.d.ts: RouteRefusalCode is missing"], notes };
   const declared = new Set([...union[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]));
   const missing = [...named].filter((c) => !declared.has(c)).sort();
   const extra = [...declared].filter((c) => !named.has(c)).sort();
   if (missing.length) problems.push(`refused by a provider but not declared in RouteRefusalCode: ${missing.join(", ")}`);
   if (extra.length) problems.push(`RouteRefusalCode declares codes no provider refuses with: ${extra.join(", ")}`);
+
+  // THE UNION MUST BE LOAD-BEARING, NOT DECORATIVE. A type nobody names is a comment: an interface that meets these
+  // refusals has to be able to switch on `code`, so at least one declaration must NAME the union OUTSIDE its own
+  // declaration. The comments are stripped first - a mention in prose is not a use, and the check must not be
+  // satisfiable by a sentence.
+  const code = stripComments(dts);
+  const references = (code.match(/\bRouteRefusalCode\b/g) || []).length - 1;
+  if (references < 1) {
+    problems.push("index.d.ts declares RouteRefusalCode but never uses it: no declaration types a refusal `code` with it, so the union constrains nothing and an interface switching on it is no better off than switching on a bare string");
+  }
+
+  // THE TABLES' DECLARED TYPE. Every shipped table is declared as `readonly RouteRefusalCode[]`, BY NAME, and the
+  // declaration names exactly the tables the package ships - no fewer (a table that ships with no declared type) and
+  // no more (a declaration for a table nobody has). The table's own module cannot make this statement in a way this
+  // repository can hold: there is no compiler here (see the `types` check), so this check holds both halves.
+  const tableBlock = (() => {
+    const at = code.indexOf("export interface RouteRefusalTables {");
+    if (at < 0) return null;
+    const end = code.indexOf("}", at);
+    return end < 0 ? code.slice(at) : code.slice(at, end);
+  })();
+  if (!tableBlock) {
+    problems.push("index.d.ts does not declare RouteRefusalTables: the four tables ship with the package (src/legs/**, `files` in package.json) and nothing says what TYPE they are, so the union stands beside them as a comment");
+  } else {
+    const typed = new Set();
+    for (const m of tableBlock.matchAll(/readonly\s+([A-Z_][A-Z0-9_]*)\s*:\s*readonly\s+RouteRefusalCode\s*\[\s*\]\s*;/g)) typed.add(m[1]);
+    for (const table of tables) {
+      const mentioned = (tableBlock.match(/\b[A-Z_][A-Z0-9_]*REFUSAL_CODES\b/g) || []).includes(table.name);
+      if (!mentioned) problems.push(`index.d.ts RouteRefusalTables does not declare ${table.name}, the table ${table.parts.join("/")} refuses with: the table ships with no declared type, so the union does not reach it`);
+      else if (!typed.has(table.name)) problems.push(`index.d.ts RouteRefusalTables declares ${table.name} without the route refusal type: it must be \`readonly RouteRefusalCode[]\`, otherwise the table and the union can drift apart and the declaration keeps saying nothing`);
+    }
+    for (const name of typed) {
+      if (!tables.some((table) => table.name === name)) problems.push(`index.d.ts RouteRefusalTables declares ${name}, which is not a table the package ships (src/legs/**)`);
+    }
+  }
+
+  // THE `*Gate` VOCABULARY STAYS OUT. Folding one of its tokens into a table AND into the union would leave the
+  // equality above green while the union quietly started to claim a word that is not a refusal - so both directions
+  // of the note below are checked, not written.
+  const gateTokens = [];
+  for (const [family, tokens] of Object.entries(GATE_REASONS)) {
+    const parts = REFUSAL_TABLES[family];
+    const source = read(p(...parts));
+    for (const token of tokens) {
+      gateTokens.push(token);
+      if (!source.includes(`"${token}"`)) problems.push(`${parts.join("/")}: the gate verdict reason "${token}" is gone from this provider: the separate vocabulary the note below names has moved, so the note is out of date`);
+      if (named.has(token)) problems.push(`a refusal table names "${token}", which is a gate VERDICT ("no order to check yet - do not sign"), not a code a provider refuses with: the *Gate vocabulary must stay out of the refusals`);
+      if (declared.has(token)) problems.push(`RouteRefusalCode declares "${token}", which a gate verdict names rather than a provider: the union does not cover the *Gate vocabulary and must not start to`);
+    }
+  }
+  notes.push(`the *Gate reason vocabulary (${gateTokens.join(", ")}) is deliberately separate from this union: a gate verdict says "no order to check yet - do not sign", while a route refusal says "the provider answered, and this is why it would not", so those tokens are in NEITHER the refusal tables NOR RouteRefusalCode, and nobody should read the union as covering them`);
+
+  const agree = !missing.length && !extra.length;
   return problems.length
-    ? { note: "the refusal tables and RouteRefusalCode disagree", problems }
-    : { note: `${declared.size} route refusal codes declared (${sizes.join(", ")}), tables and type agree`, problems };
+    ? { note: agree ? "RouteRefusalCode is declared but does not reach the tables as a type" : "the refusal tables and RouteRefusalCode disagree", problems, notes }
+    : { note: `${declared.size} route refusal codes declared (${sizes.join(", ")}), tables and type agree, the type is used ${references} time(s) outside its own declaration, the four tables are declared \`readonly RouteRefusalCode[]\``, problems, notes };
 };
 
 const CHECKS = {

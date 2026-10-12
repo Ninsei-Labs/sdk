@@ -500,7 +500,8 @@ export interface QuoteOffer {
  * The providers already name them in their own tables (`COW_REFUSAL_CODES` and its three siblings), and the
  * battery proves each of those is reachable; what was missing was the TYPE, so an interface could enumerate
  * them instead of meeting a string it cannot switch on. `broken` is shared by all four: it is the code for a
- * case a provider could not classify.
+ * case a provider could not classify. `RouteRefusalTables` below declares what those tables ARE - each of them a
+ * `readonly RouteRefusalCode[]` - so the union is the tables' TYPE and not a comment standing beside them.
  *
  * These are OUR codes, and they are what a person's message should be phrased from. A provider's OWN reason
  * stays opaque on purpose (`QuoteRefusal.why`): that is data the provider sent, not a name of ours, so it is
@@ -545,6 +546,28 @@ export type RouteRefusalCode =
   | "uniswap-relay-unreachable"
   // shared
   | "broken";
+
+/**
+ * WHAT THE FOUR REFUSAL TABLES *ARE*. Each route provider names its own refusals in one table - `COW_REFUSAL_CODES`
+ * (src/legs/cow.mjs), `KYBER_REFUSAL_CODES` (src/legs/kyber.mjs), `UNISWAPX_REFUSAL_CODES` (src/legs/uniswapx.mjs) and
+ * `UNISWAPRELAY_REFUSAL_CODES` (src/legs/uniswaprelay.mjs) - and every one of those tables is a
+ * `readonly RouteRefusalCode[]`. The dependency runs ONE WAY on purpose: a table answers to the union (a code that is
+ * not declared above cannot enter a table), while the union answers to no single table, so the same vocabulary is
+ * met in four modules.
+ *
+ * THEY ARE NOT ON THIS ENTRY'S SURFACE, and this is deliberately NOT a value: the package re-exports no provider and
+ * no table (src/index.mjs), the tables travel in the shipped source (`files` in package.json) and they are the
+ * VOCABULARY, not an API. A `declare const` here that the runtime does not export would be a lie, and the `surface`
+ * check refuses exactly that - so the tables are declared as their TYPE. That is what keeps the union from being a
+ * comment beside the tables: this declaration says what they are, and the `refusals` check says the same thing from
+ * the other side - a table declared here as a plain `readonly string[]` is a named problem there.
+ */
+export interface RouteRefusalTables {
+  readonly COW_REFUSAL_CODES: readonly RouteRefusalCode[];
+  readonly KYBER_REFUSAL_CODES: readonly RouteRefusalCode[];
+  readonly UNISWAPX_REFUSAL_CODES: readonly RouteRefusalCode[];
+  readonly UNISWAPRELAY_REFUSAL_CODES: readonly RouteRefusalCode[];
+}
 
 export interface QuoteRefusal {
   readonly providerId: string;
