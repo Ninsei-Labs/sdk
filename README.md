@@ -74,7 +74,14 @@ user-facing string.
 | `claimed` | the maker took the ETH |
 | `swept` | the XMR has been sent to the recipient's address |
 
-Terminal states (`state.terminal`): `success`, `refunded_eth`, `xmr_returned`, `closed`, `declined`.
+Terminal states (`state.terminal`): `success`, `refunded_eth`, `closed`, `declined`.
+
+`xmr_returned` WAS HERE AND IS GONE, AND SO IS THE STATE IT NAMED AS A TERMINAL. When the depositor does not place
+the ready mark in time the maker takes the XMR back — and the swap does NOT end there: the depositor's ETH is still
+in the escrow, so it is a PHASE of a live swap, not a terminal. `state.phase` is then `xmr_reclaimed` (the code an
+interface branches on, while `state.terminal` stays `null`), and the swap ends later as `refunded_eth` when the ETH
+goes back. The code exists because that phase used to be the shared `refund_available`, which the "maker never
+locked the XMR" situation sets too: the two could only be told apart by comparing a label.
 
 `declined` — THE MAKER REFUSED A FUNDED ORDER (issue #40). The escrow sets `refunded` and emits
 `Declined(claimer)`, so `status()` alone reads it exactly like any other refund; the SDK tells the two apart by

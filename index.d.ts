@@ -1178,7 +1178,12 @@ export interface SwapState {
   readonly createdAt: string | null;
   /** WHO GAVE THE PRICE. Either field may be absent: an old record or a swap without a provider. */
   readonly maker: { readonly id: string | null; readonly name: string | null };
-  /** The engine's phase code and its human name: the list shows the name. */
+  /**
+   * The engine's phase code and its human name: the list shows the name, the CODE is what an interface branches on.
+   * `xmr_reclaimed` is the maker taking the XMR back before the ready mark - a LIVE state, not a terminal: the
+   * depositor's ETH is still in the escrow, `terminal` stays null and the swap ends later as `refunded_eth`. It is
+   * told apart by that code from the other situation that opens a refund, the maker who never locked the XMR.
+   */
   readonly phase: string | null;
   readonly phaseLabel: string | null;
   /** The swap has a settlement record: the list splits live from settled by THIS flag, not by the phase's text. */
@@ -1210,8 +1215,12 @@ export type StepCode =
  * the fee included, is already back in the depositor's wallet and NO half was revealed, so there is nothing to
  * recover and nothing left to do. It is deliberately NOT `refunded_eth`: that one is the depositor taking the ETH
  * back, and it DOES reveal the depositor's half. The words a person reads are the interface's, not the package's.
+ *
+ * `xmr_returned` WAS A MEMBER AND IS GONE: it named the maker taking the XMR back, which does NOT end a swap - the
+ * depositor's ETH is still in the escrow - so it is a PHASE of a live swap (`SwapState.phase`, the code
+ * `xmr_reclaimed`), never a terminal. A member with no writer reads as coverage.
  */
-export type TerminalCode = "success" | "refunded_eth" | "xmr_returned" | "closed" | "declined";
+export type TerminalCode = "success" | "refunded_eth" | "closed" | "declined";
 
 // --- The XMR withdrawal (the sweep page) --------------------------------------------------------
 

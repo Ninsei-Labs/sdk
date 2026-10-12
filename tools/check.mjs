@@ -2046,6 +2046,18 @@ export const declineCheck = async () => {
 // named exports). So the keys come from the module's own text, while the KINDS come from the modules that WRITE a
 // settlement - the engine's (engine/core/swap.js) and ours (src/decline.mjs) - and the behaviour is not taken on
 // trust: a refund is driven to the end and the state the app is told is read back through the SDK's own surfaces.
+//
+// AND THE DECLARED TERMINALS ARE HELD TO THE WRITERS TOO. The map is not the whole vocabulary a swap can end in: the
+// ENGINE declares its own table (`export const TERMINAL`, engine/core/swap.js) and the CONTRACT declares the union
+// (`TerminalCode`, index.d.ts) - and `declined` is declared by this package (src/codes.mjs). A terminal declared in
+// one of those places that NO writer can produce is dead: no run can reach it, so nothing holds it to account and a
+// reader takes the declaration for coverage. That is exactly why `xmr_returned` could sit in the engine's table and
+// in the type for as long as it did - this comparison looked only at the MAP, and the dead entry was never in it.
+// Both are read here now, and a declared-but-unwritten terminal is RED with the declaration it came from named.
+//
+// AND THE OTHER SITUATION THE MAKER'S ABSENCE CREATES IS HELD TO ITS PHASE. The maker taking the XMR back does not
+// END a swap, so it must NOT answer to a terminal: it is a phase of its own of a LIVE swap, reached here through
+// the simulator until the engine itself reports it.
 // ---------------------------------------------------------------------------------------------------
 
 /**
@@ -2080,6 +2092,25 @@ const terminalMapEntries = (file) => {
       value: m[3] !== undefined ? m[3] : m[4], valueIsLiteral: m[3] !== undefined });
   }
   return entries;
+};
+
+/**
+ * THE CODES A `const TERMINAL = { ... }` TABLE DECLARES: its TOP-LEVEL keys - the entries whose VALUE is the
+ * `{ phase, label }` object. Pointed at the engine's table, `terminalMapEntries` above would return the INNER
+ * phase/label pairs and miss the codes the table is actually keyed by, which is the whole point of reading it.
+ */
+const terminalTableCodes = (file) => {
+  const text = read(file).replace(/\r\n/g, "\n");
+  const start = text.indexOf("const TERMINAL = {");
+  if (start < 0) return null;
+  const end = text.indexOf("};", start);
+  if (end < 0) return null;
+  const body = stripComments(text.slice(text.indexOf("{", start) + 1, end));
+  const codes = [];
+  for (const m of body.matchAll(/(?:^|[\s,{])(?:\[([A-Za-z_$][\w$]*)\]|([A-Za-z_$][\w$]*))\s*:\s*\{/g)) {
+    codes.push({ key: m[1] !== undefined ? m[1] : m[2], keyIsName: m[1] !== undefined });
+  }
+  return codes;
 };
 
 export const terminalCheck = async () => {
@@ -2232,6 +2263,54 @@ export const terminalCheck = async () => {
   }
   const towerState = await watchState("the watchtower's refund", tower.id);
 
+  // (c3) THE OTHER SITUATION THE MAKER'S ABSENCE CREATES - AND IT IS NOT A TERMINAL. The depositor did not place the
+  // ready mark in time, so the maker took the XMR back - and the ETH is STILL in the escrow. The situation has a
+  // machine-readable identity of its own: an interface branches on `state.phase` (the code `xmr_reclaimed`) instead
+  // of comparing a label, and it is told apart by that CODE from the maker who never locked the XMR, which used to
+  // answer to the same name (`refund_available`) with a different label. It is a LIVE state: nothing is settled,
+  // `terminal` stays null, and the one thing left to do is take the ETH back.
+  const reclaimOf = (id) => {
+    // THE SIMULATOR IS STEPPED FORWARD UNTIL THE ENGINE ITSELF REPORTS THE RECLAIM - the same lever the
+    // demonstration screen's speed control pulls. The engine's timing constants are not copied here: the bound
+    // FAILS LOUDLY (the phase below is then not exercised) if the engine ever stops reporting the reclaim.
+    for (const simMs of [2_000_000, 4_000_000, 5_000_000, 6_000_000, 10_000_000, 20_000_000]) {
+      sandboxAt(id, simMs);
+      if (engine.swap.derive(engine.swap.getSwap(id)).xmrReclaimed === true) return simMs;
+    }
+    return null;
+  };
+  const reclaimed = sandboxRecord("happy");
+  const reclaimAtSim = reclaimOf(reclaimed.id);
+  if (reclaimAtSim === null) {
+    problems.push("the maker's reclaim was never reached (the engine reports xmrReclaimed at no step of the simulator): the phase below was not exercised");
+  }
+  const reclaimState = await sdk.swaps.get(reclaimed.id);
+  if (!reclaimState) {
+    problems.push("the maker's reclaim: the record is not in the SDK's own list");
+  } else {
+    if (reclaimState.phase !== "xmr_reclaimed") {
+      problems.push(`the maker's reclaim is reported as the phase ${JSON.stringify(reclaimState.phase)}, not the code "xmr_reclaimed": the maker taking the XMR back is a situation of its own, and an interface must branch on a code, not on a label`);
+    }
+    if (reclaimState.terminal !== null || reclaimState.settled !== false) {
+      problems.push(`the maker's reclaim was reported as an END state (terminal=${JSON.stringify(reclaimState.terminal)}, settled=${JSON.stringify(reclaimState.settled)}): the depositor's ETH is still in the escrow, so the swap is live and ends later as \`refunded_eth\``);
+    }
+    if (!reclaimState.actions || reclaimState.actions.refund !== true) {
+      problems.push(`the maker's reclaim offers no refund (actions.refund=${JSON.stringify(reclaimState.actions && reclaimState.actions.refund)}): taking the ETH back is the one thing left to do`);
+    }
+  }
+  // THE OTHER SITUATION THAT OPENS A REFUND, SIDE BY SIDE WITH IT: the maker who never locked the XMR. It keeps the
+  // phase `refund_available`, and the two must NOT share a phase - a code two situations share is a code an
+  // interface cannot branch on.
+  const neverLocked = sandboxRecord("maker_no_lock");
+  sandboxAt(neverLocked.id, 25 * 60_000);
+  const neverLockedState = await sdk.swaps.get(neverLocked.id);
+  if (!neverLockedState || neverLockedState.phase !== "refund_available") {
+    problems.push(`the maker who never locked the XMR is reported as the phase ${JSON.stringify(neverLockedState && neverLockedState.phase)}, not "refund_available"`);
+  }
+  if (reclaimState && neverLockedState && reclaimState.phase === neverLockedState.phase) {
+    problems.push(`the maker's reclaim and the maker who never locked share the phase ${JSON.stringify(reclaimState.phase)}: two situations must not answer to one code`);
+  }
+
   // (d) THE CONTROLS THAT KEEP (c) HONEST. A kind the map does not know must still come out as the fallback (the
   // fallback is not dead), no kind the engine can write may be reported AS that fallback, and a swap that has not
   // settled must keep `terminal: null` - the map describes settlements, not "anything that is over".
@@ -2262,6 +2341,47 @@ export const terminalCheck = async () => {
     problems.push(`a swap with no settlement was given a terminal state (${JSON.stringify({ terminal: liveState && liveState.terminal, settled: liveState && liveState.settled })})`);
   }
 
+  // (e) THE DECLARED TERMINALS AGAINST THE WRITERS - THE DIRECTION THE MAP ALONE CANNOT SEE. Every code the ENGINE's
+  // terminal table and the CONTRACT's `TerminalCode` union declare must be one a writer can really produce: either a
+  // kind that is actually written settles as it (through the map above), or it is the fallback an unknown kind comes
+  // out as (a code the map deliberately does not key). A declared terminal with NEITHER is DEAD - declared in the
+  // engine's table or in the type, reachable from nowhere - and the declaration it came from is NAMED, so a red run
+  // says which one is promising a state nothing can reach.
+  const engineDeclared = terminalTableCodes(p("engine", "core", "swap.js"));
+  if (!engineDeclared) {
+    problems.push("engine/core/swap.js: no `const TERMINAL = { ... }` could be read, so a terminal declared there with no writer cannot be named");
+  }
+  const typeDeclared = unionMembers(read(p("index.d.ts")), "TerminalCode");
+  if (typeDeclared === null) {
+    problems.push("index.d.ts: no type TerminalCode, so the declared terminal codes cannot be read");
+  }
+  const declaredTerminals = new Map();
+  const declare = (code, where) => {
+    if (!declaredTerminals.has(code)) declaredTerminals.set(code, new Set());
+    declaredTerminals.get(code).add(where);
+  };
+  for (const entry of engineDeclared || []) {
+    const code = entry.keyIsName ? resolveName(entry.key) : entry.key;
+    if (typeof code !== "string" || !code) {
+      problems.push(`engine/core/swap.js: the terminal table's key \`${entry.key}\` does not resolve to a code`);
+      continue;
+    }
+    declare(code, "engine/core/swap.js TERMINAL");
+  }
+  for (const code of typeDeclared || []) declare(code, "index.d.ts TerminalCode");
+  // WHAT THE WRITERS ACTUALLY SETTLE AS: a map key with no writer (reported above) proves nothing here.
+  const settledAs = new Set();
+  for (const entry of entries) {
+    const kind = entry.keyIsName ? resolveName(entry.key) : entry.key;
+    const code = codeOf(entry);
+    if (emitted.has(kind) && typeof code === "string" && code) settledAs.add(code);
+  }
+  for (const [code, where] of declaredTerminals) {
+    if (settledAs.has(code)) continue;   // a written kind settles as this code
+    if (code === fallback) continue;      // the unknown-kind fallback: reachable, and asserted declared above
+    problems.push(`the terminal "${code}" is DECLARED (${[...where].join(", ")}) and NO WRITER can produce it: no settlement kind maps to it and it is not the fallback "${fallback}", so no run can reach it - a declared state a reader takes for coverage`);
+  }
+
   // THIS CHECK LEAVES THE STORE AS IT FOUND IT: the records it drove are forgotten, so a later check that reads the
   // list is not reading this one's sandbox deals.
   for (const id of created) engine.swap.forgetSwap(id);
@@ -2271,8 +2391,10 @@ export const terminalCheck = async () => {
   const emittedList = [...emitted].sort().join(", ");
   notes.push(`the kinds the engine and this package write: ${emittedList} - every one of them has a key in the map, and the map has no key without a writer`);
   notes.push(`both writers of the refund's kind were driven to the end: the depositor's own refund reports ${JSON.stringify(ownState && ownState.terminal)} and the watchtower's ${JSON.stringify(towerState && towerState.terminal)}`);
-  notes.push(`an unknown kind still comes out as the declared fallback ${JSON.stringify(fallback)}, and a swap with no settlement keeps \`terminal: null\`; the declared code \`xmr_returned\` has NO writer in the engine or in this package, and \`closed\` is the fallback rather than a key`);
-  return { note: `${emitted.size} settlement kind(s) against ${keys.size} map key(s), a refund driven to the end by both of its writers`, problems, notes };
+  notes.push(`an unknown kind still comes out as the declared fallback ${JSON.stringify(fallback)}, and a swap with no settlement keeps \`terminal: null\` - \`closed\` is the fallback rather than a key`);
+  notes.push(`the maker's reclaim is the LIVE phase "xmr_reclaimed" (reached at ${reclaimAtSim} ms of the simulator), told apart by that code from "refund_available" (the maker who never locked), with \`terminal: null\` - the ETH is still in the escrow and the swap ends later as \`refunded_eth\``);
+  notes.push(`every terminal declared by the engine's TERMINAL table (${(engineDeclared || []).map((e) => (e.keyIsName ? resolveName(e.key) : e.key)).join(", ")}) and by the TerminalCode union (${[...(typeDeclared || [])].join(", ")}) is reachable: a written kind settles as it, or it is the fallback`);
+  return { note: `${emitted.size} settlement kind(s) against ${keys.size} map key(s), ${declaredTerminals.size} declared terminal(s) each reachable, a refund driven to the end by both of its writers and the maker's reclaim driven to its own phase`, problems, notes };
 };
 
 const CHECKS = {
