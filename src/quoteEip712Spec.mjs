@@ -1,9 +1,9 @@
 // EIP-712 TYPED DATA FOR AN ORDER QUOTE - THE SPEC, SHARED BY THE NODE AND THE SDK.
 //
-// WHY THE SAME FILE EXISTS TWICE. The node (rfq/) runs on the provider's machine and never sees www/ or sdk/:
-// it has to start on its own. The SDK is a package and never sees rfq/. So the spec is embodied twice and the
-// two copies are pinned by sha256 (tools/check-quote-eip712.mjs), exactly like the order context. A divergence
-// here would mean one side signs what the other does not verify - the failure this format exists to prevent.
+// WHO HOLDS IT. The node (rfq/) runs on the provider's machine and does not read our files; it takes this spec
+// from the package entry (@ninsei-labs/sdk/order), so there is ONE embodiment here and no copy on the node's side
+// (that wiring is pinned by tools/check-quote-eip712.mjs). A divergence here would mean one side signs what the
+// other does not verify - the failure this format exists to prevent.
 //
 // WHAT IS BOUND, AND WHY EACH FIELD IS INSIDE THE DIGEST (changing any of them breaks recovery):
 //   provider, quoteKey   - whose quote it is and which key signed it. For a solo maker the two are equal; a

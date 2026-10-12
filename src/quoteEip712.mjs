@@ -1,8 +1,8 @@
 // EIP-712 ORDER-QUOTE SIGNATURE - THE SDK SIDE (VERIFICATION ONLY).
 //
 // The SDK verifies, it does not sign: the maker's wallet key never reaches the customer's machine. The spec
-// (types, domain, digest, recovery) lives in quoteEip712Spec.mjs, byte-identical to the node's copy and pinned
-// by tools/check-quote-eip712.mjs. Here it is only bound to the SDK's own crypto primitives.
+// (types, domain, digest, recovery) lives in quoteEip712Spec.mjs - the ONE embodiment: the node takes it from the
+// package entry, so there is no second copy (tools/check-quote-eip712.mjs). Here it is only bound to SDK primitives.
 //
 // The rule the old flag carried is kept: a quote that cannot be verified is REFUSED. A missing field, a
 // missing signature or an unusable domain is not "probably fine" - the caller names it with a code.
