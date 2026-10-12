@@ -23,4 +23,7 @@ export {
 export { createHalves } from "../../engine/atomic/halves.js";
 export { createDleq2 } from "../../engine/atomic/dleq2.js";
 
+// THE SWEEP SIDE: the spend keys a revealed half yields, and the scalar a Monero hex string carries.
+export { scalarFromMoneroHex, spendKeysFromRevealedHalf } from "../../engine/monero/halvesSweep.js";
+
 export { SELL_WINDOW, sellWindowSec } from "../../engine/core/sellWindow.js";

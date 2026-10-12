@@ -1402,7 +1402,8 @@ export const ENTRY_SYMBOLS = {
     file: ["src", "public", "xmr.mjs"],
     symbols: ["PREFIX_BY_NETWORK", "addressForNetwork", "addressFromKeys", "addressPayload", "checkAddress",
       "decodeMoneroBase58", "encodeMoneroBase58", "formatCheck", "isStagenetShaped", "networkFromShape",
-      "prefixFor", "createHalves", "createDleq2", "SELL_WINDOW", "sellWindowSec"],
+      "prefixFor", "createHalves", "createDleq2", "SELL_WINDOW", "sellWindowSec", "scalarFromMoneroHex",
+      "spendKeysFromRevealedHalf"],
   },
   "./order": {
     file: ["src", "public", "order.mjs"],
@@ -1422,6 +1423,11 @@ export const ENTRY_SYMBOLS = {
   "./core": {
     file: ["src", "public", "core.mjs"],
     symbols: ["parseAmount"],
+  },
+  "./recovery": {
+    file: ["src", "public", "recovery.mjs"],
+    symbols: ["ENVELOPE_VERSION", "FILE_MAGIC", "PAYLOAD_VERSION", "buildPayload", "createRecoveryFile",
+      "decryptFile", "encryptPayload", "envelopeAad", "recoveryFileName", "scanStartHeight", "validatePayload"],
   },
 };
 

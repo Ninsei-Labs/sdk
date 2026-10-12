@@ -1,3 +1,29 @@
+## 0.42.0 — 2026-10-12
+
+EVERY ENTRY THIS PACKAGE PUBLISHES CARRIES ITS OWN DECLARATIONS, AND THE SWEEP PAGE'S TWO PRIMITIVES ARE ON
+`./xmr`. A node that imported a subpath got no types at all - only the root had them - while a sweep page kept its
+own copies of two rules the engine already carries. Both are closed here.
+
+- `./xmr`, `./order`, `./evm`, `./core` and `./recovery` each carry a declaration file next to their barrel
+  (`src/public/<entry>.d.ts`) declaring exactly the symbols that barrel re-exports, with the signatures read off the
+  engine modules. `./recovery` opens the recovery file a sweep page reads back: `ENVELOPE_VERSION`, `FILE_MAGIC`,
+  `PAYLOAD_VERSION`, `createRecoveryFile`, `decryptFile`, `scanStartHeight` and the rest of its 11 symbols.
+- `./xmr` gains the sweep side: `spendKeysFromRevealedHalf` (the spend and view keys a revealed half yields, with the
+  check that `(s_a + s_b)*G` equals the order's public spend key before anything is swept) and `scalarFromMoneroHex`
+  (a Monero-notation key read as a number, never through `BigInt("0x" + key)`, which reverses the byte order).
+- A `types` check keeps the declarations and the runtime equal in both directions: every subpath with an import or
+  default target must declare `types` (a subpath left without them must be named, with its reason, in the check's own
+  table - `./adapters` is), the declared file must exist and read as declarations, and every symbol the barrel
+  re-exports must be declared, and nothing else. `tools/check-types-teeth.mjs` is its breaking run: four patches, each
+  RED with its own named reason, each file restored byte for byte.
+- `SDK_VERSION` is baked into `src/version.mjs` from `package.json` by `npm run sync:version`: a page cannot fetch
+  `package.json`, so the version is a value in the code, and the `version` check refuses a mismatch and refuses a
+  runtime read of the file. `engines.node` moves to `>=22`.
+- `RouteRefusalCode` declares all 33 codes the four route providers refuse with, and a `refusals` check refuses to let
+  the provider tables and the type drift apart in either direction.
+
+Nothing that already existed changed behaviour: the synchronous swap path is untouched.
+
 ## 0.41.0 — 2026-10-11
 
 THE DEPOSITOR PATH IS GONE. The factory no longer offers `createOrderAndFundByDepositor`, so the package must

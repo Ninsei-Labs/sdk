@@ -3,7 +3,8 @@
 // src/public/xmr.mjs only NAMES what the engine already offers; these declarations NAME the same thing for a
 // TypeScript consumer. Every signature is copied from the modules the barrel re-exports
 // (`../../engine/monero/address.js`, `../../engine/atomic/halves.js`, `../../engine/atomic/dleq2.js`,
-// `../../engine/core/sellWindow.js`), and a symbol the barrel does not re-export is not declared here.
+// `../../engine/monero/halvesSweep.js`, `../../engine/core/sellWindow.js`), and a symbol the barrel does not
+// re-export is not declared here.
 //
 // THE PRIMITIVES ARE HANDED IN, NOT IMPORTED. These modules pull no dependencies of their own: the curve and hash
 // libraries arrive as arguments, so the types below describe the MEMBERS THE ENGINE CALLS. A real
@@ -254,6 +255,46 @@ export interface Dleq2 {
 
 /** Creates the DLEQ module from the five primitives. Without SHA3-512 it refuses immediately. */
 export declare function createDleq2(primitives: Dleq2Primitives): Dleq2;
+
+/**
+ * What sweeping from a revealed half is handed: the half maths, this side's two halves as the file carries them,
+ * the counterparty's public spend key and view half, and the half the counterparty revealed.
+ */
+export interface SpendKeysFromRevealedHalfRequest {
+  readonly halves: Halves;
+  /** This side's spend half, from the file: it arrives as a string and is converted before any arithmetic. */
+  readonly ownSpendHalf: string | number | bigint;
+  /** This side's view half, from the file. */
+  readonly ownViewHalf: string | number | bigint;
+  /** The counterparty's public spend key, hex: the point the order carried. */
+  readonly otherSpendPoint: string;
+  /** The counterparty's view half, hex. */
+  readonly otherViewHalf: string | number | bigint;
+  /** The revealed half, hex. */
+  readonly revealedHalf: string | number | bigint;
+}
+
+/** The two private keys a sweep writes with, in Monero notation: 64 hex, least significant byte first. */
+export interface SpendKeys {
+  readonly privateSpendKey: string;
+  readonly privateViewKey: string;
+}
+
+/**
+ * The spend and view keys a revealed half yields, or a THROW when the half does not belong to this order.
+ *
+ * The commitment only proves that the HASH of the revealed half matched the order, and ed25519 does not exist in
+ * the EVM, so the check that `(s_a + s_b)*G` equals the order's public spend key happens HERE, before any
+ * synchronisation: a half from another order, or a substituted one, yields no keys.
+ */
+export declare function spendKeysFromRevealedHalf(request: SpendKeysFromRevealedHalfRequest): SpendKeys;
+
+/**
+ * A Monero-notation key read as a number: 64 hex, least significant byte first. A key that is not in that notation
+ * is refused rather than reinterpreted - `BigInt("0x" + key)` silently reverses the byte order and gives another
+ * scalar.
+ */
+export declare function scalarFromMoneroHex(hex: string): bigint;
 
 /**
  * The XMR sell window: the SOFT on-screen promise (how long the provider holds the price) and the HARD contract
