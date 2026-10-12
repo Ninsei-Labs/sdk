@@ -20,6 +20,8 @@
     "check:secrets": "node tools/check.mjs --only=secrets",
     "check:types": "node tools/check.mjs --only=types",
     "check:types-teeth": "node tools/check-types-teeth.mjs",
+    "check:refusals": "node tools/check.mjs --only=refusals",
+    "check:refusals-teeth": "node tools/check-refusals-teeth.mjs",
     "check:sweep": "node tools/sweep-refusal.test.mjs", "sync:version": "node tools/sync-version.mjs"
   },
   "types": "./index.d.ts",
