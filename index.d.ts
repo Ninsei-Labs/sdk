@@ -1373,6 +1373,7 @@ export declare class SdkError extends Error {
 }
 
 /** The step codes the SDK works with (`state.step`): the same list as the `StepCode` type. */
+export declare const SDK_VERSION: string;
 export declare const STEP_CODES: readonly StepCode[];
 /** The check codes a preflight verdict names (`checks[].code`): the same list as the `CheckCode` type. */
 export declare const CHECK_CODES: readonly CheckCode[];

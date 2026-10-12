@@ -1392,6 +1392,104 @@ export const uniswapRelayRefusalCheck = async () => {
 // RUNNER
 // ---------------------------------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------------------------------
+// 16. ENTRIES - every subpath this package declares points at a file that loads and exports what it promises.
+// ---------------------------------------------------------------------------------------------------
+
+/** What each declared subpath must export. The list is the contract with a consumer that is not the browser. */
+export const ENTRY_SYMBOLS = {
+  "./xmr": {
+    file: ["src", "public", "xmr.mjs"],
+    symbols: ["PREFIX_BY_NETWORK", "addressForNetwork", "addressFromKeys", "addressPayload", "checkAddress",
+      "decodeMoneroBase58", "encodeMoneroBase58", "formatCheck", "isStagenetShaped", "networkFromShape",
+      "prefixFor", "createHalves", "createDleq2", "SELL_WINDOW", "sellWindowSec"],
+  },
+  "./order": {
+    file: ["src", "public", "order.mjs"],
+    symbols: ["ORDER_CONTEXT_VERSION", "orderContextString", "halfCommitmentHex", "EIP712_DOMAIN_TYPE",
+      "ORDER_QUOTE_DOMAIN_NAME", "ORDER_QUOTE_DOMAIN_VERSION", "ORDER_QUOTE_FIELDS", "ORDER_QUOTE_TYPE",
+      "ORDER_QUOTE_VERSION", "quoteDigest", "quoteDomainSeparator", "quoteMissingFields", "quoteStructHash",
+      "recoverQuoteKey", "signQuoteDigest"],
+  },
+  "./evm": {
+    file: ["src", "public", "evm.mjs"],
+    symbols: ["FACTORY_METHODS", "FACTORY_READS", "ORDER_CREATED_TOPIC", "QUOTE_FIELDS", "encodePredict",
+      "encodeCreateOrderAndFund", "encodeFactoryRead",
+      "decodeImplementationCodeHash", "verifyFactoryImplementationOnChain", "CLAIM_GAS_LIMIT",
+      "CLAIM_TIP_FLOOR_WEI", "DEFAULT_GIFT_RESERVE_BPS", "claimGasGiftWei", "claimMaxFeePerGasWei",
+      "claimRequiredWei"],
+  },
+  "./core": {
+    file: ["src", "public", "core.mjs"],
+    symbols: ["parseAmount"],
+  },
+};
+
+export const entriesCheck = async () => {
+  const pkg = JSON.parse(read(p("package.json")));
+  const declared = pkg.exports && typeof pkg.exports === "object" ? pkg.exports : {};
+  const problems = [];
+  const notes = [];
+
+  for (const [entry, spec] of Object.entries(ENTRY_SYMBOLS)) {
+    const target = declared[entry];
+    if (!target) {
+      problems.push(`package.json declares no "${entry}" export, but its symbols are promised`);
+      continue;
+    }
+    const file = target.import || target.default;
+    if (typeof file !== "string") {
+      problems.push(`"${entry}" declares neither "import" nor "default"`);
+      continue;
+    }
+    if (!existsSync(p(...file.replace(/^\.\//, "").split("/")))) {
+      problems.push(`"${entry}" points at ${file}, which is not in the package`);
+      continue;
+    }
+    let mod;
+    try {
+      mod = await import(pathToFileURL(p(...file.replace(/^\.\//, "").split("/"))).href + "?v=" + Date.now());
+    } catch (error) {
+      problems.push(`"${entry}" did not load: ${error && error.message}`);
+      continue;
+    }
+    const missing = spec.symbols.filter((name) => !(name in mod));
+    if (missing.length) problems.push(`"${entry}" does not export ${missing.join(", ")}`);
+    else notes.push(`"${entry}": ${spec.symbols.length} symbols, all present`);
+  }
+
+  return { note: `${Object.keys(ENTRY_SYMBOLS).length} subpath entries load and export what they promise`, problems, notes };
+};
+
+// ---------------------------------------------------------------------------------------------------
+// 17. VERSION - the constant a peer reads equals the version the package is published under.
+// ---------------------------------------------------------------------------------------------------
+
+export const versionCheck = async () => {
+  const pkg = JSON.parse(read(p("package.json")));
+  const problems = [];
+  const source = read(p("src", "version.mjs"));
+  // BAKED, NOT FETCHED: the constant must be in the code, and must not turn into a runtime read of package.json.
+  if (/from\s+["'][^"']*package\.json["']/.test(source) || /require\(\s*["'][^"']*package\.json["']/.test(source)) {
+    problems.push("src/version.mjs reads package.json at runtime: in a browser that is a fetch of a file that need not be served beside the bundle - the version must be baked in");
+  }
+  let mod;
+  try {
+    mod = await import(pathToFileURL(p("src", "version.mjs")).href + "?v=" + Date.now());
+  } catch (error) {
+    return { note: "src/version.mjs did not load", problems: [`src/version.mjs: ${error && error.message}`] };
+  }
+  if (!/^\d+\.\d+\.\d+/.test(String(mod.SDK_VERSION))) {
+    problems.push(`SDK_VERSION is not a version: ${JSON.stringify(mod.SDK_VERSION)}`);
+  } else if (mod.SDK_VERSION !== pkg.version) {
+    problems.push(`SDK_VERSION says "${mod.SDK_VERSION}" while package.json says "${pkg.version}" - run npm run sync:version`);
+  }
+  const root = read(p("src", "index.mjs"));
+  if (!/SDK_VERSION/.test(root)) problems.push("src/index.mjs does not re-export SDK_VERSION, so a client cannot read it from the entry point");
+  if (!/declare const SDK_VERSION/.test(read(p("index.d.ts")))) problems.push("index.d.ts does not declare SDK_VERSION");
+  return { note: `SDK_VERSION "${mod.SDK_VERSION}" is baked in and equals package.json`, problems, notes: [] };
+};
+
 const CHECKS = {
   syntax: syntaxCheck,
   import: importCheck,
@@ -1408,6 +1506,8 @@ const CHECKS = {
   "uniswap-relay": uniswapRelayCheck,
   "uniswap-relay-refusal": uniswapRelayRefusalCheck,
   compose: composeCheck,
+  entries: entriesCheck,
+  version: versionCheck,
 };
 
 export const runCheck = async (name) => {

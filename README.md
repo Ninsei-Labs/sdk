@@ -209,3 +209,7 @@ The tag is passed to `npm publish` explicitly (`--tag <tag>`), and `tools/npm-ta
 can go wrong **by name** - a prerelease that would take `latest`, and a plain version that would slide into a
 channel someone else owns. A manual run of the release workflow may override the tag with an input; when it does,
 the log says so. The derivation and its refusals are covered by `node tools/npm-tag.test.mjs`.
+
+Before the tag, the version constant moves with the version: `npm run sync:version` writes `src/version.mjs` from
+`package.json`. The number is BAKED into the code on purpose - a page cannot fetch `package.json`, and the file
+need not be served beside a bundle - so `npm run check` refuses both a mismatch and a runtime read of it.

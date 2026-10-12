@@ -270,6 +270,7 @@ export function createNinsei(options) {
 }
 
 export { SdkError, ERROR_CODES, STEP_CODES, CHECK_CODES };
+export { SDK_VERSION } from "./version.mjs";
 
 // THE LEVEL WALK IS ON THE PACKAGE SURFACE. A maker publishes a level set (chunks of volume with their own prices)
 // and both the node and the client compute a firm price by WALKING it - the client must reach the SAME price before
