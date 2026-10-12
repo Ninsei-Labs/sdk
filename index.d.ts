@@ -1567,7 +1567,7 @@ export declare function createNinsei(options: NinseiOptions): Ninsei;
 /**
  * THE LEVEL WALK. A maker publishes a LEVEL SET - chunks of volume with their own prices - and both the node and
  * the client compute a firm price by WALKING it, before anything is signed. `levelsWalkSpec.mjs` is the ONE
- * implementation, a byte-identical twin of the node's copy (`rfq/lib/levelsWalkSpec.mjs`), and it is exported so a
+ * implementation, taken from the package entry by the node rather than copied, and it is exported so a
  * consumer reaches the same price: the maker's set in, the walk's answer out.
  *
  * NUMBERS ARE INTEGERS, BigInt ONLY. XMR is in atomic units (1 XMR = 1e12); a price is in the asset's atomic units
