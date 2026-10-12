@@ -30,12 +30,38 @@ import * as xmrArrival from "./xmr-arrival.mjs";
 // vocabulary live in one module, so this file names the state instead of re-reading the two.
 import { declineOf, logReaderOf, blockBoundaryOf, DECLINED_TOPIC0, DECLINED_TERMINAL, DECLINED_CODE } from "./decline.mjs";
 
-// The engine's terminal states -> the contract's codes. An unknown kind is not invented: it comes as "closed".
-// `declined` IS OURS AND NOT THE ENGINE'S (issue #40): the engine cannot tell a decline from a refund - the escrow
-// reads `refunded` either way - so the SDK writes this settlement into the record when it SEES the decline
-// (src/decline.mjs), and from then on every surface that reads the record reports the state without asking again.
-const TERMINAL = { success: "success", refunded: "refunded_eth", xmr_returned: "xmr_returned", closed: "closed",
-  [DECLINED_TERMINAL]: DECLINED_TERMINAL };
+// THE ENGINE'S SETTLEMENT KINDS -> THE CONTRACT'S CODES: THE KEY IS THE KIND THE ENGINE REALLY WRITES.
+//
+// The map used to be keyed by names no code path writes - `refunded` for a refund (the engine writes
+// `kind: "refund_eth"`), and `xmr_returned` and `closed`, for which no settlement with that kind is written
+// anywhere in the engine or in this package. A REFUND therefore never met its key and fell into the fallback:
+// get/list/progress told the app `closed` about an order whose ETH was already back in the wallet - the very
+// distinction that became load-bearing once the maker's decline was made a state of its own (issue #40).
+//
+// WHAT CAN BE A KIND, EXHAUSTIVELY. The record's settlement belongs to the engine (engine/core/swap.js, the only
+// module that assigns swap.settlement), and `declined` is the one kind written by us (src/decline.mjs):
+//   `success`    - the swap completed and the XMR is on the depositor's address (sweepNow, the auto-sweep in the
+//                  ticker, and the backend-reported sweep on the live path);
+//   `refund_eth` - the ETH went back to the depositor. TWO WRITERS, ONE KIND: the person's own refund (refundEth)
+//                  and the watchtower inside the ticker both write `kind: "refund_eth"` with the phase
+//                  `refunded_eth`, so there is exactly ONE refund-shaped kind here and nothing is collapsed;
+//   `declined`   - the maker refused a funded order. Not the engine's: the escrow reads `refunded` either way, so
+//                  the engine cannot tell a decline from a refund, and the SDK writes this kind itself when it SEES
+//                  the decline (src/decline.mjs). From then on every surface that reads the record reports it
+//                  without asking the chain again.
+//
+// AND WHAT IS NOT A KEY: an unknown kind is named, not invented - it comes out as "closed", the fallback in
+// toState below, which is why `closed` is a code here and not a key (no settlement carries that kind; the string
+// `closed` in the engine is the XMR SESSION's status vocabulary, not a settlement). The declared code
+// `xmr_returned` has no writer either: the engine keeps the phase (swap.js, TERMINAL.xmr_returned, "Swap
+// cancelled, funds returned"), but that situation - the maker took the XMR back without a ready mark - is DERIVED
+// (xmrReclaimed plus the phase refund_available) and the swap stays live until the ETH is refunded. Both facts are
+// asserted by the `terminal` check rather than left to a reader.
+const TERMINAL = {
+  success: "success",
+  refund_eth: "refunded_eth",
+  [DECLINED_TERMINAL]: DECLINED_TERMINAL,
+};
 
 const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
 

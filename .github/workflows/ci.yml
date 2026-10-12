@@ -90,6 +90,19 @@ jobs:
       - name: Break the decline guard (RED, then restored)
         run: pnpm run check:decline-teeth
 
+      # THE TERMINAL STATE A SWAP ENDS IN (issue #40's family): the map in src/swaps.mjs is keyed by the kinds the
+      # engine really writes - a REFUND is `kind: "refund_eth"`, and it used to be reported to the app as the
+      # fallback `closed` - and a refund driven to the end by both of its writers (the depositor's own and the
+      # watchtower's) must come back as `refunded_eth`.
+      - name: Check the terminal states (a refund reports its own state, not the fallback)
+        run: pnpm run check:terminal
+
+      # And that guard is exercised on deliberately broken files: the dead key put back, the refund's code sent to
+      # another declared code, a key nothing writes, the decline's own key dropped and a rename in the engine's
+      # mirror - each RED with its own reason, every file restored byte for byte.
+      - name: Break the terminal-states guard (RED, then restored)
+        run: pnpm run check:terminal-teeth
+
       # The release workflow's tag rule is a decision, so it is exercised on every change, not only at release time.
       - name: Check the release tag rule (version -> npm dist-tag)
         run: node tools/npm-tag.test.mjs
