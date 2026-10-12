@@ -13,7 +13,10 @@ export const STEP_CODES = [
   "swept",
 ];
 
-export const TERMINAL_CODES = ["success", "refunded_eth", "xmr_returned", "closed"];
+// `declined` IS A TERMINAL STATE OF ITS OWN (issue #40): the maker refused a funded order, so the whole balance -
+// the fee included - is already back in the depositor's wallet and NO half was revealed. It is told apart from
+// `refunded_eth`, which is the depositor taking the ETH back and DOES reveal a half (src/decline.mjs).
+export const TERMINAL_CODES = ["success", "refunded_eth", "xmr_returned", "closed", "declined"];
 
 export const CHECK_CODES = [
   "balance",

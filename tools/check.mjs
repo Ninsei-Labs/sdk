@@ -23,6 +23,10 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, w
 import { tmpdir } from "node:os";
 import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+// AN INDEPENDENT KECCAK-256 FOR THE DECLINE CHECK (issue #40): the topic of the escrow's `Declined` event is
+// pinned as a literal AND recomputed with THIS implementation, while the module under test computes it with
+// @noble/hashes - two implementations agreeing is a cross-check, one agreeing with itself is not.
+import keccakPkg from "keccak256";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const p = (...parts) => join(ROOT, ...parts);
@@ -1755,6 +1759,281 @@ export const refusalsCheck = () => {
     : { note: `${declared.size} route refusal codes declared (${sizes.join(", ")}), tables and type agree, the type is used ${references} time(s) outside its own declaration, the four tables are declared \`readonly RouteRefusalCode[]\``, problems, notes };
 };
 
+// ---------------------------------------------------------------------------------------------------
+// 15. DECLINE - THE MAKER'S REFUSAL IS A STATE OF ITS OWN (issue #40): it is told apart from an ordinary
+//     refund by the ESCROW'S `Declined` EVENT or by the NODE'S `declined` + `compliance` STATUS, either
+//     source stops the wait for XMR AT ONCE, no recovery file and no manual refund are offered for an order
+//     with nothing to recover, and NO reason, category or provider travels with it.
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * THE ADDRESSES OF THIS CHECK ARE MADE UP, as everywhere in this repository: a repeated byte, nothing that
+ * exists. No key, wallet or contract of anybody's is named here.
+ */
+export const DECLINE_ESCROW = "0x" + "e5".repeat(20);
+export const DECLINE_OTHER = "0x" + "d4".repeat(20);
+
+/**
+ * THE EVENT'S TOPIC, PINNED AS A LITERAL AND CROSS-CHECKED AGAINST AN INDEPENDENT HASH. The literal pins the
+ * event's NAME AND ARGUMENTS (`Declined(address)`): if either drifts, the topic moves and this fails rather than
+ * silently asking the chain for an event the contract never emits. The hash is recomputed with the `keccak256`
+ * PACKAGE - a different implementation from the one the module itself uses (@noble/hashes) - so the two agree by
+ * computation and not by the module simply agreeing with itself.
+ */
+const DECLINED_TOPIC0_PINNED = "0x8ec308f26d5905485eab9f8aae0b20ed896f8a33c64301a62e29318be049deb9";
+const independentTopic0 = (signature) => "0x" + keccakPkg(Buffer.from(signature, "utf8")).toString("hex");
+
+/** A log as a node answers it: an emitter, its topics and its data. */
+const logFrom = (address, topic0) => ({ address, topics: [topic0], data: "0x" });
+
+/** A NORMAL REFUND'S ON-CHAIN FOOTPRINT: `HalfRevealed` and NOT `Declined` - the control the guard is read against. */
+const HALF_REVEALED_TOPIC0 = "0x" + "aa".repeat(32);
+
+/**
+ * THE KEYS A DECLINE MUST NOT CARRY, ANYWHERE IN ITS ANSWER. The node returns `{ status: "declined", code:
+ * "compliance" }` and NOTHING ELSE, on purpose: no reason, no category, no provider. A key that would let an
+ * interface say why (rather than only that) is exactly what this refuses.
+ */
+const DECLINE_FORBIDDEN_KEYS = ["reason", "why", "category", "provider", "detail", "message", "cause", "refusedBy", "explain"];
+const keysDeep = (value, out = [], depth = 0) => {
+  if (depth > 4 || !value || typeof value !== "object") return out;
+  for (const [key, item] of Object.entries(value)) { out.push(key.toLowerCase()); keysDeep(item, out, depth + 1); }
+  return out;
+};
+
+/** A swap record for the decline to be read on: a LIVE order with an escrow and a funding height, nothing invented. */
+const declineRecord = (engine, { escrow = DECLINE_ESCROW, birthHeight = 12 } = {}) => {
+  const swap = engine.swap.createSwap({
+    side: "buy", chainMode: "live", network: "local-anvil",
+    payToken: "eth", payAmount: 0.01, xmrAmount: 0.5, rate: 2_000, fee: 0.1,
+    makerId: "check-maker", makerName: "check-maker", receiveAddress: "59DnddZzVBCevVg9YB3zCs24DSRH4ByS2FMBafPpYxSEB6FMegQNEbtNzbLjrrEUPNAg9NhK5uMiiAZpAvENBS4D4mEPcRq",
+  });
+  swap.escrow = { ...(swap.escrow || {}), address: escrow, birthHeight };
+  engine.swap.saveSwap(swap);
+  return swap;
+};
+
+/** The swaps facade over a stand-in service: `answers` is the queue of watch bodies, one per poll. */
+const declineFacade = (mod, { answers, logs = null }) => {
+  const seen = { polls: 0 };
+  const http = {
+    tryJson: async () => {
+      seen.polls += 1;
+      const body = answers.length > 1 ? answers.shift() : answers[0];
+      return { ok: true, status: 200, body };
+    },
+  };
+  const config = { route: (name, params) => "http://service.invalid/" + name + (params && params.id ? "/" + params.id : ""),
+    limits: { watchPollMs: 1, watchTimeoutMs: 25 } };
+  return { swaps: mod.createSwaps({ http, config, logs }), seen };
+};
+
+export const declineCheck = async () => {
+  const problems = [];
+  const notes = [];
+  const k = async (relative) => import(pathToFileURL(p(...relative.split("/"))).href);
+  const [engine, decline, flow, swapsMod] = await Promise.all([
+    k("src/engine.mjs"), k("src/decline.mjs"), k("src/swap-flow.mjs"), k("src/swaps.mjs"),
+  ]);
+  const at = 1_700_000_000_000;
+  // A WATCH THAT THROWS WHERE A DECLINE IS DUE IS A PROBLEM OF ITS OWN, AND IT IS NAMED AS ONE: the branch must
+  // RETURN the state rather than run on into a refusal. Catching it here is what keeps a broken branch from
+  // crashing the whole check with a stack trace that names nothing - the breaking runs would have nothing to read.
+  const watchOutcome = async (label, run) => {
+    try { return await run(); }
+    catch (error) {
+      problems.push(`${label} refused with ${JSON.stringify((error && error.code) || null)} instead of reporting the decline`);
+      return null;
+    }
+  };
+
+  // (a) THE EVENT'S IDENTITY. A literal topic, the module's own topic and an independently computed one must be
+  // one value; otherwise the chain would be asked for an event nobody emits.
+  const independent = independentTopic0(decline.DECLINE_EVENT_SIGNATURE());
+  if (decline.DECLINED_TOPIC0.toLowerCase() !== DECLINED_TOPIC0_PINNED) {
+    problems.push(`src/decline.mjs: the Declined topic is ${decline.DECLINED_TOPIC0}, the contract's event topic is ${DECLINED_TOPIC0_PINNED}`);
+  }
+  if (decline.DECLINE_EVENT_SIGNATURE() !== "Declined(address)") {
+    problems.push(`src/decline.mjs: the event signature reads "${decline.DECLINE_EVENT_SIGNATURE()}", not "Declined(address)"`);
+  }
+  if (independent.toLowerCase() !== DECLINED_TOPIC0_PINNED) {
+    problems.push(`the Declined topic is not keccak256("Declined(address)") as computed independently: ${independent}`);
+  }
+  if (DECLINED_TOPIC0_PINNED !== independentTopic0(decline.DECLINE_EVENT_SIGNATURE())) {
+    problems.push("the pinned Declined topic does not match the independently hashed event signature");
+  }
+  if (!decline.DECLINE_FIELDS.includes("terminal") || !decline.DECLINE_FIELDS.includes("code")) {
+    problems.push("src/decline.mjs: DECLINE_FIELDS does not carry the state and the node's code");
+  }
+  notes.push(`the Declined event's topic is ${DECLINED_TOPIC0_PINNED} - a literal, the module's own hash and keccak256("Declined(address)") from another implementation, all three equal`);
+
+  // (b) SOURCE 1 - THE ESCROW'S `Declined` EVENT, through the real read (`orderDecline`).
+  const calls = [];
+  const logReader = (request) => { calls.push(request); return Promise.resolve([logFrom(DECLINE_ESCROW, decline.DECLINED_TOPIC0)]); };
+  const fromEvent = await flow.orderDecline(DECLINE_ESCROW, { logs: logReader, fromBlock: 12, at });
+  if (!(fromEvent.declined === true && fromEvent.terminal === "declined" && fromEvent.source === "event" && fromEvent.code === "compliance")) {
+    problems.push(`a decline was not read from the escrow's Declined event: ${JSON.stringify(fromEvent)}`);
+  }
+  if (calls.length !== 1 || calls[0].address !== DECLINE_ESCROW
+      || !Array.isArray(calls[0].topics) || String(calls[0].topics[0]).toLowerCase() !== DECLINED_TOPIC0_PINNED
+      || calls[0].fromBlock !== "0xc" || calls[0].toBlock !== "latest") {
+    problems.push(`the escrow's event was read with the wrong filter: ${JSON.stringify(calls)}`);
+  }
+
+  // (c) THE CONTROL THAT MAKES (b) MEAN SOMETHING: an ORDINARY REFUND'S footprint - a `HalfRevealed` log, and a
+  // `Declined` log from ANOTHER escrow - must NOT be read as a decline.
+  const refundFootprint = await flow.orderDecline(DECLINE_ESCROW, { logs: () => Promise.resolve([
+    logFrom(DECLINE_ESCROW, HALF_REVEALED_TOPIC0), logFrom(DECLINE_OTHER, decline.DECLINED_TOPIC0),
+  ]) });
+  if (refundFootprint.declined !== false || refundFootprint.checked !== true) {
+    problems.push(`a refunded escrow was read as a decline (or as unread): ${JSON.stringify(refundFootprint)}`);
+  }
+  // And an answer that is not a list of logs is a REFUSAL, never "no decline".
+  let notAList = null;
+  try { await flow.orderDecline(DECLINE_ESCROW, { logs: () => Promise.resolve("nope") }); }
+  catch (error) { notAList = error; }
+  if (!(notAList && notAList.code === "bad-input")) {
+    problems.push(`an answer that is not a list of logs did not refuse with bad-input: ${JSON.stringify({ code: (notAList && notAList.code) || null })}`);
+  }
+
+  // (d) SOURCE 2 - THE NODE'S STATUS `declined` WITH THE CODE `compliance`, through the real watch. THE WAIT MUST
+  // STOP AT ONCE: one poll, no timeout, and the state written into the record.
+  const declinedRecord = declineRecord(engine);
+  const wire = declineFacade(swapsMod, { answers: [{ status: "declined", code: "compliance", id: "w" }], logs: () => Promise.resolve([]) });
+  const wireOutcome = await watchOutcome("the watch on the node's declined status",
+    () => wire.swaps.watch({ id: declinedRecord.id, escrow: DECLINE_ESCROW, pollMs: 1, timeoutMs: 25 }));
+  if (!(wireOutcome && wireOutcome.declined === true && wireOutcome.terminal === "declined" && wireOutcome.code === "compliance"
+        && wireOutcome.source === "status" && wireOutcome.seen === false)) {
+    problems.push(`the node's declined status did not end the wait as a decline: ${JSON.stringify(wireOutcome)}`);
+  }
+  if (wire.seen.polls !== 1) {
+    problems.push(`the wait was not stopped at once on the node's declined status: ${wire.seen.polls} poll(s) instead of 1`);
+  }
+
+  // (d2) SOURCE 1 AT THE WATCH LEVEL TOO - the escrow's event stops the wait even when the service says nothing.
+  const eventRecord = declineRecord(engine, { escrow: DECLINE_ESCROW });
+  const chainOnly = declineFacade(swapsMod, {
+    answers: [{ status: "awaiting_funding", receivedXmr: 0, id: "w2" }],
+    logs: () => Promise.resolve([logFrom(DECLINE_ESCROW, decline.DECLINED_TOPIC0)]),
+  });
+  const chainOutcome = await watchOutcome("the watch on the escrow's Declined event",
+    () => chainOnly.swaps.watch({ id: eventRecord.id, escrow: DECLINE_ESCROW, pollMs: 1, timeoutMs: 25 }));
+  if (!(chainOutcome && chainOutcome.declined === true && chainOutcome.source === "event")) {
+    problems.push(`the escrow's Declined event did not stop the wait: ${JSON.stringify(chainOutcome)}`);
+  }
+
+  // (e) THE CONTROLS THAT KEEP (d) HONEST. A swap that simply has no XMR yet must STILL time out (the decline does
+  // not end every wait), a bare `declined` WITHOUT the node's code must not count, and the locked-funds state must
+  // keep its own refusal.
+  const plainRecord = declineRecord(engine);
+  const plain = declineFacade(swapsMod, { answers: [{ status: "awaiting_funding", receivedXmr: 0, id: "w3" }], logs: () => Promise.resolve([]) });
+  let plainRefusal = null;
+  try { await plain.swaps.watch({ id: plainRecord.id, escrow: DECLINE_ESCROW, pollMs: 1, timeoutMs: 20 }); }
+  catch (error) { plainRefusal = error; }
+  if (!(plainRefusal && plainRefusal.code === "xmr-timeout")) {
+    problems.push(`an ordinary wait did not end as xmr-timeout: ${JSON.stringify({ code: (plainRefusal && plainRefusal.code) || null })}`);
+  }
+  if (plain.seen.polls < 2) {
+    problems.push(`an ordinary wait stopped after ${plain.seen.polls} poll(s): the decline branch is not conditional`);
+  }
+  // A BARE `declined` WITHOUT THE NODE'S CODE IS NOT THE STATE THE NODE NAMES: it is an answer that is not a watch
+  // response at all (no `receivedXmr` in it), so the watch names THAT and no decline is written down.
+  const bareRecord = declineRecord(engine);
+  const bare = declineFacade(swapsMod, { answers: [{ status: "declined", id: "w4" }], logs: () => Promise.resolve([]) });
+  let bareRefusal = null;
+  try { await bare.swaps.watch({ id: bareRecord.id, escrow: DECLINE_ESCROW, pollMs: 1, timeoutMs: 20 }); }
+  catch (error) { bareRefusal = error; }
+  if (!(bareRefusal && typeof bareRefusal.code === "string" && bareRefusal.code)) {
+    problems.push(`a status of "declined" WITHOUT the code "compliance" was not refused with a code: ${JSON.stringify({ code: (bareRefusal && bareRefusal.code) || null })}`);
+  }
+  if (engine.swap.getSwap(bareRecord.id).settlement) {
+    problems.push("a status of \"declined\" WITHOUT the code \"compliance\" was written into the record as a decline");
+  }
+  const lockedRecord = declineRecord(engine);
+  const locked = declineFacade(swapsMod, {
+    answers: [{ status: "xmr_locked", receivedXmr: 0, lockedXmr: 1, lockedUntil: { untilHeight: 9 }, id: "w5" }],
+    logs: () => Promise.resolve([]),
+  });
+  let lockedRefusal = null;
+  try { await locked.swaps.watch({ id: lockedRecord.id, escrow: DECLINE_ESCROW, pollMs: 1, timeoutMs: 20 }); }
+  catch (error) { lockedRefusal = error; }
+  if (!(lockedRefusal && lockedRefusal.code === "xmr-locked")) {
+    problems.push(`funds barred by unlock_time stopped being xmr-locked: ${JSON.stringify({ code: (lockedRefusal && lockedRefusal.code) || null })}`);
+  }
+
+  // (f) THE STATE, ONCE SEEN, IS WRITTEN INTO THE RECORD: every surface that reads the record reports the decline
+  // without asking the chain again - and the app can no longer offer a manual refund for an order that is over.
+  const stored = await swapsMod.toState(engine.swap.getSwap(declinedRecord.id));
+  if (stored.terminal !== "declined") {
+    problems.push(`the record of a declined swap does not report the state: ${JSON.stringify({ terminal: stored.terminal })}`);
+  }
+  if (!(stored.settled === true && stored.actions.markReady === false && stored.actions.sweep === false && stored.actions.refund === false)) {
+    problems.push(`a declined swap still offers an action or is not settled: ${JSON.stringify(stored.actions)} / settled=${stored.settled}`);
+  }
+  const settledRecord = engine.swap.getSwap(declinedRecord.id);
+  if (!(settledRecord.settlement && settledRecord.settlement.kind === "declined")) {
+    problems.push("the decline was not written into the swap record as its settlement");
+  }
+  // AND A LATER WATCH RETURNS IT AT ONCE, WITHOUT POLLING AT ALL (a page reload).
+  const afterReload = declineFacade(swapsMod, { answers: [{ status: "awaiting_funding", receivedXmr: 0, id: "w6" }], logs: () => Promise.resolve([]) });
+  const reloadOutcome = await watchOutcome("the watch after a reload",
+    () => afterReload.swaps.watch({ id: declinedRecord.id, escrow: DECLINE_ESCROW, pollMs: 1, timeoutMs: 25 }));
+  if (!(reloadOutcome && reloadOutcome.declined === true && reloadOutcome.source === "record" && afterReload.seen.polls === 0)) {
+    problems.push(`a reloaded watch did not return the recorded decline at once: ${JSON.stringify(reloadOutcome)} / polls=${afterReload.seen.polls}`);
+  }
+
+  // (g) THE CONTROL FOR (f): AN ORDINARY REFUND IS NOT A DECLINE, and neither is a live swap. A record settled by
+  // the engine's own refund keeps ITS terminal state (whatever the engine's kind translates to - a decline never
+  // rewrites it), and a swap with no settlement keeps `terminal: null`: the decline branch is specific, not
+  // "anything that is closed".
+  const refunded = declineRecord(engine);
+  refunded.settlement = { kind: "refund_eth", phase: "refunded_eth", atSim: 0, txHash: "0x" + "bb".repeat(32), by: "you" };
+  engine.swap.saveSwap(refunded);
+  const refundedState = await swapsMod.toState(engine.swap.getSwap(refunded.id));
+  if (refundedState.terminal === "declined" || refundedState.settled !== true) {
+    problems.push(`a refunded swap was reported as a decline (or as live): ${JSON.stringify({ terminal: refundedState.terminal, settled: refundedState.settled })}`);
+  }
+  if (engine.swap.getSwap(refunded.id).settlement.kind !== "refund_eth") {
+    problems.push("the settlement of an ordinary refund was rewritten");
+  }
+  const live = declineRecord(engine);
+  const liveState = await swapsMod.toState(engine.swap.getSwap(live.id));
+  if (liveState.terminal !== null || liveState.settled !== false) {
+    problems.push(`a live swap was given a terminal state: ${JSON.stringify({ terminal: liveState.terminal, settled: liveState.settled })}`);
+  }
+
+  // (h) WHAT THE APP IS TOLD, AND WHAT IT IS DELIBERATELY NOT TOLD. Exactly the declared fields, no key anywhere
+  // that would carry a reason, a category or a provider, and the node's code unchanged.
+  const verdicts = { fromEvent, fromWire: wireOutcome, fromChain: chainOutcome, fromRecord: reloadOutcome };
+  for (const [label, verdict] of Object.entries(verdicts)) {
+    if (!verdict || typeof verdict !== "object") continue;      // already named above as "refused instead"
+    const forbidden = keysDeep(verdict).filter((key) => DECLINE_FORBIDDEN_KEYS.includes(key));
+    if (forbidden.length) problems.push(`the ${label} answer carries ${forbidden.join(", ")}: the node names no reason, category or provider, and neither may the SDK`);
+    if (verdict.code !== "compliance") problems.push(`the ${label} answer carries the code ${JSON.stringify(verdict.code)} instead of the node's own compliance`);
+  }
+  const declared = [...decline.DECLINE_FIELDS].sort().join(",");
+  const reported = Object.keys(fromEvent).sort().join(",");
+  if (declared !== reported) {
+    problems.push(`the decline is reported with the fields [${reported}], not with the declared set [${declared}]`);
+  }
+  const watchDeclared = ["address", "at", "chain", "code", "declined", "escrow", "id", "seen", "source", "terminal", "waitedMs"].sort().join(",");
+  const watchShape = chainOutcome ? Object.keys(chainOutcome).sort().join(",") : "";
+  if (watchShape !== watchDeclared) {
+    problems.push(`the watch reports a decline with the fields [${watchShape}], not with the declared set [${watchDeclared}]`);
+  }
+  notes.push("the decline carries the state, the node's own `compliance` and WHERE it was seen - and no reason, category or provider, at any depth");
+  notes.push("an ordinary refund (a HalfRevealed footprint, or a record settled as refund_eth) is NOT a decline, a bare `declined` without its code is not one either, and a wait with no decline still ends as xmr-timeout");
+
+  const green = problems.length === 0;
+  return {
+    note: green
+      ? "2 sources (the escrow's Declined event, the node's declined+compliance status), the wait stops at once, the state is written down, no action and no reason offered"
+      : "the maker's decline is not handled as its own state",
+    problems,
+    notes,
+  };
+};
+
 const CHECKS = {
   syntax: syntaxCheck,
   import: importCheck,
@@ -1775,6 +2054,7 @@ const CHECKS = {
   types: typesCheck,
   version: versionCheck,
   refusals: refusalsCheck,
+  decline: declineCheck,
 };
 
 export const runCheck = async (name) => {

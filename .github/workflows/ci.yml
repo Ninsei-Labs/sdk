@@ -79,6 +79,17 @@ jobs:
       - name: Break the refusals guard (RED, then restored)
         run: pnpm run check:refusals-teeth
 
+      # THE MAKER'S DECLINE IS A STATE OF ITS OWN (issue #40): it is told apart from an ordinary refund by the
+      # escrow's `Declined` event or by the node's `declined` + `compliance` status, it stops the wait for XMR at
+      # once, it offers no recovery file and no manual refund - and it carries NO reason, category or provider.
+      - name: Check the maker's decline (a state of its own, not a refunded escrow)
+        run: pnpm run check:decline
+
+      # And that guard is exercised on deliberately broken files: the event source and the status source each have
+      # their own case, each RED with its own reason, every file restored byte for byte.
+      - name: Break the decline guard (RED, then restored)
+        run: pnpm run check:decline-teeth
+
       # The release workflow's tag rule is a decision, so it is exercised on every change, not only at release time.
       - name: Check the release tag rule (version -> npm dist-tag)
         run: node tools/npm-tag.test.mjs

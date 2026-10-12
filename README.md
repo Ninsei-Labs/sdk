@@ -20,7 +20,7 @@ machine). The wallet arrives as an EIP-1193 provider, storage as an adapter, and
 | `quotes.firm` | answers `not-implemented` (stage 2: signing with a key and the order protocol) |
 | `swaps.list` / `swaps.get` | read state from storage (and after a page reload) |
 | `swaps.start` | holds the order: guards → recovery file and the person's confirmation → order → locking funds → **recording with us and watching the Monero address**; returns the named state `step: "xmr-incoming"` |
-| `swaps.watch` | waits for XMR to arrive at the joint address with the same request as the page (`GET /swaps/{id}`): arrived — returns the fact (amount, confirmations, txid); did not wait — a refusal with the code `xmr-timeout`; already on the address but barred by `unlock_time` — a refusal with the code `xmr-locked` (the boundary is in `params.until`), and NO ready mark; with expectations and a wallet, places the ready mark after the arrival |
+| `swaps.watch` | waits for XMR to arrive at the joint address with the same request as the page (`GET /swaps/{id}`): arrived — returns the fact (amount, confirmations, txid); did not wait — a refusal with the code `xmr-timeout`; already on the address but barred by `unlock_time` — a refusal with the code `xmr-locked` (the boundary is in `params.until`), and NO ready mark; the maker DECLINED the order — returns `SwapDeclinedWatch` (`declined: true`, `terminal: "declined"`, the node's own `code`), with every action off; with expectations and a wallet, places the ready mark after the arrival |
 | `wallet.balances` | works: the native coin and tokens, in minimal units |
 
 What is not ready names itself with the code `not-implemented` with the fields `surface` and `stage`: an empty
@@ -74,7 +74,16 @@ user-facing string.
 | `claimed` | the maker took the ETH |
 | `swept` | the XMR has been sent to the recipient's address |
 
-Terminal states (`state.terminal`): `success`, `refunded_eth`, `xmr_returned`, `closed`.
+Terminal states (`state.terminal`): `success`, `refunded_eth`, `xmr_returned`, `closed`, `declined`.
+
+`declined` — THE MAKER REFUSED A FUNDED ORDER (issue #40). The escrow sets `refunded` and emits
+`Declined(claimer)`, so `status()` alone reads it exactly like any other refund; the SDK tells the two apart by
+that EVENT (the chain, read through `evmLogs`) or by the node's status `declined` with the code `compliance` (the
+wire). Either source stops the wait for XMR at once and ends the swap as `declined` with EVERY action off: the
+whole balance, the fee included, is already back in the wallet and no half was revealed, so there is nothing to
+recover — no recovery file is needed and no manual refund is offered. NO reason, category or provider travels
+with it (the node returns only `compliance`, on purpose), and the neutral sentence a person reads is the
+interface's: this package holds no user-facing string.
 
 ### Checks (`preflight().checks[].code`)
 
