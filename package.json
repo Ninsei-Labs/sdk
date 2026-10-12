@@ -18,6 +18,8 @@
     "check:mirror": "node tools/check.mjs --only=mirror",
     "check:pack": "node tools/check.mjs --only=pack",
     "check:secrets": "node tools/check.mjs --only=secrets",
+    "check:types": "node tools/check.mjs --only=types",
+    "check:types-teeth": "node tools/check-types-teeth.mjs",
     "check:sweep": "node tools/sweep-refusal.test.mjs", "sync:version": "node tools/sync-version.mjs"
   },
   "types": "./index.d.ts",
@@ -31,15 +33,19 @@
       "default": "./src/adapters/index.mjs"
     },
     "./xmr": {
+      "types": "./src/public/xmr.d.ts",
       "default": "./src/public/xmr.mjs"
     },
     "./order": {
+      "types": "./src/public/order.d.ts",
       "default": "./src/public/order.mjs"
     },
     "./evm": {
+      "types": "./src/public/evm.d.ts",
       "default": "./src/public/evm.mjs"
     },
     "./core": {
+      "types": "./src/public/core.d.ts",
       "default": "./src/public/core.mjs"
     }
   },

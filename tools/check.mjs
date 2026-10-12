@@ -1462,6 +1462,137 @@ export const entriesCheck = async () => {
 };
 
 // ---------------------------------------------------------------------------------------------------
+// 18. TYPES - every published subpath carries declarations, and they declare exactly what its barrel
+//     re-exports. A subpath WITHOUT a `types` target is invisible to a TypeScript consumer: it resolves to
+//     nothing at all, which is how the entry a node needs ends up as `any` in someone's editor.
+//
+// NO COMPILER IS AVAILABLE HERE. This package has three runtime dependencies, no devDependencies and no
+// TypeScript, so "parses" is a STRUCTURAL read of the declarations - balanced blocks, every `export` naming a
+// declaration, no name twice - the instrument the `surface` check already applies to index.d.ts. A real
+// compiler run belongs to the consumer's project, not to a zero-dependency battery.
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * Subpaths left WITHOUT declarations ON PURPOSE, each with its reason. This table is the whole exemption: a
+ * subpath that carries an import/default target and carries no `types` is a problem unless it is named here, so
+ * a new entry cannot slip in untyped.
+ */
+export const NO_TYPES = {
+  "./adapters": "re-exports the environment adapters the interface wires in itself (a wallet over EIP-1193, a storage, a Monero wallet library) - the entry surface a node needs is src/public/**, and declarations for the adapters are a separate piece of work",
+};
+
+/** The NAMED re-exports of a barrel, plus what cannot be enumerated: a star re-export and a default export. */
+export const barrelExports = (source) => {
+  const text = stripComments(source);
+  const names = new Set();
+  for (const m of text.matchAll(/\bexport\s*\{([^}]*)\}/g)) {
+    for (const part of m[1].split(",")) {
+      const name = part.trim().replace(/\s+as\s+/, " ").split(/\s+/).pop();
+      if (name) names.add(name);
+    }
+  }
+  for (const m of text.matchAll(/\bexport\s+(?:async\s+)?(?:function|const|let|var|class)\s+([A-Za-z_$][\w$]*)/g)) names.add(m[1]);
+  return {
+    names,
+    stars: [...text.matchAll(/\bexport\s*\*\s*(?:as\s+\w+\s*)?from/g)].length,
+    defaults: [...text.matchAll(/\bexport\s+default\b/g)].length,
+  };
+};
+
+/** The structural read of one declarations file. Every problem names the file and, where there is one, the line. */
+export const dtsProblems = (dts, label) => {
+  const problems = [];
+  // COMMENTS AND STRING LITERALS OUT FIRST: a brace inside either is not a block, and index.d.ts carries both
+  // in its doc comments.
+  const code = stripComments(dts).replace(/"(?:[^"\\]|\\.)*"/g, '""').replace(/'(?:[^'\\]|\\.)*'/g, "''");
+  for (const [open, close, what] of [["{", "}", "braces"], ["[", "]", "brackets"], ["(", ")", "parentheses"]]) {
+    const opened = (code.match(new RegExp("\\" + open, "g")) || []).length;
+    const closed = (code.match(new RegExp("\\" + close, "g")) || []).length;
+    if (opened !== closed) problems.push(`${label}: ${what} do not balance (${opened} "${open}" against ${closed} "${close}")`);
+  }
+  if (!declaredValueExports(code).size) problems.push(`${label}: declares no value`);
+  const counts = new Map();
+  for (const m of code.matchAll(/^export\s+(?:declare\s+)?(?:function|const|class|let|var)\s+([A-Za-z_$][\w$]*)/gm)) {
+    counts.set(m[1], (counts.get(m[1]) || 0) + 1);
+  }
+  for (const [name, times] of counts) if (times > 1) problems.push(`${label}: ${name} is declared ${times} times`);
+  // EVERY DECLARATION IS NAMED, AND OF A FORM THIS CONTRACT USES. A statement that lost its name, its terminator
+  // or its `declare` reads here as an `export` followed by something else.
+  for (const [index, line] of code.split("\n").entries()) {
+    const m = /^export\s+(\S+)/.exec(line);
+    if (m && !["declare", "type", "interface"].includes(m[1])) {
+      problems.push(`${label}:${index + 1}: "export ${m[1]}" is not a declaration form (declare, type or interface expected)`);
+    }
+  }
+  return problems;
+};
+
+export const typesCheck = () => {
+  const pkg = JSON.parse(read(p("package.json")));
+  const declaredExports = pkg.exports && typeof pkg.exports === "object" ? pkg.exports : {};
+  const problems = [];
+  const notes = [];
+  let typed = 0;
+  let symbols = 0;
+
+  for (const [subpath, entry] of Object.entries(declaredExports)) {
+    const object = entry && typeof entry === "object" ? entry : null;
+    const target = typeof entry === "string" ? entry : object ? object.import || object.default : null;
+    if (typeof target !== "string") {
+      notes.push(`"${subpath}": neither "import" nor "default" - there is no module to type`);
+      continue;
+    }
+
+    // (a) THE TYPES TARGET IS DECLARED. An exempt subpath is NAMED as exempt, never skipped in silence.
+    const types = object ? object.types : null;
+    if (typeof types !== "string") {
+      if (NO_TYPES[subpath]) notes.push(`"${subpath}": no types ON PURPOSE - ${NO_TYPES[subpath]}`);
+      else problems.push(`"${subpath}" points at ${target} and declares no "types": a TypeScript consumer gets no declarations for this subpath`);
+      continue;
+    }
+    typed += 1;
+
+    // (b) THE DECLARED FILE EXISTS AND READS AS DECLARATIONS.
+    const typesFile = p(...types.replace(/^\.\//, "").split("/"));
+    const barrelFile = p(...target.replace(/^\.\//, "").split("/"));
+    if (!existsSync(typesFile)) {
+      problems.push(`"${subpath}": the declared types file ${types} is not in the package`);
+      continue;
+    }
+    const dts = read(typesFile);
+    for (const problem of dtsProblems(dts, types)) problems.push(problem);
+    if (!existsSync(barrelFile)) {
+      problems.push(`"${subpath}": points at ${target}, which is not in the package, so ${types} cannot be compared with it`);
+      continue;
+    }
+
+    // (c) EVERY SYMBOL THE BARREL RE-EXPORTS IS DECLARED, AND NOTHING ELSE. Both ways, as the `surface` check
+    // reads the root: a declaration the runtime does not carry is the same lie as a missing one.
+    const barrel = barrelExports(read(barrelFile));
+    if (!barrel.names.size) problems.push(`${target}: re-exports no named symbol`);
+    for (const [what, count] of [["a star re-export", barrel.stars], ["a default export", barrel.defaults]]) {
+      if (count) problems.push(`${target}: carries ${count === 1 ? what : count + " of them"}, which cannot be enumerated - name the symbols explicitly so ${types} can be compared with them`);
+    }
+    const declaredValues = declaredValueExports(stripComments(dts));
+    const missing = [...barrel.names].filter((name) => !declaredValues.has(name)).sort();
+    const extra = [...declaredValues].filter((name) => !barrel.names.has(name)).sort();
+    if (missing.length) problems.push(`${types}: the barrel ${target} re-exports ${missing.join(", ")}, which the declarations omit`);
+    if (extra.length) problems.push(`${types}: declares ${extra.join(", ")}, which the barrel ${target} does not re-export`);
+    symbols += barrel.names.size;
+    if (!missing.length && !extra.length && barrel.names.size) notes.push(`"${subpath}": ${barrel.names.size} symbols, all declared in ${types}`);
+  }
+
+  const exempt = Object.keys(NO_TYPES).filter((subpath) => subpath in declaredExports);
+  if (exempt.length) notes.push(`${exempt.length} subpath deliberately without types, by name: ${exempt.join(", ")}`);
+  return {
+    note: `${typed}/${Object.keys(declaredExports).length} subpaths declare types, ${symbols} symbols declared`,
+    problems,
+    notes,
+  };
+};
+
+
+// ---------------------------------------------------------------------------------------------------
 // 17. VERSION - the constant a peer reads equals the version the package is published under.
 // ---------------------------------------------------------------------------------------------------
 
@@ -1550,6 +1681,7 @@ const CHECKS = {
   "uniswap-relay-refusal": uniswapRelayRefusalCheck,
   compose: composeCheck,
   entries: entriesCheck,
+  types: typesCheck,
   version: versionCheck,
   refusals: refusalsCheck,
 };
