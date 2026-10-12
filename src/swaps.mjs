@@ -25,9 +25,17 @@ import { primitives } from "./primitives.mjs";
 import { createActions } from "./actions.mjs";
 // THE XMR ARRIVAL CHECK ON TWO NODES (issue #85) - IN THE CORE, from the same mirrored rule and block parser.
 import * as xmrArrival from "./xmr-arrival.mjs";
+// THE MAKER'S DECLINE (issue #40): the escrow's `Declined` event and the node's `declined` + `compliance` status
+// are TWO independent sources of the same state, and either one is enough. The detectors and the neutral
+// vocabulary live in one module, so this file names the state instead of re-reading the two.
+import { declineOf, logReaderOf, blockBoundaryOf, DECLINED_TOPIC0, DECLINED_TERMINAL, DECLINED_CODE } from "./decline.mjs";
 
 // The engine's terminal states -> the contract's codes. An unknown kind is not invented: it comes as "closed".
-const TERMINAL = { success: "success", refunded: "refunded_eth", xmr_returned: "xmr_returned", closed: "closed" };
+// `declined` IS OURS AND NOT THE ENGINE'S (issue #40): the engine cannot tell a decline from a refund - the escrow
+// reads `refunded` either way - so the SDK writes this settlement into the record when it SEES the decline
+// (src/decline.mjs), and from then on every surface that reads the record reports the state without asking again.
+const TERMINAL = { success: "success", refunded: "refunded_eth", xmr_returned: "xmr_returned", closed: "closed",
+  [DECLINED_TERMINAL]: DECLINED_TERMINAL };
 
 const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
 
@@ -159,6 +167,10 @@ export function toState(swap) {
     });
   }
   const active = steps.find((s) => s.active) || [...steps].reverse().find((s) => s.done) || steps[0];
+  // THE TERMINAL STATE IS TRANSLATED ONCE, AND THE DECLINE IS READ OFF IT. A declined order is NOT a refunded
+  // one, and the difference is drawn here and in the action flags below, not left to the screen.
+  const terminal = d.terminal ? (TERMINAL[d.terminal.kind] ?? "closed") : null;
+  const declined = terminal === DECLINED_TERMINAL;
   const chain = swap.network || swap.chain || null;
   // The virtual machine is taken from the network registry. An unknown network has none, and "unknown" is more honest
   // than the network's name: it is visible in the state and does not turn into "probably EVM".
@@ -214,9 +226,16 @@ export function toState(swap) {
       status: d.phase || null,
       txs: (swap.escrow && (swap.escrow.txids || swap.escrow.txs)) || [],
     },
-    actions: { markReady: !!(d.can && d.can.ready), sweep: !!(d.can && d.can.sweep), refund: !!(d.can && d.can.refund) },
+    // A DECLINED ORDER OFFERS NOTHING, AND THAT IS THE POINT OF THE STATE (issue #40). The ETH - the fee
+    // included - is already back in the depositor's wallet and no half was revealed, so there is no ready mark to
+    // place, no XMR to sweep and NO REFUND TO SIGN: the flags are OFF rather than left to whatever the engine's
+    // `can` says about an order whose escrow merely reads `refunded`. The app needs no second source for "there
+    // is nothing to do": this state plus the terminal code says it.
+    actions: declined
+      ? { markReady: false, sweep: false, refund: false }
+      : { markReady: !!(d.can && d.can.ready), sweep: !!(d.can && d.can.sweep), refund: !!(d.can && d.can.refund) },
     simulated: { evm: !!(d.simulated && d.simulated.evm), xmr: !!(d.simulated && d.simulated.xmr) },
-    terminal: d.terminal ? (TERMINAL[d.terminal.kind] ?? "closed") : null,
+    terminal,
   };
 }
 
@@ -268,11 +287,18 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
   // The check on the ACTUAL sender is done in start() below, ONE place, right before the send - the wallet adapter
   // only HANDS OUT the current account (`address()`), it does not carry the policy.
   denylist = null,
-  watch: watchOptions = null } = {}) {
+  watch: watchOptions = null,
+  // THE CHAIN LOG READER FOR THE DECLINE CHECK (issue #40). A seam, as the chain read is: by default the logs are
+  // read through the page's wallet (`readDeclinedLogs`), and from outside a caller brings its own
+  // ({ address, topics, fromBlock, toBlock }) -> logs. It is a READ of the escrow's own event, not a node
+  // substitution - the address is the escrow of the swap being watched.
+  logs: chainLogs = null } = {}) {
   // WHAT READS THE CHAIN AT THE LOCK IS A SEAM, as in actions.mjs: by default the engine's read, from outside you can
   // substitute your own. Otherwise the lock step could not be checked beyond predicting the address - and "the address
   // from the receipt" would remain an argument on trust, not a verified property.
   const reader = typeof call === "function" ? call : engine.evm.readContract;
+  // THE SAME RULE FOR THE LOGS: one reader per facade, chosen once.
+  const logReader = logReaderOf(chainLogs);
   // MARKING READY GOES THROUGH THE SAME READ SEAM as the lock: checking the slots and signing must go one way,
   // otherwise part of the check goes past the wallet and part does not (see actions.mjs).
   const actions = createActions({ call: typeof call === "function" ? call : null });
@@ -880,10 +906,82 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         if (readyBy) xmrArrival.assertTimeForConfirmations({ readyBySec: readyBy, nowSec: Math.floor(Date.now() / 1000), minConfirmations, blockTimeSec: limitOf("xmrBlockTimeSec", 120) });
       }
       const started = Date.now();
+      // --- THE MAKER'S DECLINE: THE WAIT IS NOT STARTED AT ALL (issue #40). -------------------------------------
+      // A decline leaves the escrow `refunded`, so nothing in the state says "do not wait any longer": without
+      // this, the wait runs to its timeout and the app is told the generic `xmr-timeout` about an order that is
+      // CLOSED and whose ETH is already back - or, worse, the app offers the recovery file and a manual refund
+      // for money nobody can recover.
+      //
+      // THE DECLINE IS ASKED WITH TWO INDEPENDENT SOURCES AND EITHER ONE ENDS THE WAIT:
+      //   * THE CHAIN - the escrow's own `Declined` event, through the same log reader the rest of the core uses;
+      //   * THE WIRE - the status the service answers with (`declined` with the code `compliance`).
+      // A CHAIN READ THAT FAILS is neither a decline nor a refusal of the swap: the wait goes on and the wire may
+      // still answer. What the chain read did is carried out with the result (`chain.checked` / `chain.error`), so
+      // a broken reader is visible instead of silent.
+      // A STORAGE THAT CANNOT BE READ IS NOT A REASON TO REFUSE THE WAIT: the record is what makes the state
+      // durable, and the escrow may also arrive in the request. The watch is not a new user of the store - and it
+      // must not start failing where it did not before.
+      let record = null;
+      try { record = engine.swap.getSwap(id); } catch { record = null; }
+      const escrowAddress = request.escrow || (record && record.escrow && record.escrow.address) || null;
+      // FROM THE ESCROW'S BIRTH HEIGHT when the record knows it: the event cannot be older than the funding, and
+      // walking the whole chain every tick is a cost with no answer behind it.
+      const fromBlock = blockBoundaryOf(record && record.escrow ? record.escrow.birthHeight : null);
+      const chainDecline = { checked: false, error: null, logs: undefined };
+      const readDeclineLogs = async () => {
+        chainDecline.checked = false; chainDecline.error = null; chainDecline.logs = undefined;
+        // NO ESCROW KNOWN, NO CHAIN ANSWER: named, so `checked: false` is never a silent "nothing there".
+        if (!escrowAddress) { chainDecline.error = "no-escrow"; return; }
+        try {
+          chainDecline.logs = await logReader({ address: escrowAddress, topics: [DECLINED_TOPIC0], fromBlock, toBlock: "latest" });
+          chainDecline.checked = true;
+        } catch (error) {
+          chainDecline.error = (error && error.code) || "logs-unread";
+        }
+      };
+      // WRITTEN, NAMED, NOT INFERRED - the rule the record's destination follows too. The decline becomes the
+      // record's OWN settlement once, so later reads of the record report the same state without asking the chain
+      // again, and the state survives a page reload.
+      const settleDecline = (swap, at) => {
+        if (!swap || swap.settlement) return;
+        swap.settlement = { kind: DECLINED_TERMINAL, phase: DECLINED_TERMINAL, at };
+        try { engine.swap.saveSwap(swap); } catch { throw new SdkError("storage-unavailable", { step: "decline" }); }
+      };
+      // THE STATE THE WATCH REPORTS FOR A DECLINE: no arrival, the state's own code, the node's own token and
+      // WHERE it was seen ("event", "status", or "record" when it was already written down). NO reason, category
+      // or provider travels here - the node names none, and the sentence a person reads is the interface's.
+      const declineResult = ({ source, at, waitedMs, address, chainChecked, chainError }) => ({
+        id,
+        escrow: escrowAddress,
+        address: address || null,
+        seen: false,
+        declined: true,
+        terminal: DECLINED_TERMINAL,
+        code: DECLINED_CODE,
+        source,
+        at,
+        waitedMs,
+        chain: { checked: Boolean(chainChecked), error: chainError || null },
+      });
+      if (record && record.settlement && record.settlement.kind === DECLINED_TERMINAL) {
+        const at = Number(record.settlement.at);
+        return declineResult({ source: "record", at: Number.isFinite(at) ? at : Date.now(), waitedMs: 0,
+          address: null, chainChecked: false, chainError: null });
+      }
       let last = null;
       for (;;) {
+        await readDeclineLogs();
         const body = await readWatch(id);
         last = incomingOf(body);
+        // THE DECLINE IS DECIDED BEFORE THE ARRIVAL IS LOOKED AT, and before the "foreign response" refusal below:
+        // a declined swap's answer carries no `receivedXmr` at all, and refusing it as a bad response would name
+        // the wrong thing (the state is known - it is a decline, not a broken answer).
+        const declineNow = declineOf({ logs: chainDecline.logs, status: body, escrow: escrowAddress, at: Date.now() });
+        if (declineNow.declined) {
+          settleDecline(record, declineNow.at);
+          return declineResult({ source: declineNow.source, at: declineNow.at, waitedMs: Date.now() - started,
+            address: body && body.address, chainChecked: chainDecline.checked, chainError: chainDecline.error });
+        }
         // AN EMPTY OR FOREIGN RESPONSE IS NOT AN ARRIVAL: counting it as incoming would mean declaring money that was
         // never seen. This is a named refusal, not "let us wait some more".
         if (!last) throw new SdkError("server-unavailable", { step: "watch", why: "bad-response", id });

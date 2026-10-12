@@ -28,6 +28,10 @@
 // is the RULES, not the crypto.
 import { SdkError } from "./errors.mjs";
 import * as engine from "./engine.mjs";
+// THE MAKER'S DECLINE (issue #40) - the escrow's `Declined` event and the neutral vocabulary the state is
+// reported in. It is its own module because TWO surfaces ask the same question (this flow and the swaps watch)
+// and a second implementation of the same event would be a second truth about it.
+import { declinedFromLogs, logReaderOf, blockBoundaryOf, DECLINED_TOPIC0 } from "./decline.mjs";
 
 // THE ENGINE SURFACES, TAKEN THROUGH THE ONE SEAM (./engine.mjs) - exactly as the rest of the core does.
 const { chainById, DEFAULT_CHAIN, MONERO } = engine.config;
@@ -352,6 +356,30 @@ export async function orderStatus(escrow, deps = {}) {
   const call = deps.call || readContract;
   const raw = await call({ to: escrow, data: encodeStatus() });
   return decodeStatus(raw);
+}
+
+/**
+ * THE ESCROW'S `Declined` EVENT - THE MAKER'S OWN CLOSING OF A FUNDED ORDER (issue #40).
+ *
+ * WHY THE EVENT AND NOT `status()`. Read on its own, `status()` cannot tell a decline from an ordinary refund:
+ * both set `refunded` and send the whole balance back to the locker. The escrow keeps NO getter that names a
+ * decline (there is no `declined()` view), so the event is the on-chain fact that does - `decline()` emits
+ * `Declined(claimer)` and a refund emits `HalfRevealed(half, false)` instead.
+ *
+ * THE SEAM IS THE READER, AS EVERYWHERE ELSE: `deps.logs` is `({ address, topics, fromBlock, toBlock }) -> logs`
+ * and by default the chain is read through the page's wallet (`readDeclinedLogs`), so the wallet that reads is
+ * the wallet that would sign. `deps.fromBlock` is the caller's: a caller that knows the escrow's birth height
+ * scans from there instead of walking the whole chain.
+ *
+ * An answer that is not a list of logs is a REFUSAL (`bad-input`), never "no decline": an unread chain must not
+ * be reported as an escrow that declined nothing.
+ */
+export async function orderDecline(escrow, deps = {}) {
+  if (typeof escrow !== "string" || !escrow) throw new SdkError("bad-input", { field: "escrow" });
+  const logs = logReaderOf(deps.logs);
+  const fromBlock = deps.fromBlock === undefined ? "earliest" : blockBoundaryOf(deps.fromBlock);
+  const answer = await logs({ address: escrow, topics: [DECLINED_TOPIC0], fromBlock, toBlock: "latest" });
+  return declinedFromLogs(answer, { escrow, at: Number.isFinite(Number(deps.at)) ? Number(deps.at) : null });
 }
 
 // THE ORDER DEADLINE IS ONE - t1. Before it the claimer takes the ETH by its half and only with the ready mark

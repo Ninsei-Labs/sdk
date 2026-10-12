@@ -85,6 +85,12 @@ const normalizeOptions = (options) => {
   // THE CODE-READ SEAM (issue #103): ({address}) -> hex code, for the extcodehash check of the factory. Same
   // rule as evmCall - a read brought from outside, not a substitution of the chain.
   if (o.evmCode !== undefined && typeof o.evmCode !== "function") fail("bad-input", { field: "evmCode" });
+  // THE LOG-READ SEAM (issue #40): ({ address, topics, fromBlock, toBlock }) -> logs. Needed for the maker's
+  // decline, which is the escrow's `Declined` EVENT - the escrow has no getter that names it, and `status()` reads
+  // a decline and an ordinary refund the same way. By default the logs are read through the page's wallet, the
+  // same provider the chain read uses. Same rule as evmCall: a READ of the escrow's own event, not a node
+  // substitution.
+  if (o.evmLogs !== undefined && typeof o.evmLogs !== "function") fail("bad-input", { field: "evmLogs" });
   // THE INTERFACE'S ALLOW-LIST (POLICY, NOT PROOF): an array of provider addresses (or providerIds) OR a
   // predicate. It is NOT the check itself - that is `providerOf` on chain, taken from the quote - but the
   // interface's own decision about whom it trades with. A wrong shape is a typo, not a silent no-op.
@@ -149,6 +155,7 @@ const normalizeOptions = (options) => {
     addNodes: o.addNodes === undefined ? null : o.addNodes,
     evmCall: o.evmCall || null,
     evmCode: o.evmCode || null,
+    evmLogs: o.evmLogs || null,
     allowedProviders: o.allowedProviders === undefined ? null : o.allowedProviders,
     knownFactoryCodes: o.knownFactoryCodes === undefined ? null : o.knownFactoryCodes,
     knownImplementationCodes: o.knownImplementationCodes === undefined ? null : o.knownImplementationCodes,
@@ -216,6 +223,10 @@ export function createNinsei(options) {
   // THE SAME CHAIN-READ SEAM FOR THE ORDER READS: state and deadlines must be read by the wallet that will sign,
   // not by a second provider. Without a caller reader the module keeps its engine default.
   const orderDeps = typeof o.evmCall === "function" ? { call: o.evmCall } : {};
+  // THE LOG SEAM GOES WITH THE ORDER READS: the decline is read by the same caller-brought reader as the state,
+  // for the same reason (the wallet that reads must be the wallet that signs), and it is the READER that is
+  // substituted - the addresses and the topic stay the core's.
+  const logDeps = typeof o.evmLogs === "function" ? { logs: o.evmLogs } : {};
 
   return Object.freeze({
     config,
@@ -238,6 +249,11 @@ export function createNinsei(options) {
       // THE ORDER DEADLINES (t1, readyBy, termsHash) from the chain: the screen needs them to say whether the
       // person is in the dead zone.
       deadlines: (escrow) => orderFlow.orderDeadlines(escrow, orderDeps),
+      // THE MAKER'S DECLINE, READ FROM THE ESCROW (issue #40): the `Declined` event, which is the on-chain fact
+      // that tells a decline apart from an ordinary refund. The answer carries the state and the node's own token
+      // and NOTHING ELSE - no reason, no category, no provider. `checked: false` means the chain was not read,
+      // which is NOT the same as "the escrow did not decline".
+      decline: (escrow, deps = {}) => orderFlow.orderDecline(escrow, { ...logDeps, ...(deps || {}) }),
     },
     sim,
     quotes: {
@@ -260,6 +276,9 @@ export function createNinsei(options) {
     // would not know where to knock, and without the pass there is nothing to present to the service (and that
     // is a refusal with a CODE, not an invented path).
     swaps: createSwaps({ preflight, http, mode: o.mode, xmrNetwork: o.xmrNetwork, call: o.evmCall,
+      // THE LOG SEAM FOR THE DECLINE CHECK: the watch asks the escrow for its `Declined` event on every tick, so
+      // a declined order stops the wait at once instead of running to `xmr-timeout`.
+      logs: o.evmLogs || null,
       config, auth: o.serverAuth, denylist, watch: o.watch,
       // THE RECORD IS BUILT HERE ITSELF, and one brought from outside is only the caller's preference.
       createRecord: o.createRecord }),

@@ -15,6 +15,25 @@
 // Naming language: the values are data. `step` and `code` are stable strings from the tables below; they are
 // translated, shown and coloured as one sees fit. They change only with a package version bump (see CHANGELOG).
 
+/** One log as a node answers it: an emitter, its topics and its data. Only what the decline is read from is named. */
+export interface EvmLog {
+  readonly address?: string;
+  readonly topics?: readonly string[];
+  readonly data?: string;
+  readonly blockNumber?: string;
+  readonly transactionHash?: string;
+}
+
+/** The log read a caller may bring: the seam the decline is read through. */
+export type EvmLogReader = (
+  request: {
+    readonly address: string;
+    readonly topics?: readonly string[];
+    readonly fromBlock?: string | number;
+    readonly toBlock?: string | number;
+  },
+) => Promise<readonly EvmLog[]>;
+
 export interface NinseiOptions {
   /** The service's HTTP API base. Default is "/api" (the interface proxies it to our server). */
   apiBase?: string;
@@ -80,6 +99,15 @@ export interface NinseiOptions {
    * matched against the interface's known builds. Same rule as evmCall: a read, not a node substitution.
    */
   evmCode?: (request: { readonly address: string }) => Promise<string>;
+  /**
+   * READING THE ESCROW'S LOGS FROM OUTSIDE (issue #40): `({ address, topics, fromBlock, toBlock }) -> logs`, for
+   * the MAKER'S DECLINE. The escrow emits `Declined(claimer)` and keeps NO getter that names it, while `status()`
+   * reads a decline and an ordinary refund the same way - so the event is the only on-chain fact that tells them
+   * apart. By default the logs are read through the page's wallet, the same provider `evmCall` uses, so the wallet
+   * that reads is the wallet that signs. Same rule as `evmCall`: a READ, not a node substitution - the address is
+   * the order's escrow and the topic is the package's own.
+   */
+  evmLogs?: EvmLogReader;
   /**
    * THE INTERFACE'S OWN ADMISSION LIST - policy, not proof. The chain (maker registry, providerOf, taken from the
    * quote) proves whose key signed; this says whom THIS interface trades with at all. An array of provider
@@ -709,8 +737,12 @@ export interface SwapsApi {
    * IF `expect` AND `wallet` ARE PASSED, then after the arrival the ready mark (actions.markReady) is called with
    * THESE expectations: the slot check against the chain stands in it before the signature. Without them the step
    * names the next one (`next: "mark-ready"`) and signs nothing.
+   * THE MAKER DECLINED - THE WAIT STOPS AT ONCE (issue #40): the escrow's `Declined` event and the service's
+   * `declined` + `compliance` status are BOTH asked on every tick, and either one ends the wait with
+   * `SwapDeclinedWatch` instead of running to `xmr-timeout` about an order whose ETH is already back. Nothing is
+   * signed, and the decline is written into the record, so every later read of the swap reports the same state.
    */
-  watch(request: SwapWatchRequest): Promise<SwapWatch>;
+  watch(request: SwapWatchRequest): Promise<SwapWatch | SwapDeclinedWatch>;
   /**
    * THE XMR ARRIVAL CHECK WITHOUT THE WATCH LOOP (issue #85). The client reads the chain itself with its own view
    * key and `ready` opens only when at least two nodes of DIFFERENT operators see the transaction IN THE SAME BLOCK
@@ -985,6 +1017,33 @@ export interface SwapWatchRequest {
   readonly readyBySec?: number;
 }
 
+/**
+ * THE WATCH'S ANSWER WHEN THE MAKER DECLINED (issue #40). There is no arrival to wait for, so `seen` is false and
+ * there is no `marked`, no `next` and no `txids` - and NO field naming a reason, a category or a provider, because
+ * the node names none. `code` is the node's own single token, unchanged; `terminal` is the state the interface
+ * draws its own neutral sentence from; `source` says WHICH reader saw it (provenance, not a reason).
+ */
+export interface SwapDeclinedWatch {
+  readonly id: string;
+  /** The escrow the decline was read on, or null when the record did not know it. */
+  readonly escrow: string | null;
+  readonly address: string | null;
+  /** Never true here: a decline is not an arrival. */
+  readonly seen: false;
+  readonly declined: true;
+  readonly terminal: "declined";
+  readonly code: "compliance";
+  /** `event` - the escrow's `Declined` log; `status` - the service's status; `record` - already written down. */
+  readonly source: "event" | "status" | "record";
+  readonly at: number;
+  readonly waitedMs: number;
+  /**
+   * WHAT THE CHAIN READ DID. `checked: false` means the escrow's event could not be read at all (no reader, an
+   * unreachable node) - which is NOT "the escrow declined nothing" - and `error` carries the refusal's own code.
+   */
+  readonly chain: { readonly checked: boolean; readonly error: string | null };
+}
+
 /** THE OUTCOME OF THE WATCH: the arrival is seen as a FACT, not assumed. */
 export interface SwapWatch {
   readonly seen: true;
@@ -1105,7 +1164,12 @@ export interface SwapState {
   readonly simulated: { readonly evm: boolean; readonly xmr: boolean };
   /** The refusal reason, if any: a code and params, no text. */
   readonly error?: { readonly code: ErrorCode; readonly params?: Readonly<Record<string, unknown>> };
-  /** The terminal state, if the swap has ended. */
+  /**
+   * The terminal state, if the swap has ended. `declined` (issue #40) is the maker's refusal of a funded order:
+   * the ETH, the fee included, is already back in the wallet, every flag in `actions` is OFF, and there is nothing
+   * to recover. The interface owes the person a NEUTRAL sentence and no reason, category or provider - the node
+   * names none, and the package forwards none.
+   */
   readonly terminal: TerminalCode | null;
   /**
    * WHEN THE RECORD WAS CREATED (the record's own `createdAt`, an ISO string). null - an old record without
@@ -1141,7 +1205,13 @@ export type StepCode =
   | "claimed"
   | "swept";
 
-export type TerminalCode = "success" | "refunded_eth" | "xmr_returned" | "closed";
+/**
+ * THE ORDER'S TERMINAL STATE. `declined` is THE MAKER'S REFUSAL OF A FUNDED ORDER (issue #40): the whole balance,
+ * the fee included, is already back in the depositor's wallet and NO half was revealed, so there is nothing to
+ * recover and nothing left to do. It is deliberately NOT `refunded_eth`: that one is the depositor taking the ETH
+ * back, and it DOES reveal the depositor's half. The words a person reads are the interface's, not the package's.
+ */
+export type TerminalCode = "success" | "refunded_eth" | "xmr_returned" | "closed" | "declined";
 
 // --- The XMR withdrawal (the sweep page) --------------------------------------------------------
 
@@ -1300,6 +1370,41 @@ export interface OrderApi {
    * terms hash the recovery file is bound to. The screen uses them to say whether the person is in the dead zone.
    */
   deadlines(escrow: string): Promise<OrderDeadlines>;
+  /**
+   * THE MAKER'S DECLINE, READ FROM THE ESCROW (issue #40): the `Declined` event THE ESCROW EMITTED. It is a
+   * separate read because `status()` cannot answer it - the escrow has no `declined()` getter, and a decline sets
+   * the same `refunded` flag an ordinary refund does. Read through the same seam as the state (`evmLogs`, or the
+   * `logs` argument), so the wallet that reads is the wallet that signs.
+   *
+   * THE ANSWER CARRIES THE STATE AND NOTHING ELSE: no reason, no category, no provider. `checked: false` says the
+   * chain was NOT read, which is not the same as "the escrow did not decline".
+   */
+  decline(escrow: string, deps?: OrderDeclineDeps): Promise<OrderDecline>;
+}
+
+/**
+ * WHAT IS KNOWN ABOUT A DECLINE: exactly these fields, and the SHORTNESS IS THE POINT. Anything else would be a
+ * reason, a category or a provider, and the node names none of those on purpose.
+ */
+export interface OrderDecline {
+  readonly declined: boolean;
+  /** The state the interface draws from (`declined`), or null when this is not a decline. */
+  readonly terminal: "declined" | null;
+  /** The node's own single token, UNCHANGED (`compliance`), or null. It is a token, not a reason. */
+  readonly code: "compliance" | null;
+  /** `event` - the escrow's log was read; `status` - the node's status was read; null - neither. */
+  readonly source: "event" | "status" | null;
+  /** When it was seen (epoch ms), or null. */
+  readonly at: number | null;
+  /** Whether the reading happened at all: `false` is "not measured", NOT "no decline". */
+  readonly checked: boolean;
+}
+
+/** The seams of the decline read: the log reader and where the scan starts. */
+export interface OrderDeclineDeps {
+  readonly logs?: EvmLogReader;
+  /** The first block to scan (the escrow's birth height when it is known). Default: the whole chain. */
+  readonly fromBlock?: string | number;
 }
 
 /** THE ORDER STATE, READ FROM THE CHAIN (escrow status()): three flags and the remainder. */
