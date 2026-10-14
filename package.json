@@ -17,6 +17,7 @@
     "check:surface": "node tools/check.mjs --only=surface",
     "check:mirror": "node tools/check.mjs --only=mirror",
     "check:pack": "node tools/check.mjs --only=pack",
+    "check:pack-teeth": "node tools/check-pack-teeth.mjs",
     "check:secrets": "node tools/check.mjs --only=secrets",
     "check:types": "node tools/check.mjs --only=types",
     "check:types-teeth": "node tools/check-types-teeth.mjs",
