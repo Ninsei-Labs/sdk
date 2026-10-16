@@ -75,7 +75,7 @@ const CASES = [
     file: "src/swaps.mjs",
     expects: "the record of a declined swap does not report the state",
     patch: (text) => text.replace(
-      "        try { engine.swap.saveSwap(swap); } catch { throw new SdkError(\"storage-unavailable\", { step: \"decline\" }); }\n",
+      /        try \{ engine\.swap\.saveSwap\(swap\); \} catch \{ throw new SdkError\("storage-unavailable", \{ step: "decline" \}\); \}\r?\n/,
       "        // BREAKING RUN D: the record is not written.\n"),
   },
   {
@@ -84,7 +84,7 @@ const CASES = [
     file: "src/decline.mjs",
     expects: "carries reason",
     patch: (text) => text.replace(
-      "  for (const key of DECLINE_FIELDS) out[key] = fields[key] === undefined ? null : fields[key];\n",
+      /  for \(const key of DECLINE_FIELDS\) out\[key\] = fields\[key\] === undefined \? null : fields\[key\];\r?\n/,
       "  for (const key of DECLINE_FIELDS) out[key] = fields[key] === undefined ? null : fields[key];\n  out.reason = \"BREAKING RUN E\";\n"),
   },
 ];
