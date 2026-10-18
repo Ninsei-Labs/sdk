@@ -74,8 +74,9 @@ jobs:
       # pnpm is this repository's package manager, so the lock file is pnpm's.
       # npm is still used for the publish itself: npm owns the OIDC exchange.
       - uses: pnpm/action-setup@v6
-        with:
-          version: 12.10.1
+        # No version here on purpose: packageManager in package.json is the one place that names pnpm.
+        # A second number in a workflow drifts from it and fails the run before anything is built
+        # (ERR_PNPM_BAD_PM_VERSION). The action reads the field.
 
       - name: Install and verify
         run: |
