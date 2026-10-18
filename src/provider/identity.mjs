@@ -9,7 +9,7 @@
 // stays with the node, but does something else: the Monero halves are derived from it and the market packets are signed with it. The code
 // must follow the one the chain confirms - the address. The former code was computed from the ed25519 key and
 // therefore changed with it, not with the identity (owner's decision: backward compatibility is not needed).
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomInt } from "node:crypto";
 
 // Code shape. Strict: "lp-" and exactly 8 hex in lower case.
 export const PROVIDER_CODE_RE = /^lp-[0-9a-f]{8}$/;
@@ -36,6 +36,8 @@ export function providerCode(address) {
 const WORDS = ["north", "harbor", "lumen", "cedar", "atlas", "quartz", "verde", "nova", "orbit", "delta"];
 
 export function randomDisplayName() {
-  const word = WORDS[randomBytes(2).readUInt16BE(0) % WORDS.length];
+  // randomInt, not a modulo of random bytes: 65536 % 10 leaves six words one draw more likely than the other
+  // four. The difference is invisible in a display name, but a biased draw has no reason to exist at all.
+  const word = WORDS[randomInt(WORDS.length)];
   return word + "-" + randomBytes(2).toString("hex");
 }
