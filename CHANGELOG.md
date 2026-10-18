@@ -1,4 +1,4 @@
-## Unreleased
+## 0.43.2 — 2026-10-18
 
 THE PROVIDER SIDE AND THE BOUND VERIFICATION HELPERS ARE PUBLIC. Two things the demo and the node used to reach
 through the node's own files are now package surface: `./order` exports `orderQuoteMissingFields` and
