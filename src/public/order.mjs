@@ -20,3 +20,8 @@ export {
   recoverQuoteKey,
   signQuoteDigest,
 } from "../quoteEip712Spec.mjs";
+
+// THE BOUND VERIFICATION HELPERS. The spec above is handed crypto by the caller; these two bind it to the SDK's
+// own primitives, so a consumer verifies a maker's quote without assembling the binding itself. Verification
+// only: the provider's signing key never enters this package.
+export { orderQuoteMissingFields, recoverOrderQuoteKey } from "../quoteEip712.mjs";

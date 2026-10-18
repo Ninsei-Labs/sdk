@@ -159,3 +159,15 @@ export declare function signQuoteDigest(request: {
  * verified at all. Null is a refusal for the caller to name, never consent.
  */
 export declare function recoverQuoteKey(request: { readonly crypto: QuoteCrypto; readonly quote: OrderQuote }): string | null;
+
+/**
+ * Names of the signed-set fields the quote does not carry, bound to the SDK's own primitives: the same answer as
+ * `quoteMissingFields`, offered so a verifier does not have to pass crypto it already trusts twice.
+ */
+export declare function orderQuoteMissingFields(quote: Partial<OrderQuote> | null | undefined): string[];
+
+/**
+ * The address that signed the quote, recovered with the SDK's own primitives, or null when the quote cannot be
+ * verified at all. Null is a refusal for the caller to name, never consent.
+ */
+export declare function recoverOrderQuoteKey(quote: OrderQuote): string | null;

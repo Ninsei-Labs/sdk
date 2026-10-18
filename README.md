@@ -32,7 +32,7 @@ value that looks like data is more dangerous than a refusal.
 compares the list of what the SDK returns with what is declared in the contract (both ways).
 
 EVERY PUBLISHED SUBPATH CARRIES ITS OWN DECLARATIONS: `.` (`index.d.ts`), `./xmr`, `./order`, `./evm`,
-`./core` and `./recovery` (`src/public/<entry>.d.ts`). Each of them declares exactly the symbols its barrel
+`./core`, `./recovery` and `./provider` (`src/public/<entry>.d.ts`). Each of them declares exactly the symbols its barrel
 re-exports, so a typed consumer sees the same surface the runtime has, and nothing else.
 `tools/check.mjs --only=types` keeps the two sides equal (a subpath without a `types` target, a declarations
 file that does not read as declarations, or a symbol declared on one side only is red), and

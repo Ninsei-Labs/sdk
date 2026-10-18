@@ -26,7 +26,8 @@
     "check:decline-teeth": "node tools/check-decline-teeth.mjs",
     "check:terminal": "node tools/check.mjs --only=terminal",
     "check:terminal-teeth": "node tools/check-terminal-teeth.mjs",
-    "check:sweep": "node tools/sweep-refusal.test.mjs", "sync:version": "node tools/sync-version.mjs"
+    "check:sweep": "node tools/sweep-refusal.test.mjs",
+    "sync:version": "node tools/sync-version.mjs"
   },
   "types": "./index.d.ts",
   "exports": {
@@ -57,6 +58,10 @@
     "./recovery": {
       "types": "./src/public/recovery.d.ts",
       "default": "./src/public/recovery.mjs"
+    },
+    "./provider": {
+      "types": "./src/public/provider.d.ts",
+      "default": "./src/public/provider.mjs"
     }
   },
   "files": [
