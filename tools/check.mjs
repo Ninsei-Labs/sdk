@@ -2448,6 +2448,59 @@ export const terminalCheck = async () => {
   return { note: `${emitted.size} settlement kind(s) against ${keys.size} map key(s), ${declaredTerminals.size} declared terminal(s) each reachable, a refund driven to the end by both of its writers and the maker's reclaim driven to its own phase`, problems, notes };
 };
 
+
+// THE PROVIDER ENTRY, DRIVEN RATHER THAN COUNTED. The surface and types checks prove the names exist and are
+// declared; this one proves the three rules a consumer leans on: the provider code follows the ADDRESS and is
+// stable, the public key path follows the private one, and a settings file is found and read the way the node
+// reads it. It also proves the bound quote helpers refuse a quote that cannot be verified.
+const providerCheck = async () => {
+  const problems = [];
+  const notes = [];
+  const provider = await import(pathToFileURL(p("src/public/provider.mjs")).href);
+  const order = await import(pathToFileURL(p("src/public/order.mjs")).href);
+
+  const addressA = "0x" + "11".repeat(20);
+  const addressB = "0x" + "22".repeat(20);
+  const codeA = provider.providerCode(addressA);
+  if (!provider.PROVIDER_CODE_RE.test(codeA)) problems.push(`providerCode returned ${codeA}, which does not match PROVIDER_CODE_RE`);
+  if (provider.providerCode(addressA) !== codeA) problems.push("providerCode is not stable for the same address");
+  if (provider.providerCode(addressB) === codeA) problems.push("providerCode is the same for two different addresses");
+  notes.push(`providerCode is the address's own name: ${codeA}`);
+
+  const keyPath = provider.publicKeyPath("C:/keys/provider.key");
+  if (keyPath !== "C:/keys/provider.pub") problems.push(`publicKeyPath returned ${keyPath} for provider.key`);
+  const bare = provider.publicKeyPath("C:/keys/provider");
+  if (bare !== "C:/keys/provider.pub") problems.push(`publicKeyPath returned ${bare} for a path without .key`);
+
+  const dir = mkdtempSync(join(tmpdir(), "sdk-provider-"));
+  try {
+    writeFileSync(join(dir, "rfq.env"), "ALPHA=1\nBETA=two words\n", "utf8");
+    const found = provider.findEnvFile(dir);
+    if (found !== join(dir, "rfq.env")) problems.push(`findEnvFile returned ${found}, expected the settings file in the directory`);
+    const values = provider.readEnvFile(join(dir, "rfq.env"));
+    if (values.ALPHA !== "1" || values.BETA !== "two words") problems.push(`readEnvFile returned ${JSON.stringify(values)}`);
+    const target = {};
+    provider.applyEnvFile(join(dir, "rfq.env"), target);
+    if (target.ALPHA !== "1" || target.BETA !== "two words") problems.push(`applyEnvFile set ${JSON.stringify(target)}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  notes.push("a settings file is found, read and applied by the same rules");
+
+  const missing = order.orderQuoteMissingFields({});
+  if (!Array.isArray(missing) || missing.length === 0) problems.push("orderQuoteMissingFields({}) is empty: an unverifiable quote would pass");
+  let recovered = "not run";
+  try {
+    recovered = order.recoverOrderQuoteKey({ signature: "0x" + "00".repeat(65) });
+  } catch {
+    recovered = null;
+  }
+  if (typeof recovered === "string" && recovered.length) problems.push(`recoverOrderQuoteKey returned ${recovered} for an empty quote`);
+  notes.push("bound quote verification names what is missing and recovers nothing from an empty quote");
+
+  return { note: "provider code, key path, settings file and bound quote verification all behave", problems, notes };
+};
+
 const CHECKS = {
   syntax: syntaxCheck,
   import: importCheck,
@@ -2470,6 +2523,7 @@ const CHECKS = {
   refusals: refusalsCheck,
   decline: declineCheck,
   terminal: terminalCheck,
+  provider: providerCheck,
 };
 
 export const runCheck = async (name) => {

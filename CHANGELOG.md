@@ -1,3 +1,20 @@
+## Unreleased
+
+THE PROVIDER SIDE AND THE BOUND VERIFICATION HELPERS ARE PUBLIC. Two things the demo and the node used to reach
+through the node's own files are now package surface: `./order` exports `orderQuoteMissingFields` and
+`recoverOrderQuoteKey` (the spec functions bound to the SDK's primitives), and a new Node-only subpath
+`./provider` carries the provider's identity, signing and env-file helpers. A consumer no longer re-derives the
+provider code rule or the public-key path, and the browser entries stay free of `node:fs` and `node:crypto`.
+
+- `./order` gains two names: `orderQuoteMissingFields(quote)` and `recoverOrderQuoteKey(quote)`. Both are the
+  spec's own functions bound to `primitives.mjs`, so verification has one implementation, not two.
+- `./provider` is a separate entry because it reaches the filesystem and `node:crypto`: the provider code of an
+  address, the public key path beside a private key, key generation, payload signing and verification, and the
+  settings-file helpers (`findEnvFile`, `readEnvFile`, `applyEnvFile`, `substituteEnvVars`).
+- The checks gained a `provider` case: the provider code is the address's own name and stable, the public key
+  path follows the private one, a settings file is found, read and applied, and the bound quote verification
+  names what is missing and recovers nothing from an empty quote.
+
 ## 0.43.1 — 2026-10-12
 
 THE DECLINE, THE REFUND AND THE MAKER'S RECLAIM EACH CARRY THEIR OWN STATE, AND THE TERMINAL CHECK READS THE
