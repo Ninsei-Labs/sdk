@@ -1,3 +1,15 @@
+## 0.43.3 — 2026-10-18
+
+THE SAME CONTENT AS 0.43.2, PUBLISHED UNDER A NEW NUMBER. The tag-triggered release for 0.43.2 stopped in
+`pnpm/action-setup` before building anything: the workflow named pnpm 12.10.1 while `packageManager` names
+12.11.2, and the action refuses two versions (`ERR_PNPM_BAD_PM_VERSION`). Nothing reached the registry. The
+workflow now reads `packageManager` and pins no version of its own; this release carries that fix and the
+0.43.2 content unchanged.
+
+- `./provider` (Node only) and the two bound verification helpers in `./order` are as described in 0.43.2.
+- The display-name draw uses `randomInt`, as fixed in 0.43.2.
+- No package code changed between 0.43.2 and 0.43.3; only the release pipeline did.
+
 ## 0.43.2 — 2026-10-18
 
 THE PROVIDER SIDE AND THE BOUND VERIFICATION HELPERS ARE PUBLIC. Two things the demo and the node used to reach
