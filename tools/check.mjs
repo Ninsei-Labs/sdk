@@ -294,6 +294,53 @@ export const mirrorCheck = () => {
 // 5. PACK - what will ride in the tarball, against the `files` field.
 // ---------------------------------------------------------------------------------------------------
 
+// THE PACKER'S CONTAINER CHANGED SHAPE, SO THE READER READS BOTH - AND REFUSES ANY THIRD ONE BY NAME.
+//
+// `npm pack --dry-run --json` answers an ARRAY holding one entry up to npm 11, and an OBJECT KEYED BY PACKAGE NAME
+// from npm 12. Measured on this machine, node 26.7.0's bundled npm 11.19.0 against the standalone npm 12.0.2: the
+// same package, the same 104 files, the same sizes, the same shasum and integrity - only the container differs.
+// Reading one container alone does not fail loudly: `entry.files` comes back `undefined`, the listing stands empty
+// and the check reports a tarball carrying nothing - eight problems that do not exist, on a run that must be green.
+// So the reader takes the ONE entry out of either container and hands the assertions below exactly the value they
+// have always been given.
+//
+// ANY OTHER SHAPE IS A REFUSAL THAT NAMES ITSELF, never "no files". An empty answer, a container holding more than
+// one entry and a container that is neither of the two are each a case where guessing would report an agreement
+// that was never checked: the day the packer changes shape again, this reddens HERE with the shape written out,
+// instead of passing as a tarball that carries nothing.
+const shapeOfListing = (value) => {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return `an array of ${value.length} entries`;
+  if (typeof value === "object") return `an object with ${Object.keys(value).length} key(s)`;
+  return `a ${typeof value} (${JSON.stringify(value).slice(0, 60)})`;
+};
+
+/** The ONE entry the packer packed, out of whichever container it chose - or the reasons its answer cannot be read. */
+export const packListing = (listing) => {
+  const refuse = (reason) => ({ problems: [`the packer answered ${reason}`] });
+
+  if (Array.isArray(listing)) {
+    // npm 11: [ entry ]
+    if (listing.length === 0) return refuse("an empty listing - an array of 0 entries. A tarball cannot be empty, and an empty answer is not agreement");
+    if (listing.length > 1) return refuse(`an array of ${listing.length} entries - one package was packed, so this is not this package's answer`);
+    return { entry: listing[0], problems: [] };
+  }
+
+  if (listing && typeof listing === "object") {
+    // npm 12: { "package-name": entry }
+    const names = Object.keys(listing);
+    if (names.length === 0) return refuse("an object with no keys - an object keyed by package name has to name the package that was packed");
+    if (names.length > 1) return refuse(`an object keyed by ${names.length} package names (${names.slice(0, 3).map((n) => JSON.stringify(n)).join(", ")}${names.length > 3 ? ", ..." : ""}) - one package was packed`);
+    const entry = listing[names[0]];
+    if (!entry || typeof entry !== "object" || !Array.isArray(entry.files)) {
+      return refuse(`${JSON.stringify(names[0])} without a \`files\` list (${entry === undefined ? "no entry at all" : `an entry that is ${shapeOfListing(entry)}`}) - an entry carrying no file list cannot be read`);
+    }
+    return { entry, problems: [] };
+  }
+
+  return refuse(`${shapeOfListing(listing)} - npm 11 answers an array of one entry and npm 12 an object keyed by the package name, and neither of those is this`);
+};
+
 export const packCheck = () => {
   const pkg = JSON.parse(read(p("package.json")));
   const declared = Array.isArray(pkg.files) ? pkg.files : [];
@@ -305,7 +352,11 @@ export const packCheck = () => {
   } catch (error) {
     return { note: "the packer is unavailable", problems: [`npm pack --dry-run failed: ${error && error.message}`] };
   }
-  const entry = Array.isArray(listing) ? listing[0] : listing;
+  // THE CONTAINER IS READ, THE CONTENTS ARE NOT: whichever shape arrived, everything below sees the same entry.
+  // A shape this reader does not know stops here, by name, instead of arriving as a tarball with no files.
+  const answer = packListing(listing);
+  if (answer.problems.length) return { note: "the packer's answer is not a listing this check can read", problems: answer.problems };
+  const entry = answer.entry;
   const packed = (entry.files || []).map((f) => f.path);
 
   // ALWAYS CARRIED BY npm, whatever `files` says: package.json, the readme and the license.

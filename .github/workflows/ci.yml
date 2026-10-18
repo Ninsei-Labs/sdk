@@ -54,6 +54,15 @@ jobs:
       - name: Check package contents (the tarball against `files`)
         run: pnpm run check:pack
 
+      # The pack reader's agreement is with the packer's ANSWER, and that answer changed container between npm 11
+      # (an array of one entry) and npm 12 (an object keyed by the package name): reading one container alone
+      # reported eight problems that did not exist. The guard is exercised with the packer itself stubbed - both
+      # containers must read to the same listing, and a shape that is neither (an empty one, one naming two
+      # packages, one carrying no `files` list) must come back RED naming its reason, so the next change of shape
+      # reddens here instead of passing as a tarball carrying nothing.
+      - name: Break the pack guard (both containers read, unknown shapes refused)
+        run: pnpm run check:pack-teeth
+
       - name: Check for secrets
         run: pnpm run check:secrets
 
