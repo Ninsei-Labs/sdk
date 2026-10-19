@@ -28,7 +28,8 @@
     "check:terminal": "node tools/check.mjs --only=terminal",
     "check:terminal-teeth": "node tools/check-terminal-teeth.mjs",
     "check:sweep": "node tools/sweep-refusal.test.mjs",
-    "sync:version": "node tools/sync-version.mjs"
+    "sync:version": "node tools/sync-version.mjs",
+    "check:restore": "node tools/check-restore.mjs"
   },
   "types": "./index.d.ts",
   "exports": {
