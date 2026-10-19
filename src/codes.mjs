@@ -125,6 +125,62 @@ export const ERROR_CODES = [
   "unknown",
 ];
 
+// WHAT EACH CODE MEANS FOR THE INTERFACE: may it offer "try again", and whose problem is it. The page kept two
+// hand-written lists (retryable, and "which of these are ours") next to a code dictionary; a code added to the
+// vocabulary and forgotten there showed the person the wrong advice. Here the table is beside the vocabulary, and a
+// machine checks that they name exactly the same codes.
+//
+// `retryable` answers "would another attempt have a chance"; it is not "was it transient" and it is not permission
+// to retry a payment. `side` names who can act:
+//   caller   - the person or the caller fixes an input;
+//   wallet   - the wallet's state or the person's decision in it;
+//   chain    - the chain, a node or a transaction;
+//   provider - a maker or a quote;
+//   service  - our own service;
+//   unknown  - the code is `unknown`, and pretending otherwise would be a guess.
+export const ERROR_SIDES = ["caller", "wallet", "chain", "provider", "service", "unknown"];
+
+export const ERROR_META = Object.freeze({
+  "not-implemented": { retryable: false, side: "caller" },
+  "bad-input": { retryable: false, side: "caller" },
+  "wallet-not-connected": { retryable: false, side: "wallet" },
+  "wallet-rejected": { retryable: false, side: "wallet" },
+  "wrong-chain": { retryable: false, side: "wallet" },
+  "quote-unavailable": { retryable: true, side: "provider" },
+  "quote-refused": { retryable: false, side: "provider" },
+  "address-denied": { retryable: false, side: "caller" },
+  "quote-stale": { retryable: true, side: "provider" },
+  "quote-signature-invalid": { retryable: false, side: "provider" },
+  "quote-key-mismatch": { retryable: false, side: "provider" },
+  "quote-field-unbound": { retryable: false, side: "provider" },
+  "quote-expired": { retryable: true, side: "provider" },
+  "quote-registry-unchecked": { retryable: true, side: "chain" },
+  "quote-key-unknown": { retryable: false, side: "chain" },
+  "quote-provider-mismatch": { retryable: false, side: "chain" },
+  "quote-provider-not-allowed": { retryable: false, side: "caller" },
+  "quote-factory-unchecked": { retryable: true, side: "chain" },
+  "quote-factory-unknown": { retryable: false, side: "chain" },
+  "quote-factory-mismatch": { retryable: false, side: "chain" },
+  "quote-factory-code-unknown": { retryable: false, side: "chain" },
+  "recovery-declined": { retryable: false, side: "wallet" },
+  "recovery-failed": { retryable: false, side: "wallet" },
+  "storage-unavailable": { retryable: true, side: "service" },
+  "server-unavailable": { retryable: true, side: "service" },
+  "server-refused": { retryable: false, side: "service" },
+  "xmr-timeout": { retryable: true, side: "chain" },
+  "xmr-locked": { retryable: true, side: "chain" },
+  "xmr-nodes-disagree": { retryable: true, side: "chain" },
+  "xmr-no-nodes": { retryable: true, side: "chain" },
+  "xmr-underpaid": { retryable: false, side: "chain" },
+  "xmr-too-late": { retryable: false, side: "chain" },
+  "contract-reverted": { retryable: false, side: "chain" },
+  "insufficient-funds": { retryable: false, side: "wallet" },
+  "gas-refused-by-maker": { retryable: false, side: "provider" },
+  "gas-not-arrived": { retryable: true, side: "chain" },
+  "gas-too-little": { retryable: false, side: "provider" },
+  "unknown": { retryable: false, side: "unknown" },
+});
+
 // GUARD KIND -> CHECK CODE. Kinds come from the engine (www/js/core/preSignGuards.js), codes are our public
 // vocabulary. The table is checked by machine: every kind the engine can return must be here, otherwise the
 // interface gets a code that is not in the contract.

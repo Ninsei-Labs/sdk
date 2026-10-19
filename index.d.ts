@@ -1704,6 +1704,20 @@ export declare const CHECK_CODES: readonly CheckCode[];
 /** The error codes the SDK refuses with (`error.code`, `SdkError.code`): the same list as the `ErrorCode` type. */
 export declare const ERROR_CODES: readonly ErrorCode[];
 
+/** WHO CAN ACT on a refusal, and whether another attempt has a chance. */
+export type ErrorSide = "caller" | "wallet" | "chain" | "provider" | "service" | "unknown";
+
+export interface ErrorMeta {
+  /** Whether another attempt has a chance. Not permission to retry a payment. */
+  readonly retryable: boolean;
+  readonly side: ErrorSide;
+}
+
+/** What each refusal means: the interface's advice, kept beside the vocabulary and checked by machine. */
+export declare const ERROR_META: Readonly<Record<ErrorCode, ErrorMeta>>;
+
+export declare const ERROR_SIDES: readonly ErrorSide[];
+
 export declare function createNinsei(options: NinseiOptions): Ninsei;
 
 // --- The maker's level set: the level walk the node and the client agree on ------------------------

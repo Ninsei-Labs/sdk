@@ -157,3 +157,8 @@ jobs:
       # with the promise and with the file's network is the package's, not the interface's.
       - name: Check the destination (the promise, the network, the shape)
         run: pnpm run check:destination
+
+      # WHAT A REFUSAL MEANS: may the interface offer a retry, and whose problem is it. The table sits beside the
+      # vocabulary, and this guard keeps the two in step - a code with no meaning is a wrong piece of advice.
+      - name: Check the refusal table (every code has a meaning)
+        run: pnpm run check:codes-meta

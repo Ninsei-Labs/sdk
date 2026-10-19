@@ -19,7 +19,7 @@ import { contextOf, verifyCounterparty, jointAddress } from "./order.mjs";
 import * as orderFlow from "./swap-flow.mjs";
 import { createSweep } from "./sweep.mjs";
 import { SdkError, fail } from "./errors.mjs";
-import { ERROR_CODES, STEP_CODES, CHECK_CODES } from "./codes.mjs";
+import { ERROR_CODES, ERROR_META, ERROR_SIDES, STEP_CODES, CHECK_CODES } from "./codes.mjs";
 
 // A surface declared by the contract but answering with a code: that is more honest than returning an empty
 // value that looks like data. The stage number is named so the interface understands what to expect
@@ -288,7 +288,7 @@ export function createNinsei(options) {
   });
 }
 
-export { SdkError, ERROR_CODES, STEP_CODES, CHECK_CODES };
+export { SdkError, ERROR_CODES, ERROR_META, ERROR_SIDES, STEP_CODES, CHECK_CODES };
 export { SDK_VERSION } from "./version.mjs";
 
 // THE LEVEL WALK IS ON THE PACKAGE SURFACE. A maker publishes a level set (chunks of volume with their own prices)

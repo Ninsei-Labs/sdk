@@ -34,7 +34,8 @@
     "check:wallet-factory": "node tools/check-wallet-factory.mjs",
     "check:xmr-amount": "node tools/check-xmr-amount.mjs",
     "check:sign-preview": "node tools/check-sign-preview.mjs",
-    "check:destination": "node tools/check-destination.mjs"
+    "check:destination": "node tools/check-destination.mjs",
+    "check:codes-meta": "node tools/check-codes-meta.mjs"
   },
   "types": "./index.d.ts",
   "exports": {
