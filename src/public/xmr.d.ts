@@ -316,3 +316,10 @@ export declare function sellWindowSec(request?: {
   readonly soft?: number;
   readonly hard?: number;
 }): number;
+
+/**
+ * WHAT NETWORK A NODE SAYS IT IS ON, from its `get_info` answer. The wallet must be built from this value: a
+ * mainnet wallet against a stagenet node looks like a broken withdrawal. An answer that is none of `mainnet`,
+ * `stagenet`, `testnet` comes back as null - a default would build a wallet for a chain the node may not serve.
+ */
+export declare function networkFromNode(info: unknown): "mainnet" | "stagenet" | "testnet" | null;
