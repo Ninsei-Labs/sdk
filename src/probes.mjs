@@ -22,7 +22,10 @@ const text = (value) => (typeof value === "string" ? value.trim() : "");
  * The answer never throws: `{ ok: false, why }` names the problem.
  */
 export async function probeMoneroNode({ url, fetchImpl = globalThis.fetch, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
-  const base = text(url).replace(/\/+$/, "");
+  // TRAILING SLASHES WITHOUT A REGEX: a pattern anchored on a run of slashes is flagged as a slow expression on
+  // input a person can type, and this address is exactly that.
+  let base = text(url);
+  while (base.endsWith("/")) base = base.slice(0, -1);
   if (!base) return { ok: false, why: "no-url" };
   if (typeof fetchImpl !== "function") return { ok: false, why: "no-fetch" };
   const started = Date.now();
