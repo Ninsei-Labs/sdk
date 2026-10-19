@@ -27,3 +27,24 @@ export declare function formatXmr(atomic: bigint | number | string, options?: { 
  * that looks successful.
  */
 export declare function parseXmr(text: string | number | null | undefined): bigint | null;
+
+/** A value below this is in seconds. Separated from the millisecond threshold on purpose: the gap has no scale. */
+export declare const SECONDS_SCALE_MAX: number;
+/** A value from this on is in milliseconds. */
+export declare const MS_SCALE_MIN: number;
+export declare const DEADLINE_SCALE: Readonly<{ seconds: "seconds"; milliseconds: "milliseconds"; unknown: "unknown" }>;
+export type DeadlineScale = "seconds" | "milliseconds" | "unknown";
+
+/** THE SCALE OF A VALUE. Empty, zero, a non-number, or a value between the thresholds: unknown - never a guess. */
+export declare function scaleOf(value: unknown): DeadlineScale;
+export declare function isSecondsScale(value: unknown): boolean;
+export declare function isMsScale(value: unknown): boolean;
+
+/**
+ * THE ONLY CONVERSION from the signed order's seconds to milliseconds. Empty gives null; a value already in
+ * milliseconds is refused (a second conversion would multiply the thousand in silence).
+ */
+export declare function msFromOrderSeconds(value: unknown, what?: string): number | null;
+
+/** A write guard: throws unless the value is in milliseconds. Returns true when it passes. */
+export declare function assertMsScale(value: unknown, what?: string): true;

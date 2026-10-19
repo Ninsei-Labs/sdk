@@ -143,6 +143,11 @@ jobs:
       - name: Check the fee estimate (the price per KB and the fee for a size)
         run: pnpm run check:fee-estimate
 
+      # SECONDS AT THE CHAIN, MILLISECONDS EVERYWHERE ELSE. One line once carried both, and a millisecond margin
+      # subtracted from a seconds deadline looked like 1970 - the deadline was "past" before the check ever ran.
+      - name: Check the deadline scale (seconds, milliseconds, one conversion)
+        run: pnpm run check:deadline-scale
+
 
       # THE RESTORE PASS IS A PACKAGE RULE NOW. It used to live on the sweep page: a scan ten blocks below the
       # named height, a rescan, and ONE second pass when coins exist but none is spendable. A wrong height or a
