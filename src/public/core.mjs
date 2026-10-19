@@ -8,3 +8,15 @@ export { parseAmount } from "../../engine/core/format.js";
 // XMR AMOUNTS IN ATOMIC UNITS: 12 decimals, bigint, no rounding. `formatXmr` for display and for a field,
 // `parseXmr` for what a person typed.
 export { formatXmr, parseXmr } from "../../engine/core/xmrAmount.js";
+
+// SECONDS AT THE CHAIN, MILLISECONDS EVERYWHERE ELSE: the scale of a deadline, and the one conversion at the boundary.
+export {
+  DEADLINE_SCALE,
+  SECONDS_SCALE_MAX,
+  MS_SCALE_MIN,
+  scaleOf,
+  isSecondsScale,
+  isMsScale,
+  msFromOrderSeconds,
+  assertMsScale,
+} from "../../engine/core/deadlineScale.js";
