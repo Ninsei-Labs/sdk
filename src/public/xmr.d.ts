@@ -323,3 +323,47 @@ export declare function sellWindowSec(request?: {
  * `stagenet`, `testnet` comes back as null - a default would build a wallet for a chain the node may not serve.
  */
 export declare function networkFromNode(info: unknown): "mainnet" | "stagenet" | "testnet" | null;
+
+/** An address read as its network and its public keys. An integrated address's payment id is not returned. */
+export interface AddressKeys {
+  readonly network: "mainnet" | "stagenet" | "testnet" | null;
+  /** The first payload byte, kept for callers that meet a prefix the table does not know. */
+  readonly netByte: number;
+  readonly spendPub: string;
+  readonly viewPub: string;
+}
+
+/** AN ADDRESS -> ITS NETWORK AND PUBLIC KEYS. Throws when the text is not a Monero address. */
+export declare function decodeAddressKeys(address: string): AddressKeys;
+
+/** A SCALAR AS LITTLE-ENDIAN HEX, low byte first - the form the daemon expects. */
+export declare function scalarToLeHex(scalar: bigint | number | string, bytes?: number): string;
+
+/**
+ * WHETHER A VIEW KEY IS THE ONE THE ADDRESS NAMES: true / false, or null when there is no public key to compare.
+ * `halves` is what `createHalves` returns, so the comparison uses the same arithmetic as the address build.
+ */
+export declare function viewKeyMatchesAddress(
+  viewScalar: bigint | number | string,
+  expectedViewPubHex: string,
+  halves: { publicHalves(scalar: bigint | number | string): { ed: string } },
+): boolean | null;
+
+/** A boundary up to this value is a block height; from it on, a unix time. */
+export declare const UNLOCK_TIME_BLOCK_MAX: number;
+
+export interface UnlockState {
+  readonly code: "unlocked" | "locked_height" | "locked_time";
+  readonly locked: boolean;
+  readonly untilHeight: number | null;
+  readonly untilTime: number | null;
+}
+
+/**
+ * WHETHER A COIN IS SPENDABLE. A height that is unknown does not open the coin: without the height there is no
+ * fact that would. `nowSec` defaults to the wall clock.
+ */
+export declare function unlockStateOf(
+  unlockTime: number | bigint | string,
+  options?: { height?: number | null; nowSec?: number | null },
+): UnlockState;
