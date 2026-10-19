@@ -122,6 +122,12 @@ jobs:
       - name: Check the withdrawal refusal (empty remainder -> insufficient-funds)
         run: pnpm run check:sweep
 
+      # READING AN ARRIVAL WITHOUT A WALLET: the address and its keys, the little-endian scalar, whether a view key
+      # matches, and the unlock_time rule. A second copy of the last one is the expensive kind - locked money reads
+      # as an arrival.
+      - name: Check the arrival read (address, key, unlock_time)
+        run: pnpm run check:arrival-read
+
       # THE RESTORE PASS IS A PACKAGE RULE NOW. It used to live on the sweep page: a scan ten blocks below the
       # named height, a rescan, and ONE second pass when coins exist but none is spendable. A wrong height or a
       # missing pass looks like an empty wallet, not like an error - so the rule is exercised with a stand-in
