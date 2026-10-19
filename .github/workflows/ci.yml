@@ -133,6 +133,11 @@ jobs:
       - name: Check the daemon address policy (https, loopback, network)
         run: pnpm run check:daemon-address
 
+      # EVERY SCRIPT THE CI NAMES MUST EXIST. package.json and the workflows are edited in parallel, and a dropped
+      # script failed only in CI, as ERR_PNPM_NO_SCRIPT, after a push.
+      - name: Check that every script CI names exists
+        run: pnpm run check:ci-scripts
+
 
       # THE RESTORE PASS IS A PACKAGE RULE NOW. It used to live on the sweep page: a scan ten blocks below the
       # named height, a rescan, and ONE second pass when coins exist but none is spendable. A wrong height or a
