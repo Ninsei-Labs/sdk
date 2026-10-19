@@ -58,3 +58,6 @@ export {
 // WHAT A TRANSACTION WILL COST: the daemon's price per kilobyte, by priority, and the arithmetic that turns it into
 // a fee. The page learned the fee only after signing.
 export { moneroFeeEstimate, feeForBytes } from "../feeEstimate.mjs";
+
+// IS THE NODE USABLE, AND WHAT DOES IT SAY ABOUT ITSELF: one get_info request, an answer that names why not.
+export { probeMoneroNode } from "../probes.mjs";
