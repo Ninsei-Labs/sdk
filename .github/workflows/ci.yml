@@ -128,6 +128,12 @@ jobs:
       - name: Check the arrival read (address, key, unlock_time)
         run: pnpm run check:arrival-read
 
+      # WHERE A MONERO NODE MAY LIVE. https anywhere, http on loopback, http to a remote host only on stagenet and
+      # testnet - one policy for the node and for the page that lets an operator type an address.
+      - name: Check the daemon address policy (https, loopback, network)
+        run: pnpm run check:daemon-address
+
+
       # THE RESTORE PASS IS A PACKAGE RULE NOW. It used to live on the sweep page: a scan ten blocks below the
       # named height, a rescan, and ONE second pass when coins exist but none is spendable. A wrong height or a
       # missing pass looks like an empty wallet, not like an error - so the rule is exercised with a stand-in
