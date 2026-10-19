@@ -36,7 +36,9 @@
     "check:sign-preview": "node tools/check-sign-preview.mjs",
     "check:destination": "node tools/check-destination.mjs",
     "check:codes-meta": "node tools/check-codes-meta.mjs",
-    "check:arrival-read": "node tools/check-arrival-read.mjs"
+    "check:arrival-read": "node tools/check-arrival-read.mjs",
+    "check:daemon-address": "node tools/check-daemon-address.mjs",
+    "check:ci-scripts": "node tools/check-ci-scripts.mjs"
   },
   "types": "./index.d.ts",
   "exports": {

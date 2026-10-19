@@ -41,3 +41,16 @@ export {
   unlockStateOf,
   UNLOCK_TIME_BLOCK_MAX,
 } from "../../engine/monero/arrivalRead.js";
+
+// WHERE A MONERO NODE MAY LIVE: https anywhere, http on loopback, http to a remote host only on stagenet/testnet -
+// one policy for the node and for the page that lets an operator type an address.
+export {
+  DAEMON_CODES,
+  DAEMON_NETWORK_MAINNET,
+  DAEMON_PLAIN_HTTP_NETWORKS,
+  LOOPBACK_HOSTS,
+  hostOfUrl,
+  isLoopbackHost,
+  judgeDaemonAddress,
+  plainLoopbackAllowed,
+} from "../../engine/monero/daemonAddress.js";

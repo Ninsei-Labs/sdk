@@ -367,3 +367,42 @@ export declare function unlockStateOf(
   unlockTime: number | bigint | string,
   options?: { height?: number | null; nowSec?: number | null },
 ): UnlockState;
+
+/** The names that count as loopback: 127.0.0.1, ::1, localhost - not all of 127.0.0.0/8. */
+export declare const LOOPBACK_HOSTS: ReadonlySet<string>;
+export declare function isLoopbackHost(host: string): boolean;
+
+/** An address read as scheme and host, or null when the text is not a URL. */
+export declare function hostOfUrl(url: string): { scheme: string; host: string } | null;
+
+export type DaemonCode = "daemon-not-https" | "daemon-address-unreadable" | "daemon-scheme-unknown";
+export declare const DAEMON_CODES: Readonly<{ notHttps: DaemonCode; unreadable: DaemonCode; schemeUnknown: DaemonCode }>;
+export declare const DAEMON_PLAIN_HTTP_NETWORKS: readonly string[];
+export declare const DAEMON_NETWORK_MAINNET: string;
+
+/** A setting in one shape: 0/false/no/off switches it off; anything else, a typo included, leaves it on. */
+export declare function plainLoopbackAllowed(raw: unknown): boolean;
+
+export interface DaemonAddressJudgement {
+  readonly ok: boolean;
+  /** False for an empty value: nothing to judge, not a refusal. */
+  readonly configured: boolean;
+  readonly scheme: string | null;
+  readonly host: string | null;
+  readonly loopback: boolean;
+  readonly plainLoopbackAllowed: boolean;
+  /** True when a remote plain-http daemon was accepted because the network is stagenet or testnet. */
+  readonly plainHttpAccepted: boolean;
+  readonly network: string;
+  readonly code: DaemonCode | null;
+  readonly reason: string | null;
+}
+
+/**
+ * MAY THIS DAEMON ADDRESS BE USED. https anywhere; http on loopback; http to a remote host only on stagenet and
+ * testnet. An unknown network is judged as mainnet.
+ */
+export declare function judgeDaemonAddress(
+  raw: string | null | undefined,
+  options?: { network?: string; allowPlainLoopback?: boolean },
+): DaemonAddressJudgement;
