@@ -40,6 +40,18 @@ export function moneroWallet({ createWallet, networkType, serverUri, password = 
       need();
       return await wallet.sweepUnlocked({ address, relay });
     },
+    // THE FEE OF WHAT WAS SIGNED, when the library reports one. `sweepUnlocked` answers with the signed
+    // transactions; monero-ts puts the fee on each transaction. Optional by contract - the core treats a missing
+    // method as "unknown", so this adapter says what it can and nothing more.
+    async fee(signed) {
+      need();
+      const list = Array.isArray(signed) ? signed : [signed];
+      const tx = list[0];
+      if (!tx || typeof tx.getFee !== "function") return null;
+      const value = tx.getFee();
+      return value === null || value === undefined ? null : String(value);
+    },
+
     async relay(signed) {
       need();
       return await wallet.relayTxs(signed);

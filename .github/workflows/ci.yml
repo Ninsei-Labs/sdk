@@ -146,3 +146,9 @@ jobs:
       # refuses more than twelve decimals, and both are cut in a copy to prove the guard reddens.
       - name: Check XMR amounts (twelve decimals, no silent rounding)
         run: pnpm run check:xmr-amount
+
+      # WHAT THE TRANSFER COSTS. A withdrawal moves the whole free remainder, so the fee comes out of it and the
+      # recipient receives the rest. A wallet that cannot report a fee says null - a zero would be a claim the
+      # package cannot support, and the interface would show a free transfer.
+      - name: Check the signing preview (fee and what the recipient receives)
+        run: pnpm run check:sign-preview

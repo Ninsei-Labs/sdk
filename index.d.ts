@@ -1411,6 +1411,13 @@ export interface SweepSignResult {
   readonly token: string;
   /** The free remainder at the moment of signing, in atomic units (string). */
   readonly amount: string;
+  /**
+   * THE FEE OF THE SIGNED TRANSFER, in atomic units, or null when the wallet could not report one. A withdrawal
+   * moves the whole remainder, so the fee comes out of it - `receive` is what the recipient gets.
+   */
+  readonly fee: string | null;
+  /** The remainder minus the fee. Null when the fee is unknown, or when a reported fee claims more than the remainder. */
+  readonly receive: string | null;
   /** Where the transfer was signed to. */
   readonly to: string;
   /** The address the XMR leaves from (the swap's joint address). */
