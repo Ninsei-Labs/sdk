@@ -9,6 +9,7 @@ import { primitives } from "./primitives.mjs";
 import * as engine from "./engine.mjs";
 import { restoreWallet } from "./sweep-restore.mjs";
 import { moneroWalletAdapter } from "./adapters/monero-wallet.mjs";
+import { checkDestination } from "./destination.mjs";
 
 // The same boundary as when the file was issued: a passphrase shorter than twelve characters will not open the file.
 const MIN_PASSPHRASE = 12;
@@ -87,6 +88,22 @@ export function createSweep({ http, config }) {
         restoreHeight: request.restoreHeight,
         expectedAddress: request.expectedAddress || null,
       });
+    },
+
+    // WHERE THE WITHDRAWAL GOES. The file names the recipient the swap was made for; this compares the address the
+    // person typed with that promise and with the file's network. `matches` is null when the file named nobody -
+    // that is not a failure, it is an absence the caller can phrase.
+    async destination(request = {}) {
+      const contents = contentsOf(request.file);
+      if (!contents) throw new SdkError("bad-input", { field: "file" });
+      if (!request.passphrase) throw new SdkError("bad-input", { field: "passphrase" });
+      if (typeof request.dest !== "string" || !request.dest.trim()) throw new SdkError("bad-input", { field: "dest" });
+      let payload = null;
+      try { payload = await engine.recoveryFile.decryptFile(JSON.parse(contents), request.passphrase); }
+      catch { throw new SdkError("recovery-failed", { step: "decrypt" }); }
+      try { engine.recoveryFile.validatePayload(payload); }
+      catch { throw new SdkError("recovery-failed", { step: "validate" }); }
+      return checkDestination(payload, request.dest);
     },
 
     async plan(request) {

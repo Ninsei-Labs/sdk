@@ -1236,6 +1236,12 @@ export interface SweepApi {
    * caller passes the namespace, the network, the node and the keys.
    */
   wallet(request: SweepWalletRequest): SweepWallet;
+
+   * COMPARE A DESTINATION WITH THE FILE'S PROMISE. `ok` is "usable address on the file's network", `matches` is
+   * "the promised one" and is null when the file named nobody. Sending XMR elsewhere is a different payment, so the
+   * comparison is not presentation.
+   */
+  destination(request: SweepDestinationRequest): Promise<SweepDestination>;
   /** What is known about the withdrawal from the recovery file: the address, the restore height, what we can dispose of. */
   plan(request: SweepPlanRequest): Promise<SweepPlan>;
   /**
@@ -1406,6 +1412,30 @@ export interface MoneroWalletAdapter {
 }
 
 /** What signing returned: the open session's token and what lies under it. */
+/** What `destination` needs: the file, its passphrase, and the address the person typed. */
+export interface SweepDestinationRequest {
+  readonly file: { readonly contents: string };
+  readonly passphrase: string;
+  /** The address the person typed. Empty is refused (`bad-input`, field `dest`). */
+  readonly dest: string;
+}
+
+export interface SweepDestination {
+  /** True when the address is usable on the file's network. */
+  readonly ok: boolean;
+  readonly dest: string;
+  /** The recipient the file promised, or null when it named none. */
+  readonly promised: string | null;
+  /** True/false against the promise; null when the file named nobody. */
+  readonly matches: boolean | null;
+  /** The file's Monero network (stagenet, mainnet, testnet), or null. */
+  readonly network: string | null;
+  /** True when the checksum was actually checked; false when the library was not available. */
+  readonly verified: boolean;
+  /** The library's phrase when the shape or the network is wrong. */
+  readonly reason: string | null;
+}
+
 export interface SweepSignResult {
   /** The open session's token for `relay`. It contains no keys - they are owned by the library wallet. */
   readonly token: string;
