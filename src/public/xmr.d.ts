@@ -323,3 +323,37 @@ export declare function sellWindowSec(request?: {
  * `stagenet`, `testnet` comes back as null - a default would build a wallet for a chain the node may not serve.
  */
 export declare function networkFromNode(info: unknown): "mainnet" | "stagenet" | "testnet" | null;
+
+/** The answer to a preflight: usable, or the named reason it is not. */
+export interface NodeProbeOk {
+  readonly ok: true;
+  readonly url: string;
+  readonly height: number;
+  readonly network: "mainnet" | "stagenet" | "testnet";
+  readonly nettype: string | null;
+  readonly synchronized: boolean;
+  readonly version: string | null;
+  readonly status: string | null;
+  readonly ms: number;
+}
+
+export interface NodeProbeRefusal {
+  readonly ok: false;
+  /** no-url | no-fetch | timeout | unreachable | http | not-json | rpc | no-height | nettype */
+  readonly why: string;
+  readonly status?: number | null;
+  readonly nettype?: string | null;
+  readonly rpc?: number | null;
+  readonly ms?: number;
+}
+
+/**
+ * ASK A NODE FOR `get_info`: the height, the network it names, whether it is synchronized. Never throws - the
+ * answer names the problem (`unreachable`, `timeout`, `nettype`, ...). `fetchImpl` is injected so a Node consumer
+ * or a test can pass its own; `timeoutMs` abandons the request (8 seconds by default).
+ */
+export declare function probeMoneroNode(options: {
+  url: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}): Promise<NodeProbeOk | NodeProbeRefusal>;
