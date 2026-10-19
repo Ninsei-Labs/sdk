@@ -32,6 +32,23 @@ const walletStep = async (surface, step) => {
   }
 };
 
+// THE FEE A WALLET REPORTS FOR A SIGNED TRANSACTION. Optional on purpose: the adapter contract does not require
+// it, and an adapter without it is not broken - the answer is simply unknown. The library's own shape is tried
+// (`getFee()` on the transaction or on the signed wrapper), because that is what monero-ts returns; a value that is
+// not a non-negative integer string is refused as unknown rather than trusted.
+const feeOf = async (wallet, signed) => {
+  if (!wallet || typeof wallet.fee !== "function") return null;
+  let value;
+  try {
+    value = await wallet.fee(signed);
+  } catch {
+    return null;
+  }
+  if (value === null || value === undefined) return null;
+  const text = String(value);
+  return /^\d+$/.test(text) ? text : null;
+};
+
 export function createSweep({ http, config }) {
   // THE NAME IS NEEDED BY THE OBJECT ITSELF: `run` calls `api.plan(...)` - the step order is held by the plan and
   // the withdrawal living in one object, not in two copies. During a manual merge of branches the object was left
@@ -240,9 +257,26 @@ export function createSweep({ http, config }) {
         // zero, and the refusal would look like success.
         if (unlocked <= 0n) throw new SdkError("insufficient-funds", { unlocked: unlocked.toString() });
         const signed = await walletStep("sweepUnlocked", () => wallet.sweepUnlocked({ address: request.to, relay: false }));
+        // WHAT THE TRANSFER COSTS, WHEN THE WALLET CAN SAY. A withdrawal moves the whole free remainder, so the fee
+        // is not extra money on top - it is taken out of it, and the recipient receives the remainder MINUS the fee.
+        // An adapter that cannot report a fee answers null; publishing 0 there would be a claim the package cannot
+        // support, and the interface would show a free transfer.
+        const fee = await feeOf(wallet, signed);
+        const feeValue = fee === null ? null : BigInt(fee);
         const token = "sweep-" + (++sessionSeq);
         sessions.set(token, { wallet, plan, signed });
-        return { token, amount: unlocked.toString(), to: request.to, swept: plan.address };
+        return {
+          token,
+          amount: unlocked.toString(),
+          // The fee in atomic units, or null when the wallet could not report it.
+          fee,
+          // What the recipient receives: the remainder minus the fee. Null whenever the fee is unknown, and null
+          // rather than a negative number when a fee claims more than the remainder (that is a broken report, not
+          // a transfer).
+          receive: feeValue === null || feeValue >= unlocked ? null : (unlocked - feeValue).toString(),
+          to: request.to,
+          swept: plan.address,
+        };
       } catch (error) {
         // There is no signature - we do not leave an open wallet. Closing must not hide the refusal's reason.
         try { await wallet.close(); } catch { /* the reason matters more than closing */ }
