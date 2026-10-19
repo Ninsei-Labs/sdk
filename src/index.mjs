@@ -232,7 +232,7 @@ export function createNinsei(options) {
     config,
     wallet,
     preflight,
-    recovery: createRecovery(),
+    recovery: createRecovery({ http, config }),
 
     // THE ORDER: checking the counterparty's side and the joint address. Both checks - BEFORE signing: after it
     // there is nothing to fix.

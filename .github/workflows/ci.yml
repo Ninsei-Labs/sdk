@@ -128,3 +128,9 @@ jobs:
       # driver, and each of its three load-bearing lines is cut in a copy to prove it reddens.
       - name: Check the restore pass (height, rescan, the one locked second pass)
         run: pnpm run check:restore
+
+      # THE RESTORE HEIGHT HAS ONE ORDER. The service's height wins when it knows one (it watches the address),
+      # the file's is the fallback, and no height is a named state - not a refusal, because the person can type
+      # one. The guard builds a real file and a stand-in service, and cuts each of the three load-bearing lines.
+      - name: Check the restore height (service wins, file is the fallback, none is named)
+        run: pnpm run check:restore-height

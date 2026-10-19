@@ -1488,6 +1488,29 @@ export interface ActionsRequest {
 export interface RecoveryApi {
   /** Parse the recovery file. Without the right passphrase - a refusal with a code, not an exception. */
   open(file: { readonly contents: string } | string, passphrase?: string): Promise<RecoveredWallet>;
+  /**
+   * WHICH HEIGHT TO SCAN FROM, AND WHERE IT CAME FROM. The service's height wins when it knows one (it watches
+   * the address), the file's is the fallback, and no height is a named state - the person can type one.
+   */
+  restoreHeight(request: RestoreHeightRequest): Promise<RestoreHeightResult>;
+}
+
+export interface RestoreHeightRequest {
+  readonly file: { readonly contents: string } | string;
+  readonly passphrase: string;
+}
+
+export interface RestoreHeightResult {
+  readonly address: string | null;
+  /** 0 when no source knows a height. */
+  readonly height: number;
+  readonly source: "app" | "file" | "none";
+  readonly fileHeight: number;
+  readonly appHeight: number;
+  /** Whether the service was asked at all (it is absent in a package without a service). */
+  readonly appAsked: boolean;
+  /** When `source` is "none": "unreachable" | "no-row" | "no-height". Null when a height was found. */
+  readonly appProblem: string | null;
 }
 
 export interface RecoveredWallet {
