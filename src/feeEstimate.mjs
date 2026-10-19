@@ -38,7 +38,10 @@ const atomicField = (source, ...names) => {
  * assembled transaction; `feeForBytes` is the arithmetic that gets there. Never throws - a refusal names the problem.
  */
 export async function moneroFeeEstimate({ url, fetchImpl = globalThis.fetch, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
-  const base = text(url).replace(/\/+$/, "");
+  // TRAILING SLASHES WITHOUT A REGEX: a pattern anchored on a run of slashes is flagged as a slow expression on
+  // hostile input, and this value can be typed by a person.
+  let base = text(url);
+  while (base.endsWith("/")) base = base.slice(0, -1);
   if (!base) return { ok: false, why: "no-url" };
   if (typeof fetchImpl !== "function") return { ok: false, why: "no-fetch" };
   const controller = typeof AbortController === "function" ? new AbortController() : null;
