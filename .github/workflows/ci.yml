@@ -138,6 +138,11 @@ jobs:
       - name: Check that every script CI names exists
         run: pnpm run check:ci-scripts
 
+      # WHAT A TRANSACTION WILL COST, BEFORE IT IS BUILT. The daemon's price per KB, by priority, and the one
+      # arithmetic that turns it into a fee - rounded UP, because one unit short is still short.
+      - name: Check the fee estimate (the price per KB and the fee for a size)
+        run: pnpm run check:fee-estimate
+
 
       # THE RESTORE PASS IS A PACKAGE RULE NOW. It used to live on the sweep page: a scan ten blocks below the
       # named height, a rescan, and ONE second pass when coins exist but none is spendable. A wrong height or a

@@ -54,3 +54,7 @@ export {
   judgeDaemonAddress,
   plainLoopbackAllowed,
 } from "../../engine/monero/daemonAddress.js";
+
+// WHAT A TRANSACTION WILL COST: the daemon's price per kilobyte, by priority, and the arithmetic that turns it into
+// a fee. The page learned the fee only after signing.
+export { moneroFeeEstimate, feeForBytes } from "../feeEstimate.mjs";
