@@ -140,3 +140,8 @@ jobs:
       # package's: a caller passes the namespace, and an unknown nettype is null rather than a guess.
       - name: Check the wallet factory (the network word becomes the library's enum)
         run: pnpm run check:wallet-factory
+
+      # IS THE NODE USABLE. One get_info request, and an answer that names why not - "unreachable" and "this node
+      # names an unknown network" are different problems, and a preflight must agree with the wallet builder.
+      - name: Check the node preflight (height, network, every failure named)
+        run: pnpm run check:node-probe

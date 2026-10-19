@@ -31,3 +31,6 @@ export { SELL_WINDOW, sellWindowSec } from "../../engine/core/sellWindow.js";
 // WHAT NETWORK A NODE SAYS IT IS ON: the wallet must be built from that answer, and an unknown answer is null -
 // a default here would build a wallet for a chain the node may not serve.
 export { networkFromNode } from "../../engine/monero/nodeNetwork.js";
+
+// IS THE NODE USABLE, AND WHAT DOES IT SAY ABOUT ITSELF: one get_info request, an answer that names why not.
+export { probeMoneroNode } from "../probes.mjs";
