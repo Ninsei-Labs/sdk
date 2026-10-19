@@ -1233,6 +1233,13 @@ export interface SweepApi {
   /** What is known about the withdrawal from the recovery file: the address, the restore height, what we can dispose of. */
   plan(request: SweepPlanRequest): Promise<SweepPlan>;
   /**
+   * RESTORE THE WALLET FROM A HEIGHT AND REPORT WHAT IT HOLDS. Sets the restore height a little below the one given,
+   * rescans, syncs and reads the total and the spendable balance. Coins that exist but are locked get ONE more pass
+   * with a spent-status re-check - the page used to decide that itself, and the rule belongs to wallet2, not to an
+   * interface. A failed sync is not the verdict: the remainder is.
+   */
+  restore(request: SweepRestoreRequest): Promise<SweepRestoreResult>;
+  /**
    * Assemble the spend and view keys from the revealed half - with the mandatory check `(s_a + s_b)*G` against the
    * order's public key. It did not match - a refusal, not "let us try to send".
    */
@@ -1254,6 +1261,36 @@ export interface SweepApi {
   report(request: SweepReportRequest): Promise<SweepReportResult>;
   /** Perform the withdrawal as a whole (`sign` + `relay`). */
   run(request: SweepRunRequest): Promise<SweepRunResult>;
+}
+
+/** What `restore` needs: the withdrawal adapter and the height named by the file. */
+export interface SweepRestoreRequest {
+  /** The withdrawal adapter: `sync`, `unlockedBalance`, `driver`. The wallet is built by the caller. */
+  readonly wallet: {
+    sync(): Promise<void>;
+    unlockedBalance(): Promise<bigint | number | string>;
+    driver(): unknown;
+  };
+  /** The height from the recovery file. The scan starts `scanBack` blocks below it. */
+  readonly fromHeight: number;
+  /** How far below the named height the scan starts. Default 10. */
+  readonly scanBack?: number;
+  /** Run the second pass when coins exist but none is spendable. Default true. */
+  readonly rescanWhenLocked?: boolean;
+}
+
+/** What `restore` found. Amounts are atomic units as strings; heights are numbers when the driver can read them. */
+export interface SweepRestoreResult {
+  readonly total: string;
+  readonly unlocked: string;
+  /** The height the scan actually started from. */
+  readonly scanHeight: number;
+  readonly walletHeight: number | null;
+  readonly nodeHeight: number | null;
+  /** How many sync passes ran: 1, or 2 when the locked pass ran. */
+  readonly passes: number;
+  /** Whether the second pass RAN - not whether it helped. */
+  readonly lockedPass: boolean;
 }
 
 /** The withdrawal mark: the swap identifier and the transfer hash. */

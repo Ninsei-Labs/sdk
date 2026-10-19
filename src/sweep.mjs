@@ -7,6 +7,7 @@
 import { SdkError } from "./errors.mjs";
 import { primitives } from "./primitives.mjs";
 import * as engine from "./engine.mjs";
+import { restoreWallet } from "./sweep-restore.mjs";
 
 // The same boundary as when the file was issued: a passphrase shorter than twelve characters will not open the file.
 const MIN_PASSPHRASE = 12;
@@ -143,6 +144,13 @@ export function createSweep({ http, config }) {
         // not an engine exception with text inside.
         throw new SdkError("bad-input", { field: "revealedHalf", step: "verify" });
       }
+    },
+
+    // THE PASS BEFORE SIGNING: set the height, rescan, sync, read the balance, and - when coins exist but none is
+    // spendable - re-check the spent status once. The wallet is the same withdrawal adapter `sign` takes; the page
+    // no longer decides when a second pass is needed.
+    async restore(request) {
+      return await restoreWallet(request || {});
     },
 
     // THE WITHDRAWAL ITSELF. The wallet arrives as an adapter (the WASM and the worker live with whoever builds the

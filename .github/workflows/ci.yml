@@ -121,3 +121,10 @@ jobs:
       # browser, no contour: the wallet is a stand-in and the recovery file is built by the engine itself.
       - name: Check the withdrawal refusal (empty remainder -> insufficient-funds)
         run: pnpm run check:sweep
+
+      # THE RESTORE PASS IS A PACKAGE RULE NOW. It used to live on the sweep page: a scan ten blocks below the
+      # named height, a rescan, and ONE second pass when coins exist but none is spendable. A wrong height or a
+      # missing pass looks like an empty wallet, not like an error - so the rule is exercised with a stand-in
+      # driver, and each of its three load-bearing lines is cut in a copy to prove it reddens.
+      - name: Check the restore pass (height, rescan, the one locked second pass)
+        run: pnpm run check:restore
