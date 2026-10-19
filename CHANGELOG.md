@@ -1,3 +1,35 @@
+## 0.44.0 — 2026-10-19
+
+THE WITHDRAWAL AND THE NODE NOW ASK THE PACKAGE INSTEAD OF CARRYING THEIR OWN COPIES. Every rule below was
+implemented in the sweep page or in the node first, and each had a second reader or a second copy waiting to
+diverge. Nothing here is a breaking change: the entries are new names, apart from two type-level declarations that
+replace nothing.
+
+- `sweep.restore` restores the wallet from a height with one second pass when coins exist but none is spendable,
+  and `recovery.restoreHeight` answers the height with its source: the service wins when it knows one, the file is
+  the fallback, and "no height" is a named state rather than a refusal.
+- `sweep.wallet` builds the withdrawal wallet from the caller's monero-ts namespace. The network word becomes the
+  library's enum inside the package, and `xmr.networkFromNode` reads the three known answers while anything else
+  is null.
+- `sweep.destination` compares a typed address with the address the recovery file promised and with the file's
+  network, and `sweep.sign` now reports `fee` and `receive`: a withdrawal moves the whole remainder, so the fee
+  comes out of it.
+- `core.formatXmr` and `core.parseXmr` work in BigInt at twelve decimals. One atomic unit is `"0.000000000001"`,
+  never `"0"`, and more than twelve decimals is refused instead of rounded.
+- `xmr.decodeAddressKeys`, `xmr.scalarToLeHex`, `xmr.viewKeyMatchesAddress` and `xmr.unlockStateOf` read an arrival
+  without a wallet: the address and its public keys, the daemon's little-endian scalar, the key check, and the
+  `unlock_time` rule with its boundary named.
+- `xmr.judgeDaemonAddress` is one policy for a node address: https anywhere, http on loopback, and http to a remote
+  host only on stagenet and testnet. An unknown network is judged as mainnet.
+- `xmr.moneroFeeEstimate` asks a node for `get_fee_estimate`, and `xmr.feeForBytes` turns a per-KB price into a sum,
+  rounded up. `xmr.probeMoneroNode` answers a preflight with a height, a network and a named reason when it cannot.
+- `core.scaleOf` and `core.msFromOrderSeconds` keep seconds at the chain and in the signed terms, milliseconds
+  everywhere else, with one conversion at the boundary that refuses a value already in milliseconds.
+- `ERROR_META` and `ERROR_SIDES` sit beside `ERROR_CODES`: whether another attempt has a chance, and who can act.
+  A machine check keeps the two vocabularies exactly equal.
+
+Verified by the package battery: 22 checks green, and every new rule has its own guard with a breaking run.
+
 ## 0.43.3 — 2026-10-18
 
 THE SAME CONTENT AS 0.43.2, PUBLISHED UNDER A NEW NUMBER. The tag-triggered release for 0.43.2 stopped in

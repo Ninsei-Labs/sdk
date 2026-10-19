@@ -6,4 +6,4 @@
 // tools/sync-version.mjs. Do not edit it by hand - set the version in package.json and run `npm run sync:version`.
 // The `version` check in tools/check.mjs refuses a mismatch, and refuses a runtime read of package.json here.
 
-export const SDK_VERSION = "0.43.3";
+export const SDK_VERSION = "0.44.0";
