@@ -31,7 +31,8 @@
     "sync:version": "node tools/sync-version.mjs",
     "check:restore": "node tools/check-restore.mjs",
     "check:restore-height": "node tools/check-restore-height.mjs",
-    "check:wallet-factory": "node tools/check-wallet-factory.mjs"
+    "check:wallet-factory": "node tools/check-wallet-factory.mjs",
+    "check:xmr-amount": "node tools/check-xmr-amount.mjs"
   },
   "types": "./index.d.ts",
   "exports": {

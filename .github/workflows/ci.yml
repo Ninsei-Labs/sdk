@@ -140,3 +140,9 @@ jobs:
       # package's: a caller passes the namespace, and an unknown nettype is null rather than a guess.
       - name: Check the wallet factory (the network word becomes the library's enum)
         run: pnpm run check:wallet-factory
+
+      # XMR AMOUNTS ARE TWELVE DECIMALS AND BIGINT. A JavaScript number is exact only to about 9007 XMR in
+      # piconero, and rounding an amount is a wrong payment that looks successful. Formatting keeps dust, parsing
+      # refuses more than twelve decimals, and both are cut in a copy to prove the guard reddens.
+      - name: Check XMR amounts (twelve decimals, no silent rounding)
+        run: pnpm run check:xmr-amount

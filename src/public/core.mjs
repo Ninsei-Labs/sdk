@@ -4,3 +4,7 @@
 // consumer forced to import it from either would learn a false lesson about where it lives.
 
 export { parseAmount } from "../../engine/core/format.js";
+
+// XMR AMOUNTS IN ATOMIC UNITS: 12 decimals, bigint, no rounding. `formatXmr` for display and for a field,
+// `parseXmr` for what a person typed.
+export { formatXmr, parseXmr } from "../../engine/core/xmrAmount.js";
