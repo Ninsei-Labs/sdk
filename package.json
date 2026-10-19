@@ -33,7 +33,8 @@
     "check:restore-height": "node tools/check-restore-height.mjs",
     "check:wallet-factory": "node tools/check-wallet-factory.mjs",
     "check:xmr-amount": "node tools/check-xmr-amount.mjs",
-    "check:sign-preview": "node tools/check-sign-preview.mjs"
+    "check:sign-preview": "node tools/check-sign-preview.mjs",
+    "check:destination": "node tools/check-destination.mjs"
   },
   "types": "./index.d.ts",
   "exports": {

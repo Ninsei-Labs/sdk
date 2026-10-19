@@ -152,3 +152,8 @@ jobs:
       # package cannot support, and the interface would show a free transfer.
       - name: Check the signing preview (fee and what the recipient receives)
         run: pnpm run check:sign-preview
+
+      # WHERE THE XMR GOES. The file names the recipient; sending elsewhere is a different payment, so the comparison
+      # with the promise and with the file's network is the package's, not the interface's.
+      - name: Check the destination (the promise, the network, the shape)
+        run: pnpm run check:destination
