@@ -134,3 +134,9 @@ jobs:
       # one. The guard builds a real file and a stand-in service, and cuts each of the three load-bearing lines.
       - name: Check the restore height (service wins, file is the fallback, none is named)
         run: pnpm run check:restore-height
+
+      # THE WALLET IS BUILT WITHOUT KNOWING THE LIBRARY. The page used to pass a `createWallet` callback that
+      # translated "stagenet" into monero-ts's enum, and it owned the only `networkFromNode`. Both are the
+      # package's: a caller passes the namespace, and an unknown nettype is null rather than a guess.
+      - name: Check the wallet factory (the network word becomes the library's enum)
+        run: pnpm run check:wallet-factory

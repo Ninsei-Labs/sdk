@@ -27,3 +27,7 @@ export { createDleq2 } from "../../engine/atomic/dleq2.js";
 export { scalarFromMoneroHex, spendKeysFromRevealedHalf } from "../../engine/monero/halvesSweep.js";
 
 export { SELL_WINDOW, sellWindowSec } from "../../engine/core/sellWindow.js";
+
+// WHAT NETWORK A NODE SAYS IT IS ON: the wallet must be built from that answer, and an unknown answer is null -
+// a default here would build a wallet for a chain the node may not serve.
+export { networkFromNode } from "../../engine/monero/nodeNetwork.js";

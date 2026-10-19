@@ -1230,6 +1230,12 @@ export type TerminalCode = "success" | "refunded_eth" | "closed" | "declined";
  * WASM - while the core stays DOM-free.
  */
 export interface SweepApi {
+  /**
+   * BUILD THE WITHDRAWAL WALLET from the caller's monero-ts namespace. The page used to pass a `createWallet`
+   * callback that translated the network name into the library's enum; that translation is the package's now, so a
+   * caller passes the namespace, the network, the node and the keys.
+   */
+  wallet(request: SweepWalletRequest): SweepWallet;
   /** What is known about the withdrawal from the recovery file: the address, the restore height, what we can dispose of. */
   plan(request: SweepPlanRequest): Promise<SweepPlan>;
   /**
@@ -1291,6 +1297,38 @@ export interface SweepRestoreResult {
   readonly passes: number;
   /** Whether the second pass RAN - not whether it helped. */
   readonly lockedPass: boolean;
+}
+
+/** What `wallet` needs: the library namespace and the facts the wallet is built from. */
+export interface SweepWalletRequest {
+  /** The monero-ts namespace (the browser bundle's default export, or the module in Node). */
+  readonly moneroTs: {
+    readonly MoneroNetworkType?: Record<string, unknown>;
+    readonly createWalletFull: (config: Record<string, unknown>) => Promise<unknown>;
+  };
+  /** `mainnet`, `stagenet` or `testnet` - what a node says. */
+  readonly network: string;
+  /** The node (in production - a proxy). */
+  readonly serverUri: string;
+  readonly password?: string;
+  /** `{ seed }` or `{ privateSpendKey, privateViewKey, primaryAddress }`. */
+  readonly keys?: Record<string, unknown>;
+  readonly restoreHeight?: number;
+  /** When set, the derived address must match, or the wallet refuses to open. */
+  readonly expectedAddress?: string | null;
+}
+
+/** The wallet `sweep.wallet` returns: the SDK wallet adapter with the Monero surface on top. */
+export interface SweepWallet {
+  readonly vm: "monero";
+  connect(): Promise<void>;
+  disconnect(): Promise<void>;
+  address(): string;
+  chainId(): string;
+  unlockedBalance(): Promise<bigint | number | string>;
+  sync(): Promise<void>;
+  close(): Promise<void>;
+  driver(): unknown;
 }
 
 /** The withdrawal mark: the swap identifier and the transfer hash. */

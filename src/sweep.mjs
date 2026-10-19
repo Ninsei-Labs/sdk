@@ -8,6 +8,7 @@ import { SdkError } from "./errors.mjs";
 import { primitives } from "./primitives.mjs";
 import * as engine from "./engine.mjs";
 import { restoreWallet } from "./sweep-restore.mjs";
+import { moneroWalletAdapter } from "./adapters/monero-wallet.mjs";
 
 // The same boundary as when the file was issued: a passphrase shorter than twelve characters will not open the file.
 const MIN_PASSPHRASE = 12;
@@ -41,7 +42,36 @@ export function createSweep({ http, config }) {
   const sessions = new Map();
   let sessionSeq = 0;
 
+  // THE NETWORK NAME MONERO-TS TAKES. The adapter speaks a string ("stagenet") because that is what a node says and
+  // what a human reads; the library wants its own enum. That translation used to be a callback on the sweep page -
+  // the last thing a caller had to know about the library to open a wallet.
+  const NETWORK_ENUM = { mainnet: "MAINNET", stagenet: "STAGENET", testnet: "TESTNET" };
+
   const api = {
+    // BUILD THE WITHDRAWAL WALLET from the library namespace the caller has. The page used to pass a `createWallet`
+    // callback that mapped the enum itself; that mapping is here now, so a caller passes `moneroTs` and the keys.
+    wallet(request = {}) {
+      const moneroTs = request.moneroTs;
+      if (!moneroTs || typeof moneroTs !== "object") throw new SdkError("bad-input", { field: "moneroTs" });
+      if (typeof moneroTs.createWalletFull !== "function") throw new SdkError("bad-input", { field: "moneroTs.createWalletFull" });
+      const network = String(request.network || "").trim().toLowerCase();
+      const enumName = NETWORK_ENUM[network] || null;
+      const enumValue = enumName && moneroTs.MoneroNetworkType ? moneroTs.MoneroNetworkType[enumName] : undefined;
+      if (enumValue === undefined || enumValue === null) {
+        throw new SdkError("bad-input", { field: "network", known: Object.keys(NETWORK_ENUM), got: request.network });
+      }
+      if (typeof request.serverUri !== "string" || !request.serverUri) throw new SdkError("bad-input", { field: "serverUri" });
+      return moneroWalletAdapter({
+        createWallet: (config) => moneroTs.createWalletFull({ ...config, networkType: enumValue }),
+        network,
+        serverUri: request.serverUri,
+        password: request.password,
+        keys: request.keys || {},
+        restoreHeight: request.restoreHeight,
+        expectedAddress: request.expectedAddress || null,
+      });
+    },
+
     async plan(request) {
       if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
       const contents = contentsOf(request.file);
