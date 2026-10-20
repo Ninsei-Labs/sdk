@@ -1,3 +1,13 @@
+## 0.44.2 — 2026-10-20
+
+REGTEST HAS A NAME THE PACKAGE KNOWS.
+
+- `networkFromNode` accepts `fakechain`, the answer a `monerod` in regtest mode gives. Every stand and the CI
+  contour run that mode, and the withdrawal page builds its wallet from the recovery file, so refusing the name
+  stopped a run against a node the page is meant to test. The answer is passed through as `fakechain`; an unknown
+  word is still `null`, not a guess.
+- The type declaration and the wallet-factory check name the fourth answer.
+
 ## 0.44.1 — 2026-10-20
 
 TWO ENTRIES A BACKEND NEEDS WHEN IT STOPS READING THE PAGE'S SOURCE.
