@@ -14,6 +14,8 @@ import { checkDestination } from "./destination.mjs";
 // The same boundary as when the file was issued: a passphrase shorter than twelve characters will not open the file.
 const MIN_PASSPHRASE = 12;
 const STEPS = ["unlock", "sync", "sweep", "relay"];
+// `revealedHalf()` on the escrow. Public data: the function returns the half the settlement published.
+const REVEALED_HALF_SELECTOR = "0x3f267bb6";
 
 const contentsOf = (file) => (typeof file === "string" ? file : file && typeof file.contents === "string" ? file.contents : null);
 
@@ -50,7 +52,7 @@ const feeOf = async (wallet, signed) => {
   return /^\d+$/.test(text) ? text : null;
 };
 
-export function createSweep({ http, config }) {
+export function createSweep({ http, config, call = null }) {
   // THE NAME IS NEEDED BY THE OBJECT ITSELF: `run` calls `api.plan(...)` - the step order is held by the plan and
   // the withdrawal living in one object, not in two copies. During a manual merge of branches the object was left
   // unnamed, and the withdrawal failed with "api is not defined": not a refusal, but a breakdown. `node --check`
@@ -96,7 +98,7 @@ export function createSweep({ http, config }) {
     async destination(request = {}) {
       const contents = contentsOf(request.file);
       if (!contents) throw new SdkError("bad-input", { field: "file" });
-      if (!request.passphrase) throw new SdkError("bad-input", { field: "passphrase" });
+      if (typeof request.passphrase !== "string") throw new SdkError("bad-input", { field: "passphrase" });
       if (typeof request.dest !== "string" || !request.dest.trim()) throw new SdkError("bad-input", { field: "dest" });
       let payload = null;
       try { payload = await engine.recoveryFile.decryptFile(JSON.parse(contents), request.passphrase); }
@@ -110,7 +112,8 @@ export function createSweep({ http, config }) {
       if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
       const contents = contentsOf(request.file);
       if (!contents) throw new SdkError("bad-input", { field: "file" });
-      if (typeof request.passphrase !== "string" || request.passphrase.length < MIN_PASSPHRASE) {
+      // EMPTY IS ALLOWED: it opens an unencrypted file. A non-empty one keeps the floor.
+      if (typeof request.passphrase !== "string" || (request.passphrase.length > 0 && request.passphrase.length < MIN_PASSPHRASE)) {
         throw new SdkError("bad-input", { field: "passphrase", min: MIN_PASSPHRASE });
       }
 
@@ -150,10 +153,25 @@ export function createSweep({ http, config }) {
       // the named path, body { network, address }, where address is the ESCROW ADDRESS (not the Monero address).
       // The half is published by the settlement that moves the ETH: a claim or a refund. Before that no one has the
       // spend key, so "not revealed yet" is not an error but a state, and that is exactly where it lands in `missing`.
+      // THE COUNTERPARTY'S REVEALED HALF - FROM THE CHAIN WHEN THE CALLER HAS A CHAIN READ. The half is public:
+      // `claim` and `refund` store it in `revealedHalf()` and emit `HalfRevealed`. A recovery page served from a
+      // static host has no `/escrow/revealed-half` route, so asking the app was the only path and a static page
+      // could never withdraw. The app route stays as the fallback for a caller that has no chain read and did
+      // configure an API base.
       let revealed = false;
       let revealedValue = null;
       const escrowAddress = wallet.escrowAddress || (payload.escrow && payload.escrow.address) || null;
-      if (escrowAddress) {
+      if (escrowAddress && typeof call === "function") {
+        try {
+          const word = String((await call({ to: escrowAddress, data: REVEALED_HALF_SELECTOR })) || "");
+          const hex = word.startsWith("0x") ? word.slice(2) : word;
+          if (/^[0-9a-fA-F]{64}$/.test(hex) && !/^0+$/.test(hex)) {
+            revealed = true;
+            revealedValue = "0x" + hex.slice(24);
+          }
+        } catch { revealed = false; }
+      }
+      if (!revealed && escrowAddress && config && config.apiBase) {
         try {
           const half = await http.json(config.route("revealedHalf"), {
             method: "POST",

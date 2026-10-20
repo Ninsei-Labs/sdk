@@ -19,6 +19,12 @@ export declare const ENVELOPE_VERSION: number;
 /** The payload version (deal content), raised independently of the envelope: 1 keys as fields, 2 the mnemonic, 3 halves. */
 export declare const PAYLOAD_VERSION: number;
 
+/** The envelope version of a file written WITHOUT a passphrase: the payload travels in the clear and the header says so. */
+export declare const UNENCRYPTED_ENVELOPE_VERSION: number;
+
+/** The algorithm identifier of an unencrypted envelope. */
+export declare const ALG_NONE: string;
+
 /** The mark every Ninsei recovery file carries in its payload, so a foreign file is refused by name. */
 export declare const FILE_MAGIC: string;
 
@@ -47,12 +53,20 @@ export interface RecoveryEnvelopeHeader {
   readonly iv: string;
 }
 
-/** The recovery file object as it is written (`ninsei-<id>.json.enc`) and read back. */
+/** An encrypted recovery file object as it is written (`ninsei-<id>.json.enc`) and read back. */
 export interface RecoveryEnvelope extends RecoveryEnvelopeHeader {
   /** The AES-GCM ciphertext of the payload, base64. */
   readonly ciphertext: string;
   /** The authenticated deal fields of the header. */
   readonly meta?: RecoveryEnvelopeMeta | null;
+}
+
+/** A recovery file written WITHOUT a passphrase: the payload is readable, the envelope says so, and no key is derived. */
+export interface RecoveryPlainEnvelope {
+  readonly v: number;
+  readonly alg: string;
+  readonly meta?: RecoveryEnvelopeMeta | null;
+  readonly payload: RecoveryPayload;
 }
 
 /**
@@ -221,10 +235,14 @@ export interface RecoveryValidation {
 export declare function validatePayload(payload: RecoveryPayload): RecoveryValidation;
 
 /**
- * Encrypts one payload into a recovery file envelope: a fresh salt and IV, the key derived from the passphrase, and
- * the header authenticated as AAD. A passphrase shorter than 12 characters is refused.
+ * Writes one payload into a recovery file envelope. A non-empty passphrase derives a key from a fresh salt and IV
+ * and authenticates the header as AAD; a passphrase shorter than 12 characters is refused. An EMPTY passphrase
+ * writes the payload in the clear, with the envelope naming that fact.
  */
-export declare function encryptPayload(payload: RecoveryPayload, passphrase: string): Promise<RecoveryEnvelope>;
+export declare function encryptPayload(payload: RecoveryPayload, passphrase: string): Promise<RecoveryEnvelope | RecoveryPlainEnvelope>;
+
+/** Whether the file asks for a passphrase. False for an unencrypted envelope. */
+export declare function isEncrypted(fileObject: unknown): boolean;
 
 /**
  * Decrypts a recovery file: the envelope version, the algorithm, the required fields and the iteration count are

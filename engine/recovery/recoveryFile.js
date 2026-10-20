@@ -78,7 +78,12 @@ export const FILE_MAGIC = "NINSEI-SWAP-RECOVERY";
 // BOTH must be readable: people hold version-1 files and they must not be lost. The version is raised when the
 // ENVELOPE itself changes, not the payload inside.
 export const ENVELOPE_VERSION = 2;
-const READABLE_ENVELOPE_VERSIONS = [1, 2];
+// v3 - NO ENCRYPTION. An empty passphrase writes the payload in the clear and the envelope says so. It is a
+// deliberate choice by the owner: a forgotten passphrase locks a person out of their own money, and the file is
+// still the only way to the XMR. Readers of every version must keep working.
+export const UNENCRYPTED_ENVELOPE_VERSION = 3;
+export const ALG_NONE = "NONE";
+const READABLE_ENVELOPE_VERSIONS = [1, 2, 3];
 export const PAYLOAD_VERSION = 3;
 // v1 - the very first files (seedHex and both keys as separate fields), v2 - the mnemonic as the single source,
 // v3 - HALVES. All three must be readable: people hold files of every version, and a recovery file is the only way
@@ -264,7 +269,13 @@ export function validatePayload(payload) {
 }
 
 export async function encryptPayload(payload, passphrase) {
-  if (!passphrase || passphrase.length < 12) throw new Error("Passphrase must be at least 12 characters");
+  const metaOf = () => ({ id: payload.swapId, side: payload.side, createdAt: payload.createdAt, termsHash: payload.termsHash || null });
+  // AN EMPTY PASSPHRASE MEANS NO ENCRYPTION, AND THE ENVELOPE SAYS SO. A provided one keeps the twelve character
+  // floor: a short password is worse than none because it looks like protection.
+  if (passphrase === "") {
+    return { v: UNENCRYPTED_ENVELOPE_VERSION, alg: ALG_NONE, meta: metaOf(), payload };
+  }
+  if (typeof passphrase !== "string" || passphrase.length < 12) throw new Error("Passphrase must be at least 12 characters");
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await deriveKey(passphrase, salt, ITER);
@@ -282,9 +293,19 @@ export async function encryptPayload(payload, passphrase) {
 // Decryption. AES-GCM errors (wrong password, altered ciphertext) arrive as OperationError with no detail - we
 // turn them into a human message, else the user sees "operation failed" and cannot tell a wrong password from a
 // corrupt file.
+// WHETHER A FILE ASKS FOR A PASSPHRASE. A page reads this before showing the field: an unencrypted file has none.
+export function isEncrypted(fileObject) {
+  return !!(fileObject && typeof fileObject === "object" && fileObject.alg !== ALG_NONE);
+}
+
 export async function decryptFile(fileObject, passphrase) {
   if (!fileObject || typeof fileObject !== "object") throw new Error("Not a recovery file (expecting JSON)");
   if (!READABLE_ENVELOPE_VERSIONS.includes(fileObject.v)) throw new Error(`Unsupported recovery file version: ${fileObject.v}`);
+  if (fileObject.v === UNENCRYPTED_ENVELOPE_VERSION) {
+    if (fileObject.alg !== ALG_NONE) throw new Error(`Unknown algorithm: ${fileObject.alg}`);
+    if (!fileObject.payload || typeof fileObject.payload !== "object") throw new Error('Recovery file is missing "payload"');
+    return fileObject.payload;
+  }
   if (fileObject.alg !== ALG_ID) throw new Error(`Unknown algorithm: ${fileObject.alg}`);
   for (const field of ["salt", "iv", "ciphertext"]) {
     if (typeof fileObject[field] !== "string" || !fileObject[field]) throw new Error(`Recovery file is missing "${field}"`);

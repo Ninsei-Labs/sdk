@@ -737,7 +737,8 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       const makeRecord = typeof createRecord === "function" ? createRecord
         : async (req) => recordModule.createRecord(recordInputOf(req), { order: req.order });
       const passphrase = typeof request.passphrase === "string" ? request.passphrase : "";
-      if (passphrase.length < MIN_PASSPHRASE) throw new SdkError("bad-input", { field: "passphrase", min: MIN_PASSPHRASE });
+      if (typeof passphrase !== "string") throw new SdkError("bad-input", { field: "passphrase" });
+      if (passphrase.length > 0 && passphrase.length < MIN_PASSPHRASE) throw new SdkError("bad-input", { field: "passphrase", min: MIN_PASSPHRASE });
       // THE ORDER TERMS ARE CHECKED BEFORE THE RECORD. The context is assembled by the engine from the very fields the
       // firm quote's signature is bound to; incomplete terms - a refusal with a named field, not a substitution of empty
       // values: the DLEQ proof would then be bound to nothing.

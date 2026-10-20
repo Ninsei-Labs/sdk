@@ -52,7 +52,8 @@ export function createRecovery({ http = null, config = null } = {}) {
     async restoreHeight(request = {}) {
       const contents = contentsOf(request.file);
       if (contents === null) throw new SdkError("bad-input", { field: "file" });
-      if (typeof request.passphrase !== "string" || !request.passphrase) {
+      // AN EMPTY PASSPHRASE IS A VALID ONE: the file may be unencrypted on purpose.
+      if (typeof request.passphrase !== "string") {
         throw new SdkError("bad-input", { field: "passphrase" });
       }
       // THE ENVELOPE IS PARSED HERE: `restoreFromFile` takes the OBJECT, while the file arrives as text. Doing it
