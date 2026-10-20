@@ -20,6 +20,9 @@ export {
   prefixFor,
 } from "../../engine/monero/address.js";
 
+// THE BLOCK WALK A WATCHER RUNS: the same scanner the page uses, without a wallet.
+export { laterBoundary, scanRange, viewKeyFormForAddress } from "../../engine/monero/scan.js";
+
 export { createHalves } from "../../engine/atomic/halves.js";
 export { createDleq2 } from "../../engine/atomic/dleq2.js";
 

@@ -13,6 +13,12 @@
 export declare function parseAmount(raw: string | number | null | undefined): number | null;
 
 /**
+ * The same field text reduced to something a decimal parser can read: thousands separators removed, a lone comma
+ * read as the decimal separator, anything after a second separator dropped. Empty when the text carries no digit.
+ */
+export declare function normalizeAmountInput(raw: string | number | null | undefined): string;
+
+/**
  * ATOMIC UNITS -> A DECIMAL STRING. One XMR is 10^12 atomic units; the conversion uses BigInt, so a value above
  * 2^53 (about 9007 XMR in piconero) is not rounded. Dust does not vanish: 1 unit is "0.000000000001". `trim`
  * drops trailing zeros in the fraction; the result is always a plain decimal, never grouped.

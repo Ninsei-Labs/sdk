@@ -1,3 +1,15 @@
+## 0.44.1 — 2026-10-20
+
+TWO ENTRIES A BACKEND NEEDS WHEN IT STOPS READING THE PAGE'S SOURCE.
+
+- `./networks` names the registry the engine already holds: `CHAINS`, `DEX_CHAINS`, `DEFAULT_CHAIN` and
+  `ASYNC_ROUTE_PROVIDERS`. A service that validates a chain id or a token against the same data the page
+  reads cannot drift from it. Nothing is re-implemented; the entry only re-exports `engine/core/config.js`.
+- `./core` now also exports `normalizeAmountInput`, the text a person typed reduced to a decimal string, so a
+  backend does not carry a second reader of the same field.
+- `./xmr` now names the block walk a watcher runs: `scanRange`, `viewKeyFormForAddress` and `laterBoundary`, all
+  from `engine/monero/scan.js`. A backend watching a deposit no longer reaches into the page's source.
+
 ## 0.44.0 — 2026-10-19
 
 THE WITHDRAWAL AND THE NODE NOW ASK THE PACKAGE INSTEAD OF CARRYING THEIR OWN COPIES. Every rule below was
