@@ -1,3 +1,12 @@
+## 0.44.3 — 2026-10-20
+
+A RESCAN THAT THE LIBRARY REFUSES DOES NOT STOP THE RESTORE.
+
+- `sweep.restore` still asks for the rescan first. If the wallet library refuses it, the pass continues to the
+  sync and the balance, exactly as a failed sync already did. A wallet opened from keys carries its height from
+  creation, so a library that cannot rescan a chain can still serve the withdrawal. The spendable balance stays
+  the verdict, not the rescan.
+
 ## 0.44.2 — 2026-10-20
 
 REGTEST HAS A NAME THE PACKAGE KNOWS.

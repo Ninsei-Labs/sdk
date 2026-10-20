@@ -92,7 +92,10 @@ export async function restoreWallet(request = {}) {
   // A RESCAN IS REQUIRED, NOT OPTIONAL: without it the height only applies to a wallet that has not scanned yet,
   // and a wallet restored from a key has. A driver that cannot rescan is the caller's mistake, named here.
   if (typeof driver.rescanBlockchain !== "function") throw new SdkError("bad-input", { field: "wallet.driver.rescanBlockchain" });
-  await step("rescanBlockchain", () => driver.rescanBlockchain());
+  // A RESCAN IS BEST-EFFORT, LIKE THE SYNC BELOW. A wallet built from keys already carries the height it was opened
+  // with, and a library that cannot rescan a chain (monero-ts against a regtest node answers "failed to get hashes")
+  // would otherwise stop a withdrawal the sync can still serve. The balance below is the verdict, not the rescan.
+  try { await step("rescanBlockchain", () => driver.rescanBlockchain()); } catch { /* the balance decides */ }
 
   // A FAILED SYNC IS BEST-EFFORT, exactly as in the signing step: what blocks a withdrawal is the spendable
   // remainder, and it is read below. The library throws low-level while scanning a chain it cannot read; that must
