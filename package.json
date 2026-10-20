@@ -1,6 +1,6 @@
 {
   "name": "@ninsei-labs/sdk",
-  "version": "0.44.0",
+  "version": "0.44.1",
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
@@ -68,6 +68,10 @@
     "./core": {
       "types": "./src/public/core.d.ts",
       "default": "./src/public/core.mjs"
+    },
+    "./networks": {
+      "types": "./src/public/networks.d.ts",
+      "default": "./src/public/networks.mjs"
     },
     "./recovery": {
       "types": "./src/public/recovery.d.ts",

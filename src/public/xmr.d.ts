@@ -471,3 +471,25 @@ export declare function probeMoneroNode(options: {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
 }): Promise<NodeProbeOk | NodeProbeRefusal>;
+
+/** The watch key form that matches the address's view public key, or null when none does. */
+export declare function viewKeyFormForAddress(viewSecret: string, expectedViewPubHex: string): string | null;
+
+/** A boundary height derived from a later unlock_time, or null when the time names no height. */
+export declare function laterBoundary(...args: unknown[]): unknown;
+
+/** One transaction that carries an output for a watched address. */
+export interface ScannedMatch {
+  [field: string]: unknown;
+}
+
+/** Walk a block range and return the transactions that pay a watched address. */
+export declare function scanRange(options: {
+  daemonUrl: string;
+  fromHeight: number;
+  toHeight: number;
+  watched: unknown;
+  log?: (event: unknown) => void;
+  concurrency?: number;
+  nowSec?: number | null;
+}): Promise<ScannedMatch[]>;
