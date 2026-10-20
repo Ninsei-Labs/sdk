@@ -7,6 +7,9 @@ REGTEST HAS A NAME THE PACKAGE KNOWS.
   stopped a run against a node the page is meant to test. The answer is passed through as `fakechain`; an unknown
   word is still `null`, not a guess.
 - The type declaration and the wallet-factory check name the fourth answer.
+- The `Swap` type is gone. Nothing in the package returned one, so a reader could build on `swap.sweep()`
+  and find it at runtime. The working surfaces are unchanged: `swaps.get`/`swaps.toState`, `actions.markReady`,
+  `actions.claim`, `actions.refund`, and `sweep` for the withdrawal.
 
 ## 0.44.1 — 2026-10-20
 

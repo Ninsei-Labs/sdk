@@ -1114,20 +1114,6 @@ export interface RecoveryFile {
   readonly contents: string;
 }
 
-export interface Swap {
-  readonly id: string;
-  /** The current state. Also arrives in the subscription. */
-  state(): SwapState;
-  /** Subscribe to changes. Returns an unsubscribe function. */
-  on(event: "update", handler: (state: SwapState) => void): () => void;
-  /** The "checked by you" mark: opens the claim to the maker. */
-  markReady(): Promise<SwapState>;
-  /** Withdraw the XMR to the recipient's address. */
-  sweep(): Promise<SwapState>;
-  /** Refund the ETH when the claim did not happen. */
-  refund(): Promise<SwapState>;
-}
-
 export interface SwapState {
   readonly id: string;
   readonly direction: "buy" | "sell";
