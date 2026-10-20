@@ -1,3 +1,16 @@
+## 0.45.0 — 2026-10-20
+
+THE RECOVERY PATH WORKS WITHOUT THE APP, AND A PASSPHRASE IS A CHOICE.
+
+- `sweep.plan` reads the counterparty's revealed half from the escrow with the `evmCall` the caller already
+  passes (`revealedHalf()`, selector `0x3f267bb6`). A recovery page served from a static host has no
+  `/escrow/revealed-half` route, so asking the app was the only path and the page could never withdraw there.
+  The app route remains as the fallback for a caller with no chain read that configured an API base.
+- An empty passphrase writes the recovery file without encryption. The envelope is version 3 with
+  `alg: "NONE"` and carries the payload; `decryptFile` returns it without deriving a key, and `isEncrypted`
+  tells a page whether to ask for a passphrase. A non-empty passphrase keeps the twelve character floor.
+- `swaps.start`, `sweep.plan`, `sweep.destination` and `recovery.restoreHeight` accept an empty passphrase.
+
 ## 0.44.3 — 2026-10-20
 
 A RESCAN THAT THE LIBRARY REFUSES DOES NOT STOP THE RESTORE.
