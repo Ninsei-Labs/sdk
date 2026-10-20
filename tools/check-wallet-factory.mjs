@@ -119,6 +119,7 @@ console.log("=== 3) THE NETWORK A NODE NAMES ===");
     [{ nettype: "mainnet" }, "mainnet"],
     [{ nettype: "stagenet" }, "stagenet"],
     [{ nettype: "testnet" }, "testnet"],
+    [{ nettype: "fakechain" }, "fakechain"],
     [{ nettype: " MainNet " }, "mainnet"],
     [{ nettype: "devnet" }, null],
     [{ nettype: "" }, null],
@@ -126,7 +127,7 @@ console.log("=== 3) THE NETWORK A NODE NAMES ===");
     [null, null],
   ];
   const wrong = cases.filter(([info, want]) => networkFromNode(info) !== want);
-  if (!wrong.length) ok("three known answers map, everything else is null (" + cases.length + " cases)");
+  if (!wrong.length) ok("four known answers map, everything else is null (" + cases.length + " cases)");
   else bad("networkFromNode: " + JSON.stringify(wrong.map(([info]) => [info, networkFromNode(info)])));
 }
 

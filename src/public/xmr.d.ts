@@ -322,7 +322,7 @@ export declare function sellWindowSec(request?: {
  * mainnet wallet against a stagenet node looks like a broken withdrawal. An answer that is none of `mainnet`,
  * `stagenet`, `testnet` comes back as null - a default would build a wallet for a chain the node may not serve.
  */
-export declare function networkFromNode(info: unknown): "mainnet" | "stagenet" | "testnet" | null;
+export declare function networkFromNode(info: unknown): "mainnet" | "stagenet" | "testnet" | "fakechain" | null;
 
 /** An address read as its network and its public keys. An integrated address's payment id is not returned. */
 export interface AddressKeys {
