@@ -146,7 +146,12 @@ export async function restoreWallet(request = {}) {
       blocks: Math.max(0, Number(requestWindow.toHeight) - fromHeight + 1), txs: hashes.length };
     if (hashes.length && typeof driver.scanTxs === "function") {
       await step("setRestoreHeight", () => driver.setRestoreHeight(tipHeight));
-      await step("scanTxs", () => driver.scanTxs(hashes));
+      // A RESTRICTED NODE FETCHES AT MOST 100 TRANSACTIONS PER CALL. The wallet library takes an array, so the
+      // batches are ours: one scan per hundred hashes, in order.
+      for (let at = 0; at < hashes.length; at += 100) {
+        const batch = hashes.slice(at, at + 100);
+        await step("scanTxs", () => driver.scanTxs(batch));
+      }
       try { await wallet.sync(); } catch { /* the balance below decides */ }
       windowTotal = asAmount(await step("getBalance", () => driver.getBalance()), "balance");
       windowUnlocked = asAmount(await step("unlockedBalance", () => wallet.unlockedBalance()), "unlockedBalance");
