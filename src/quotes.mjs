@@ -393,6 +393,58 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
     //
     // The path and the body are the same as the engine's (`requestOrderQuote` in www/js/core/rfqSource.js): POST to
     // the named path, body { providerId, order }. The path is named by name, so it is overridable by options.
+    // A REVERSE-MODE TICKET. The maker sells XMR; the node answers with a signed order quote that carries the claim
+    // tip. The tip is checked HERE, on the ticket's own signed figure, with the same formula the node used: base fee
+    // plus the priority part of the gas price. A buy quote has no tip; a sale is the only route where one exists.
+    async sale(request) {
+      if (!request || typeof request !== "object") fail("bad-input", { field: "request" });
+      const payload = request.request && typeof request.request === "object" ? request : { request };
+      let res = null;
+      try {
+        res = await http.tryJson(config.route("orderSell"), {
+          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload),
+        });
+      } catch (error) {
+        if (error && error.code === "bad-input") throw error;
+        fail("server-unavailable", { step: "order-sell" });
+      }
+      if (!res || res.ok !== true || !res.body || res.body.ok !== true) fail("quote-refused", { step: "order-sell" });
+      const ticket = res.body;
+      const quote = (ticket.handoff && ticket.handoff.quote) || ticket.quote || null;
+      if (!quote || typeof quote !== "object") fail("quote-field-unbound", { step: "order-sell", field: "quote" });
+      // THE TICKET'S TIP MUST BE THE SIGNED ONE. The node returns both the ticket's `claimTip` object and the quote it
+      // signed; a difference means the figure shown to the person is not the figure the escrow will pay.
+      const shown = ticket.claimTip && ticket.claimTip.wei !== undefined && ticket.claimTip.wei !== null
+        ? String(ticket.claimTip.wei) : null;
+      if (shown === null) fail("quote-field-unbound", { step: "claimTip", field: "claimTip" });
+      if (ticket.claimTip.signed !== true) fail("quote-field-unbound", { step: "claimTip", field: "signed" });
+      let signedTip = null;
+      try { signedTip = quote.claimTip === undefined || quote.claimTip === null || quote.claimTip === "" ? "0" : BigInt(quote.claimTip).toString(); }
+      catch { fail("quote-field-unbound", { step: "claimTip", field: "claimTip" }); }
+      let shownBig = null;
+      try { shownBig = BigInt(shown); } catch { fail("quote-tip-unreadable", { step: "claimTip" }); }
+      if (signedTip === null || shownBig < 0n || BigInt(signedTip) !== shownBig) {
+        fail("quote-refused", { step: "claimTip", why: "not-the-signed-tip" });
+      }
+      if (shownBig > 0n) {
+        if (typeof evmBlock !== "function") fail("quote-tip-unchecked", { step: "claimTip", why: "no-block-read" });
+        let block = null;
+        try { block = await evmBlock("latest"); } catch { fail("quote-tip-unchecked", { step: "claimTip", why: "block-read-failed" }); }
+        const baseFeeWei = block && (block.baseFeePerGas !== undefined ? block.baseFeePerGas : block.baseFeeWei);
+        // THE NODE SIZES THE TIP FROM THE GAS PRICE, PRIORITY INCLUDED. The SDK used to pass only the base fee, so an
+        // honest L1 tip (or a base fee that dropped between sizing and checking) was refused.
+        let priorityFeeWei = block && block.priorityFeePerGas !== undefined ? block.priorityFeePerGas : null;
+        if (priorityFeeWei === null && block && block.gasPrice !== undefined && baseFeeWei !== undefined && baseFeeWei !== null) {
+          try {
+            const gas = BigInt(block.gasPrice); const base = BigInt(baseFeeWei);
+            priorityFeeWei = gas > base ? gas - base : 0n;
+          } catch { priorityFeeWei = 0n; }
+        }
+        const verdict = claimTipVerdict({ claimTipWei: shownBig, baseFeeWei, priorityFeeWei: priorityFeeWei === null ? 0n : priorityFeeWei });
+        if (!verdict.ok) fail(verdict.code, { step: "claimTip", ...verdict });
+      }
+      return ticket;
+    },
     async firm(request) {
       if (!request || typeof request !== "object") fail("bad-input", { field: "request" });
       if (typeof request.providerId !== "string" || !request.providerId) fail("bad-input", { field: "providerId" });

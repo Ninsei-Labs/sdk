@@ -269,6 +269,8 @@ export function createNinsei(options) {
       // A firm quote is stage 2: it is signed with a key and lives in the order protocol, not in a market snapshot.
       // A FIRM QUOTE: accepted only with a confirmed provider signature.
       firm: (request) => quotes.firm(request),
+      // A REVERSE TICKET: the node signs it; its claim tip is checked here before the caller sees it.
+      sale: (request) => quotes.sale(request),
     },
     // READING STATE WORKS, STARTING IS NAMED HONESTLY: list/get raise swaps from storage after a page reload;
     // start holds the step order and runs into the step that creates the record (stage 2).
