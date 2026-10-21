@@ -29,6 +29,10 @@ export const RECOVERY_KEY_WORDS = 12;
 export const RECOVERY_KEY_STORE = "ninsei.recovery.key.v1";
 export const RECOVERY_KEY_FILE_MAGIC = "NINSEI RECOVERY KEY";
 export const RECOVERY_KEY_DOMAIN = "ninsei-taker-v1";
+// The counterparty's view half is derived from the SAME ONE KEY, in a domain of its own. The taker sends this
+// number to the maker (the node), which uses it as its own view half; the taker keeps it, so the joint view key
+// can be rebuilt from the twelve words without any server.
+export const MAKER_VIEW_HALF_DOMAIN = "ninsei-maker-view-v1";
 export const RECOVERY_KEY_ENVELOPE_VERSION = 1;
 export const RECOVERY_KEY_ALG = "AES-GCM-256/PBKDF2-SHA256";
 export const RECOVERY_KEY_ITER = 600000;
@@ -120,8 +124,12 @@ export function takerHalves({ mnemonic, chainId, index }) {
   const seed = seedOf(mnemonic);
   const spendHalf = halves.halfFromSeed(seed, binding, halves.HALF_DOMAIN);
   const viewHalf = halves.halfFromSeed(seed, binding, halves.VIEW_HALF_DOMAIN);
+  // THE OTHER SIDE'S VIEW HALF. The same key, a third domain: the taker gives this number to the maker, so the
+  // maker's view half no longer comes from a seed the taker cannot reproduce.
+  const makerViewHalf = halves.halfFromSeed(seed, binding, MAKER_VIEW_HALF_DOMAIN);
   const spend = halves.publicHalves(spendHalf);
   const view = halves.publicHalves(viewHalf);
+  const makerView = halves.publicHalves(makerViewHalf);
   return {
     index: numberField(index, "index"),
     binding,
@@ -129,6 +137,8 @@ export function takerHalves({ mnemonic, chainId, index }) {
     viewHalf: hex32(viewHalf),
     spendPoint: spend.ed,
     viewPoint: view.ed,
+    makerViewHalf: hex32(makerViewHalf),
+    makerViewPoint: makerView.ed,
     spendCommitment: halfCommitmentHex(spendHalf, secp256k1, keccak256),
   };
 }

@@ -52,6 +52,9 @@ export const recoveryKeyCheck = async () => {
   check(halves.spendHalf === "0x08a3f2c84abe73db766e8925647c65c44e63439e6cb9aa0065816c8ada646200", `spend half changed: ${halves.spendHalf}`);
   check(halves.viewHalf === "0x0c7f5926fff480f57b3da60b019ebc3cddfd014ca348e8cab1702e8534f696cf", `view half changed: ${halves.viewHalf}`);
   check(halves.spendCommitment === "0xd76f78b636a123aafb4da3c226d1e8b81332461291641efe334026b85252a4b2", `commitment changed: ${halves.spendCommitment}`);
+  check(halves.makerViewHalf === "0x0470bcc4d4c3e8af89174f19e71e208124a7947d98cc40b9436258d20e48a3e5", `maker view half changed: ${halves.makerViewHalf}`);
+  check(halves.makerViewPoint === "ad1f3bb9b66ab339f47d9e215bd9ff90f6e8c87a66325a4a0c0ad700047057a8", `maker view point changed: ${halves.makerViewPoint}`);
+  check(halves.makerViewHalf !== halves.viewHalf, "the maker view half equals the taker view half");
   const again = recovery.takerHalves({ mnemonic: WORDS, chainId: CHAIN, index: 0 });
   check(JSON.stringify(again) === JSON.stringify(halves), "the same words and index gave different halves");
   notes.push("fixed halves and commitment vectors hold");
