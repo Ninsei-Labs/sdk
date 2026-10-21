@@ -1,3 +1,16 @@
+## 0.48.1 — 2026-10-21
+
+A SWAP KEEPS ITS MONERO HEIGHT, AND A RECOVERED ORDER KNOWS WHERE TO SCAN.
+
+- `swaps.start` measures the start height from the configured Monero nodes before it hands over recovery data. A
+  node on another network, or no answer at all, is `xmr-no-nodes { step: "restore-height" }`; a swap without a
+  height is not funded.
+- The measured height is kept on the swap record and written into the recovery file. `openWatch` sends that
+  Monero height; the settlement-chain block is named `evmBirthBlock` and stays the bound for the EVM log search.
+- `findSwaps` derives a `startHeight` for every order it finds: the timestamp of the order's block, then the last
+  Monero header at or before it, minus 60 blocks. The readers are seams (`evmBlockTime`, `moneroTip`,
+  `moneroBlockTimestamp`); without them the order comes back with `startHeight: null` and a named reason.
+
 ## 0.48.0 — 2026-10-21
 
 A SWAP CAN START FROM THE ONE RECOVERY KEY.

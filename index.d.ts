@@ -1115,6 +1115,13 @@ export interface StartRequest {
   recoveryKey?: string | { readonly mnemonic: string };
   /** The swap number, when the caller already reserved one. Absent - the SDK reserves the next free number. */
   recoveryIndex?: number;
+  /** The Monero height the swap starts at. Absent - the SDK asks the configured nodes (`get_info`) and refuses
+   * the start if none answers on the swap's network. */
+  restoreHeight?: number;
+  /** Monero nodes for that one measurement; absent - the configured nodes for the swap's network. */
+  xmrNodes?: readonly (string | { readonly url: string })[];
+  /** The fetch used for the height measurement (tests); absent - the global fetch. */
+  fetchImpl?: typeof fetch;
   /**
    * Hand the key backup to the interface, ONCE, when this call created the key. `true` - the person saved it;
    * `false` - the swap is not started. A key already in the store is not shown again.
