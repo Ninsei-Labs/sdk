@@ -1332,6 +1332,9 @@ export interface SweepRestoreResult {
     readonly toHeight: number;
     readonly blocks: number;
     readonly txs: number;
+    readonly spent?: number | null;
+    readonly keyImages?: number;
+    readonly spentWhy?: string;
   } | null;
 }
 

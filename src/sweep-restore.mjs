@@ -151,6 +151,34 @@ export async function restoreWallet(request = {}) {
       windowTotal = asAmount(await step("getBalance", () => driver.getBalance()), "balance");
       windowUnlocked = asAmount(await step("unlockedBalance", () => wallet.unlockedBalance()), "unlockedBalance");
       windowReport.used = true;
+      // THE KEY IMAGES OF THE WALLET, CHECKED AT THE NODE. `scanTxs` finds an output; whether the chain already
+      // spent it is a separate fact, and the caller must not sign on a guess.
+      if (requestWindow.nodeUrl && typeof driver.getKeyImages === "function") {
+        try {
+          const exported = await driver.getKeyImages();
+          const images = Array.isArray(exported) ? exported
+            : (exported && typeof exported.getKeyImages === "function" ? exported.getKeyImages() : []);
+          const hexes = images.map((image) => typeof image === "string" ? image
+            : (image && typeof image.getHex === "function" ? image.getHex() : image && image.hex)).filter(Boolean);
+          if (hexes.length) {
+            let base = String(requestWindow.nodeUrl);
+            while (base.endsWith("/")) base = base.slice(0, -1);
+            const response = await (request.fetchImpl || globalThis.fetch)(base + "/is_key_image_spent", {
+              method: "POST", headers: { "content-type": "application/json" },
+              body: JSON.stringify({ key_images: hexes }),
+              signal: typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
+            });
+            const body = response && response.ok === true ? await response.json() : null;
+            if (body && Array.isArray(body.spent_status)) {
+              windowReport.spent = body.spent_status.filter((value) => value === true || value === 1).length;
+              windowReport.keyImages = hexes.length;
+            } else windowReport.spent = null;
+          } else { windowReport.spent = null; windowReport.spentWhy = "no-key-images"; }
+        } catch { windowReport.spent = null; windowReport.spentWhy = "check-failed"; }
+      } else if (requestWindow.nodeUrl) {
+        windowReport.spent = null;
+        windowReport.spentWhy = "no-key-images";
+      }
       // A WINDOW WITH COINS IS THE ANSWER. A window with none falls through to the full scan unless the caller
       // explicitly turned the fallback off.
       if (windowTotal > 0n || windowUnlocked > 0n || requestWindow.fallback === false) {

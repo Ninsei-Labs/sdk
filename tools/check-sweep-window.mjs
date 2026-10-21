@@ -45,6 +45,17 @@ export const sweepWindowCheck = async () => {
   check(empty.calls.some((call) => call[0] === "height" && call[1] === 90), "the full scan did not start below the order height");
   notes.push("an empty window falls back to the full scan");
 
+  const withImages = fake({ balance: 5n });
+  const nodeCalls = [];
+  withImages.wallet.driver().getKeyImages = async () => [{ getHex: () => "aa" }, { getHex: () => "bb" }];
+  const spent = await restoreWallet({ wallet: withImages.wallet, fromHeight: 100,
+    window: { txHashes: ["a"], toHeight: 110, tipHeight: 900, nodeUrl: "https://node.example" },
+    fetchImpl: async (url, options) => { nodeCalls.push([url, JSON.parse(options.body)]); return { ok: true, json: async () => ({ spent_status: [false, true] }) }; },
+  });
+  check(spent.window && spent.window.spent === 1 && spent.window.keyImages === 2,
+    `the spent check reported ${JSON.stringify(spent.window)}`);
+  check(nodeCalls.length === 1 && nodeCalls[0][0].endsWith("/is_key_image_spent"), "the key images were not checked at the node");
+
   const noScan = fake({ balance: 5n, scanTxs: false });
   const skipped = await restoreWallet({ wallet: noScan.wallet, fromHeight: 100,
     window: { txHashes: ["a"], toHeight: 110, tipHeight: 900 } });
