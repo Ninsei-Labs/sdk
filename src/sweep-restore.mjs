@@ -62,6 +62,45 @@ const heightOf = async (driver, name) => {
   }
 };
 
+// THE BLOCK WINDOW AROUND THE LOCK. A full rescan of mainnet takes hours; the lock can only be in the blocks from
+// the order's start to just after its t1. The caller may pass the hashes, or a node URL and the SDK asks for them.
+export async function windowTxHashes({ nodeUrl, fromHeight, toHeight, fetchImpl = globalThis.fetch } = {}) {
+  let base = typeof nodeUrl === "string" ? nodeUrl.trim() : "";
+  while (base.endsWith("/")) base = base.slice(0, -1);
+  const from = Number(fromHeight);
+  const to = Number(toHeight);
+  if (!base) throw new SdkError("bad-input", { field: "window.nodeUrl" });
+  if (!Number.isSafeInteger(from) || from < 0) throw new SdkError("bad-input", { field: "window.fromHeight" });
+  if (!Number.isSafeInteger(to) || to < from) throw new SdkError("bad-input", { field: "window.toHeight" });
+  if (typeof fetchImpl !== "function") throw new SdkError("bad-input", { field: "fetchImpl" });
+  const hashes = [];
+  for (let height = from; height <= to; height += 1) {
+    let response;
+    try {
+      response = await fetchImpl(base + "/json_rpc", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: "block", method: "get_block", params: { height } }),
+        signal: typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
+      });
+    } catch { throw new SdkError("wallet-rejected", { surface: "window-blocks", height }); }
+    if (!response || response.ok !== true) throw new SdkError("wallet-rejected", { surface: "window-blocks", height, status: response ? response.status : null });
+    let body = null;
+    try { body = await response.json(); } catch { throw new SdkError("wallet-rejected", { surface: "window-blocks", height, why: "not-json" }); }
+    if (!body || body.error || !body.result) throw new SdkError("wallet-rejected", { surface: "window-blocks", height, why: "rpc" });
+    const result = body.result;
+    let list = Array.isArray(result.tx_hashes) ? result.tx_hashes : null;
+    if (!list && typeof result.json === "string") {
+      try {
+        const json = JSON.parse(result.json);
+        list = Array.isArray(json.tx_hashes) ? json.tx_hashes : null;
+      } catch { list = null; }
+    }
+    if (!list) throw new SdkError("wallet-rejected", { surface: "window-blocks", height, why: "no-tx-hashes" });
+    hashes.push(...list.map(String));
+  }
+  return hashes;
+}
+
 /**
  * Restore the wallet from a height and report what it holds.
  *
@@ -87,6 +126,43 @@ export async function restoreWallet(request = {}) {
     : SCAN_BACK;
   const scanHeight = Math.max(0, Math.floor(fromHeight) - scanBack);
   const driver = driverOf(wallet);
+
+  // THE WINDOW PATH: set the wallet at the node tip, scan the lock's blocks, and only fall back to a full scan
+  // when that window holds nothing. An empty window is "not found", not "no funds".
+  const requestWindow = request.window && typeof request.window === "object" ? request.window : null;
+  let windowReport = null;
+  let windowTotal = 0n;
+  let windowUnlocked = 0n;
+  if (requestWindow) {
+    const tipHeight = Number(requestWindow.tipHeight);
+    if (!Number.isSafeInteger(tipHeight) || tipHeight <= 0) throw new SdkError("bad-input", { field: "window.tipHeight" });
+    let hashes = Array.isArray(requestWindow.txHashes) ? requestWindow.txHashes.map(String) : null;
+    if (hashes === null) {
+      hashes = await windowTxHashes({
+        nodeUrl: requestWindow.nodeUrl, fromHeight, toHeight: requestWindow.toHeight, fetchImpl: request.fetchImpl,
+      });
+    }
+    windowReport = { used: false, skipped: null, fromHeight, toHeight: Number(requestWindow.toHeight),
+      blocks: Math.max(0, Number(requestWindow.toHeight) - fromHeight + 1), txs: hashes.length };
+    if (hashes.length && typeof driver.scanTxs === "function") {
+      await step("setRestoreHeight", () => driver.setRestoreHeight(tipHeight));
+      await step("scanTxs", () => driver.scanTxs(hashes));
+      try { await wallet.sync(); } catch { /* the balance below decides */ }
+      windowTotal = asAmount(await step("getBalance", () => driver.getBalance()), "balance");
+      windowUnlocked = asAmount(await step("unlockedBalance", () => wallet.unlockedBalance()), "unlockedBalance");
+      windowReport.used = true;
+      // A WINDOW WITH COINS IS THE ANSWER. A window with none falls through to the full scan unless the caller
+      // explicitly turned the fallback off.
+      if (windowTotal > 0n || windowUnlocked > 0n || requestWindow.fallback === false) {
+        return {
+          total: windowTotal.toString(), unlocked: windowUnlocked.toString(), scanHeight, walletHeight: await heightOf(driver, "getHeight"),
+          nodeHeight: await heightOf(driver, "getDaemonHeight"), passes: 1, lockedPass: false, window: windowReport,
+        };
+      }
+    } else if (hashes.length) {
+      windowReport.skipped = "no-scan-txs";
+    }
+  }
 
   await step("setRestoreHeight", () => driver.setRestoreHeight(scanHeight));
   // A RESCAN IS REQUIRED, NOT OPTIONAL: without it the height only applies to a wallet that has not scanned yet,
@@ -129,5 +205,6 @@ export async function restoreWallet(request = {}) {
     // Whether the second pass RAN - not whether it helped. A reader must be able to tell "nothing was locked" from
     // "it was locked and stayed locked".
     lockedPass,
+    window: windowReport,
   };
 }
