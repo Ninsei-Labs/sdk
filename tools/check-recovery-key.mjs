@@ -136,6 +136,22 @@ export const recoveryKeyCheck = async () => {
   check(withHeight.swaps.length === 1, "the height search lost the order");
   check(withHeight.swaps[0].startHeight === 939, `the start height is ${withHeight.swaps[0].startHeight}, expected 939 (999 - 60)`);
   check(withHeight.swaps[0].startHeightReason === null, "a derived start height carries a refusal reason");
+  const nodeFetch = async (url, options) => {
+    const request = JSON.parse(options.body);
+    const result = request.method === "get_info"
+      ? { height: 2_000, nettype: "stagenet", synchronized: true }
+      : { block_header: { timestamp: 500 + Number(request.params.height) * 1_000 } };
+    return { ok: true, json: async () => ({ result }) };
+  };
+  const throughNode = await recovery.findSwaps({
+    mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
+    evmLogs: async (request) => request.topics.includes(pad(address("bb"))) ? [order] : [],
+    evmBlockTime: async () => 1_000_000,
+    xmrNodes: ["https://node.example"], moneroNetwork: "stagenet", fetchImpl: nodeFetch,
+    gap: 2,
+  });
+  check(throughNode.swaps[0].startHeight === 939, `the node-backed start height is ${throughNode.swaps[0].startHeight}`);
+  notes.push("the search can use node URLs without three callbacks");
   const withoutHeight = await recovery.findSwaps({
     mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
     evmLogs: async (request) => request.topics.includes(pad(address("bb"))) ? [order] : [], gap: 2,

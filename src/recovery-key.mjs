@@ -19,6 +19,7 @@ import { createHalves } from "../engine/atomic/halves.js";
 import { halfCommitmentHex } from "../engine/atomic/orderHalfCommit.js";
 import { ORDER_CREATED_TOPIC } from "../engine/evm/factory.js";
 import { SdkError } from "./errors.mjs";
+import { probeMoneroNode } from "./probes.mjs";
 import { ed25519, keccak256, randomBytes, secp256k1 } from "./primitives.mjs";
 
 const halves = createHalves({ ed25519, secp256k1, keccak256, randomBytes });
@@ -430,6 +431,45 @@ async function heightAtOrBefore(timestamp, { tip, headerTimestamp }) {
   return low;
 }
 
+// THE READERS A CALLER SHOULD NOT HAVE TO BUILD. A page already holds the node URLs it probed; these wrap
+// `get_info` and `get_block_header_by_height` over one of them. The SDK still owns the binary search; only the
+// transport is borrowed.
+async function moneroReadersFromNodes({ nodes = [], network = null, fetchImpl = globalThis.fetch } = {}) {
+  const urls = (Array.isArray(nodes) ? nodes : [])
+    .map((entry) => typeof entry === "string" ? entry : entry && entry.url).filter(Boolean);
+  if (!urls.length) return null;
+  const answers = await Promise.all(urls.map(async (url) => {
+    try { return { ...(await probeMoneroNode({ url, fetchImpl })), url }; }
+    catch { return { ok: false, why: "unreachable", url }; }
+  }));
+  const node = answers.find((answer) => answer.ok === true && (!network || answer.network === network));
+  if (!node) return null;
+  const call = async (method, params) => {
+    let response;
+    try {
+      response = await fetchImpl(node.url + "/json_rpc", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: method, method, params }),
+        signal: typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
+      });
+    } catch { throw new Error("monero-unreachable"); }
+    if (!response || response.ok !== true) throw new Error("monero-http");
+    let body = null;
+    try { body = await response.json(); } catch { throw new Error("monero-json"); }
+    if (!body || body.error || !body.result) throw new Error("monero-rpc");
+    return body.result;
+  };
+  return {
+    tip: async () => node.height,
+    headerTimestamp: async (height) => {
+      const result = await call("get_block_header_by_height", { height });
+      const ts = Number(result.block_header && result.block_header.timestamp);
+      if (!Number.isFinite(ts) || ts <= 0) throw new Error("monero-header");
+      return ts;
+    },
+  };
+}
+
 async function recoveredStartHeight(order, { evmBlockTime, moneroTip, moneroBlockTimestamp, cache }) {
   if (order.blockNumber === null || order.blockNumber === undefined) {
     return { startHeight: null, startHeightReason: "no-block-number" };
@@ -460,7 +500,8 @@ async function recoveredStartHeight(order, { evmBlockTime, moneroTip, moneroBloc
  */
 export async function findSwaps({ mnemonic, chainId, factory, address = null, evmLogs,
   fromBlock = 0, toBlock = "latest", gap = 5, maxIndex = 1000,
-  evmBlockTime = null, moneroTip = null, moneroBlockTimestamp = null } = {}) {
+  evmBlockTime = null, moneroTip = null, moneroBlockTimestamp = null,
+  xmrNodes = null, moneroNetwork = null, fetchImpl = globalThis.fetch } = {}) {
   if (typeof factory !== "string" || !ADDRESS_RE.test(factory)) throw bad("factory");
   const chain = numberField(chainId, "chainId");
   const max = numberField(maxIndex, "maxIndex") || 1000;
@@ -506,8 +547,14 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
   // EACH FOUND ORDER CARRIES THE MONERO HEIGHT ITS WITHDRAWAL MAY START FROM. The rule lives here, not in a
   // page: a widget and the recovery page must not derive two different answers from one chain.
   const cache = new Map();
+  let tip = moneroTip;
+  let header = moneroBlockTimestamp;
+  if ((typeof tip !== "function" || typeof header !== "function") && Array.isArray(xmrNodes) && xmrNodes.length) {
+    const readers = await moneroReadersFromNodes({ nodes: xmrNodes, network: moneroNetwork, fetchImpl });
+    if (readers) { tip = tip || readers.tip; header = header || readers.headerTimestamp; }
+  }
   for (const order of found) {
-    Object.assign(order, await recoveredStartHeight(order, { evmBlockTime, moneroTip, moneroBlockTimestamp, cache }));
+    Object.assign(order, await recoveredStartHeight(order, { evmBlockTime, moneroTip: tip, moneroBlockTimestamp: header, cache }));
   }
   return { swaps: found, scanned };
 }
