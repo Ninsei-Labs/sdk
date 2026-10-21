@@ -1,3 +1,11 @@
+## 0.46.1 — 2026-10-21
+
+THE FACTORY SELECTORS FOLLOW THE 20-FIELD QUOTE.
+
+- `FACTORY_METHODS.predict` is `0x3e949279` and `createOrderAndFund` is `0x3a504547` (the 19-field values were
+  `0x0824d205` and `0x4703a9d3`). With the old selectors the node's calldata reverted at the factory on the first
+  call, so no order could be created even though the quote itself was correct.
+
 ## 0.46.0 — 2026-10-21
 
 THE QUOTE CARRIES THE CLAIM TIP, AND THE CLAIM PAYS IT.
