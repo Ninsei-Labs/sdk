@@ -32,6 +32,7 @@ import { recoveryKeyCheck } from "./check-recovery-key.mjs";
 import { sweepWindowCheck } from "./check-sweep-window.mjs";
 import { claimTipCheck } from "./check-claim-tip.mjs";
 import { claimSenderCheck } from "./check-claim-sender.mjs";
+import { quoteRankCheck } from "./check-quote-rank.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const p = (...parts) => join(ROOT, ...parts);
@@ -2533,6 +2534,7 @@ const CHECKS = {
   "sweep-window": sweepWindowCheck,
   "claim-tip": claimTipCheck,
   "claim-sender": claimSenderCheck,
+  "quote-rank": quoteRankCheck,
 };
 
 export const runCheck = async (name) => {

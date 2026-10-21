@@ -507,6 +507,8 @@ export interface QuoteOffer {
   readonly currency: string | null;
   readonly rate: number;
   readonly rateQuote: number;
+  /** The claim tip in native-token wei; a sale is ranked by the payout AFTER it. */
+  readonly claimTip: string;
   readonly min: number | null;
   readonly max: number | null;
   readonly step: number | null;
