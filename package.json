@@ -28,6 +28,7 @@
     "check:terminal": "node tools/check.mjs --only=terminal",
     "check:terminal-teeth": "node tools/check-terminal-teeth.mjs",
     "check:sweep": "node tools/sweep-refusal.test.mjs",
+    "check:sweep-half": "node tools/check-sweep-half.mjs",
     "sync:version": "node tools/sync-version.mjs",
     "check:restore": "node tools/check-restore.mjs",
     "check:restore-height": "node tools/check-restore-height.mjs",
