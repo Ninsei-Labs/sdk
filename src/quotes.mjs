@@ -18,6 +18,7 @@
 import { fail } from "./errors.mjs";
 import * as engine from "./engine.mjs";
 import { orderQuoteMissingFields, recoverOrderQuoteKey } from "./quoteEip712.mjs";
+import { claimGasGiftWei } from "../engine/evm/claimGas.js";
 // THE CHAIN READ NEEDED TO ASK THE REGISTRY WHO OWNS THE KEY. The selector is COMPUTED from the signature, not
 // remembered: a single wrong hex digit would call another function and return a zero address - and a zero
 // address is exactly the answer "nobody owns this key", which the caller would take as the truth.
@@ -208,7 +209,32 @@ const compactOffer = (o) => ({
 // the price of the failed row to tell the person WHY there is no offer (and not just "none").
 const compactRefusal = (r) => ({ ...compactOffer(r), code: r.code, why: r.why });
 
-export function createQuotes({ config, http, now = () => Date.now(), evmCall = null, evmCode = null, providerAllowed = null, knownFactoryCodes = null, knownImplementationCodes = null, denylist = null }) {
+/**
+ * A CLAIM TIP IS SIZED BY THE CLAIM, NOT BY THE MAKER'S MOOD. The node's own estimate uses the chain's current
+ * base fee and the same formula; a quote may carry up to twice that estimate (gas moves between the sizing and
+ * the check). Zero is the buy side and is always allowed. An unmeasured base fee is a refusal, not a free pass.
+ */
+export function claimTipVerdict({ claimTipWei = 0, baseFeeWei = null, priorityFeeWei = 0, factor = 2 } = {}) {
+  let tip = 0n;
+  try { tip = BigInt(claimTipWei === undefined || claimTipWei === null || claimTipWei === "" ? 0 : claimTipWei); }
+  catch { return { ok: false, code: "quote-tip-unreadable" }; }
+  if (tip < 0n) return { ok: false, code: "quote-tip-unreadable" };
+  if (tip === 0n) return { ok: true, tipWei: "0", ceilingWei: null, estimateWei: null };
+  if (baseFeeWei === null || baseFeeWei === undefined || baseFeeWei === "") {
+    return { ok: false, code: "quote-tip-unchecked", tipWei: tip.toString() };
+  }
+  const estimate = claimGasGiftWei({ baseFeeWei, priorityFeeWei });
+  if (estimate === null) return { ok: false, code: "quote-tip-unchecked", tipWei: tip.toString() };
+  const f = BigInt(factor);
+  const ceiling = estimate * f;
+  if (tip > ceiling) {
+    return { ok: false, code: "quote-tip-too-large", tipWei: tip.toString(), estimateWei: estimate.toString(), ceilingWei: ceiling.toString() };
+  }
+  return { ok: true, tipWei: tip.toString(), estimateWei: estimate.toString(), ceilingWei: ceiling.toString() };
+}
+
+export function createQuotes({ config, http, now = () => Date.now(), evmCall = null, evmCode = null, evmBlock = null,
+  providerAllowed = null, knownFactoryCodes = null, knownImplementationCodes = null, denylist = null }) {
   // THE INTERFACE'S FACTORY POLICY (#103): the code hashes of factories it is willing to trade through
   // (extcodehash semantics = keccak256 of the runtime code). An EMPTY list is "no policy" (like
   // allowedProviders); a NON-EMPTY one refuses any factory whose code is not on it. Lower-cased once.
@@ -506,6 +532,24 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
       const quoted = quote.context || "";
       if (String(quoted) !== expectedContext) {
         fail("quote-refused", { step: "context", why: quoted ? "other-terms" : "not-reported" });
+      }
+      // THE CLAIM TIP: the seller pays it out of the payout, so a quote that asks for more than the claim can
+      // cost is refused before it is signed. The chain's base fee is read through the caller's block seam; a
+      // missing seam or an unreadable base fee is a named refusal, never a silently accepted tip.
+      const tipCheck = (() => {
+        try { return claimTipVerdict({ claimTipWei: quote.claimTip }); }
+        catch { return { ok: true, tipWei: "0" }; }
+      })();
+      if (!tipCheck.ok && tipCheck.code === "quote-tip-unreadable") {
+        fail("quote-field-unbound", { step: "claimTip", field: "claimTip" });
+      }
+      if (tipCheck.tipWei !== "0") {
+        if (typeof evmBlock !== "function") fail("quote-tip-unchecked", { step: "claimTip", why: "no-block-read" });
+        let block = null;
+        try { block = await evmBlock("latest"); } catch { fail("quote-tip-unchecked", { step: "claimTip", why: "block-read-failed" }); }
+        const baseFeeWei = block && (block.baseFeePerGas !== undefined ? block.baseFeePerGas : block.baseFeeWei);
+        const verdict = claimTipVerdict({ claimTipWei: quote.claimTip, baseFeeWei });
+        if (!verdict.ok) fail(verdict.code, { step: "claimTip", ...verdict });
       }
       return quote;
     },
