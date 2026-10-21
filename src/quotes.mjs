@@ -405,6 +405,8 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
         fail("address-denied", { step: "order-quote" });
       }
       let res = null;
+      const viewHalfClaimer = request.viewHalfClaimer === undefined || request.viewHalfClaimer === null || request.viewHalfClaimer === ""
+        ? null : String(request.viewHalfClaimer);
       try {
         // THE ANSWER IS READ AS A VALUE (tryJson), NOT AS AN EXCEPTION: "did not answer" and "answered and
         // refused" must stay different, and a refusal's own body carries the reason. `json` throws
@@ -412,7 +414,8 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
         res = await http.tryJson(config.route("orderQuote"), {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ providerId: request.providerId, order: request.order }),
+          body: JSON.stringify({ providerId: request.providerId, order: request.order,
+            ...(viewHalfClaimer === null ? {} : { viewHalfClaimer }) }),
         });
       } catch (error) {
         if (error && error.code === "bad-input") throw error;
@@ -428,6 +431,17 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
       }
       const body = res.body;
       const quote = body.quote;
+      // THE MAKER'S VIEW HALF IS OURS, NOT THE NODE'S CHOICE. When the caller supplies it, the quote must carry the
+      // same scalar back; otherwise the maker used another half and the joint view key cannot be rebuilt from the key.
+      if (viewHalfClaimer !== null) {
+        const echoed = quote.viewHalfClaimer;
+        if (echoed === undefined || echoed === null || echoed === "") {
+          fail("quote-field-unbound", { step: "viewHalfClaimer", field: "viewHalfClaimer" });
+        }
+        if (String(echoed).toLowerCase() !== viewHalfClaimer.toLowerCase()) {
+          fail("quote-refused", { step: "viewHalfClaimer", why: "not-echoed" });
+        }
+      }
       // A MISSING FIELD OF THE SIGNED SET IS NOT "PROBABLY ZERO": the digest cannot be built, so the quote is
       // not verifiable and is refused (its own code, so the interface can say which field is unbound).
       const missingFields = orderQuoteMissingFields(quote);
