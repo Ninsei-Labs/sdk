@@ -25,13 +25,19 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createSweep } from "../src/sweep.mjs";
 import { SdkError } from "../src/errors.mjs";
 import * as engine from "../src/engine.mjs";
+import { addressFromKeys } from "../engine/monero/address.js";
+import keccak256 from "keccak256";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DEST = join(ROOT, "src", "destination.mjs");
 const PASSPHRASE = "destination-test-pass";
 const ADDRESS = "59DnddZzVBCevVg9YB3zCs24DSRH4ByS2FMBafPpYxSEB6FMegQNEbtNzbLjrrEUPNAg9NhK5uMiiAZpAvENBS4D4mEPcRq";
-const OTHER = "59DnddZzVBCevVg9YB3zCs24DSRH4ByS2FMBafPpYxSEB6FMegQNEbtNzbLjrrEUPNAg9NhK5uMiiAZpAvENBS4D4mEPcRr";
-const MAINNET = "4" + "A".repeat(94);
+// A DIFFERENT, VALID STAGENET ADDRESS. The old constant changed one character of ADDRESS, which is only a valid
+// address while the checksum is not loaded; with the monero bundle shipped, the checksum check (correctly) refuses it.
+const OTHER = addressFromKeys({ network: "stagenet", spendPub: "11".repeat(32), viewPub: "22".repeat(32) },
+  { keccak256, Buffer });
+const MAINNET = addressFromKeys({ network: "mainnet", spendPub: "33".repeat(32), viewPub: "44".repeat(32) },
+  { keccak256, Buffer });
 
 let pass = 0;
 const fails = [];
