@@ -1,3 +1,15 @@
+## 0.48.0 — 2026-10-21
+
+A SWAP CAN START FROM THE ONE RECOVERY KEY.
+
+- `swaps.start` accepts `recoveryKey` (a BIP39 mnemonic or a key object). It derives the spend and view halves
+  for the reserved swap number instead of generating a random pair, and writes no per-swap recovery file.
+- A key created by the call is handed to `onRecoveryKey` once, before the funds are locked; a key already in the
+  store is not shown again. The number is reserved before the order and retired only after the escrow exists.
+- The old path is unchanged: without `recoveryKey`, `onRecoveryFile` still assembles and confirms a per-swap file.
+- `buildOwnSideFromHalves` builds the order side and its DLEQ proof from supplied halves; `createRecord` accepts
+  that side, so the recovery key remains the only taker secret.
+
 ## 0.47.0 — 2026-10-21
 
 ONE RECOVERY KEY, AND THE NODE'S VIEW HALF COMES FROM IT.

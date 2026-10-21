@@ -717,7 +717,7 @@ export interface SwapsApi {
   /**
    * Start a swap. The SDK holds the step order, not the screen:
    *   1) guards (preflight); 2) the swap record (createSwap); 3) the order - it GENERATES the key halves;
-   *   4) the recovery file and the interface's confirmation that the file is saved; 5) locking the funds (signature);
+   *   4) the recovery file / one key and the interface's confirmation that it is saved; 5) locking the funds (signature);
    *   6) saving on the server; 7) opening the watch on the Monero address.
    * HALVES DO NOT EXIST BEFORE THE ORDER: the recovery file carries MY half of the spend key and the counterparty's
    * open points, and they are taken from the signed order (www/js/atomic/order-worker.js, createOrderBuilder; in the
@@ -1102,10 +1102,24 @@ export interface StartRequest {
    */
   readonly wallet?: WalletAdapter;
   /**
-   * Hand the recovery file to the interface and wait for the person's decision.
+   * Hand the OLD per-swap recovery file to the interface and wait for the person's decision.
    * `true` - the person confirmed the file is saved; `false` - the swap is not started.
+   * Not used when `recoveryKey` is present: that path has one key, saved once.
    */
-  onRecoveryFile(file: RecoveryFile): Promise<boolean>;
+  onRecoveryFile?(file: RecoveryFile): Promise<boolean>;
+  /**
+   * THE ONE RECOVERY KEY (sdk#76). A BIP39 mnemonic, or a key object from `@ninsei-labs/sdk/recovery`.
+   * When present, the swap's spend and view halves are derived from it instead of being generated, and no
+   * per-swap recovery file is written. The key is kept through the SDK's storage adapter.
+   */
+  recoveryKey?: string | { readonly mnemonic: string };
+  /** The swap number, when the caller already reserved one. Absent - the SDK reserves the next free number. */
+  recoveryIndex?: number;
+  /**
+   * Hand the key backup to the interface, ONCE, when this call created the key. `true` - the person saved it;
+   * `false` - the swap is not started. A key already in the store is not shown again.
+   */
+  onRecoveryKey?(file: RecoveryFile): Promise<boolean>;
 }
 
 export interface RecoveryFile {

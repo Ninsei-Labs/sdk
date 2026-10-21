@@ -12,7 +12,7 @@ import * as engine from "./engine.mjs";
 import * as recordModule from "./record.mjs";
 // The order: our own side is built by the engine's builder, the counterparty's side is verified and accepted, and
 // the joint address is assembled from the halves. There are no formulas of our own in the core - see order.mjs.
-import { contextOf, orderStep } from "./order.mjs";
+import { buildOwnSideFromHalves, contextOf, orderStep } from "./order.mjs";
 // Locking the funds: sending goes through the already-finished step (`lock.send`), the wallet is an adapter from outside.
 import * as lock from "./lock.mjs";
 import { vmOfChain, legFor } from "./legs/index.mjs";
@@ -23,6 +23,11 @@ import { primitives } from "./primitives.mjs";
 // the slots against the chain BEFORE signing (actions.markReady). The watch must call exactly it, otherwise "we saw
 // the XMR" and "we allowed the settlement to be taken" would diverge.
 import { createActions } from "./actions.mjs";
+// THE ONE RECOVERY KEY (sdk#76): the taker's halves come from it, not from a fresh random pair per swap.
+import {
+  commitRecoveryIndex, createRecoveryKeyFile, importRecoveryKey, loadRecoveryKey,
+  recoveryKeyFileName, reserveRecoveryIndex, saveRecoveryKey, takerHalves,
+} from "./recovery-key.mjs";
 // THE XMR ARRIVAL CHECK ON TWO NODES (issue #85) - IN THE CORE, from the same mirrored rule and block parser.
 import * as xmrArrival from "./xmr-arrival.mjs";
 // THE MAKER'S DECLINE (issue #40): the escrow's `Declined` event and the node's `declined` + `compliance` status
@@ -705,7 +710,9 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
     async start(request) {
       if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
       if (!request.quote || typeof request.quote !== "object") throw new SdkError("bad-input", { field: "quote" });
-      if (typeof request.onRecoveryFile !== "function") throw new SdkError("bad-input", { field: "onRecoveryFile" });
+      // THE OLD PATH IS UNCHANGED; THE NEW ONE ASKS FOR A KEY INSTEAD OF A PER-SWAP FILE.
+      const wantsKey = request.recoveryKey !== undefined && request.recoveryKey !== null;
+      if (!wantsKey && typeof request.onRecoveryFile !== "function") throw new SdkError("bad-input", { field: "onRecoveryFile" });
       if (!request.receiveTo || typeof request.receiveTo !== "string") throw new SdkError("bad-input", { field: "receiveTo" });
       // THE ORDER CONTEXT IS MANDATORY AND NOT INVENTED. It is assembled by the engine FROM THE VERY FIELDS the firm
       // quote's signature is bound to (orderContext.js, FIELDS), because the DLEQ proof proves a half FOR THESE TERMS.
@@ -734,8 +741,9 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       // record, and our side of the order is computed from the core's primitives.
       // THE RECORD IS CREATED TOGETHER WITH OUR SIDE: the order terms go into it, and the side is built by the engine's
       // builder (with the DLEQ proof and the encryption key), not by the core's own arithmetic.
+      let keySide = null;
       const makeRecord = typeof createRecord === "function" ? createRecord
-        : async (req) => recordModule.createRecord(recordInputOf(req), { order: req.order });
+        : async (req) => recordModule.createRecord(recordInputOf(req), { order: req.order, side: keySide });
       const passphrase = typeof request.passphrase === "string" ? request.passphrase : "";
       if (typeof passphrase !== "string") throw new SdkError("bad-input", { field: "passphrase" });
       if (passphrase.length > 0 && passphrase.length < MIN_PASSPHRASE) throw new SdkError("bad-input", { field: "passphrase", min: MIN_PASSPHRASE });
@@ -743,6 +751,32 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       // firm quote's signature is bound to; incomplete terms - a refusal with a named field, not a substitution of empty
       // values: the DLEQ proof would then be bound to nothing.
       const orderContext = contextOf(request.order);
+
+      // THE KEY RECORD, THE NUMBER AND THE SIDE. A key is made once and kept through the SDK's store; the
+      // number is reserved before the order is built, and it is retired only after the order exists on chain.
+      // No per-swap file is assembled on this path.
+      let recovery = null;
+      if (wantsKey) {
+        const storage = engine.store.storage();
+        const supplied = typeof request.recoveryKey === "string"
+          ? request.recoveryKey
+          : request.recoveryKey && typeof request.recoveryKey.mnemonic === "string" ? request.recoveryKey.mnemonic : null;
+        const saved = loadRecoveryKey(storage);
+        if (saved && supplied && saved.mnemonic !== supplied) {
+          throw new SdkError("bad-input", { field: "recoveryKey", why: "different-key" });
+        }
+        if (!saved && !supplied) throw new SdkError("bad-input", { field: "recoveryKey" });
+        const key = saved || importRecoveryKey(supplied);
+        if (!saved) saveRecoveryKey(storage, key);
+        const chainId = request.order.chainId;
+        const index = request.recoveryIndex === undefined || request.recoveryIndex === null
+          ? reserveRecoveryIndex(storage, { chainId })
+          : Number(request.recoveryIndex);
+        if (!Number.isSafeInteger(index) || index < 0) throw new SdkError("bad-input", { field: "recoveryIndex" });
+        const derived = takerHalves({ mnemonic: key.mnemonic, chainId, index });
+        keySide = buildOwnSideFromHalves(request.order, { spendHalf: derived.spendHalf, viewHalf: derived.viewHalf }).side;
+        recovery = { storage, key, index, newKey: !saved };
+      }
 
       let made = null;
       try { made = await makeRecord(request); } catch (error) {
@@ -785,26 +819,42 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         builtSide = step;
       }
 
-      // 2a. THE RECOVERY FILE IS ASSEMBLED AND CHECKED BEFORE THE PERSON. A file that will not open is worse than no
-      // file: the person will rely on it. So we check on our side, before the screen.
+      // 2a. THE KEY IS CONFIRMED ONCE; THE OLD PATH STILL ASSEMBLES A PER-SWAP FILE. On the key path there is
+      // no file per swap: the same twelve words cover every swap, and a person who already saved them is not
+      // asked again. A new key is shown before the money moves - no saved key, no funding.
       let payload = null;
-      try {
-        payload = engine.recoveryFile.buildPayload({
-          swap: record.swap, swapWallet: record.swapWallet, escrow: record.escrow,
-          receiveAddress: record.receiveTo || request.receiveTo, restoreHeight: record.restoreHeight ?? null,
-        });
-        engine.recoveryFile.validatePayload(payload);
-      } catch { throw new SdkError("recovery-failed", { step: "build-payload" }); }
-
       let file = null;
-      try {
-        file = { name: engine.recoveryFile.recoveryFileName(payload.swapId), contents: await engine.recoveryFile.createRecoveryFile(payload, passphrase) };
-      } catch { throw new SdkError("recovery-failed", { step: "encrypt" }); }
+      let confirmed = true;
+      if (!recovery) {
+        // THE RECOVERY FILE IS ASSEMBLED AND CHECKED BEFORE THE PERSON. A file that will not open is worse than no
+        // file: the person will rely on it. So we check on our side, before the screen.
+        try {
+          payload = engine.recoveryFile.buildPayload({
+            swap: record.swap, swapWallet: record.swapWallet, escrow: record.escrow,
+            receiveAddress: record.receiveTo || request.receiveTo, restoreHeight: record.restoreHeight ?? null,
+          });
+          engine.recoveryFile.validatePayload(payload);
+        } catch { throw new SdkError("recovery-failed", { step: "build-payload" }); }
 
-      // 3. THE PERSON'S CONFIRMATION - THE GATE. No action that locks funds goes earlier: otherwise the lock would end
-      // up without a key if the browser is lost. "Did not answer" is a refusal, not consent.
-      const confirmed = await request.onRecoveryFile(file);
-      if (confirmed !== true) throw new SdkError("recovery-declined", { swapId: payload.swapId });
+        try {
+          file = { name: engine.recoveryFile.recoveryFileName(payload.swapId), contents: await engine.recoveryFile.createRecoveryFile(payload, passphrase) };
+        } catch { throw new SdkError("recovery-failed", { step: "encrypt" }); }
+
+        // 3. THE PERSON'S CONFIRMATION - THE GATE. No action that locks funds goes earlier: otherwise the lock would end
+        // up without a key if the browser is lost. "Did not answer" is a refusal, not consent.
+        confirmed = await request.onRecoveryFile(file);
+        if (confirmed !== true) throw new SdkError("recovery-declined", { swapId: payload.swapId });
+      } else if (recovery.newKey) {
+        if (typeof request.onRecoveryKey !== "function") throw new SdkError("bad-input", { field: "onRecoveryKey" });
+        try {
+          file = {
+            name: recoveryKeyFileName(recovery.key),
+            contents: await createRecoveryKeyFile({ mnemonic: recovery.key.mnemonic, createdAt: recovery.key.createdAt, passphrase }),
+          };
+        } catch { throw new SdkError("recovery-failed", { step: "encrypt-key" }); }
+        confirmed = await request.onRecoveryKey(file);
+        if (confirmed !== true) throw new SdkError("recovery-declined", { key: recovery.key.fingerprint });
+      }
 
       // 4. LOCKING THE FUNDS. The wallet comes FROM OUTSIDE (an adapter with `send`/`receipt`): signing is possible only
       // in it, and the core keeps no path into the chain of its own. The absence of a wallet is a REFUSAL WITH A CODE,
@@ -864,6 +914,11 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
           // THE FUNDING HEIGHT - FROM THE RECEIPT: the XMR watch and the recovery file take it from here.
           birthHeight: Number(funded.birthBlock) > 0 ? Number(funded.birthBlock) : (escrowRecord.birthHeight ?? null) };
         try { engine.swap.saveSwap(record.swap); } catch { throw new SdkError("storage-unavailable", { step: "save-escrow" }); }
+        // THE NUMBER IS SPENT ONLY NOW, WHEN THE ORDER EXISTS ON CHAIN. A failed or abandoned start keeps the
+        // reservation, so a retry uses the same number and the later search has no gap.
+        if (recovery) {
+          try { commitRecoveryIndex(recovery.storage, recovery.index); } catch { /* the reservation stays; the key still works */ }
+        }
       }
 
       // 5. THE SERVER: RECORDING THE SWAP WITH US, THEN THE FACTORY WATCH RECORD FOR THE MONERO ADDRESS.

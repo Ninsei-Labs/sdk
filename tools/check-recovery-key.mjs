@@ -4,6 +4,7 @@
 // change to every swap made with the key.
 
 import * as recovery from "../src/public/recovery.mjs";
+import { buildOwnSideFromHalves } from "../src/order.mjs";
 
 const WORDS = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 const CHAIN = 421614;
@@ -57,7 +58,17 @@ export const recoveryKeyCheck = async () => {
   check(halves.makerViewHalf !== halves.viewHalf, "the maker view half equals the taker view half");
   const again = recovery.takerHalves({ mnemonic: WORDS, chainId: CHAIN, index: 0 });
   check(JSON.stringify(again) === JSON.stringify(halves), "the same words and index gave different halves");
-  notes.push("fixed halves and commitment vectors hold");
+  const orderTerms = {
+    chainId: 421614, factory: "0x" + "11".repeat(20), locker: "0x" + "22".repeat(20),
+    claimer: "0x" + "33".repeat(20), amount: "1000", readyBy: 2000000000, t1: 2000003600,
+    salt: "0x" + "44".repeat(32),
+  };
+  const known = buildOwnSideFromHalves(orderTerms, { spendHalf: halves.spendHalf, viewHalf: halves.viewHalf });
+  const samePoint = (a, b) => String(a).replace(/^0x/i, "").toLowerCase() === String(b).replace(/^0x/i, "").toLowerCase();
+  check(samePoint(known.spendPoint, halves.spendPoint), "the known spend half produced another point");
+  check(samePoint(known.viewPoint, halves.viewPoint), "the known view half produced another point");
+  check(known.side.half.toString() === BigInt(halves.spendHalf).toString(), "the side did not keep the supplied spend half");
+  notes.push("fixed halves and commitment vectors hold; the order side can be built from them");
 
   const generated = recovery.createRecoveryKey({ createdAt: "2026-10-21" });
   check(generated.mnemonic.split(" ").length === 12, "createRecoveryKey did not make twelve words");
