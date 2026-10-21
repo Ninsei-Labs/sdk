@@ -51,6 +51,11 @@ jobs:
       - name: Check engine mirror (parses, no dangling imports)
         run: pnpm run check:mirror
 
+      # A field added to the signed quote changes both factory selectors. A stale pair is well-formed calldata
+      # that calls a function the factory does not have, so this guard derives the selectors from QUOTE_FIELDS.
+      - name: Check factory selectors
+        run: pnpm run check:factory-selectors
+
       - name: Check package contents (the tarball against `files`)
         run: pnpm run check:pack
 
