@@ -275,6 +275,8 @@ export declare const RECOVERY_KEY_STORE: string;
 export declare const RECOVERY_KEY_FILE_MAGIC: string;
 /** The domain half derivation binds to; the chain id and swap number join it. */
 export declare const RECOVERY_KEY_DOMAIN: string;
+/** The domain of the counterparty's view half, derived from the same one key. */
+export declare const MAKER_VIEW_HALF_DOMAIN: string;
 /** The encrypted backup envelope version. */
 export declare const RECOVERY_KEY_ENVELOPE_VERSION: number;
 /** The encrypted backup algorithm identifier. */
@@ -298,6 +300,8 @@ export interface TakerHalves {
   readonly viewHalf: string;
   readonly spendPoint: string;
   readonly viewPoint: string;
+  readonly makerViewHalf: string;
+  readonly makerViewPoint: string;
   readonly spendCommitment: string;
 }
 

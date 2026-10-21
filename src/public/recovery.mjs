@@ -30,6 +30,7 @@ export {
   RECOVERY_KEY_ITER,
   RECOVERY_KEY_STORE,
   RECOVERY_KEY_VERSION,
+  MAKER_VIEW_HALF_DOMAIN,
   RECOVERY_KEY_WORDS,
   commitRecoveryIndex,
   createRecoveryKey,
