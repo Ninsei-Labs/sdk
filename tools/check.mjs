@@ -31,6 +31,7 @@ import keccakPkg from "keccak256";
 import { recoveryKeyCheck } from "./check-recovery-key.mjs";
 import { sweepWindowCheck } from "./check-sweep-window.mjs";
 import { claimTipCheck } from "./check-claim-tip.mjs";
+import { claimSenderCheck } from "./check-claim-sender.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const p = (...parts) => join(ROOT, ...parts);
@@ -2531,6 +2532,7 @@ const CHECKS = {
   "recovery-key": recoveryKeyCheck,
   "sweep-window": sweepWindowCheck,
   "claim-tip": claimTipCheck,
+  "claim-sender": claimSenderCheck,
 };
 
 export const runCheck = async (name) => {

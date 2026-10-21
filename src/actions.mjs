@@ -25,6 +25,18 @@ const walletOrFail = (wallet) => {
   return wallet;
 };
 
+// THE CLAIM'S HALF IS REVEALED BY WHOEVER SENDS IT. The package sends a claim only from the claimer's own wallet:
+// a third-party sender would see the half before the claim is mined, and the only reason to use one is the tip -
+// not a reason to hand the half to another party. A caller with no claimer is refused, not sent blind.
+export function claimSenderVerdict({ sender = null, claimer = null } = {}) {
+  const from = typeof sender === "string" ? sender.trim().toLowerCase() : "";
+  const to = typeof claimer === "string" ? claimer.trim().toLowerCase() : "";
+  if (!to) return { ok: false, code: "bad-input", field: "claimer" };
+  if (!from) return { ok: false, code: "bad-input", field: "wallet.address" };
+  if (from !== to) return { ok: false, code: "bad-input", field: "wallet", why: "not-the-claimer" };
+  return { ok: true };
+}
+
 const requestOrFail = (request, extra) => {
   if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
   const missing = missingFields(request, ["escrow", "expect", ...extra]);
@@ -59,6 +71,9 @@ export function createActions({ call = null } = {}) {
       requestOrFail(request, ["halfClaimer"]);
       walletOrFail(wallet);
       const { escrow, halfClaimer, expect, onStep } = request;
+      const sender = typeof wallet.address === "function" ? await wallet.address() : null;
+      const verdict = claimSenderVerdict({ sender, claimer: request.claimer || (expect && expect.claimer) });
+      if (!verdict.ok) throw new SdkError(verdict.code, { field: verdict.field, why: verdict.why, surface: "actions.claim" });
       return await withCodes("claim", () => flow.claimOrder({ escrow, halfClaimer, expect, onStep, deps: deps(wallet) }));
     },
     /** Refunding: it also reveals a half. The core passes the expectations ALWAYS, though the engine does not require them. */
