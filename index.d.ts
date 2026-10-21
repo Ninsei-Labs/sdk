@@ -109,6 +109,13 @@ export interface NinseiOptions {
    */
   evmLogs?: EvmLogReader;
   /**
+   * READING A SETTLEMENT BLOCK FROM OUTSIDE (`(tag) => block`): the claim-tip check needs the chain's current
+   * `baseFeePerGas`. A missing seam is `quote-tip-unchecked` when a quote carries a non-zero tip; zero tips (the
+   * buy side) never call it.
+   */
+  evmBlock?: (tag?: string) => Promise<{ readonly baseFeePerGas?: string | number | bigint | null;
+    readonly baseFeeWei?: string | number | bigint | null }>;
+  /**
    * THE INTERFACE'S OWN ADMISSION LIST - policy, not proof. The chain (maker registry, providerOf, taken from the
    * quote) proves whose key signed; this says whom THIS interface trades with at all. An array of provider
    * addresses (or providerIds) or a predicate `(provider) => boolean`. A provider the chain confirms but the list

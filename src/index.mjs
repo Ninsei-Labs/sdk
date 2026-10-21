@@ -91,6 +91,9 @@ const normalizeOptions = (options) => {
   // same provider the chain read uses. Same rule as evmCall: a READ of the escrow's own event, not a node
   // substitution.
   if (o.evmLogs !== undefined && typeof o.evmLogs !== "function") fail("bad-input", { field: "evmLogs" });
+  // THE BLOCK-READ SEAM: the claim tip is checked against the chain's current base fee, and that is a block read,
+  // not an `eth_call`. Same rule as evmCall - brought from outside, refused when it is not a function.
+  if (o.evmBlock !== undefined && typeof o.evmBlock !== "function") fail("bad-input", { field: "evmBlock" });
   // THE INTERFACE'S ALLOW-LIST (POLICY, NOT PROOF): an array of provider addresses (or providerIds) OR a
   // predicate. It is NOT the check itself - that is `providerOf` on chain, taken from the quote - but the
   // interface's own decision about whom it trades with. A wrong shape is a typo, not a silent no-op.
@@ -156,6 +159,7 @@ const normalizeOptions = (options) => {
     evmCall: o.evmCall || null,
     evmCode: o.evmCode || null,
     evmLogs: o.evmLogs || null,
+    evmBlock: o.evmBlock || null,
     allowedProviders: o.allowedProviders === undefined ? null : o.allowedProviders,
     knownFactoryCodes: o.knownFactoryCodes === undefined ? null : o.knownFactoryCodes,
     knownImplementationCodes: o.knownImplementationCodes === undefined ? null : o.knownImplementationCodes,
@@ -215,7 +219,8 @@ export function createNinsei(options) {
     ? new Set(o.denylist.map((a) => String(a).toLowerCase()))
     : null;
   const quotes = createQuotes({ config, http, now: o.now || (() => Date.now()), evmCall: o.evmCall || null,
-    evmCode: o.evmCode || null, providerAllowed, knownFactoryCodes: o.knownFactoryCodes, knownImplementationCodes: o.knownImplementationCodes,
+    evmCode: o.evmCode || null, evmBlock: o.evmBlock || null,
+    providerAllowed, knownFactoryCodes: o.knownFactoryCodes, knownImplementationCodes: o.knownImplementationCodes,
     denylist });
   // THE SAME CHAIN-READ SEAM AS THE LOCK AND THE CORE: checking the slots and signing must go one way, otherwise
   // part of the check goes past the wallet and part does not.
