@@ -155,6 +155,11 @@ export const recoveryKeyCheck = async () => {
   check(withHeight.swaps[0].startHeightReason === null, "a derived start height carries a refusal reason");
   const nodeFetch = async (url, options) => {
     const request = JSON.parse(options.body);
+    // A REAL NODE'S TOP BLOCK IS height - 1: `get_info.height` counts blocks, and a header request at `height` answers
+    // "greater than current top block". This stand-in does the same, so a reader that asks for `height` loses the order.
+    if (request.method === "get_block_header_by_height" && Number(request.params.height) >= 2_000) {
+      return { ok: true, json: async () => ({ error: { code: -1, message: "greater than current top block height" } }) };
+    }
     const result = request.method === "get_info"
       ? { height: 2_000, nettype: "stagenet", synchronized: true }
       : { block_header: { timestamp: 500 + Number(request.params.height) * 1_000 } };
@@ -168,6 +173,20 @@ export const recoveryKeyCheck = async () => {
     gap: 2,
   });
   check(throughNode.swaps[0].startHeight === 939, `the node-backed start height is ${throughNode.swaps[0].startHeight}`);
+  const genesis = await recovery.findSwaps({
+    mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
+    evmLogs: async (request) => request.topics.includes(pad(address("bb"))) ? [order] : [],
+    evmBlockTime: async () => 0,
+    xmrNodes: ["https://node.example"], moneroNetwork: "stagenet",
+    fetchImpl: async (url, options) => {
+      const request = JSON.parse(options.body);
+      if (request.method === "get_info") return { ok: true, json: async () => ({ result: { height: 1, nettype: "stagenet", synchronized: true } }) };
+      return { ok: true, json: async () => ({ result: { block_header: { timestamp: 0 } } }) };
+    },
+    gap: 2,
+  });
+  check(genesis.swaps[0].startHeightReason === null, `genesis timestamp 0 was refused: ${genesis.swaps[0].startHeightReason}`);
+  check(genesis.swaps[0].startHeight === 0, `genesis start height is ${genesis.swaps[0].startHeight}`);
   notes.push("the search can use node URLs without three callbacks");
   const withoutHeight = await recovery.findSwaps({
     mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),

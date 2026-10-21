@@ -426,7 +426,7 @@ const MONERO_HEIGHT_SAFETY_BLOCKS = 60;
 
 function secondsOf(value) {
   const n = Number(value);
-  if (!Number.isFinite(n) || n <= 0) return null;
+  if (!Number.isFinite(n) || n < 0) return null;
   return n > 1e12 ? Math.floor(n / 1000) : Math.floor(n);
 }
 
@@ -479,11 +479,15 @@ async function moneroReadersFromNodes({ nodes = [], network = null, fetchImpl = 
     return body.result;
   };
   return {
-    tip: async () => node.height,
+    // `get_info.height` is the block COUNT, one past the top block. Asking a real node for a header at that height
+    // answers "greater than current top block"; the tip reader must name the top block itself.
+    tip: async () => Math.max(0, Number(node.height) - 1),
     headerTimestamp: async (height) => {
       const result = await call("get_block_header_by_height", { height });
       const ts = Number(result.block_header && result.block_header.timestamp);
-      if (!Number.isFinite(ts) || ts <= 0) throw new Error("monero-header");
+      // GENESIS HAS TIMESTAMP 0. The binary search reads height 0 to prove the requested moment is before it; a
+      // `<= 0` refusal turned a legitimate genesis answer into "monero-header" and every old order lost its height.
+      if (!Number.isFinite(ts) || ts < 0) throw new Error("monero-header");
       return ts;
     },
   };

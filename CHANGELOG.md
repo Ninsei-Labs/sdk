@@ -1,3 +1,15 @@
+## 0.50.0 — 2026-10-21
+
+A CLAIM IS SENT BY ITS CLAIMER, AND A SALE IS RANKED AFTER THE TIP.
+
+- `actions.claim` compares the wallet's address with `request.claimer` or `expect.claimer` before it signs. A
+  third-party wallet, a missing claimer or a wallet without an address is a named `bad-input`; `claimSenderVerdict`
+  exposes the same rule. This is a deliberate tightening: a claim reveals the half to its sender.
+- `readQuote` keeps the signed `claimTip`, and `rankOffers` selects a sale by `amount × rate − claimTip`, not by
+  the headline rate. A buy, or a request without an amount, still ranks by rate.
+- `quotes.watch` uses that ranking for the chosen offer, so moving margin from the price into the tip no longer
+  wins a sale.
+
 ## 0.49.0 — 2026-10-21
 
 A ONE-KEY RECOVERY CAN WITHDRAW WITHOUT A FULL SCAN, AND A CLAIM TIP IS CHECKED.
