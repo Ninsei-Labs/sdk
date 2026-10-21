@@ -127,6 +127,11 @@ jobs:
       - name: Check the withdrawal refusal (empty remainder -> insufficient-funds)
         run: pnpm run check:sweep
 
+      # A REVEALED HALF IS ONE 32-BYTE WORD. The escrow's `revealedHalf()` used to be read as an address, keeping 20
+      # bytes, so `(s_a + s_b)·G` never matched and every real withdrawal was refused.
+      - name: Check the revealed half (32 bytes, never an address tail)
+        run: pnpm run check:sweep-half
+
       # READING AN ARRIVAL WITHOUT A WALLET: the address and its keys, the little-endian scalar, whether a view key
       # matches, and the unlock_time rule. A second copy of the last one is the expensive kind - locked money reads
       # as an arrival.
