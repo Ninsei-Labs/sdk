@@ -1296,6 +1296,20 @@ export interface SweepRestoreRequest {
   readonly scanBack?: number;
   /** Run the second pass when coins exist but none is spendable. Default true. */
   readonly rescanWhenLocked?: boolean;
+  /**
+   * THE BLOCK WINDOW AROUND THE LOCK. When present, the wallet is set at the node tip and only these blocks are
+   * scanned. An empty window falls back to the full scan unless `fallback` is false. `txHashes` may be supplied by
+   * the caller; otherwise the SDK reads `get_block` from `nodeUrl`.
+   */
+  readonly window?: {
+    readonly nodeUrl?: string;
+    readonly txHashes?: readonly string[];
+    readonly toHeight: number;
+    readonly tipHeight: number;
+    readonly fallback?: boolean;
+  };
+  /** The fetch used for `get_block`; absent - the global fetch. */
+  readonly fetchImpl?: typeof fetch;
 }
 
 /** What `restore` found. Amounts are atomic units as strings; heights are numbers when the driver can read them. */
@@ -1310,6 +1324,18 @@ export interface SweepRestoreResult {
   readonly passes: number;
   /** Whether the second pass RAN - not whether it helped. */
   readonly lockedPass: boolean;
+  /** Present when a window was requested: whether it was used, and why it was skipped. */
+  readonly window?: {
+    readonly used: boolean;
+    readonly skipped: string | null;
+    readonly fromHeight: number;
+    readonly toHeight: number;
+    readonly blocks: number;
+    readonly txs: number;
+    readonly spent?: number | null;
+    readonly keyImages?: number;
+    readonly spentWhy?: string;
+  } | null;
 }
 
 /** What `wallet` needs: the library namespace and the facts the wallet is built from. */
