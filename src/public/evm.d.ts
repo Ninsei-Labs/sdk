@@ -47,6 +47,8 @@ export interface FactoryQuote {
   readonly validUntil: string | number | bigint;
   readonly nonce: string | number | bigint;
   readonly xmrAmount: string | number | bigint;
+  /** The tip `claim` pays to a third-party sender out of the payout; zero means none. */
+  readonly claimTip: string | number | bigint;
   /** r || s || v over the quote digest, 65 bytes, with or without the `0x` prefix. */
   readonly signature: string;
   readonly commitHalfLocker: string;
