@@ -42,7 +42,8 @@
     "check:factory-selectors": "node tools/check-factory-selectors.mjs",
     "check:fee-estimate": "node tools/check-fee-estimate.mjs",
     "check:deadline-scale": "node tools/check-deadline-scale.mjs",
-    "check:node-probe": "node tools/check-node-probe.mjs"
+    "check:node-probe": "node tools/check-node-probe.mjs",
+    "check:recovery-key": "node tools/check.mjs --only=recovery-key"
   },
   "types": "./index.d.ts",
   "exports": {
@@ -120,6 +121,7 @@
   "dependencies": {
     "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.4.0",
+    "@scure/bip39": "2.4.0",
     "keccak256": "^1.0.6"
   },
   "sideEffects": false

@@ -259,3 +259,116 @@ export declare function createRecoveryFile(payload: RecoveryPayload, passphrase:
  * yet. Stable, so a repeated download shows up as a second copy of one name rather than a new random file.
  */
 export declare function recoveryFileName(swapId?: string | null): string;
+
+
+// ---------------------------------------------------------------------------------------------------
+// ONE RECOVERY KEY PER BROWSER (sdk#79)
+// ---------------------------------------------------------------------------------------------------
+
+/** The version of the stored/backup key record. */
+export declare const RECOVERY_KEY_VERSION: number;
+/** Twelve words, by the BIP39 rules. */
+export declare const RECOVERY_KEY_WORDS: number;
+/** The store key a browser adapter keeps the key under. */
+export declare const RECOVERY_KEY_STORE: string;
+/** The first line of a plain backup file. */
+export declare const RECOVERY_KEY_FILE_MAGIC: string;
+/** The domain half derivation binds to; the chain id and swap number join it. */
+export declare const RECOVERY_KEY_DOMAIN: string;
+/** The encrypted backup envelope version. */
+export declare const RECOVERY_KEY_ENVELOPE_VERSION: number;
+/** The encrypted backup algorithm identifier. */
+export declare const RECOVERY_KEY_ALG: string;
+/** The PBKDF2 iteration count written into an encrypted backup. */
+export declare const RECOVERY_KEY_ITER: number;
+
+/** A key as it is kept: the words are the secret, the fingerprint is its short public name. */
+export interface RecoveryKey {
+  readonly version: number;
+  readonly mnemonic: string;
+  readonly fingerprint: string;
+  readonly createdAt: string;
+}
+
+/** A derived swap number: the halves cross JSON as hex scalars. */
+export interface TakerHalves {
+  readonly index: number;
+  readonly binding: string;
+  readonly spendHalf: string;
+  readonly viewHalf: string;
+  readonly spendPoint: string;
+  readonly viewPoint: string;
+  readonly spendCommitment: string;
+}
+
+/** One order found by the key's commitments. */
+export interface FoundSwap {
+  readonly escrow: string;
+  readonly locker: string;
+  readonly claimer: string;
+  readonly commitHalfLocker: string;
+  readonly commitHalfClaimer: string;
+  readonly edPointLocker: string;
+  readonly edPointClaimer: string;
+  readonly edViewPointLocker: string;
+  readonly amount: string;
+  readonly readyBy: number;
+  readonly t1: number;
+  readonly salt: string;
+  readonly registry: string;
+  readonly provider: string;
+  readonly quoteKey: string;
+  readonly transactionHash: string | null;
+  readonly blockNumber: number | null;
+  readonly logIndex: number | null;
+  readonly index: number;
+  readonly side: "locker" | "claimer";
+}
+
+/** A storage adapter: the same shape the SDK store takes. */
+export interface RecoveryKeyStorage {
+  get(key: string): string | null;
+  set(key: string, value: string): unknown;
+  remove(key: string): unknown;
+}
+
+/** Makes a new 12-word key. The caller saves it; nothing is stored here. */
+export declare function createRecoveryKey(options?: { createdAt?: string | Date }): RecoveryKey;
+/** Imports and validates words. */
+export declare function importRecoveryKey(mnemonic: string, options?: { createdAt?: string | Date }): RecoveryKey;
+/** The short public fingerprint (four hex characters) of the words. */
+export declare function fingerprintOf(mnemonic: string): string;
+/** The binding for a chain and swap number: `ninsei-taker-v1|<chainId>|<index>`. */
+export declare function recoveryBinding(chainId: number, index: number): string;
+/** Derives the taker spend and view halves for one swap number. */
+export declare function takerHalves(request: { mnemonic: string; chainId: number; index: number }): TakerHalves;
+/** The stable backup name, with `DO-NOT-DELETE` in it on purpose. */
+export declare function recoveryKeyFileName(request: { mnemonic?: string; fingerprint?: string; createdAt?: string | Date }): string;
+/** A plain backup file: readable header above the words. */
+export declare function recoveryKeyText(request: { mnemonic: string; createdAt?: string | Date }): string;
+/** A backup file, optionally encrypted with a passphrase of at least 12 characters. */
+export declare function createRecoveryKeyFile(request: { mnemonic: string; createdAt?: string | Date; passphrase?: string }): Promise<string>;
+/** Reads a plain or encrypted backup file and validates the words. */
+export declare function openRecoveryKeyFile(contents: string, passphrase?: string): Promise<RecoveryKey>;
+/** Saves the key through a storage adapter. */
+export declare function saveRecoveryKey(storage: RecoveryKeyStorage, key: RecoveryKey & { nextIndex?: number; reserved?: Record<string, unknown>; retired?: Record<string, unknown> }): RecoveryKey;
+/** Reads the key from a storage adapter, or null. */
+export declare function loadRecoveryKey(storage: RecoveryKeyStorage): (RecoveryKey & { nextIndex: number; reserved: Record<string, unknown>; retired: Record<string, unknown> }) | null;
+/** Reserves a swap number; the caller releases it if the request is abandoned. */
+export declare function reserveRecoveryIndex(storage: RecoveryKeyStorage, request: { chainId: number; swapId?: string | null }): number;
+/** Releases a number that never reached the chain. */
+export declare function releaseRecoveryIndex(storage: RecoveryKeyStorage, index: number): void;
+/** Retires a number after its order exists on chain. */
+export declare function commitRecoveryIndex(storage: RecoveryKeyStorage, index: number): void;
+/** Finds orders whose commitment was made from the key's halves. */
+export declare function findSwaps(request: {
+  mnemonic: string;
+  chainId: number;
+  factory: string;
+  address?: string | null;
+  evmLogs: (request: { address: string; topics: (string | null)[]; fromBlock: number | string; toBlock: number | string }) => Promise<unknown[]>;
+  fromBlock?: number | string;
+  toBlock?: number | string;
+  gap?: number;
+  maxIndex?: number;
+}): Promise<{ swaps: FoundSwap[]; scanned: number }>;
