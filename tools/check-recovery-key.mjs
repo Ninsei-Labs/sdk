@@ -5,6 +5,7 @@
 
 import * as recovery from "../src/public/recovery.mjs";
 import { buildOwnSideFromHalves } from "../src/order.mjs";
+import { startHeightFromNodes } from "../src/swaps.mjs";
 
 const WORDS = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 const CHAIN = 421614;
@@ -124,7 +125,44 @@ export const recoveryKeyCheck = async () => {
     gap: 2,
   });
   check(all.swaps.length === 1 && allCalls.length === 1, `a full scan made ${allCalls.length} calls and found ${all.swaps.length} orders`);
-  notes.push("the search matches a commitment and filters by address without sending a secret");
+  const withHeight = await recovery.findSwaps({
+    mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
+    evmLogs: async (request) => request.topics.includes(pad(address("bb"))) ? [order] : [],
+    evmBlockTime: async () => 1_000_000,
+    moneroTip: async () => 2_000,
+    moneroBlockTimestamp: async (height) => 500 + height * 1_000,
+    gap: 2,
+  });
+  check(withHeight.swaps.length === 1, "the height search lost the order");
+  check(withHeight.swaps[0].startHeight === 939, `the start height is ${withHeight.swaps[0].startHeight}, expected 939 (999 - 60)`);
+  check(withHeight.swaps[0].startHeightReason === null, "a derived start height carries a refusal reason");
+  const withoutHeight = await recovery.findSwaps({
+    mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
+    evmLogs: async (request) => request.topics.includes(pad(address("bb"))) ? [order] : [], gap: 2,
+  });
+  check(withoutHeight.swaps[0].startHeight === null && withoutHeight.swaps[0].startHeightReason === "no-height-readers",
+    "a search without readers did not name the missing height");
+  notes.push("the search matches a commitment and filters by address without sending a secret; it derives the Monero start height");
+
+  const answer = (result) => async () => ({ ok: true, json: async () => ({ result }) });
+  const measured = await startHeightFromNodes({
+    nodes: ["https://node.example"], network: "stagenet",
+    fetchImpl: answer({ height: 2234563, nettype: "stagenet", synchronized: true }),
+  });
+  check(measured === 2234563, `the node height was read as ${measured}`);
+  let wrongNetwork = null;
+  try {
+    await startHeightFromNodes({ nodes: ["https://node.example"], network: "mainnet",
+      fetchImpl: answer({ height: 1, nettype: "stagenet", synchronized: true }) });
+  } catch (error) { wrongNetwork = error; }
+  check(wrongNetwork && wrongNetwork.code === "xmr-no-nodes" && wrongNetwork.params && wrongNetwork.params.why === "network",
+    "a node on another network was not refused with why=network");
+  let noNode = null;
+  try { await startHeightFromNodes({ nodes: [], network: "stagenet", fetchImpl: answer({ height: 1 }) }); }
+  catch (error) { noNode = error; }
+  check(noNode && noNode.code === "xmr-no-nodes" && noNode.params && noNode.params.why === "no-node",
+    "a missing node was not refused with why=no-node");
+  notes.push("the start height is measured from a node and a foreign network is refused");
 
   return { note: "the recovery key, its backup file, reservations and the on-chain search behave", problems, notes };
 };

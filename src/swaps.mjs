@@ -19,6 +19,7 @@ import { vmOfChain, legFor } from "./legs/index.mjs";
 // THE VIEW HALVES - from the core's primitives: the sum of two halves is the key the wallet sees incoming payments
 // with. There is no arithmetic of the core's own here either (see order.mjs) - we use the same halves builder.
 import { primitives } from "./primitives.mjs";
+import { probeMoneroNode } from "./probes.mjs";
 // MARKING READY - A FINISHED STEP, NOT A SECOND IMPLEMENTATION OF IT: it requires the order expectations and checks
 // the slots against the chain BEFORE signing (actions.markReady). The watch must call exactly it, otherwise "we saw
 // the XMR" and "we allowed the settlement to be taken" would diverge.
@@ -306,6 +307,24 @@ const recordInputOf = (request) => {
 // createRecord is the start step that requires a Monero wallet IN THE BROWSER (creating the wallet and the order of
 // the halves). It arrives from outside, so the whole path after it (building the file, encryption, the person's
 // confirmation) is written and checked already now, rather than appearing together with the browser part.
+/**
+ * The Monero height a swap starts at, measured from the configured nodes. Exported for the guard, not as a
+ * package entry: the start is the only production caller. A node that answers on another network is not a height
+ * for this deal, and a missing answer is a named refusal, never a scan from zero.
+ */
+export async function startHeightFromNodes({ nodes = [], network = null, fetchImpl = globalThis.fetch } = {}) {
+  const urls = (Array.isArray(nodes) ? nodes : [])
+    .map((entry) => typeof entry === "string" ? entry : entry && entry.url).filter(Boolean);
+  const answers = await Promise.all(urls.map(async (url) => {
+    try { return await probeMoneroNode({ url, fetchImpl }); }
+    catch { return { ok: false, why: "unreachable" }; }
+  }));
+  const good = answers.find((answer) => answer.ok === true && (!network || answer.network === network));
+  if (good) return good.height;
+  const why = answers.find((answer) => answer.ok === true) ? "network" : (answers[0] && answers[0].why) || "no-node";
+  throw new SdkError("xmr-no-nodes", { step: "restore-height", network: network || null, why });
+}
+
 export function createSwaps({ preflight, http, createRecord, mode = null, xmrNetwork = null, call = null,
   // THE PATHS AND LIMITS ARE BROUGHT BY THE CONFIGURATION: the "server" step's paths are named by names (config.route),
   // and the timeout and rate of the watch polling - in config.limits. Without the configuration the step answers with a
@@ -342,6 +361,18 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
     const value = config && config.limits ? config.limits[name] : null;
     return Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : fallback;
   };
+
+  // THE MONERO HEIGHT A SWAP STARTS AT. It is measured before the recovery data is handed over: a file without
+  // it scans Monero from block zero, and a watch opened at an EVM block sees nothing. The node must name the same
+  // network as the swap; a different network is not a height for this deal.
+  async function measuredStartHeight(request, moneroNetwork) {
+    const explicit = Number(request.restoreHeight);
+    if (Number.isSafeInteger(explicit) && explicit > 0) return explicit;
+    const listed = Array.isArray(request.xmrNodes) ? request.xmrNodes
+      : (config && typeof config.nodesFor === "function" ? config.nodesFor(moneroNetwork) : []);
+    return startHeightFromNodes({ nodes: listed, network: moneroNetwork,
+      fetchImpl: request.fetchImpl || (typeof fetch === "function" ? fetch : null) });
+  }
   const records = () => {
     const state = engine.store.loadState();
     const all = Object.values((state && state.swaps) || {}).filter((s) => s && s.id);
@@ -454,11 +485,15 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
     if (!(expectedXmr > 0)) throw new SdkError("bad-input", { field: "expectedAmountXmr" });
     const network = swap.moneroNetwork || xmrNetwork || null;
     if (!network) throw new SdkError("bad-input", { field: "moneroNetwork" });
+    const restoreHeight = Number(swap.restoreHeight) > 0 ? Number(swap.restoreHeight)
+      : (Number(e.moneroRestoreHeight) > 0 ? Number(e.moneroRestoreHeight) : null);
+    if (!(restoreHeight > 0)) throw new SdkError("bad-input", { field: "restoreHeight", step: "watch" });
     const wanted = {
       swapId: swap.id || null, network, address, viewKey: jointViewKey(swap), expectedAmountXmr: expectedXmr,
-      // THE RESTORE HEIGHT - FROM THE SWAP RECORD (the order puts it there), not invented: a scan from zero would take
-      // tens of hours, and the arrivals would not be visible in a reasonable time.
-      restoreHeight: Number(e.birthHeight) > 0 ? Number(e.birthHeight) : null,
+      // THE RESTORE HEIGHT - THE MONERO HEIGHT, NEVER THE EVM BLOCK. It is measured before the file is handed
+      // over and kept on the record; `birthHeight`/`evmBirthBlock` is a settlement-chain block for log search and
+      // is far above any Monero tip, so using it here opened the watch nowhere near the money.
+      restoreHeight,
       chain: swap.network || swap.chain || null,
     };
     const body = {};
@@ -819,6 +854,15 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         builtSide = step;
       }
 
+      // THE HEIGHT IS MEASURED BEFORE THE FILE OR THE WATCH: the node is asked once, while the swap is still in
+      // front of us. A swap without it is not funded - a recovery file that scans from zero is a file that looks
+      // usable and is not.
+      const measuredHeight = await measuredStartHeight(request, record.swap.moneroNetwork || xmrNetwork || null);
+      record.swap.restoreHeight = measuredHeight;
+      record.restoreHeight = measuredHeight;
+      record.swap.escrow = { ...(record.swap.escrow || {}), moneroRestoreHeight: measuredHeight };
+      try { engine.swap.saveSwap(record.swap); } catch { throw new SdkError("storage-unavailable", { step: "save-restore-height" }); }
+
       // 2a. THE KEY IS CONFIRMED ONCE; THE OLD PATH STILL ASSEMBLES A PER-SWAP FILE. On the key path there is
       // no file per swap: the same twelve words cover every swap, and a person who already saved them is not
       // asked again. A new key is shown before the money moves - no saved key, no funding.
@@ -911,8 +955,10 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       if (escrowAddress) {
         const escrowRecord = record.swap.escrow && typeof record.swap.escrow === "object" ? record.swap.escrow : {};
         record.swap.escrow = { ...escrowRecord, address: escrowAddress,
-          // THE FUNDING HEIGHT - FROM THE RECEIPT: the XMR watch and the recovery file take it from here.
-          birthHeight: Number(funded.birthBlock) > 0 ? Number(funded.birthBlock) : (escrowRecord.birthHeight ?? null) };
+          // THE SETTLEMENT-CHAIN HEIGHT, NAMED AS SUCH. It is for the OrderCreated/Declined log search; the XMR
+          // watch and the recovery file take the Monero height measured above. The old name `birthHeight` stays
+          // readable on records written before this split.
+          evmBirthBlock: Number(funded.birthBlock) > 0 ? Number(funded.birthBlock) : (escrowRecord.evmBirthBlock ?? escrowRecord.birthHeight ?? null) };
         try { engine.swap.saveSwap(record.swap); } catch { throw new SdkError("storage-unavailable", { step: "save-escrow" }); }
         // THE NUMBER IS SPENT ONLY NOW, WHEN THE ORDER EXISTS ON CHAIN. A failed or abandoned start keeps the
         // reservation, so a retry uses the same number and the later search has no gap.
@@ -1009,7 +1055,8 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       const escrowAddress = request.escrow || (record && record.escrow && record.escrow.address) || null;
       // FROM THE ESCROW'S BIRTH HEIGHT when the record knows it: the event cannot be older than the funding, and
       // walking the whole chain every tick is a cost with no answer behind it.
-      const fromBlock = blockBoundaryOf(record && record.escrow ? record.escrow.birthHeight : null);
+      const fromBlock = blockBoundaryOf(record && record.escrow
+        ? (record.escrow.evmBirthBlock ?? record.escrow.birthHeight) : null);
       const chainDecline = { checked: false, error: null, logs: undefined };
       const readDeclineLogs = async () => {
         chainDecline.checked = false; chainDecline.error = null; chainDecline.logs = undefined;

@@ -396,6 +396,61 @@ async function readLogs(evmLogs, request) {
   return logs;
 }
 
+// THE MONERO HEIGHT A RECOVERED ORDER STARTED AT. With one key there is no per-swap file to carry it, so it is
+// derived from the settlement chain: the timestamp of the block that holds OrderCreated, then the last Monero
+// block at or before it. A Monero block's timestamp may run ahead of wall time, hence the safety margin.
+//
+// The two readers are seams, like evmLogs: the SDK owns the rule, the caller owns the transport. Without them the
+// order is still returned, with startHeight null and a named reason, instead of a guessed height.
+const MONERO_HEIGHT_SAFETY_BLOCKS = 60;
+
+function secondsOf(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n > 1e12 ? Math.floor(n / 1000) : Math.floor(n);
+}
+
+async function heightAtOrBefore(timestamp, { tip, headerTimestamp }) {
+  const top = Number(await tip());
+  if (!Number.isSafeInteger(top) || top < 0) throw new Error("monero-tip");
+  const at = async (height) => secondsOf(await headerTimestamp(height));
+  const topTime = await at(top);
+  if (topTime !== null && topTime <= timestamp) return top;
+  let low = 0;
+  let high = top;
+  const zeroTime = await at(0);
+  if (zeroTime !== null && zeroTime > timestamp) return 0;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    const ts = await at(mid);
+    if (ts === null) throw new Error("monero-header");
+    if (ts <= timestamp) low = mid;
+    else high = mid - 1;
+  }
+  return low;
+}
+
+async function recoveredStartHeight(order, { evmBlockTime, moneroTip, moneroBlockTimestamp, cache }) {
+  if (order.blockNumber === null || order.blockNumber === undefined) {
+    return { startHeight: null, startHeightReason: "no-block-number" };
+  }
+  if (typeof evmBlockTime !== "function" || typeof moneroTip !== "function" || typeof moneroBlockTimestamp !== "function") {
+    return { startHeight: null, startHeightReason: "no-height-readers" };
+  }
+  let timestamp = cache.get(order.blockNumber);
+  if (timestamp === undefined) {
+    timestamp = secondsOf(await evmBlockTime(order.blockNumber));
+    if (timestamp === null) return { startHeight: null, startHeightReason: "no-block-time" };
+    cache.set(order.blockNumber, timestamp);
+  }
+  try {
+    const height = await heightAtOrBefore(timestamp, { tip: moneroTip, headerTimestamp: moneroBlockTimestamp });
+    return { startHeight: Math.max(0, height - MONERO_HEIGHT_SAFETY_BLOCKS), startHeightReason: null };
+  } catch {
+    return { startHeight: null, startHeightReason: "monero-header" };
+  }
+}
+
 /**
  * Find orders made with this key.
  *
@@ -403,7 +458,9 @@ async function readLogs(evmLogs, request) {
  * search asks for it as the locker and as the claimer (two queries; the RPC topic filter cannot say OR across two
  * positions) and merges the answers. Without one, every OrderCreated of the factory is read and matched locally.
  */
-export async function findSwaps({ mnemonic, chainId, factory, address = null, evmLogs, fromBlock = 0, toBlock = "latest", gap = 5, maxIndex = 1000 } = {}) {
+export async function findSwaps({ mnemonic, chainId, factory, address = null, evmLogs,
+  fromBlock = 0, toBlock = "latest", gap = 5, maxIndex = 1000,
+  evmBlockTime = null, moneroTip = null, moneroBlockTimestamp = null } = {}) {
   if (typeof factory !== "string" || !ADDRESS_RE.test(factory)) throw bad("factory");
   const chain = numberField(chainId, "chainId");
   const max = numberField(maxIndex, "maxIndex") || 1000;
@@ -445,6 +502,12 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
     for (const order of matches) {
       found.push({ ...order, index, side: order.commitHalfLocker.toLowerCase() === own.spendCommitment.toLowerCase() ? "locker" : "claimer" });
     }
+  }
+  // EACH FOUND ORDER CARRIES THE MONERO HEIGHT ITS WITHDRAWAL MAY START FROM. The rule lives here, not in a
+  // page: a widget and the recovery page must not derive two different answers from one chain.
+  const cache = new Map();
+  for (const order of found) {
+    Object.assign(order, await recoveredStartHeight(order, { evmBlockTime, moneroTip, moneroBlockTimestamp, cache }));
   }
   return { swaps: found, scanned };
 }

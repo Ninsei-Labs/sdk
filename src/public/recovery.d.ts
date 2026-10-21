@@ -327,6 +327,10 @@ export interface FoundSwap {
   readonly logIndex: number | null;
   readonly index: number;
   readonly side: "locker" | "claimer";
+  /** The Monero height a withdrawal may start from, derived from the order's block time. Null when the caller did
+   * not pass the readers; `startHeightReason` then names why. */
+  readonly startHeight: number | null;
+  readonly startHeightReason: "no-block-number" | "no-height-readers" | "no-block-time" | "monero-header" | null;
 }
 
 /** A storage adapter: the same shape the SDK store takes. */
@@ -375,4 +379,10 @@ export declare function findSwaps(request: {
   toBlock?: number | string;
   gap?: number;
   maxIndex?: number;
+  /** Reads the settlement block timestamp, in seconds: (blockNumber) -> seconds. */
+  evmBlockTime?: (blockNumber: number) => Promise<number>;
+  /** The Monero tip at the time of the search: () -> height. */
+  moneroTip?: () => Promise<number>;
+  /** A Monero block header timestamp, in seconds: (height) -> seconds. */
+  moneroBlockTimestamp?: (height: number) => Promise<number>;
 }): Promise<{ swaps: FoundSwap[]; scanned: number }>;
