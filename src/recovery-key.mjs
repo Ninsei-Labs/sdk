@@ -397,6 +397,25 @@ async function readLogs(evmLogs, request) {
   return logs;
 }
 
+/**
+ * Is this number already held by an order on chain?
+ *
+ * A browser store is per device. The same twelve words opened on a second device, or restored before any search, start
+ * at number 0 again; two swaps would then share the taker's halves, and a refund of one publishes a half the other's
+ * maker can use. The check is the factory's own `OrderCreated` log, matched by the spend commitment the number derives.
+ *
+ * The caller owns the log transport, as everywhere else in this module. An unreadable log request is a refusal, not
+ * "free": the number is not reserved on a guess.
+ */
+export async function recoveryIndexTaken({ mnemonic, chainId, index, factory, evmLogs, fromBlock = 0, toBlock = "latest" } = {}) {
+  if (typeof factory !== "string" || !ADDRESS_RE.test(factory)) throw bad("factory");
+  const own = takerHalves({ mnemonic, chainId, index });
+  const logs = await readLogs(evmLogs, { address: factory, topics: [ORDER_CREATED_TOPIC], fromBlock, toBlock });
+  return logs.map(decodeOrderLog).filter(Boolean).some((order) =>
+    order.commitHalfLocker.toLowerCase() === own.spendCommitment.toLowerCase() ||
+    order.commitHalfClaimer.toLowerCase() === own.spendCommitment.toLowerCase());
+}
+
 // THE MONERO HEIGHT A RECOVERED ORDER STARTED AT. With one key there is no per-swap file to carry it, so it is
 // derived from the settlement chain: the timestamp of the block that holds OrderCreated, then the last Monero
 // block at or before it. A Monero block's timestamp may run ahead of wall time, hence the safety margin.

@@ -27,7 +27,7 @@ import { createActions } from "./actions.mjs";
 // THE ONE RECOVERY KEY (sdk#76): the taker's halves come from it, not from a fresh random pair per swap.
 import {
   commitRecoveryIndex, createRecoveryKeyFile, importRecoveryKey, loadRecoveryKey,
-  recoveryKeyFileName, reserveRecoveryIndex, saveRecoveryKey, takerHalves,
+  recoveryIndexTaken, recoveryKeyFileName, reserveRecoveryIndex, saveRecoveryKey, takerHalves,
 } from "./recovery-key.mjs";
 // THE XMR ARRIVAL CHECK ON TWO NODES (issue #85) - IN THE CORE, from the same mirrored rule and block parser.
 import * as xmrArrival from "./xmr-arrival.mjs";
@@ -804,10 +804,23 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         const key = saved || importRecoveryKey(supplied);
         if (!saved) saveRecoveryKey(storage, key);
         const chainId = request.order.chainId;
-        const index = request.recoveryIndex === undefined || request.recoveryIndex === null
-          ? reserveRecoveryIndex(storage, { chainId })
-          : Number(request.recoveryIndex);
+        const explicit = request.recoveryIndex !== undefined && request.recoveryIndex !== null;
+        let index = explicit ? Number(request.recoveryIndex) : reserveRecoveryIndex(storage, { chainId });
         if (!Number.isSafeInteger(index) || index < 0) throw new SdkError("bad-input", { field: "recoveryIndex" });
+        // A BROWSER STORE IS PER DEVICE. The same words opened elsewhere start at the same number, so the factory's own
+        // log is asked before the number is used; a taken number is retired locally and the next one is reserved.
+        // Without a log seam the previous behaviour is kept - the caller cannot be asked to invent a chain read.
+        if (typeof chainLogs === "function" && request.order.factory) {
+          let hops = 0;
+          while (await recoveryIndexTaken({ mnemonic: key.mnemonic, chainId, index, factory: request.order.factory,
+            evmLogs: chainLogs, fromBlock: request.fromBlock === undefined ? 0 : request.fromBlock })) {
+            if (explicit) throw new SdkError("bad-input", { field: "recoveryIndex", why: "on-chain" });
+            commitRecoveryIndex(storage, index);
+            index = reserveRecoveryIndex(storage, { chainId });
+            hops += 1;
+            if (!Number.isSafeInteger(index) || index < 0 || hops > 1000) throw new SdkError("bad-input", { field: "recoveryIndex", why: "exhausted" });
+          }
+        }
         const derived = takerHalves({ mnemonic: key.mnemonic, chainId, index });
         keySide = buildOwnSideFromHalves(request.order, { spendHalf: derived.spendHalf, viewHalf: derived.viewHalf }).side;
         recovery = { storage, key, index, newKey: !saved };
