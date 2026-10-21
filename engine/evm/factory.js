@@ -32,6 +32,7 @@ export const ORDER_CREATED_TOPIC =
 export const QUOTE_FIELDS = [
   "provider", "quoteKey", "registry", "cashier", "locker", "claimer", "amount", "readyBy", "t1", "salt",
   "commitHalfClaimer", "edPointClaimer", "chainId", "feeBps", "fee", "feeRecipient", "validUntil", "nonce", "xmrAmount",
+  "claimTip",
 ];
 // The depositor fields are NOT in the quote: they go as separate arguments (into the escrow init code).
 const LOCKER_HALF_FIELDS = ["commitHalfLocker", "edPointLocker", "edViewPointLocker"];
@@ -89,6 +90,7 @@ function quoteWords(quote) {
     chainId: word(quote.chainId, 32), feeBps: word(quote.feeBps, 32), fee: word(quote.fee, 32),
     feeRecipient: word(quote.feeRecipient, 32), validUntil: word(quote.validUntil, 32), nonce: word(quote.nonce, 32),
     xmrAmount: word(quote.xmrAmount, 32),
+    claimTip: word(quote.claimTip, 32),
   };
   return QUOTE_FIELDS.map((n) => map[n]).join("");
 }

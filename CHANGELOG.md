@@ -1,3 +1,15 @@
+## 0.46.0 — 2026-10-21
+
+THE QUOTE CARRIES THE CLAIM TIP, AND THE CLAIM PAYS IT.
+
+- `claimTip` is the last field of the signed order quote and of `FactoryQuote`, and it is encoded into
+  `createOrderAndFund`. The escrow pays it to whoever sends `claim` when that sender is not the claimer, out of the
+  payout and in the same transaction (`router-escrow-evm` #19). Zero means no tip.
+- `ORDER_QUOTE_VERSION` is 9. The field set changed, so every quote signed by this package is a version 9 quote and
+  verifies only against an escrow that knows the field.
+- A quote object without `claimTip` is refused by `quoteMissingFields` like any other absent condition: a missing tip
+  is not read as zero.
+
 ## 0.45.0 — 2026-10-20
 
 THE RECOVERY PATH WORKS WITHOUT THE APP, AND A PASSPHRASE IS A CHOICE.

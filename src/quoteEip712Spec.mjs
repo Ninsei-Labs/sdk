@@ -32,18 +32,22 @@
 //   validUntil           - the quote's own expiry, IN SECONDS (the order's readyBy/t1 and block.timestamp
 //                          scale): a quote past it is refused regardless of the price.
 //   nonce                - replay protection: the very same signed quote cannot be presented twice.
+//   claimTip             - the tip the escrow pays to whoever sends `claim`, out of the payout, in the same
+//                          transaction (#18). It is inside the signed set so a provider cannot raise it after the
+//                          taker has seen the quote. Zero means no tip and is the only value a buy uses.
 //
 // The domain's verifyingContract is the escrow FACTORY taken from the order: the contract that will verify the
 // quote in EVM (stage 2). The type order, the domain name and the version are part of the protocol - they may
 // change only together with the quote version.
 export const ORDER_QUOTE_DOMAIN_NAME = "NinseiEscrowFactory";
 export const ORDER_QUOTE_DOMAIN_VERSION = "1";
-// 8: the signed EIP-712 field set grew `xmrAmount` (#110 step 3) - the XMR the level walk gives is now covered by
-// the provider's signature and verified ON CHAIN. This is the request-shape generation label, and it moves WITH the
+// 9: the signed EIP-712 field set grew `claimTip` (#18) - the tip a third-party sender of `claim` takes from the
+// payout, covered by the provider's signature like every other condition.
+// 8: the field set grew `xmrAmount` (#110 step 3). This is the request-shape generation label, and it moves WITH the
 // field set (see the note above). The DOMAIN name and the domain version string are UNCHANGED by it: they name the
 // domain (the factory address and the chain), which did not change. So here the label and the domain version string
 // move apart, and that is deliberate - the label tracks the message shape, not the domain identity.
-export const ORDER_QUOTE_VERSION = 8;
+export const ORDER_QUOTE_VERSION = 9;
 
 // The domain type string is assembled from parts ON PURPOSE. A single literal of it is a phrase of several
 // space-separated words, and the SDK check reads such literals as user-facing text. Do not "simplify" it.
@@ -72,6 +76,7 @@ export const ORDER_QUOTE_FIELDS = [
   ["validUntil", "uint64"],
   ["nonce", "uint256"],
   ["xmrAmount", "uint256"],
+  ["claimTip", "uint256"],
 ];
 export const ORDER_QUOTE_TYPE = "OrderQuote(" + ORDER_QUOTE_FIELDS.map((f) => f[1] + " " + f[0]).join(",") + ")";
 

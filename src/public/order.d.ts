@@ -110,6 +110,8 @@ export interface OrderQuote {
   readonly validUntil: string | number | bigint;
   readonly nonce: string | number | bigint;
   readonly xmrAmount: string | number | bigint;
+  /** The tip `claim` pays to a third-party sender out of the payout; zero means none. */
+  readonly claimTip: string | number | bigint;
   /** The escrow factory the domain names as `verifyingContract`. */
   readonly factory: string;
   /** r || s || v over the digest, 65 bytes, with or without the `0x` prefix; v is normalised to 27/28. */
