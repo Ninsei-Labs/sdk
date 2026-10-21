@@ -4,6 +4,7 @@
 // change to every swap made with the key.
 
 import * as recovery from "../src/public/recovery.mjs";
+import { recoveryIndexTaken } from "../src/recovery-key.mjs";
 import { buildOwnSideFromHalves } from "../src/order.mjs";
 import { startHeightFromNodes } from "../src/swaps.mjs";
 
@@ -107,6 +108,22 @@ export const recoveryKeyCheck = async () => {
   notes.push("reservations are reused only when released");
 
   const order = logFor({ commitment: halves.spendCommitment, locker: address("bb"), claimer: address("cc"), index: 0 });
+  const taken = await recoveryIndexTaken({
+    mnemonic: WORDS, chainId: CHAIN, index: 0, factory: address("dd"), evmLogs: async () => [order],
+  });
+  check(taken === true, "the on-chain check did not see the number held by its own commitment");
+  const free = await recoveryIndexTaken({
+    mnemonic: WORDS, chainId: CHAIN, index: 1, factory: address("dd"), evmLogs: async () => [order],
+  });
+  check(free === false, "the on-chain check treated another number's order as this number's");
+  let unreadable = null;
+  try {
+    await recoveryIndexTaken({ mnemonic: WORDS, chainId: CHAIN, index: 0, factory: address("dd"),
+      evmLogs: async () => { throw new Error("rpc down"); } });
+  } catch (error) { unreadable = error; }
+  check(unreadable && unreadable.code === "recovery-failed" && unreadable.params && unreadable.params.stage === "logs",
+    "an unreadable chain did not refuse the number check");
+  notes.push("a number held on chain is found by its commitment; an unreadable log refuses instead of guessing");
   const calls = [];
   const found = await recovery.findSwaps({
     mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
