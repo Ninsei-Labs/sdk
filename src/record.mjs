@@ -14,7 +14,7 @@
 import { SdkError } from "./errors.mjs";
 import { primitives } from "./primitives.mjs";
 import * as engine from "./engine.mjs";
-import { buildOwnSide, halfHex, norm } from "./order.mjs";
+import { buildOwnSide, buildOwnSideFromHalves, halfHex, norm } from "./order.mjs";
 
 /**
  * Our side. Without order terms - only the halves and their points (a shape of the record; there is no proof and
@@ -23,7 +23,11 @@ import { buildOwnSide, halfHex, norm } from "./order.mjs";
  * THE HALF NAMES ARE THE ENGINE'S: the half is returned in the engine's form (BigInt), and it goes into the
  * record as a hex string, because a BigInt survives neither storage nor the recovery file's JSON.
  */
-export function ownSide(order = null) {
+export function ownSide(order = null, known = null) {
+  if (known && known.spendHalf && known.viewHalf) {
+    const built = buildOwnSideFromHalves(order, known);
+    return built.side;
+  }
   if (order !== null && order !== undefined) {
     const built = buildOwnSide(order);
     return built.side;
@@ -40,9 +44,9 @@ export function ownSide(order = null) {
  * edPointLocker, edViewPointLocker). The counterparty's half cannot and need not be put in: it will come from
  * the order.
  */
-export function createRecord(input, { order = null } = {}) {
+export function createRecord(input, { order = null, side: knownSide = null } = {}) {
   if (!input || typeof input !== "object") throw new SdkError("bad-input", { field: "input" });
-  const side = ownSide(order);
+  const side = knownSide || ownSide(order);
   let swap = null;
   try { swap = engine.swap.createSwap(input); } catch { throw new SdkError("bad-input", { field: "input" }); }
   const escrow = { ...(swap.escrow || {}),

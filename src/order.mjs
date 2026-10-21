@@ -98,6 +98,29 @@ export function buildOwnSide(order, onBit) {
 }
 
 /**
+ * OUR SIDE FROM HALVES WE ALREADY HAVE - the one recovery key case. A random side would be a second secret,
+ * which is exactly what one key removes. The proof is still bound to this order and built by the same engine
+ * builder; only the source of the two numbers changes.
+ */
+export function buildOwnSideFromHalves(order, { spendHalf, viewHalf } = {}) {
+  const context = contextOf(order);
+  const b = builder();
+  const scalar = (value, name) => {
+    const n = BigInt(value);
+    if (n <= 0n || n >= BigInt(b.halves.LIMIT)) throw new SdkError("bad-input", { field: name });
+    return n;
+  };
+  const half = scalar(spendHalf, "spendHalf");
+  const view = scalar(viewHalf, "viewHalf");
+  const pub = b.halves.publicHalves(half);
+  const viewPub = b.halves.publicHalves(view).ed;
+  const encPair = b.enc.recipientKeyPair();
+  const proof = b.dleq.prove(half, context);
+  const side = { half, pub, viewHalf: view, viewPub, enc: encPair, proof, standIn: false };
+  return { context, side, spendPoint: norm(pub.ed), viewPoint: norm(viewPub), encPub: norm(encPair.pub) };
+}
+
+/**
  * The counterparty's side: accept and verify. The check is ONE for both sides and is done by the engine
  * (order.js, verifySide): the proof stands in the CONTEXT OF THIS order, the proven point matches the one that
  * will go into the contract, and if a sealed package arrived it is opened with OUR encryption key and checked
