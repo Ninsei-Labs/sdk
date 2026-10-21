@@ -1597,6 +1597,9 @@ export interface ActionsApi {
 export interface ActionsRequest {
   readonly escrow: string;
   readonly expect: Readonly<Record<string, unknown>>;
+  /** The claimer whose half is revealed by `claim`; absent - `expect.claimer` is used. A claim without one is
+   * refused: the package sends it only from the claimer's own wallet, never from a third-party sender. */
+  readonly claimer?: string;
   readonly onStep?: (stage: string, detail?: string) => void;
 }
 
