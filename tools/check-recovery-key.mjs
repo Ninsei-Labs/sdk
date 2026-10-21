@@ -1,0 +1,116 @@
+// THE RECOVERY KEY CHECK (sdk#79): fixed vectors, the backup file, reservations and the on-chain search.
+//
+// The vectors are pinned so a change to a domain, a binding or the seed derivation is a red check, not a silent
+// change to every swap made with the key.
+
+import * as recovery from "../src/public/recovery.mjs";
+
+const WORDS = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+const CHAIN = 421614;
+const TOPIC = "0xa22cdabaed3cce4f51dde71626a108ffe9c7bc4216fd14d5e719f892e2fd8ab0";
+const pad = (value) => "0x" + String(value).toLowerCase().replace(/^0x/, "").padStart(64, "0");
+const address = (byte) => "0x" + byte.repeat(20);
+
+const memory = () => {
+  const map = new Map();
+  return { get: (key) => (map.has(key) ? map.get(key) : null), set: (key, value) => map.set(key, value), remove: (key) => map.delete(key) };
+};
+
+const logFor = ({ commitment, locker, claimer, index = 0 }) => ({
+  topics: [TOPIC, pad(address("aa")), pad(locker), pad(claimer)],
+  data: "0x" + [
+    commitment,
+    "0x" + "00".repeat(32),
+    "0x" + "11".repeat(32),
+    "0x" + "22".repeat(32),
+    "0x" + "33".repeat(32),
+    "0x1",
+    "0x2",
+    "0x3",
+    "0x" + "44".repeat(32),
+    pad(address("55")),
+    pad(address("66")),
+    pad(address("77")),
+  ].map((word) => word.replace(/^0x/, "").padStart(64, "0")).join(""),
+  transactionHash: "0x" + String(index + 1).padStart(64, "0"),
+  logIndex: index,
+  blockNumber: 100 + index,
+});
+
+export const recoveryKeyCheck = async () => {
+  const problems = [];
+  const notes = [];
+  const check = (condition, message) => { if (!condition) problems.push(message); };
+
+  const imported = recovery.importRecoveryKey(WORDS, { createdAt: "2026-10-21" });
+  check(imported.mnemonic === WORDS, "importRecoveryKey did not return the normalised words");
+  check(imported.fingerprint === "3ae0", `fingerprint changed: ${imported.fingerprint}`);
+  check(recovery.fingerprintOf(WORDS) === "3ae0", "fingerprintOf disagrees with importRecoveryKey");
+  check(recovery.recoveryBinding(CHAIN, 0) === "ninsei-taker-v1|421614|0", "the binding changed");
+
+  const halves = recovery.takerHalves({ mnemonic: WORDS, chainId: CHAIN, index: 0 });
+  check(halves.spendHalf === "0x08a3f2c84abe73db766e8925647c65c44e63439e6cb9aa0065816c8ada646200", `spend half changed: ${halves.spendHalf}`);
+  check(halves.viewHalf === "0x0c7f5926fff480f57b3da60b019ebc3cddfd014ca348e8cab1702e8534f696cf", `view half changed: ${halves.viewHalf}`);
+  check(halves.spendCommitment === "0xd76f78b636a123aafb4da3c226d1e8b81332461291641efe334026b85252a4b2", `commitment changed: ${halves.spendCommitment}`);
+  const again = recovery.takerHalves({ mnemonic: WORDS, chainId: CHAIN, index: 0 });
+  check(JSON.stringify(again) === JSON.stringify(halves), "the same words and index gave different halves");
+  notes.push("fixed halves and commitment vectors hold");
+
+  const generated = recovery.createRecoveryKey({ createdAt: "2026-10-21" });
+  check(generated.mnemonic.split(" ").length === 12, "createRecoveryKey did not make twelve words");
+  check(recovery.recoveryKeyFileName(generated) === `ninsei-recovery-key-DO-NOT-DELETE-2026-10-21-${generated.fingerprint}.txt`, `unexpected file name: ${recovery.recoveryKeyFileName(generated)}`);
+  let refused = false;
+  try { recovery.importRecoveryKey("abandon abandon abandon"); } catch (error) { refused = error && error.code === "bad-input"; }
+  check(refused, "a short mnemonic was not refused with bad-input");
+  notes.push("generation and refusal behave");
+
+  const plain = await recovery.createRecoveryKeyFile({ mnemonic: WORDS, createdAt: "2026-10-21", passphrase: "" });
+  check(plain.startsWith("NINSEI RECOVERY KEY\n"), "the plain file does not start with its magic line");
+  const openedPlain = await recovery.openRecoveryKeyFile(plain, "");
+  check(openedPlain.mnemonic === WORDS && openedPlain.fingerprint === "3ae0", "the plain file did not round-trip");
+
+  const encrypted = await recovery.createRecoveryKeyFile({ mnemonic: WORDS, createdAt: "2026-10-21", passphrase: "correct horse battery" });
+  check(encrypted.startsWith("{"), "the encrypted file is not JSON");
+  const openedEncrypted = await recovery.openRecoveryKeyFile(encrypted, "correct horse battery");
+  check(openedEncrypted.mnemonic === WORDS, "the encrypted file did not round-trip");
+  let wrong = false;
+  try { await recovery.openRecoveryKeyFile(encrypted, "wrong password"); } catch (error) { wrong = error && error.code === "recovery-failed" && error.params && error.params.stage === "decrypt"; }
+  check(wrong, "a wrong password was not refused at decrypt");
+  notes.push("plain and encrypted backup files round-trip");
+
+  const storage = memory();
+  recovery.saveRecoveryKey(storage, generated);
+  const first = recovery.reserveRecoveryIndex(storage, { chainId: CHAIN, swapId: "one" });
+  const second = recovery.reserveRecoveryIndex(storage, { chainId: CHAIN, swapId: "two" });
+  check(first === 0 && second === 1, `reservation returned ${first} and ${second}`);
+  recovery.releaseRecoveryIndex(storage, first);
+  const reused = recovery.reserveRecoveryIndex(storage, { chainId: CHAIN, swapId: "three" });
+  check(reused === 0, `a released number was not reused: ${reused}`);
+  recovery.commitRecoveryIndex(storage, second);
+  const afterCommit = recovery.reserveRecoveryIndex(storage, { chainId: CHAIN, swapId: "four" });
+  check(afterCommit !== second, `a retired number was reused: ${afterCommit}`);
+  notes.push("reservations are reused only when released");
+
+  const order = logFor({ commitment: halves.spendCommitment, locker: address("bb"), claimer: address("cc"), index: 0 });
+  const calls = [];
+  const found = await recovery.findSwaps({
+    mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
+    evmLogs: async (request) => { calls.push(request); return request.topics.includes(pad(address("bb"))) ? [order] : []; },
+    gap: 2,
+  });
+  check(found.swaps.length === 1 && found.swaps[0].index === 0, `the search found ${found.swaps.length} orders`);
+  check(found.swaps[0] && found.swaps[0].side === "locker", "the search named the wrong side");
+  check(calls.length === 2, `an address query made ${calls.length} log calls, expected 2`);
+  check(calls.every((call) => !call.topics.some((topic) => String(topic).toLowerCase().includes(halves.spendHalf.slice(2, 10)))), "a half was put into the log filter");
+
+  const allCalls = [];
+  const all = await recovery.findSwaps({
+    mnemonic: WORDS, chainId: CHAIN, factory: address("dd"),
+    evmLogs: async (request) => { allCalls.push(request); return [order]; },
+    gap: 2,
+  });
+  check(all.swaps.length === 1 && allCalls.length === 1, `a full scan made ${allCalls.length} calls and found ${all.swaps.length} orders`);
+  notes.push("the search matches a commitment and filters by address without sending a secret");
+
+  return { note: "the recovery key, its backup file, reservations and the on-chain search behave", problems, notes };
+};

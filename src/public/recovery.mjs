@@ -20,3 +20,30 @@ export {
   scanStartHeight,
   validatePayload,
 } from "../../engine/recovery/recoveryFile.js";
+
+// ONE RECOVERY KEY FOR EVERY SWAP (sdk#79): the taker's key, its derivation, its file and the on-chain search.
+export {
+  RECOVERY_KEY_ALG,
+  RECOVERY_KEY_DOMAIN,
+  RECOVERY_KEY_ENVELOPE_VERSION,
+  RECOVERY_KEY_FILE_MAGIC,
+  RECOVERY_KEY_ITER,
+  RECOVERY_KEY_STORE,
+  RECOVERY_KEY_VERSION,
+  RECOVERY_KEY_WORDS,
+  commitRecoveryIndex,
+  createRecoveryKey,
+  createRecoveryKeyFile,
+  findSwaps,
+  fingerprintOf,
+  importRecoveryKey,
+  loadRecoveryKey,
+  openRecoveryKeyFile,
+  recoveryBinding,
+  recoveryKeyFileName,
+  recoveryKeyText,
+  releaseRecoveryIndex,
+  reserveRecoveryIndex,
+  saveRecoveryKey,
+  takerHalves,
+} from "../recovery-key.mjs";

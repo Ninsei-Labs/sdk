@@ -1,0 +1,440 @@
+// ONE RECOVERY KEY FOR EVERY SWAP: THE TAKER'S KEY, ITS HALVES, ITS FILE, AND THE SEARCH.
+//
+// The taker used to make a random secret per swap and ask a person to save a file before funding. One BIP39 key,
+// made once and saved once, removes that step. The seeds of this module are the ONLY source of the taker's
+// halves: the spend and view halves for swap number i come from halfFromSeed with a binding that is known at
+// recovery time. The factory is deliberately not part of the binding: numbers then run across a redeployment,
+// and the search reads every factory the caller names.
+//
+// THE KEY NEVER LEAVES THE CLIENT. The search sends an address and the OrderCreated topic to a log reader; it
+// never sends the words, the seed, a half or a commitment. A service that answered "which of these are mine"
+// would learn that the orders belong to one person.
+//
+// THIS MODULE DOES NOT SWITCH swaps.start. It is the foundation: the current per-swap flow keeps working until
+// the node accepts the taker's maker view half and the page is rebuilt around the key.
+
+import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from "@scure/bip39";
+import { wordlist } from "@scure/bip39/wordlists/english.js";
+import { createHalves } from "../engine/atomic/halves.js";
+import { halfCommitmentHex } from "../engine/atomic/orderHalfCommit.js";
+import { ORDER_CREATED_TOPIC } from "../engine/evm/factory.js";
+import { SdkError } from "./errors.mjs";
+import { ed25519, keccak256, randomBytes, secp256k1 } from "./primitives.mjs";
+
+const halves = createHalves({ ed25519, secp256k1, keccak256, randomBytes });
+
+/** A BIP39 mnemonic with 128 bits of entropy: twelve words. */
+export const RECOVERY_KEY_VERSION = 1;
+export const RECOVERY_KEY_WORDS = 12;
+export const RECOVERY_KEY_STORE = "ninsei.recovery.key.v1";
+export const RECOVERY_KEY_FILE_MAGIC = "NINSEI RECOVERY KEY";
+export const RECOVERY_KEY_DOMAIN = "ninsei-taker-v1";
+export const RECOVERY_KEY_ENVELOPE_VERSION = 1;
+export const RECOVERY_KEY_ALG = "AES-GCM-256/PBKDF2-SHA256";
+export const RECOVERY_KEY_ITER = 600000;
+const ITER_MIN = 600000;
+const ITER_MAX = 6000000;
+
+const te = new TextEncoder();
+const td = new TextDecoder();
+
+const hex32 = (value) => "0x" + BigInt(value).toString(16).padStart(64, "0");
+const pad32 = (value) => "0x" + String(value).toLowerCase().replace(/^0x/, "").padStart(64, "0");
+const b64 = (bytes) => {
+  let text = "";
+  for (const byte of bytes) text += String.fromCharCode(byte);
+  return btoa(text);
+};
+const unb64 = (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+
+const bad = (field) => new SdkError("bad-input", { field });
+const failed = (stage) => new SdkError("recovery-failed", { stage });
+
+function normalizeWords(value) {
+  if (typeof value !== "string") throw bad("mnemonic");
+  const mnemonic = value.trim().toLowerCase().replace(/\s+/g, " ");
+  if (!mnemonic || mnemonic.split(" ").length !== RECOVERY_KEY_WORDS) throw bad("mnemonic");
+  if (!validateMnemonic(mnemonic, wordlist)) throw bad("mnemonic");
+  return mnemonic;
+}
+
+function createdAtOf(value) {
+  const date = value instanceof Date ? value : value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) throw bad("createdAt");
+  return date.toISOString();
+}
+
+/** A new 12-word key. The caller stores it; this function keeps nothing. */
+export function createRecoveryKey({ createdAt } = {}) {
+  const mnemonic = generateMnemonic(wordlist, 128);
+  return recoveryKeyOf(mnemonic, createdAt);
+}
+
+/** A key imported from words. Validation happens here, once. */
+export function importRecoveryKey(mnemonic, { createdAt } = {}) {
+  return recoveryKeyOf(mnemonic, createdAt);
+}
+
+function recoveryKeyOf(mnemonic, createdAt) {
+  const words = normalizeWords(mnemonic);
+  return {
+    version: RECOVERY_KEY_VERSION,
+    mnemonic: words,
+    fingerprint: fingerprintOf(words),
+    createdAt: createdAtOf(createdAt),
+  };
+}
+
+/** The first four hex characters of the key's hash: a name a person can compare, not a secret. */
+export function fingerprintOf(mnemonic) {
+  const words = typeof mnemonic === "string" ? mnemonic.trim().toLowerCase().replace(/\s+/g, " ") : "";
+  if (!words) throw bad("mnemonic");
+  return Array.from(keccak256(te.encode(words)), (b) => b.toString(16).padStart(2, "0")).join("").slice(0, 4);
+}
+
+function seedOf(mnemonic) {
+  // BIP39 defines the seed; no wallet password is used here. A wallet password is a DIFFERENT feature and would
+  // silently produce different halves.
+  return mnemonicToSeedSync(normalizeWords(mnemonic));
+}
+
+function numberField(value, field) {
+  const n = Number(value);
+  if (!Number.isSafeInteger(n) || n < 0) throw bad(field);
+  return n;
+}
+
+/** The binding a swap number is derived from. The chain id keeps testnet and mainnet keys apart. */
+export function recoveryBinding(chainId, index) {
+  return `${RECOVERY_KEY_DOMAIN}|${numberField(chainId, "chainId")}|${numberField(index, "index")}`;
+}
+
+/**
+ * The taker's two halves for swap number `index`.
+ *
+ * The halves are returned as 0x-prefixed scalars (64 hex digits), not BigInt: every crossing of JSON in this
+ * package is a hex string, and a BigInt that reaches JSON.stringify fails the whole record.
+ */
+export function takerHalves({ mnemonic, chainId, index }) {
+  const binding = recoveryBinding(chainId, index);
+  const seed = seedOf(mnemonic);
+  const spendHalf = halves.halfFromSeed(seed, binding, halves.HALF_DOMAIN);
+  const viewHalf = halves.halfFromSeed(seed, binding, halves.VIEW_HALF_DOMAIN);
+  const spend = halves.publicHalves(spendHalf);
+  const view = halves.publicHalves(viewHalf);
+  return {
+    index: numberField(index, "index"),
+    binding,
+    spendHalf: hex32(spendHalf),
+    viewHalf: hex32(viewHalf),
+    spendPoint: spend.ed,
+    viewPoint: view.ed,
+    spendCommitment: halfCommitmentHex(spendHalf, secp256k1, keccak256),
+  };
+}
+
+// ---------------------------------------------------------------------------------------------------
+// THE BACKUP FILE
+// ---------------------------------------------------------------------------------------------------
+
+const stampOf = (createdAt) => createdAtOf(createdAt).slice(0, 10);
+
+/** The stable name a person can search for. `DO-NOT-DELETE` is part of the name on purpose. */
+export function recoveryKeyFileName({ mnemonic, fingerprint, createdAt } = {}) {
+  const fp = fingerprint || fingerprintOf(mnemonic);
+  return `ninsei-recovery-key-DO-NOT-DELETE-${stampOf(createdAt)}-${fp}.txt`;
+}
+
+function headerOf({ fingerprint, createdAt }) {
+  return [
+    RECOVERY_KEY_FILE_MAGIC,
+    "This file restores every swap made with this key.",
+    "Restore at https://recovery.ninsei.finance",
+    "Never share it with anyone, not even Ninsei.",
+    "This is not a wallet seed. Do not import it into a wallet.",
+    `Key ${fingerprint}, created ${stampOf(createdAt)}`,
+  ].join("\n");
+}
+
+/** The plain file: a readable header above the words. */
+export function recoveryKeyText({ mnemonic, createdAt } = {}) {
+  const key = recoveryKeyOf(mnemonic, createdAt);
+  return `${headerOf(key)}\n\n${key.mnemonic}\n`;
+}
+
+async function deriveKey(passphrase, salt, iter) {
+  if (!globalThis.crypto || !globalThis.crypto.subtle) throw failed("crypto-unavailable");
+  const material = await crypto.subtle.importKey("raw", te.encode(passphrase), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt, iterations: iter, hash: "SHA-256" },
+    material,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+const aadOf = (header) => JSON.stringify({
+  kind: "ninsei-recovery-key",
+  v: header.v,
+  alg: header.alg,
+  iter: header.iter,
+  salt: header.salt,
+  iv: header.iv,
+  meta: header.meta,
+});
+
+/**
+ * The backup file, optionally protected by a password. An empty password is a choice, not an omission: the
+ * file then says so in plain text, as the unencrypted recovery envelope does.
+ */
+export async function createRecoveryKeyFile({ mnemonic, createdAt, passphrase = "" } = {}) {
+  const key = recoveryKeyOf(mnemonic, createdAt);
+  if (typeof passphrase !== "string") throw bad("passphrase");
+  if (passphrase === "") return recoveryKeyText(key);
+  if (passphrase.length < 12) throw bad("passphrase");
+  if (!globalThis.crypto || !globalThis.crypto.subtle) throw failed("crypto-unavailable");
+
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const header = {
+    v: RECOVERY_KEY_ENVELOPE_VERSION,
+    alg: RECOVERY_KEY_ALG,
+    iter: RECOVERY_KEY_ITER,
+    salt: b64(salt),
+    iv: b64(iv),
+    meta: { fingerprint: key.fingerprint, createdAt: key.createdAt },
+  };
+  const aes = await deriveKey(passphrase, salt, RECOVERY_KEY_ITER);
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv, tagLength: 128, additionalData: te.encode(aadOf(header)) },
+    aes,
+    te.encode(JSON.stringify({ mnemonic: key.mnemonic }))
+  );
+  return JSON.stringify({ ...header, ciphertext: b64(new Uint8Array(ciphertext)) }, null, 2);
+}
+
+/** Read a plain or an encrypted key file. The returned key is always validated. */
+export async function openRecoveryKeyFile(contents, passphrase = "") {
+  if (typeof contents !== "string" || !contents.trim()) throw bad("file");
+  if (typeof passphrase !== "string") throw bad("passphrase");
+  const text = contents.trim();
+
+  if (!text.startsWith("{")) {
+    // THE PLAIN FILE. The header is checked by its first line, not by a loose search: a random text file must
+    // not be mistaken for a key.
+    const lines = text.split(/\r?\n/);
+    if (lines[0].trim() !== RECOVERY_KEY_FILE_MAGIC) throw failed("parse");
+    const words = lines.slice(1).map((line) => line.trim()).find((line) => line && validateMnemonic(line.toLowerCase(), wordlist));
+    if (!words) throw failed("parse");
+    return recoveryKeyOf(words);
+  }
+
+  let envelope;
+  try {
+    envelope = JSON.parse(text);
+  } catch {
+    throw failed("parse");
+  }
+  if (!envelope || envelope.v !== RECOVERY_KEY_ENVELOPE_VERSION || envelope.alg !== RECOVERY_KEY_ALG) throw failed("parse");
+  for (const field of ["salt", "iv", "ciphertext"]) if (typeof envelope[field] !== "string" || !envelope[field]) throw failed("parse");
+  const iter = Number(envelope.iter);
+  if (!Number.isInteger(iter) || iter < ITER_MIN || iter > ITER_MAX) throw failed("parse");
+  if (passphrase.length < 12) throw failed("passphrase");
+
+  let payload;
+  try {
+    const aes = await deriveKey(passphrase, unb64(envelope.salt), iter);
+    const plain = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: unb64(envelope.iv), tagLength: 128, additionalData: te.encode(aadOf(envelope)) },
+      aes,
+      unb64(envelope.ciphertext)
+    );
+    payload = JSON.parse(td.decode(plain));
+  } catch {
+    throw failed("decrypt");
+  }
+  const key = recoveryKeyOf(payload && payload.mnemonic);
+  if (envelope.meta && envelope.meta.fingerprint && envelope.meta.fingerprint !== key.fingerprint) throw failed("fingerprint");
+  return key;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// RESERVATION
+// ---------------------------------------------------------------------------------------------------
+
+const readStore = (storage) => {
+  if (!storage || typeof storage.get !== "function" || typeof storage.set !== "function" || typeof storage.remove !== "function") throw bad("storage");
+  const raw = storage.get(RECOVERY_KEY_STORE);
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw);
+    if (!value || value.version !== RECOVERY_KEY_VERSION || typeof value.mnemonic !== "string") return null;
+    return value;
+  } catch {
+    return null;
+  }
+};
+
+/** Save the key next to the swap records. The words are the secret; the store is the caller's. */
+export function saveRecoveryKey(storage, key) {
+  const checked = recoveryKeyOf(key && key.mnemonic, key && key.createdAt);
+  storage.set(RECOVERY_KEY_STORE, JSON.stringify({ ...checked, nextIndex: Number(key.nextIndex) || 0, reserved: key.reserved || {}, retired: key.retired || {} }));
+  return checked;
+}
+
+export function loadRecoveryKey(storage) {
+  const value = readStore(storage);
+  if (!value) return null;
+  return { ...value, fingerprint: value.fingerprint || fingerprintOf(value.mnemonic) };
+}
+
+/**
+ * Reserve a number for a request. A reservation is not a spent number: if the request is abandoned, the caller
+ * releases it and the same number is used again. The chain check belongs to the caller: a number is retired only
+ * when an order with its commitment exists.
+ */
+export function reserveRecoveryIndex(storage, { chainId, swapId = null } = {}) {
+  const key = loadRecoveryKey(storage);
+  if (!key) throw failed("key-missing");
+  const chain = String(numberField(chainId, "chainId"));
+  const reserved = { ...(key.reserved || {}) };
+  const retired = { ...(key.retired || {}) };
+  const index = Number(key.nextIndex) || 0;
+  // Holes left by RELEASED numbers are reused; a retired number was seen on chain and is never reused.
+  for (let i = 0; i < index; i += 1) {
+    if (!Object.prototype.hasOwnProperty.call(reserved, i) && !Object.prototype.hasOwnProperty.call(retired, i)) {
+      reserved[i] = { chainId: chain, swapId, at: new Date().toISOString() };
+      storage.set(RECOVERY_KEY_STORE, JSON.stringify({ ...key, reserved, retired }));
+      return i;
+    }
+  }
+  if (index >= 100000) throw failed("index-exhausted");
+  reserved[index] = { chainId: chain, swapId, at: new Date().toISOString() };
+  storage.set(RECOVERY_KEY_STORE, JSON.stringify({ ...key, nextIndex: index + 1, reserved, retired }));
+  return index;
+}
+
+export function releaseRecoveryIndex(storage, index) {
+  const key = loadRecoveryKey(storage);
+  if (!key) throw failed("key-missing");
+  const reserved = { ...(key.reserved || {}) };
+  delete reserved[String(numberField(index, "index"))];
+  storage.set(RECOVERY_KEY_STORE, JSON.stringify({ ...key, reserved }));
+}
+
+/** Retire a number after its order exists on chain: it is never reused, so a later scan has no collision. */
+export function commitRecoveryIndex(storage, index) {
+  const key = loadRecoveryKey(storage);
+  if (!key) throw failed("key-missing");
+  const reserved = { ...(key.reserved || {}) };
+  const retired = { ...(key.retired || {}) };
+  const n = numberField(index, "index");
+  delete reserved[String(n)];
+  retired[String(n)] = true;
+  storage.set(RECOVERY_KEY_STORE, JSON.stringify({ ...key, reserved, retired }));
+}
+
+// ---------------------------------------------------------------------------------------------------
+// THE SEARCH
+// ---------------------------------------------------------------------------------------------------
+
+const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+
+function topicAddress(address) {
+  if (typeof address !== "string" || !ADDRESS_RE.test(address)) throw bad("address");
+  return pad32(address);
+}
+
+function decodeOrderLog(log) {
+  const topics = Array.isArray(log && log.topics) ? log.topics : [];
+  if (topics.length < 4 || String(topics[0]).toLowerCase() !== ORDER_CREATED_TOPIC) return null;
+  const data = String(log.data || "").replace(/^0x/, "");
+  if (data.length < 64 * 2) return null;
+  const word = (i) => "0x" + data.slice(i * 64, (i + 1) * 64).toLowerCase();
+  return {
+    escrow: "0x" + String(topics[1]).slice(26).toLowerCase(),
+    locker: "0x" + String(topics[2]).slice(26).toLowerCase(),
+    claimer: "0x" + String(topics[3]).slice(26).toLowerCase(),
+    commitHalfLocker: word(0),
+    commitHalfClaimer: word(1),
+    edPointLocker: word(2),
+    edPointClaimer: word(3),
+    edViewPointLocker: word(4),
+    amount: BigInt(word(5)).toString(),
+    readyBy: Number(BigInt(word(6))),
+    t1: Number(BigInt(word(7))),
+    salt: word(8),
+    registry: "0x" + data.slice(9 * 64 + 24, 10 * 64),
+    provider: "0x" + data.slice(10 * 64 + 24, 11 * 64),
+    quoteKey: "0x" + data.slice(11 * 64 + 24, 12 * 64),
+    transactionHash: log.transactionHash || null,
+    blockNumber: log.blockNumber != null ? Number(log.blockNumber) : null,
+    logIndex: log.logIndex != null ? Number(log.logIndex) : null,
+  };
+}
+
+async function readLogs(evmLogs, request) {
+  if (typeof evmLogs !== "function") throw bad("evmLogs");
+  let logs;
+  try {
+    logs = await evmLogs(request);
+  } catch {
+    throw failed("logs");
+  }
+  if (!Array.isArray(logs)) throw failed("logs");
+  return logs;
+}
+
+/**
+ * Find orders made with this key.
+ *
+ * `evmLogs` is the caller's read seam: ({ address, topics, fromBlock, toBlock }) -> logs. With an address, the
+ * search asks for it as the locker and as the claimer (two queries; the RPC topic filter cannot say OR across two
+ * positions) and merges the answers. Without one, every OrderCreated of the factory is read and matched locally.
+ */
+export async function findSwaps({ mnemonic, chainId, factory, address = null, evmLogs, fromBlock = 0, toBlock = "latest", gap = 5, maxIndex = 1000 } = {}) {
+  if (typeof factory !== "string" || !ADDRESS_RE.test(factory)) throw bad("factory");
+  const chain = numberField(chainId, "chainId");
+  const max = numberField(maxIndex, "maxIndex") || 1000;
+  const missesAllowed = numberField(gap, "gap") || 5;
+  const base = { address: factory, fromBlock, toBlock };
+  let logs = [];
+  if (address) {
+    const padded = topicAddress(address);
+    const [asLocker, asClaimer] = await Promise.all([
+      readLogs(evmLogs, { ...base, topics: [ORDER_CREATED_TOPIC, null, padded, null] }),
+      readLogs(evmLogs, { ...base, topics: [ORDER_CREATED_TOPIC, null, null, padded] }),
+    ]);
+    const seen = new Set();
+    for (const log of asLocker.concat(asClaimer)) {
+      const id = `${log.transactionHash || ""}:${log.logIndex ?? ""}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      logs.push(log);
+    }
+  } else {
+    logs = await readLogs(evmLogs, { ...base, topics: [ORDER_CREATED_TOPIC] });
+  }
+  const orders = logs.map(decodeOrderLog).filter(Boolean);
+  const found = [];
+  let misses = 0;
+  let scanned = 0;
+  for (let index = 0; index < max && misses < missesAllowed; index += 1) {
+    scanned = index + 1;
+    const own = takerHalves({ mnemonic, chainId: chain, index });
+    const matches = orders.filter((order) =>
+      order.commitHalfLocker.toLowerCase() === own.spendCommitment.toLowerCase() ||
+      order.commitHalfClaimer.toLowerCase() === own.spendCommitment.toLowerCase()
+    );
+    if (matches.length === 0) {
+      misses += 1;
+      continue;
+    }
+    misses = 0;
+    for (const order of matches) {
+      found.push({ ...order, index, side: order.commitHalfLocker.toLowerCase() === own.spendCommitment.toLowerCase() ? "locker" : "claimer" });
+    }
+  }
+  return { swaps: found, scanned };
+}

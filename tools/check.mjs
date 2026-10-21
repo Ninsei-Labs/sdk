@@ -27,6 +27,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 // pinned as a literal AND recomputed with THIS implementation, while the module under test computes it with
 // @noble/hashes - two implementations agreeing is a cross-check, one agreeing with itself is not.
 import keccakPkg from "keccak256";
+// THE RECOVERY KEY CHECK (sdk#79): one key, its backup file, reservations and the on-chain search.
+import { recoveryKeyCheck } from "./check-recovery-key.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const p = (...parts) => join(ROOT, ...parts);
@@ -2524,6 +2526,7 @@ const CHECKS = {
   decline: declineCheck,
   terminal: terminalCheck,
   provider: providerCheck,
+  "recovery-key": recoveryKeyCheck,
 };
 
 export const runCheck = async (name) => {
