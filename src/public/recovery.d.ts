@@ -385,4 +385,11 @@ export declare function findSwaps(request: {
   moneroTip?: () => Promise<number>;
   /** A Monero block header timestamp, in seconds: (height) -> seconds. */
   moneroBlockTimestamp?: (height: number) => Promise<number>;
+  /** Convenience: the node URLs the caller already probed. When the two Monero readers above are absent, the SDK
+   * asks these for `get_info` and `get_block_header_by_height` itself. */
+  xmrNodes?: readonly (string | { readonly url: string })[];
+  /** The Monero network those nodes must name (mainnet, stagenet, testnet). */
+  moneroNetwork?: string | null;
+  /** The fetch used for those node requests; absent - the global fetch. */
+  fetchImpl?: typeof fetch;
 }): Promise<{ swaps: FoundSwap[]; scanned: number }>;
