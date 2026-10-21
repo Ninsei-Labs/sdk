@@ -87,6 +87,7 @@
   "files": [
     "src",
     "engine",
+    "assets",
     "index.d.ts",
     "README.md",
     "CHANGELOG.md",
