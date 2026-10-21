@@ -39,6 +39,7 @@
     "check:arrival-read": "node tools/check-arrival-read.mjs",
     "check:daemon-address": "node tools/check-daemon-address.mjs",
     "check:ci-scripts": "node tools/check-ci-scripts.mjs",
+    "check:factory-selectors": "node tools/check-factory-selectors.mjs",
     "check:fee-estimate": "node tools/check-fee-estimate.mjs",
     "check:deadline-scale": "node tools/check-deadline-scale.mjs",
     "check:node-probe": "node tools/check-node-probe.mjs"
