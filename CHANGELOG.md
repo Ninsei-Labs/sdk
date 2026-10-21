@@ -1,3 +1,18 @@
+## 0.49.0 — 2026-10-21
+
+A ONE-KEY RECOVERY CAN WITHDRAW WITHOUT A FULL SCAN, AND A CLAIM TIP IS CHECKED.
+
+- `findSwaps` accepts `xmrNodes` and `moneroNetwork`: it asks the node for `get_info` and
+  `get_block_header_by_height` itself, so a page needs only `evmBlockTime`; the `startHeight` rule stays in the SDK.
+- `sweep.restore({ window })` sets the wallet at the node tip, scans only the blocks from the swap's start to
+  `t1 + 10` through `scanTxs` (batches of 100), checks the wallet's key images at `/is_key_image_spent`, and does
+  not run `rescanBlockchain` after `scanTxs`. An empty window falls back to the full scan; `windowTxHashes` collects
+  the hashes from a node.
+- `quotes.firm` refuses a `claimTip` above twice the SDK's own `claimGasGiftWei` estimate, read from the new
+  `evmBlock` seam. Zero tips (the buy side) do not call it; an unmeasured base fee is named.
+- `claimTipVerdict` is exported for the same arithmetic outside the quote path.
+- No breaking changes: the old recovery-file path, the full restore and zero-tip quotes behave as before.
+
 ## 0.48.1 — 2026-10-21
 
 A SWAP KEEPS ITS MONERO HEIGHT, AND A RECOVERED ORDER KNOWS WHERE TO SCAN.
