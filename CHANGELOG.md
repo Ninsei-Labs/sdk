@@ -1,3 +1,19 @@
+## 0.47.0 — 2026-10-21
+
+ONE RECOVERY KEY, AND THE NODE'S VIEW HALF COMES FROM IT.
+
+- `@ninsei-labs/sdk/recovery` exposes a BIP39 12-word taker key: creation, import, fingerprint, the
+  `ninsei-recovery-key-DO-NOT-DELETE-...` backup file (plain or AES-GCM/PBKDF2), and a storage adapter for the key.
+- `takerHalves({ mnemonic, chainId, index })` derives the taker spend/view halves with
+  `ninsei-taker-v1|<chainId>|<index>`, and the counterparty view half with `ninsei-maker-view-v1`. The taker sends
+  the latter to the node (`viewHalfClaimer` on a direct quote, `viewHalfLocker` on a reverse ticket); the node
+  accepts it and keeps the joint view key.
+- `findSwaps({ mnemonic, chainId, factory, address?, evmLogs, ... })` reads `OrderCreated`, filters by the indexed
+  locker/claimer when an address is given, matches `commitHalfLocker`/`commitHalfClaimer` locally, and stops after
+  five numbers in a row with no order.
+- Numbers are reserved in the store: released numbers are reused, numbers seen on chain are retired.
+- The current per-swap recovery file and `swaps.start` are unchanged. The switch is a separate change.
+
 ## 0.46.2 — 2026-10-21
 
 THE TESTNET CONFIG NAMES THE CLAIMTIP DEPLOYMENT.
