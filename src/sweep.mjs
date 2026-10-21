@@ -10,6 +10,7 @@ import * as engine from "./engine.mjs";
 import { restoreWallet } from "./sweep-restore.mjs";
 import { moneroWalletAdapter } from "./adapters/monero-wallet.mjs";
 import { checkDestination } from "./destination.mjs";
+import { revealedHalfWord } from "./sweep-half.mjs";
 
 // The same boundary as when the file was issued: a passphrase shorter than twelve characters will not open the file.
 const MIN_PASSPHRASE = 12;
@@ -164,10 +165,10 @@ export function createSweep({ http, config, call = null }) {
       if (escrowAddress && typeof call === "function") {
         try {
           const word = String((await call({ to: escrowAddress, data: REVEALED_HALF_SELECTOR })) || "");
-          const hex = word.startsWith("0x") ? word.slice(2) : word;
-          if (/^[0-9a-fA-F]{64}$/.test(hex) && !/^0+$/.test(hex)) {
+          const half = revealedHalfWord(word);
+          if (half !== null) {
             revealed = true;
-            revealedValue = "0x" + hex.slice(24);
+            revealedValue = half;
           }
         } catch { revealed = false; }
       }
