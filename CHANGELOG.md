@@ -1,3 +1,15 @@
+## 0.46.2 — 2026-10-21
+
+THE TESTNET CONFIG NAMES THE CLAIMTIP DEPLOYMENT.
+
+- `arbitrum-sepolia` now points at factory `0x3eE25f12758ec28e5b3045d16132D89Cd0bf341F`, cashier
+  `0x1123A3875775Da25FA181Af0d91EB278E94a5dfb` and implementation code hash
+  `0xf97af2b4eed8c646d82bce001e52ff03c065d43127073f8ee52271b65c35d659` (release
+  `contracts-testnet-2026.10.21`). The old factory did not know `claimTip`.
+- A deployment through the release workflow does not create a maker registry (`DEPLOY_REGISTRY=false`); the node
+  keeps naming an existing registry in `RFQ_REGISTRY_ADDRESS` until a fresh one is deployed and its keys are
+  registered.
+
 ## 0.46.1 — 2026-10-21
 
 THE FACTORY SELECTORS FOLLOW THE 20-FIELD QUOTE.
