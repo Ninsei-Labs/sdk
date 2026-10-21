@@ -423,6 +423,11 @@ export interface FirmQuoteRequest {
   readonly providerId: string;
   /** The order terms: how much, to whom, the deadlines, the salt. The context the signature is bound to is assembled from them. */
   readonly order: Readonly<Record<string, unknown>>;
+  /**
+   * THE TAKER'S MAKER VIEW HALF, when the order was built from a recovery key. Sent top-level to the node; the quote
+   * must echo it, so the joint view key can be rebuilt from the twelve words.
+   */
+  readonly viewHalfClaimer?: string;
 }
 
 export interface QuotesApi {
