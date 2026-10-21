@@ -10,15 +10,16 @@
 // feeFor() (the router was removed), so there is nothing to ask. All arguments are static, so calldata is a
 // selector plus 32-byte words, built here in one place and checked mechanically.
 //
-//   cast sig "predict((address,address,address,address,address,address,uint256,uint64,uint64,bytes32,bytes32,bytes32,uint256,uint256,uint256,address,uint64,uint256,uint256),bytes32,bytes32,uint8,bytes32,bytes32,bytes32)" -> 0x0824d205
-//   cast sig "createOrderAndFund(<same tuple>,...)"                                                                                                                -> 0x4703a9d3
+//   cast sig "predict((address,address,address,address,address,address,uint256,uint64,uint64,bytes32,bytes32,bytes32,uint256,uint256,uint256,address,uint64,uint256,uint256,uint256),bytes32,bytes32,uint8,bytes32,bytes32,bytes32)" -> 0x3e949279
+//   cast sig "createOrderAndFund(<same tuple>,...)"                                                                                                                -> 0x3a504547
 
 export const FACTORY_METHODS = {
-  // THE QUOTE GREW THE xmrAmount FIELD: the XMR side of the deal is part of the signed set, so both selectors
-  // changed a second time (earlier for the cashier field).
-  predict: "0x0824d205",
+  // THE SELECTORS FOLLOW THE 20-FIELD QUOTE. claimTip is the last field of the tuple, so both selectors changed when
+  // it joined the signed set; the old 19-field values (0x0824d205 / 0x4703a9d3) address a function this factory no
+  // longer has.
+  predict: "0x3e949279",
   // create the escrow AND deposit funds in ONE transaction (a value transfer with the call).
-  createOrderAndFund: "0x4703a9d3",
+  createOrderAndFund: "0x3a504547",
 };
 
 // The OrderCreated event topic. It grew the registry address, the provider and the signing key:
