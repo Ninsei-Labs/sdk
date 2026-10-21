@@ -83,6 +83,13 @@ export function readQuote(pair, raw, owner = {}, data = {}) {
     currencyNetwork: q.currencyNetwork ? String(q.currencyNetwork) : null,
     rateQuote,
     rate,
+    // THE CLAIM TIP IS IN THE MAKER'S NATIVE TOKEN (wei). A sale is ranked by what the seller receives AFTER it;
+    // the value is kept as a string, because a wei amount does not fit a float reliably.
+    claimTip: (() => {
+      if (q.claimTip === undefined || q.claimTip === null || q.claimTip === "") return "0";
+      try { const n = BigInt(q.claimTip); return n < 0n ? "0" : n.toString(); }
+      catch { return "0"; }
+    })(),
     min: num(q.min),
     max: num(q.max),
     step: num(q.step),
@@ -102,6 +109,27 @@ export function readQuote(pair, raw, owner = {}, data = {}) {
     contradicts,
     ageMs: at === null ? null : Math.max(0, Date.now() - at),
   };
+}
+
+/**
+ * THE BEST OFFER IS THE ONE THAT PAYS THE MOST, NOT THE ONE WITH THE HIGHEST RATE. On a sale the maker may move
+ * its margin into `claimTip`: the escrow pays that tip out of the seller's payout, so a higher rate with a larger
+ * tip can leave the seller with less. With no amount there is nothing to compare beyond the rate, and a buy has
+ * no tip. Native-token wei are converted at 18 decimals: a sale settles in the chain's native coin.
+ */
+export function rankOffers(offers = [], { direction = "buy", amount = null } = {}) {
+  const list = Array.isArray(offers) ? offers.filter((offer) => offer && Number(offer.rate) > 0) : [];
+  const amountXmr = Number(amount);
+  const score = (offer) => {
+    const rate = Number(offer.rate);
+    if (direction !== "sell" || !(amountXmr > 0)) return rate;
+    let tip = 0;
+    try { tip = Number(BigInt(offer.claimTip || "0")) / 1e18; } catch { tip = 0; }
+    return amountXmr * rate - tip;
+  };
+  const ranked = list.map((offer) => ({ offer, net: score(offer) }))
+    .sort((a, b) => (b.net - a.net) || (Number(b.offer.rate) - Number(a.offer.rate)));
+  return { best: ranked.length ? ranked[0].offer : null, net: ranked.length ? ranked[0].net : null, ranked };
 }
 
 /**
@@ -201,7 +229,7 @@ const compactOffer = (o) => ({
   assetNetwork: o.assetNetwork, currencyNetwork: o.currencyNetwork, networkStated: o.networkStated,
   networksDerived: o.networksDerived === true, networksUnnamed: o.networksUnnamed === true,
   // THE REASON (in the provider's words), THE PACKAGE'S SIGNATURE AND KEY, THE AGE BY ITS OWN MARK.
-  why: o.why, signature: o.signature, keyId: o.keyId, ageMs: o.ageMs,
+  claimTip: o.claimTip, why: o.why, signature: o.signature, keyId: o.keyId, ageMs: o.ageMs,
   networks: { asset: o.assetNetwork, currency: o.currencyNetwork, stated: o.networkStated },
 });
 
@@ -267,8 +295,11 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
       const asked = explicit ? Number(request.size) : size;
       const data = await http.json("/rate?amount=" + encodeURIComponent(asked) + "&side=" + encodeURIComponent(request.direction));
       const book = readBook(data, now());
-      const offer = book.best;
       const amount = Number.isFinite(Number(request.amount)) ? Number(request.amount) : null;
+      // A SALE IS RANKED BY THE PAYOUT AFTER THE TIP; a buy has no tip. Without an amount the rate is the only
+      // comparable number, and the service's own best remains the fallback.
+      const ranked = rankOffers(book.offers, { direction: request.direction, amount });
+      const offer = ranked.best || book.best;
       // The size derived from the person's amount becomes the size of the NEXT request: the price does not depend
       // on volume, and the volume is needed by the provider to say whether it takes such a size. With a named size
       // there is nothing to derive - it stays what it was asked as.
