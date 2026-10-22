@@ -182,6 +182,9 @@ export async function restoreWallet(request = {}) {
           nodeUrl: requestWindow.nodeUrl, fromHeight, toHeight: requestWindow.toHeight, fetchImpl: request.fetchImpl,
         });
       } catch (e) {
+        // A MALFORMED WINDOW IS NOT A BUSY NODE. A bad height or a missing URL is the caller's error and is
+        // rethrown; only a read the node refused reaches the fallback.
+        if (e && e.code === "bad-input") throw e;
         // THE WINDOW READ FAILED: FALL BACK TO THE FULL SCAN, NOT TO A REFUSAL. A 429 from a busy node, a timeout
         // or a 5xx is a fact about the node, not about the coins; the scan below can still find them. The reason is
         // carried on the report so the caller does not present this as a normal empty window.
