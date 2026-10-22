@@ -61,7 +61,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: "26"
+          node-version: "24.22.1"
           registry-url: "https://registry.npmjs.org" # wires up the .npmrc the OIDC exchange rides on
 
       # The npm bundled with the runner image can be older than the trusted
