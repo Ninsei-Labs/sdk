@@ -446,6 +446,9 @@ export async function recoveryIndexTaken({ mnemonic, chainId, index, factory, ev
 const MONERO_HEIGHT_SAFETY_BLOCKS = 60;
 
 function secondsOf(value) {
+  // A MISSING BLOCK TIME IS NOT 1970. `Number(null)` is 0, so a reader that answered null used to place an order
+  // at the epoch and derive a Monero height from it. Null means "not read": the caller names no-block-time.
+  if (value === null || value === undefined) return null;
   const n = Number(value);
   if (!Number.isFinite(n) || n < 0) return null;
   return n > 1e12 ? Math.floor(n / 1000) : Math.floor(n);
@@ -477,13 +480,18 @@ async function heightAtOrBefore(timestamp, { tip, headerTimestamp }) {
 async function moneroReadersFromNodes({ nodes = [], network = null, fetchImpl = globalThis.fetch } = {}) {
   const urls = (Array.isArray(nodes) ? nodes : [])
     .map((entry) => typeof entry === "string" ? entry : entry && entry.url).filter(Boolean);
-  if (!urls.length) return null;
+  if (!urls.length) return { readers: null, reason: "no-height-readers" };
   const answers = await Promise.all(urls.map(async (url) => {
     try { return { ...(await probeMoneroNode({ url, fetchImpl })), url }; }
     catch { return { ok: false, why: "unreachable", url }; }
   }));
   const node = answers.find((answer) => answer.ok === true && (!network || answer.network === network));
-  if (!node) return null;
+  if (!node) {
+    // TWO DIFFERENT FAILURES, TWO DIFFERENT REASONS. A node that answered but runs another network is not the
+    // same as no node answering at all; a page must be able to tell the person which one to fix.
+    const answered = answers.some((answer) => answer.ok === true);
+    return { readers: null, reason: answered ? "monero-network-mismatch" : "monero-nodes-unreachable" };
+  }
   const call = async (method, params) => {
     let response;
     try {
@@ -500,27 +508,30 @@ async function moneroReadersFromNodes({ nodes = [], network = null, fetchImpl = 
     return body.result;
   };
   return {
-    // `get_info.height` is the block COUNT, one past the top block. Asking a real node for a header at that height
-    // answers "greater than current top block"; the tip reader must name the top block itself.
-    tip: async () => Math.max(0, Number(node.height) - 1),
-    headerTimestamp: async (height) => {
-      const result = await call("get_block_header_by_height", { height });
-      const ts = Number(result.block_header && result.block_header.timestamp);
-      // GENESIS HAS TIMESTAMP 0. The binary search reads height 0 to prove the requested moment is before it; a
-      // `<= 0` refusal turned a legitimate genesis answer into "monero-header" and every old order lost its height.
-      if (!Number.isFinite(ts) || ts < 0) throw new Error("monero-header");
-      return ts;
+    reason: null,
+    readers: {
+      // `get_info.height` is the block COUNT, one past the top block. Asking a real node for a header at that height
+      // answers "greater than current top block"; the tip reader must name the top block itself.
+      tip: async () => Math.max(0, Number(node.height) - 1),
+      headerTimestamp: async (height) => {
+        const result = await call("get_block_header_by_height", { height });
+        const ts = Number(result.block_header && result.block_header.timestamp);
+        // GENESIS HAS TIMESTAMP 0. The binary search reads height 0 to prove the requested moment is before it; a
+        // `<= 0` refusal turned a legitimate genesis answer into "monero-header" and every old order lost its height.
+        if (!Number.isFinite(ts) || ts < 0) throw new Error("monero-header");
+        return ts;
+      },
     },
   };
 }
 
-async function recoveredStartHeight(order, { evmBlockTime, moneroTip, moneroBlockTimestamp, cache }) {
+async function recoveredStartHeight(order, { evmBlockTime, moneroTip, moneroBlockTimestamp, cache, readersReason = "no-height-readers" }) {
   if (order.blockNumber === null || order.blockNumber === undefined) {
     return { startHeight: null, startHeightReason: "no-block-number", blockTime: null };
   }
   // NOTHING TO READ WITH: no settlement block time and no Monero readers. That is a missing seam, not a missing date.
   if (typeof evmBlockTime !== "function" && typeof moneroTip !== "function" && typeof moneroBlockTimestamp !== "function") {
-    return { startHeight: null, startHeightReason: "no-height-readers", blockTime: null };
+    return { startHeight: null, startHeightReason: readersReason || "no-height-readers", blockTime: null };
   }
   // THE BLOCK TIME IS PART OF THE FOUND ORDER. The page used to read the block again just to show a date; the
   // timestamp is already needed here for the Monero height, so it is returned with it.
@@ -531,7 +542,7 @@ async function recoveredStartHeight(order, { evmBlockTime, moneroTip, moneroBloc
     cache.set(order.blockNumber, timestamp);
   }
   if (typeof moneroTip !== "function" || typeof moneroBlockTimestamp !== "function") {
-    return { startHeight: null, startHeightReason: "no-height-readers", blockTime: timestamp };
+    return { startHeight: null, startHeightReason: readersReason || "no-height-readers", blockTime: timestamp };
   }
   try {
     const height = await heightAtOrBefore(timestamp, { tip: moneroTip, headerTimestamp: moneroBlockTimestamp });
@@ -608,9 +619,11 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
   const cache = new Map();
   let tip = moneroTip;
   let header = moneroBlockTimestamp;
+  let readersReason = "no-height-readers";
   if ((typeof tip !== "function" || typeof header !== "function") && Array.isArray(xmrNodes) && xmrNodes.length) {
-    const readers = await moneroReadersFromNodes({ nodes: xmrNodes, network: moneroNetwork, fetchImpl });
-    if (readers) { tip = tip || readers.tip; header = header || readers.headerTimestamp; }
+    const probed = await moneroReadersFromNodes({ nodes: xmrNodes, network: moneroNetwork, fetchImpl });
+    if (probed.readers) { tip = tip || probed.readers.tip; header = header || probed.readers.headerTimestamp; }
+    else readersReason = probed.reason || "no-height-readers";
   }
   // THE ORDER IS NATIVE, AND THE PAYING TOKEN IS NOT ON THE CHAIN. The escrow receives the settlement network's
   // native coin (`amount` is wei); which token the person swapped into it (USDC, USDT, ...) belongs to the DEX/quote
@@ -622,7 +635,7 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
     order.payTokenReason = "not-on-chain";
   }
   for (const order of found) {
-    Object.assign(order, await recoveredStartHeight(order, { evmBlockTime, moneroTip: tip, moneroBlockTimestamp: header, cache }));
+    Object.assign(order, await recoveredStartHeight(order, { evmBlockTime, moneroTip: tip, moneroBlockTimestamp: header, cache, readersReason }));
   }
   // THE XMR AMOUNT IS IN THE CLONE, NOT IN THE LOG. A caller without a code reader gets null and a named reason;
   // an unreadable or differently-shaped contract does the same. This is data, not a withdrawal verdict.

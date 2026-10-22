@@ -173,6 +173,16 @@ When a token is needed, the order can be joined with an off-chain quote record b
 would have to put the token into the signed quote and the clone (and therefore a new order format and factory); only
 then can `findSwaps` return it from the chain and set `payTokenReason` to something other than `not-on-chain`.
 
+The found order also carries the Monero start height and the reason it is absent. `no-block-time`,
+`monero-nodes-unreachable` and `monero-network-mismatch` are different answers: a missing settlement timestamp is not
+a dead node, and a node on another network is not an absent reader. A page that starts swaps without the SDK's start
+path can call `recoveryIndexTaken` from `./recovery` before using a number; it checks the factory's `OrderCreated`
+logs from the registry's deployment block.
+
+The withdrawal window retries a `429`, a timeout or a `5xx` before it gives up. If the window still cannot be read,
+`restoreWallet` falls back to the full scan and reports `window.fallback: true` with `fallbackWhy: "window-read"` and
+the node's status; a withdrawal is not refused because the node was busy.
+
 ## Extending to other networks (Tron, Solana and beyond)
 
 The package name is deliberately common: the shared part — the quote client, the Monero leg, the state machine,

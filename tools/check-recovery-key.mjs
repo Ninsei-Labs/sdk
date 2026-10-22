@@ -105,7 +105,8 @@ export const recoveryKeyCheck = async () => {
   recovery.commitRecoveryIndex(storage, second);
   const afterCommit = recovery.reserveRecoveryIndex(storage, { chainId: CHAIN, swapId: "four" });
   check(afterCommit !== second, `a retired number was reused: ${afterCommit}`);
-  notes.push("reservations are reused only when released");
+  check(typeof recovery.recoveryIndexTaken === "function", "recoveryIndexTaken is not exported from the public recovery entry");
+  notes.push("reservations are reused only when released; the on-chain number check is public");
 
   const order = logFor({ commitment: halves.spendCommitment, locker: address("bb"), claimer: address("cc"), index: 0 });
   const taken = await recoveryIndexTaken({
@@ -227,6 +228,31 @@ export const recoveryKeyCheck = async () => {
   check(withoutHeight.swaps[0].startHeight === null && withoutHeight.swaps[0].startHeightReason === "no-height-readers",
     "a search without readers did not name the missing height");
   check(withoutHeight.swaps[0].blockTime === null, `a search without a block-time reader returned ${withoutHeight.swaps[0].blockTime}`);
+  const noTime = await recovery.findSwaps({
+    mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
+    evmLogs: async (request) => request.topics.includes(pad(address("bb"))) ? [order] : [],
+    evmBlockTime: async () => null, gap: 2,
+  });
+  check(noTime.swaps[0].startHeightReason === "no-block-time" && noTime.swaps[0].blockTime === null,
+    `a null block time became ${JSON.stringify({ reason: noTime.swaps[0].startHeightReason, time: noTime.swaps[0].blockTime })}`);
+  const unreachable = await recovery.findSwaps({
+    mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
+    evmLogs: async (request) => request.topics.includes(pad(address("bb"))) ? [order] : [],
+    evmBlockTime: async () => 1_000_000, xmrNodes: ["https://node.example"], moneroNetwork: "stagenet",
+    fetchImpl: async () => { throw new Error("down"); }, gap: 2,
+  });
+  check(unreachable.swaps[0].startHeightReason === "monero-nodes-unreachable",
+    `an unreachable node was reported as ${unreachable.swaps[0].startHeightReason}`);
+  const otherNet = await recovery.findSwaps({
+    mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
+    evmLogs: async (request) => request.topics.includes(pad(address("bb"))) ? [order] : [],
+    evmBlockTime: async () => 1_000_000, xmrNodes: ["https://node.example"], moneroNetwork: "mainnet",
+    fetchImpl: async () => ({ ok: true, json: async () => ({ result: { height: 2_000, nettype: "stagenet", synchronized: true } }) }),
+    gap: 2,
+  });
+  check(otherNet.swaps[0].startHeightReason === "monero-network-mismatch",
+    `a node on another network was reported as ${otherNet.swaps[0].startHeightReason}`);
+  notes.push("no block time, an unreachable node and a wrong-network node have three different reasons");
   notes.push("the search matches a commitment and filters by address without sending a secret; it derives the Monero start height");
 
   const answer = (result) => async () => ({ ok: true, json: async () => ({ result }) });

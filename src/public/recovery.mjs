@@ -41,6 +41,7 @@ export {
   loadRecoveryKey,
   openRecoveryKeyFile,
   recoveryBinding,
+  recoveryIndexTaken,
   recoveryKeyFileName,
   recoveryKeyText,
   releaseRecoveryIndex,
