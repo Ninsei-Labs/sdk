@@ -142,7 +142,7 @@ export async function restoreWallet(request = {}) {
         nodeUrl: requestWindow.nodeUrl, fromHeight, toHeight: requestWindow.toHeight, fetchImpl: request.fetchImpl,
       });
     }
-    windowReport = { used: false, skipped: null, fromHeight, toHeight: Number(requestWindow.toHeight),
+    windowReport = { used: false, skipped: null, fallback: false, fromHeight, toHeight: Number(requestWindow.toHeight),
       blocks: Math.max(0, Number(requestWindow.toHeight) - fromHeight + 1), txs: hashes.length };
     if (hashes.length && typeof driver.scanTxs === "function") {
       await step("setRestoreHeight", () => driver.setRestoreHeight(tipHeight));
@@ -192,6 +192,9 @@ export async function restoreWallet(request = {}) {
     }
   }
 
+  // THE WINDOW DID NOT ANSWER: the full scan below is the fallback. Say so on the report, so the caller does not
+  // have to infer it from `used: false` and a balance.
+  if (windowReport) windowReport.fallback = true;
   await step("setRestoreHeight", () => driver.setRestoreHeight(scanHeight));
   // A RESCAN IS REQUIRED, NOT OPTIONAL: without it the height only applies to a wallet that has not scanned yet,
   // and a wallet restored from a key has. A driver that cannot rescan is the caller's mistake, named here.
