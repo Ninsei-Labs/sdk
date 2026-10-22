@@ -51,6 +51,13 @@ const chainConfig = (chain) => ({
     decimals: Number(t.decimals),
   })),
   dex: chain.dex ? { routes: chain.dex.routes || [] } : null,
+  // THE ESCROW'S BIRTH HEIGHT, when the network has an escrow. A caller can hand it to findSwaps instead of
+  // inventing a start block or asking from genesis, which public RPCs refuse.
+  escrow: chain.escrow ? {
+    address: chain.escrow.address || null,
+    mode: chain.escrow.mode || null,
+    deploymentBlock: Number.isSafeInteger(chain.escrow.deploymentBlock) ? chain.escrow.deploymentBlock : null,
+  } : null,
 });
 
 // --- ADDRESSES AND PATHS THAT ARE SUPPLIED FROM OUTSIDE ------------------------------------

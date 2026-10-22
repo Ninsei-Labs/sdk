@@ -142,6 +142,24 @@ export const recoveryKeyCheck = async () => {
     gap: 2,
   });
   check(all.swaps.length === 1 && allCalls.length === 1, `a full scan made ${allCalls.length} calls and found ${all.swaps.length} orders`);
+  // THE FACTORY'S BIRTH HEIGHT IS THE DEFAULT START. A public RPC refuses a log query from genesis; the registry
+  // carries the block, and `findSwaps` uses it when the caller did not name one.
+  const deploymentCalls = [];
+  await recovery.findSwaps({
+    mnemonic: WORDS, chainId: CHAIN, factory: address("dd"),
+    evmLogs: async (request) => { deploymentCalls.push(request.fromBlock); return [order]; },
+    gap: 2, deploymentBlock: 321430239,
+  });
+  check(deploymentCalls.length === 1 && deploymentCalls[0] === 321430239,
+    `the deployment block became ${deploymentCalls[0]}, expected 321430239`);
+  const explicitCalls = [];
+  await recovery.findSwaps({
+    mnemonic: WORDS, chainId: CHAIN, factory: address("dd"),
+    evmLogs: async (request) => { explicitCalls.push(request.fromBlock); return [order]; },
+    gap: 2, fromBlock: 7, deploymentBlock: 321430239,
+  });
+  check(explicitCalls.length === 1 && explicitCalls[0] === 7,
+    `an explicit fromBlock became ${explicitCalls[0]}, expected 7`);
   const withHeight = await recovery.findSwaps({
     mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
     evmLogs: async (request) => request.topics.includes(pad(address("bb"))) ? [order] : [],
