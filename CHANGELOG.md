@@ -1,4 +1,4 @@
-## Unreleased
+## 0.51.2 — 2026-10-22
 
 - The withdrawal window falls back to the full scan when `scanTxs` or the balance read fails, and reports
   `window.fallbackWhy: "window-scan"`.
