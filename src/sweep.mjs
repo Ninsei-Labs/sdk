@@ -11,6 +11,8 @@ import { restoreWallet } from "./sweep-restore.mjs";
 import { moneroWalletAdapter } from "./adapters/monero-wallet.mjs";
 import { checkDestination } from "./destination.mjs";
 import { revealedHalfWord } from "./sweep-half.mjs";
+import { takerHalves } from "./recovery-key.mjs";
+import { jointAddress } from "./order.mjs";
 
 // The same boundary as when the file was issued: a passphrase shorter than twelve characters will not open the file.
 const MIN_PASSPHRASE = 12;
@@ -19,6 +21,71 @@ const STEPS = ["unlock", "sync", "sweep", "relay"];
 const REVEALED_HALF_SELECTOR = "0x3f267bb6";
 
 const contentsOf = (file) => (typeof file === "string" ? file : file && typeof file.contents === "string" ? file.contents : null);
+
+const bare = (value) => String(value == null ? "" : value).replace(/^0x/i, "").toLowerCase();
+
+// A FOUND ORDER AND THE KEY, WITHOUT A FILE. The recovery page used to write the order into the SDK's own payload
+// (buildPayload) in memory; that rule belongs here, next to the withdrawal it feeds. The page keeps the order and
+// the key; this function decides which side is the person, checks the chain's points against the key, builds the
+// joint address and returns the same payload a recovery file would carry.
+const payloadFromOrder = async (request) => {
+  const order = request && request.order;
+  if (!order || typeof order !== "object") throw new SdkError("bad-input", { field: "order" });
+  if (typeof request.mnemonic !== "string" || !request.mnemonic.trim()) throw new SdkError("bad-input", { field: "mnemonic" });
+  const chainId = Number(request.chainId);
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) throw new SdkError("bad-input", { field: "chainId" });
+  const index = Number(order.index);
+  if (!Number.isSafeInteger(index) || index < 0) throw new SdkError("bad-input", { field: "order.index" });
+  const network = typeof request.network === "string" ? request.network.trim() : "";
+  const moneroNetwork = typeof request.moneroNetwork === "string" ? request.moneroNetwork.trim() : "";
+  if (!network) throw new SdkError("bad-input", { field: "network" });
+  if (!moneroNetwork) throw new SdkError("bad-input", { field: "moneroNetwork" });
+  const passphrase = typeof request.passphrase === "string" ? request.passphrase : "";
+  if (passphrase && passphrase.length < MIN_PASSPHRASE) {
+    throw new SdkError("bad-input", { field: "passphrase", min: MIN_PASSPHRASE });
+  }
+
+  const side = order.side === "locker" ? "buy" : order.side === "claimer" ? "sell" : null;
+  if (!side) throw new SdkError("bad-input", { field: "order.side" });
+  const halves = takerHalves({ mnemonic: request.mnemonic, chainId, index });
+  const buy = side === "buy";
+  if (bare(buy ? order.edPointLocker : order.edPointClaimer) !== bare(halves.spendPoint)) {
+    throw new SdkError("bad-input", { field: "order", why: "spend-point" });
+  }
+  if (bare(order.edViewPointLocker) !== bare(buy ? halves.viewPoint : halves.makerViewPoint)) {
+    throw new SdkError("bad-input", { field: "order", why: buy ? "own-view-point" : "maker-view-point" });
+  }
+
+  const otherSpendPoint = "0x" + bare(buy ? order.edPointClaimer : order.edPointLocker);
+  const otherViewPoint = "0x" + bare(halves.makerViewPoint);
+  const joint = jointAddress({
+    ownSpendHalf: halves.spendHalf, ownViewHalf: halves.viewHalf,
+    otherSpendPoint, otherViewPoint, network: moneroNetwork,
+  });
+  const escrow = { address: order.escrow, readyBy: order.readyBy, t1: order.t1 };
+  const payload = engine.recoveryFile.buildPayload({
+    swap: {
+      id: order.escrow, side, network, moneroNetwork,
+      createdAt: order.blockTime ? Number(order.blockTime) * 1000 : null,
+      payToken: null, payAmount: null, xmrAmount: null, rate: null, maker: null, quoteSignature: null,
+      escrow, timeline: null,
+    },
+    swapWallet: {
+      source: "halves", network: moneroNetwork, address: joint.address,
+      spendHalf: halves.spendHalf, viewHalf: halves.viewHalf,
+      otherSpendPoint, otherViewPoint, otherViewHalf: halves.makerViewHalf,
+      escrowAddress: order.escrow,
+    },
+    escrow,
+    receiveAddress: null,
+    restoreHeight: Number(order.startHeight) > 0 ? Number(order.startHeight) : null,
+  });
+  return {
+    payload,
+    contents: await engine.recoveryFile.createRecoveryFile(payload, passphrase),
+    address: joint.address,
+  };
+};
 
 // A LOW-LEVEL WALLET ERROR IS STILL A REFUSAL, AND EVERY REFUSAL CARRIES A CODE.
 //
@@ -69,6 +136,13 @@ export function createSweep({ http, config, call = null }) {
   const NETWORK_ENUM = { mainnet: "MAINNET", stagenet: "STAGENET", testnet: "TESTNET" };
 
   const api = {
+    // BUILD THE WITHDRAWAL MATERIAL FROM A FOUND ORDER AND THE KEY. No recovery file, no temporary payload in the
+    // page: the returned `contents` is the same file `plan`/`keys` already accept, and `payload` is for callers
+    // that want the fields directly.
+    async fromOrder(request = {}) {
+      return await payloadFromOrder(request);
+    },
+
     // BUILD THE WITHDRAWAL WALLET from the library namespace the caller has. The page used to pass a `createWallet`
     // callback that mapped the enum itself; that mapping is here now, so a caller passes `moneroTs` and the keys.
     wallet(request = {}) {

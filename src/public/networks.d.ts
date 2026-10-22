@@ -32,6 +32,8 @@ export interface Chain {
   rpcUrl?: string;
   tokens?: ChainToken[];
   uniswap?: ChainUniswap;
+  /** The escrow deployment, including the factory's birth height. */
+  escrow?: { address?: string; mode?: string; deploymentBlock?: number; [field: string]: unknown };
   [field: string]: unknown;
 }
 
