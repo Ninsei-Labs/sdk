@@ -44,7 +44,7 @@ import { createNinsei } from "@ninsei-labs/sdk";
 const sdk = createNinsei({
   settlement: { chain: "arbitrum-sepolia" },  // from sdk.config.chains; vm is taken from the registry
   xmrNetwork: "stagenet",
-  apiBase: "/api",
+  // apiBase: "https://your-service",   // only when you bring a backend; there is no default
   assetsBase: "/sdk/",
   mode: "live",                     // or "sim"
 });

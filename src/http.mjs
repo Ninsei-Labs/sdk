@@ -16,6 +16,7 @@ export function createHttp({ apiBase, fetchImpl = null, timeoutMs = 20_000 }) {
     // a GET, and the service would answer with a refusal to a request it did not understand. The defaults are
     // the previous ones (GET without a body).
     async json(path, { signal = null, method = "GET", headers = null, body = null } = {}) {
+      if (!apiBase) throw new SdkError("server-unavailable", { why: "no-api-base" });
       if (typeof impl !== "function") throw new SdkError("bad-input", { field: "fetch" });
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -47,6 +48,7 @@ export function createHttp({ apiBase, fetchImpl = null, timeoutMs = 20_000 }) {
      * refused" are different things, and the caller must see them.
      */
     async tryJson(path, { signal = null, method = "GET", headers = null, body = null } = {}) {
+      if (!apiBase) throw new SdkError("server-unavailable", { why: "no-api-base" });
       if (typeof impl !== "function") throw new SdkError("bad-input", { field: "fetch" });
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), timeoutMs);

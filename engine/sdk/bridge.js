@@ -122,7 +122,7 @@ function optionsFor(chain) {
   return {
     settlement: { chain: chain.id },
     xmrNetwork: MONERO.networkType,
-    apiBase: "/api",
+    // NO BACKEND BY DEFAULT: a page that needs one passes its base explicitly.
     assetsBase: "/",
     mode: modeOf(chain),
     // THE PAGE STORAGE BECOMES THE CORE STORAGE: deal records and the session live in one place.
