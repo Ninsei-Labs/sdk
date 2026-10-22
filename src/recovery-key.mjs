@@ -385,6 +385,27 @@ function decodeOrderLog(log) {
   };
 }
 
+// THE CLONE CARRIES THE ORDER, INCLUDING THE XMR AMOUNT. OrderCreated does not repeat `xmrAmount`, and the clone
+// has no getter for it, but word 18 of the condition blob is in its code. Read it only from a clone of the exact
+// shape: a contract of another size is not this order and must not yield a guessed number.
+const CLONE_CODE_BYTES = 877;
+const XMR_AMOUNT_WORD = 18;
+const CLONE_PROXY_BYTES = 45;
+const XMR_AMOUNT_OFFSET = CLONE_PROXY_BYTES + XMR_AMOUNT_WORD * 32;
+
+function xmrAmountFromClone(code) {
+  if (typeof code !== "string" || !/^0x[0-9a-fA-F]+$/.test(code)) return { value: null, reason: "code" };
+  const bytes = (code.length - 2) / 2;
+  if (!Number.isInteger(bytes) || bytes !== CLONE_CODE_BYTES) return { value: null, reason: "not-clone" };
+  const word = code.slice(2 + XMR_AMOUNT_OFFSET * 2, 2 + (XMR_AMOUNT_OFFSET + 32) * 2);
+  if (word.length !== 64) return { value: null, reason: "not-clone" };
+  try {
+    return { value: BigInt("0x" + word).toString(), reason: null };
+  } catch {
+    return { value: null, reason: "code" };
+  }
+}
+
 async function readLogs(evmLogs, request) {
   if (typeof evmLogs !== "function") throw bad("evmLogs");
   let logs;
@@ -529,7 +550,7 @@ async function recoveredStartHeight(order, { evmBlockTime, moneroTip, moneroBloc
  */
 export async function findSwaps({ mnemonic, chainId, factory, address = null, evmLogs,
   fromBlock = null, deploymentBlock = null, toBlock = "latest", gap = 5, maxIndex = 1000,
-  evmBlockTime = null, moneroTip = null, moneroBlockTimestamp = null,
+  evmBlockTime = null, evmCode = null, moneroTip = null, moneroBlockTimestamp = null,
   xmrNodes = null, moneroNetwork = null, fetchImpl = globalThis.fetch } = {}) {
   if (typeof factory !== "string" || !ADDRESS_RE.test(factory)) throw bad("factory");
   const chain = numberField(chainId, "chainId");
@@ -593,6 +614,26 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
   }
   for (const order of found) {
     Object.assign(order, await recoveredStartHeight(order, { evmBlockTime, moneroTip: tip, moneroBlockTimestamp: header, cache }));
+  }
+  // THE XMR AMOUNT IS IN THE CLONE, NOT IN THE LOG. A caller without a code reader gets null and a named reason;
+  // an unreadable or differently-shaped contract does the same. This is data, not a withdrawal verdict.
+  for (const order of found) {
+    if (typeof evmCode !== "function") {
+      order.xmrAmount = null;
+      order.xmrAmountReason = "no-code-reader";
+      continue;
+    }
+    let code;
+    try {
+      code = await evmCode(order.escrow);
+    } catch {
+      order.xmrAmount = null;
+      order.xmrAmountReason = "code";
+      continue;
+    }
+    const read = xmrAmountFromClone(code);
+    order.xmrAmount = read.value;
+    order.xmrAmountReason = read.reason;
   }
   return { swaps: found, scanned };
 }

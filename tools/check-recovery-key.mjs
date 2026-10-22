@@ -134,6 +134,17 @@ export const recoveryKeyCheck = async () => {
   check(found.swaps[0] && found.swaps[0].side === "locker", "the search named the wrong side");
   check(calls.length === 2, `an address query made ${calls.length} log calls, expected 2`);
   check(calls.every((call) => !call.topics.some((topic) => String(topic).toLowerCase().includes(halves.spendHalf.slice(2, 10)))), "a half was put into the log filter");
+  check(found.swaps[0].xmrAmount === null && found.swaps[0].xmrAmountReason === "no-code-reader",
+    `a search without a code reader answered ${found.swaps[0].xmrAmount}/${found.swaps[0].xmrAmountReason}`);
+  const xmrWord = BigInt(5_000_000_000_000).toString(16).padStart(64, "0");
+  const cloneCode = "0x" + "00".repeat(621) + xmrWord + "00".repeat(877 - 621 - 32);
+  const withXmr = await recovery.findSwaps({
+    mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
+    evmLogs: async (request) => request.topics.includes(pad(address("bb"))) ? [order] : [],
+    evmCode: async () => cloneCode, gap: 2,
+  });
+  check(withXmr.swaps[0].xmrAmount === "5000000000000" && withXmr.swaps[0].xmrAmountReason === null,
+    `the clone's XMR amount became ${withXmr.swaps[0].xmrAmount}/${withXmr.swaps[0].xmrAmountReason}`);
 
   const allCalls = [];
   const all = await recovery.findSwaps({
