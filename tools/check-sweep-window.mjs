@@ -76,5 +76,46 @@ export const sweepWindowCheck = async () => {
   check(JSON.stringify(fetched) === JSON.stringify(["h10", "h11", "h12"]), `windowTxHashes returned ${JSON.stringify(fetched)}`);
   notes.push("the SDK can collect the window's tx hashes from a node");
 
-  return { note: "the withdrawal window scans only the lock and falls back on an empty one", problems, notes };
+  // A 429 IS RETRIED BEFORE THE WINDOW IS ABANDONED. The node's own burst limit answers 429 while the page is
+  // still healthy; one refusal used to end a withdrawal.
+  let rateCalls = 0;
+  const slept = [];
+  const afterRetry = await windowTxHashes({
+    nodeUrl: "https://node.example", fromHeight: 10, toHeight: 10,
+    sleep: async (ms) => { slept.push(ms); },
+    fetchImpl: async () => {
+      rateCalls += 1;
+      if (rateCalls === 1) return { ok: false, status: 429, headers: { get: () => "0" } };
+      return { ok: true, json: async () => ({ result: { tx_hashes: ["after-429"] } }) };
+    },
+  });
+  check(JSON.stringify(afterRetry) === JSON.stringify(["after-429"]), "a 429 was not retried into a success");
+  check(rateCalls === 2, `a 429 was read ${rateCalls} times instead of twice`);
+  check(slept.length === 1 && slept[0] === 0, "Retry-After was not honoured");
+
+  // EXHAUSTED RETRIES ARE A WINDOW REFUSAL, AND restoreWallet TURNS IT INTO THE FULL-SCAN FALLBACK.
+  let failed = null;
+  try {
+    await windowTxHashes({
+      nodeUrl: "https://node.example", fromHeight: 10, toHeight: 10, attempts: 2,
+      sleep: async () => {},
+      fetchImpl: async () => ({ ok: false, status: 429, headers: { get: () => "0" } }),
+    });
+  } catch (e) { failed = e; }
+  check(failed && failed.code === "wallet-rejected" && failed.params && failed.params.status === 429, "an exhausted 429 was not a wallet-rejected refusal");
+
+  const readFailed = fake({ balance: 7n });
+  const fallbackOnRead = await restoreWallet({
+    wallet: readFailed.wallet, fromHeight: 100,
+    window: { nodeUrl: "https://node.example", toHeight: 110, tipHeight: 900, fallback: false },
+    fetchImpl: async () => ({ ok: false, status: 429, headers: { get: () => "0" } }),
+  });
+  check(fallbackOnRead.total === "7", "a failed window read did not reach the full scan");
+  check(fallbackOnRead.window && fallbackOnRead.window.fallback === true, "a failed window read did not report the fallback");
+  check(fallbackOnRead.window && fallbackOnRead.window.fallbackWhy === "window-read", "a failed window read did not name the reason");
+  check(fallbackOnRead.window && fallbackOnRead.window.error && fallbackOnRead.window.error.status === 429, "the window report lost the node status");
+  check(readFailed.calls.some((call) => call[0] === "rescan"), "the full scan did not run after the failed window");
+  notes.push("a failed window read falls back to the full scan and keeps the node status");
+
+  return { note: "the withdrawal window scans only the lock and falls back on an empty or unreadable one", problems, notes };
 };

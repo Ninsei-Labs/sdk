@@ -342,7 +342,7 @@ export interface FoundSwap {
   /** The Monero height a withdrawal may start from, derived from the order's block time. Null when the caller did
    * not pass the readers; `startHeightReason` then names why. */
   readonly startHeight: number | null;
-  readonly startHeightReason: "no-block-number" | "no-height-readers" | "no-block-time" | "monero-header" | null;
+  readonly startHeightReason: "no-block-number" | "no-height-readers" | "monero-nodes-unreachable" | "monero-network-mismatch" | "no-block-time" | "monero-header" | null;
 }
 
 /** A storage adapter: the same shape the SDK store takes. */
@@ -376,6 +376,17 @@ export declare function saveRecoveryKey(storage: RecoveryKeyStorage, key: Recove
 export declare function loadRecoveryKey(storage: RecoveryKeyStorage): (RecoveryKey & { nextIndex: number; reserved: Record<string, unknown>; retired: Record<string, unknown> }) | null;
 /** Reserves a swap number; the caller releases it if the request is abandoned. */
 export declare function reserveRecoveryIndex(storage: RecoveryKeyStorage, request: { chainId: number; swapId?: string | null }): number;
+/** True when an order already holds this number's commitment on chain. A page that starts swaps without the SDK's
+ * start path calls this before using a number; an unreadable log is a refusal, not "free". */
+export declare function recoveryIndexTaken(request: {
+  mnemonic: string;
+  chainId: number;
+  index: number;
+  factory: string;
+  evmLogs: (request: { address: string; topics: (string | null)[]; fromBlock: number | string; toBlock: number | string }) => Promise<unknown[]>;
+  fromBlock?: number | string;
+  toBlock?: number | string;
+}): Promise<boolean>;
 /** Releases a number that never reached the chain. */
 export declare function releaseRecoveryIndex(storage: RecoveryKeyStorage, index: number): void;
 /** Retires a number after its order exists on chain. */

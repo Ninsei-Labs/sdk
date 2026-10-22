@@ -1140,6 +1140,9 @@ export interface StartRequest {
   recoveryKey?: string | { readonly mnemonic: string };
   /** The swap number, when the caller already reserved one. Absent - the SDK reserves the next free number. */
   recoveryIndex?: number;
+  /** The first block for the on-chain number check. Absent - the chain registry's escrow deployment block, and
+   * zero only when the registry has no height. */
+  fromBlock?: string | number;
   /** The Monero height the swap starts at. Absent - the SDK asks the configured nodes (`get_info`) and refuses
    * the start if none answers on the swap's network. */
   restoreHeight?: number;
@@ -1328,8 +1331,9 @@ export interface SweepRestoreRequest {
   readonly rescanWhenLocked?: boolean;
   /**
    * THE BLOCK WINDOW AROUND THE LOCK. When present, the wallet is set at the node tip and only these blocks are
-   * scanned. An empty window falls back to the full scan unless `fallback` is false. `txHashes` may be supplied by
-   * the caller; otherwise the SDK reads `get_block` from `nodeUrl`.
+   * scanned. An empty window falls back to the full scan unless `fallback` is false. A window read that fails
+   * (429, timeout, 5xx) is retried; if it still fails, the full scan runs and `fallbackWhy` names the read.
+   * `txHashes` may be supplied by the caller; otherwise the SDK reads `get_block` from `nodeUrl`.
    */
   readonly window?: {
     readonly nodeUrl?: string;
@@ -1357,8 +1361,18 @@ export interface SweepRestoreResult {
   /** Present when a window was requested: whether it was used, and why it was skipped. */
   readonly window?: {
     readonly used: boolean;
-    /** Whether the full scan ran because the window found nothing (or could not scan). */
+    /** Whether the full scan ran because the window found nothing, could not scan, or could not be read. */
     readonly fallback: boolean;
+    /** Why the fallback ran: `empty-window`, `window-read`, or a named skip. */
+    readonly fallbackWhy?: string;
+    /** The node's answer when the window read failed; absent when the window was read. */
+    readonly error?: {
+      readonly code: string;
+      readonly surface: string;
+      readonly status: number | null;
+      readonly height: number | null;
+      readonly why: string | null;
+    };
     readonly skipped: string | null;
     readonly fromHeight: number;
     readonly toHeight: number;

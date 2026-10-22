@@ -811,9 +811,18 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         // log is asked before the number is used; a taken number is retired locally and the next one is reserved.
         // Without a log seam the previous behaviour is kept - the caller cannot be asked to invent a chain read.
         if (typeof chainLogs === "function" && request.order.factory) {
+          // THE CHAIN'S BIRTH HEIGHT IS THE DEFAULT START, NOT ZERO. The factory's own log cannot hold an order
+          // before it existed; asking from zero is tens of log queries per number on a public RPC. An explicit
+          // `fromBlock` still wins, including the literal zero.
+          const chain = config && Array.isArray(config.chains)
+            ? config.chains.find((entry) => Number(entry.chainId) === Number(chainId)) : null;
+          const deploymentBlock = chain && chain.escrow ? chain.escrow.deploymentBlock : null;
+          const fromBlock = request.fromBlock !== undefined
+            ? request.fromBlock
+            : (Number.isSafeInteger(deploymentBlock) ? deploymentBlock : 0);
           let hops = 0;
           while (await recoveryIndexTaken({ mnemonic: key.mnemonic, chainId, index, factory: request.order.factory,
-            evmLogs: chainLogs, fromBlock: request.fromBlock === undefined ? 0 : request.fromBlock })) {
+            evmLogs: chainLogs, fromBlock })) {
             if (explicit) throw new SdkError("bad-input", { field: "recoveryIndex", why: "on-chain" });
             commitRecoveryIndex(storage, index);
             index = reserveRecoveryIndex(storage, { chainId });

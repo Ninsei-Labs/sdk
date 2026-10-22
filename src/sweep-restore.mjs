@@ -64,7 +64,7 @@ const heightOf = async (driver, name) => {
 
 // THE BLOCK WINDOW AROUND THE LOCK. A full rescan of mainnet takes hours; the lock can only be in the blocks from
 // the order's start to just after its t1. The caller may pass the hashes, or a node URL and the SDK asks for them.
-export async function windowTxHashes({ nodeUrl, fromHeight, toHeight, fetchImpl = globalThis.fetch } = {}) {
+export async function windowTxHashes({ nodeUrl, fromHeight, toHeight, fetchImpl = globalThis.fetch, sleep = defaultSleep, attempts = 3 } = {}) {
   let base = typeof nodeUrl === "string" ? nodeUrl.trim() : "";
   while (base.endsWith("/")) base = base.slice(0, -1);
   const from = Number(fromHeight);
@@ -73,17 +73,39 @@ export async function windowTxHashes({ nodeUrl, fromHeight, toHeight, fetchImpl 
   if (!Number.isSafeInteger(from) || from < 0) throw new SdkError("bad-input", { field: "window.fromHeight" });
   if (!Number.isSafeInteger(to) || to < from) throw new SdkError("bad-input", { field: "window.toHeight" });
   if (typeof fetchImpl !== "function") throw new SdkError("bad-input", { field: "fetchImpl" });
+  const tries = Math.max(1, Math.min(5, Number(attempts) || 3));
   const hashes = [];
   for (let height = from; height <= to; height += 1) {
-    let response;
-    try {
-      response = await fetchImpl(base + "/json_rpc", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: "block", method: "get_block", params: { height } }),
-        signal: typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
-      });
-    } catch { throw new SdkError("wallet-rejected", { surface: "window-blocks", height }); }
-    if (!response || response.ok !== true) throw new SdkError("wallet-rejected", { surface: "window-blocks", height, status: response ? response.status : null });
+    let response = null;
+    let last = null;
+    for (let attempt = 1; attempt <= tries; attempt += 1) {
+      try {
+        response = await fetchImpl(base + "/json_rpc", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: "block", method: "get_block", params: { height } }),
+          signal: typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
+        });
+      } catch {
+        // A TIMEOUT OR A BROKEN CONNECTION IS RETRIED, NOT THE END OF THE WINDOW. The node is rate-limited by the
+        // same bursts the page sends; a withdrawal that stops on the first 429 or timeout is a refund waiting to
+        // happen (the page's measured failure: 93 of 150 parallel reads answered 429).
+        response = null;
+        last = new SdkError("wallet-rejected", { surface: "window-blocks", height, why: "transport" });
+        if (attempt < tries) { await sleep(backoffMs(attempt)); continue; }
+        throw last;
+      }
+      if (response && response.ok === true) { last = null; break; }
+      const status = response ? response.status : null;
+      last = new SdkError("wallet-rejected", { surface: "window-blocks", height, status });
+      // ONLY A RATE LIMIT AND A SERVER FAULT ARE WORTH ANOTHER READ. A 404 or a bad request will answer the same
+      // way every time, and retrying it only makes the fallback slower.
+      if ((status === 429 || (status !== null && status >= 500)) && attempt < tries) {
+        await sleep(retryAfterMs(response) ?? backoffMs(attempt));
+        continue;
+      }
+      throw last;
+    }
+    if (!response || response.ok !== true) throw last || new SdkError("wallet-rejected", { surface: "window-blocks", height });
     let body = null;
     try { body = await response.json(); } catch { throw new SdkError("wallet-rejected", { surface: "window-blocks", height, why: "not-json" }); }
     if (!body || body.error || !body.result) throw new SdkError("wallet-rejected", { surface: "window-blocks", height, why: "rpc" });
@@ -99,6 +121,21 @@ export async function windowTxHashes({ nodeUrl, fromHeight, toHeight, fetchImpl 
     hashes.push(...list.map(String));
   }
   return hashes;
+}
+
+const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const backoffMs = (attempt) => Math.min(4000, 250 * (2 ** Math.max(0, attempt - 1)));
+function retryAfterMs(response) {
+  try {
+    const value = response && response.headers && typeof response.headers.get === "function"
+      ? response.headers.get("retry-after") : null;
+    if (value === null || value === undefined || value === "") return null;
+    const seconds = Number(value);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(5000, Math.floor(seconds * 1000));
+    const date = Date.parse(String(value));
+    if (Number.isFinite(date)) return Math.min(5000, Math.max(0, date - Date.now()));
+  } catch { /* a bad header is not a reason to stop */ }
+  return null;
 }
 
 /**
@@ -136,14 +173,34 @@ export async function restoreWallet(request = {}) {
   if (requestWindow) {
     const tipHeight = Number(requestWindow.tipHeight);
     if (!Number.isSafeInteger(tipHeight) || tipHeight <= 0) throw new SdkError("bad-input", { field: "window.tipHeight" });
+    windowReport = { used: false, skipped: null, fallback: false, fromHeight, toHeight: Number(requestWindow.toHeight),
+      blocks: Math.max(0, Number(requestWindow.toHeight) - fromHeight + 1), txs: 0 };
     let hashes = Array.isArray(requestWindow.txHashes) ? requestWindow.txHashes.map(String) : null;
     if (hashes === null) {
-      hashes = await windowTxHashes({
-        nodeUrl: requestWindow.nodeUrl, fromHeight, toHeight: requestWindow.toHeight, fetchImpl: request.fetchImpl,
-      });
+      try {
+        hashes = await windowTxHashes({
+          nodeUrl: requestWindow.nodeUrl, fromHeight, toHeight: requestWindow.toHeight, fetchImpl: request.fetchImpl,
+        });
+      } catch (e) {
+        // A MALFORMED WINDOW IS NOT A BUSY NODE. A bad height or a missing URL is the caller's error and is
+        // rethrown; only a read the node refused reaches the fallback.
+        if (e && e.code === "bad-input") throw e;
+        // THE WINDOW READ FAILED: FALL BACK TO THE FULL SCAN, NOT TO A REFUSAL. A 429 from a busy node, a timeout
+        // or a 5xx is a fact about the node, not about the coins; the scan below can still find them. The reason is
+        // carried on the report so the caller does not present this as a normal empty window.
+        windowReport.fallback = true;
+        windowReport.fallbackWhy = "window-read";
+        windowReport.error = {
+          code: e && e.code ? e.code : "wallet-rejected",
+          surface: e && e.params && e.params.surface ? e.params.surface : "window-blocks",
+          status: e && e.params && e.params.status !== undefined ? e.params.status : null,
+          height: e && e.params && e.params.height !== undefined ? e.params.height : null,
+          why: e && e.params && e.params.why ? e.params.why : null,
+        };
+        hashes = [];
+      }
     }
-    windowReport = { used: false, skipped: null, fallback: false, fromHeight, toHeight: Number(requestWindow.toHeight),
-      blocks: Math.max(0, Number(requestWindow.toHeight) - fromHeight + 1), txs: hashes.length };
+    windowReport.txs = hashes.length;
     if (hashes.length && typeof driver.scanTxs === "function") {
       await step("setRestoreHeight", () => driver.setRestoreHeight(tipHeight));
       await step("scanTxs", () => driver.scanTxs(hashes));
@@ -194,7 +251,10 @@ export async function restoreWallet(request = {}) {
 
   // THE WINDOW DID NOT ANSWER: the full scan below is the fallback. Say so on the report, so the caller does not
   // have to infer it from `used: false` and a balance.
-  if (windowReport) windowReport.fallback = true;
+  if (windowReport) {
+    windowReport.fallback = true;
+    if (!windowReport.fallbackWhy) windowReport.fallbackWhy = "empty-window";
+  }
   await step("setRestoreHeight", () => driver.setRestoreHeight(scanHeight));
   // A RESCAN IS REQUIRED, NOT OPTIONAL: without it the height only applies to a wallet that has not scanned yet,
   // and a wallet restored from a key has. A driver that cannot rescan is the caller's mistake, named here.
