@@ -79,6 +79,8 @@ export const DEFAULT_ROUTES = Object.freeze({
   evmSwaps: "/evm-swaps",
   // A quote for an order: the provider's commitment under keys, not a market snapshot.
   orderQuote: "/order-quote",
+  // A reverse-mode ticket: the maker supplies the XMR fields, the node answers with a signed quote and its claim tip.
+  orderSell: "/order-sell",
   revealedHalf: "/escrow/revealed-half",
   swept: "/swaps/{id}/swept",
 });

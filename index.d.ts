@@ -80,7 +80,7 @@ export interface NinseiOptions {
     readonly rpc?: { readonly evm?: string; readonly monero?: string };
   };
   /**
-   * Renaming API paths by name: { swaps, swap, evmSwaps, orderQuote, revealedHalf, swept }.
+   * Renaming API paths by name: { swaps, swap, evmSwaps, orderQuote, orderSell, revealedHalf, swept }.
    * An unknown name is bad-input (a typo must not silently fall back to the default).
    */
   routes?: Readonly<Record<string, string>>;
@@ -440,6 +440,11 @@ export interface QuotesApi {
   snapshot(): QuoteSnapshot | null;
   /** A binding quote with a TTL. A refusal comes as a code, not text. */
   firm(offer: FirmOffer): Promise<Quote>;
+  /**
+   * A reverse-mode ticket: the maker sells XMR. The request is the node's `request` object; the answer carries the
+   * signed order quote and its claim tip, which is checked against the gas price before it is returned.
+   */
+  sale(request: Readonly<Record<string, unknown>>): Promise<Readonly<Record<string, unknown>>>;
 }
 
 export interface QuoteRequest {
