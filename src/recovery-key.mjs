@@ -528,14 +528,23 @@ async function recoveredStartHeight(order, { evmBlockTime, moneroTip, moneroBloc
  * positions) and merges the answers. Without one, every OrderCreated of the factory is read and matched locally.
  */
 export async function findSwaps({ mnemonic, chainId, factory, address = null, evmLogs,
-  fromBlock = 0, toBlock = "latest", gap = 5, maxIndex = 1000,
+  fromBlock = null, deploymentBlock = null, toBlock = "latest", gap = 5, maxIndex = 1000,
   evmBlockTime = null, moneroTip = null, moneroBlockTimestamp = null,
   xmrNodes = null, moneroNetwork = null, fetchImpl = globalThis.fetch } = {}) {
   if (typeof factory !== "string" || !ADDRESS_RE.test(factory)) throw bad("factory");
   const chain = numberField(chainId, "chainId");
   const max = numberField(maxIndex, "maxIndex") || 1000;
   const missesAllowed = numberField(gap, "gap") || 5;
-  const base = { address: factory, fromBlock, toBlock };
+  // THE CHAIN SAYS WHERE ITS ORDERS CAN START. An explicit fromBlock wins; otherwise the caller can pass the
+  // factory's deployment block (the SDK's chain registry exposes it as escrow.deploymentBlock). Zero remains the
+  // last resort for a caller that knows the factory existed at genesis.
+  if (deploymentBlock !== null && deploymentBlock !== undefined && !Number.isSafeInteger(Number(deploymentBlock))) {
+    throw bad("deploymentBlock");
+  }
+  const startBlock = fromBlock === null || fromBlock === undefined
+    ? (deploymentBlock === null || deploymentBlock === undefined ? 0 : Number(deploymentBlock))
+    : fromBlock;
+  const base = { address: factory, fromBlock: startBlock, toBlock };
   let logs = [];
   if (address) {
     const padded = topicAddress(address);
