@@ -33,6 +33,7 @@ export const sweepWindowCheck = async () => {
     window: { txHashes: ["a", "b"], toHeight: 110, tipHeight: 900 } });
   check(one.total === "5" && one.unlocked === "5", `the window balance is ${one.total}/${one.unlocked}`);
   check(one.window && one.window.used === true, "the window was not marked as used");
+  check(one.window && one.window.fallback === false, "a used window was marked as a fallback");
   check(found.calls.some((call) => call[0] === "scan" && call[1] === 2), "scanTxs did not receive both hashes");
   check(found.calls.some((call) => call[0] === "height" && call[1] === 900), "the wallet was not set at the tip");
   check(!found.calls.some((call) => call[0] === "rescan"), "a rescan followed scanTxs and would wipe the result");
@@ -42,6 +43,7 @@ export const sweepWindowCheck = async () => {
   const fallback = await restoreWallet({ wallet: empty.wallet, fromHeight: 100,
     window: { txHashes: ["a"], toHeight: 110, tipHeight: 900 } });
   check(fallback.total === "0" && empty.calls.some((call) => call[0] === "rescan"), "an empty window did not fall back to the full scan");
+  check(fallback.window && fallback.window.fallback === true, "an empty window did not report the fallback");
   check(empty.calls.some((call) => call[0] === "height" && call[1] === 90), "the full scan did not start below the order height");
   notes.push("an empty window falls back to the full scan");
 
@@ -60,6 +62,7 @@ export const sweepWindowCheck = async () => {
   const skipped = await restoreWallet({ wallet: noScan.wallet, fromHeight: 100,
     window: { txHashes: ["a"], toHeight: 110, tipHeight: 900 } });
   check(skipped.window && skipped.window.skipped === "no-scan-txs", "a wallet without scanTxs did not name the skip");
+  check(skipped.window && skipped.window.fallback === true, "a skipped window did not report the fallback");
   check(skipped.total === "5", "the fallback did not read the balance");
   notes.push("a wallet without scanTxs falls back and names it");
 
