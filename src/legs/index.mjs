@@ -10,6 +10,9 @@
 // What must not be in a driver: no user strings, no DOM. A driver is chain reads and writes plus knowing what the
 // network is measured in for this VM.
 import * as evm from "./evm.mjs";
+export { profileOf, VM_PROFILES, ACCOUNT_VMS, UTXO_VMS } from "./profiles.mjs";
+export { LEG_ROLE_METHODS, SETTLEMENT_METHODS, legVerdict } from "./contract.mjs";
+import { profileOf } from "./profiles.mjs";
 
 export const LEGS = { evm };
 
@@ -35,6 +38,26 @@ export const chainOf = (chainId) => (engine.config.CHAINS || []).find((c) => c &
 export const vmOfChain = (chainId) => {
   const chain = chainOf(chainId);
   return chain && chain.vm ? chain.vm : null;
+};
+
+/** The VM profile for a network, or null when the network or the profile is unknown. */
+export const profileOfChain = (chainId) => {
+  const vm = vmOfChain(chainId);
+  return vm ? profileOf(vm) : null;
+};
+
+/**
+ * A canonical settlement reference for a network. The leg owns the format; an unsupported VM is refused by name,
+ * never compared as if it were an EVM address.
+ */
+export const normalizeSettlementRef = (chainId, ref) => {
+  const chain = chainOf(chainId);
+  if (!chain) fail("bad-input", { field: "chain", chain: typeof chainId === "string" ? chainId : null });
+  const leg = legForChain(chain.id);
+  if (typeof leg.normalizeRef !== "function") fail("not-implemented", { surface: "settlement-ref", vm: chain.vm });
+  const normalized = leg.normalizeRef(ref);
+  if (normalized === null) fail("bad-input", { field: "settlementRef", vm: chain.vm });
+  return { vm: chain.vm, chain: chain.id, ref: normalized };
 };
 
 /**
