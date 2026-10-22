@@ -351,8 +351,13 @@ export function createSweep({ http, config, call = null }) {
     async sign(request) {
       const plan = await api.plan(request);
       if (!request || typeof request.to !== "string" || !request.to) throw new SdkError("bad-input", { field: "to" });
-      if (typeof request.connectWallet !== "function") throw new SdkError("bad-input", { field: "connectWallet" });
-      const wallet = await request.connectWallet(plan);
+      // ONE ADAPTER FOR RESTORE AND SIGN. A caller that already holds the opened and synced wallet passes it as
+      // `wallet`; a caller that wants the SDK to build one passes `connectWallet`.
+      const wallet = request.wallet !== undefined && request.wallet !== null
+        ? request.wallet
+        : (typeof request.connectWallet === "function"
+          ? await request.connectWallet(plan)
+          : (() => { throw new SdkError("bad-input", { field: "connectWallet" }); })());
       const role = ["open", "sync", "unlockedBalance", "sweepUnlocked", "relay", "close"];
       const missing = role.filter((name) => !wallet || typeof wallet[name] !== "function");
       if (missing.length) throw new SdkError("bad-input", { field: "wallet", missing });

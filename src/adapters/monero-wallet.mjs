@@ -164,6 +164,32 @@ export function moneroWalletAdapter({
       return undefined;
     },
 
+    // THE SAME ADAPTER ALSO PLAYS THE WITHDRAWAL ROLE. `sweep.restore` already takes this wallet; `sweep.sign`
+    // opened a second adapter over a second monero-ts wallet. `open` is a no-op when the address already matches
+    // (the page has opened and synced this wallet), and the withdrawal calls go to the same underlying wallet.
+    async open(plan) {
+      if (wallet === null) throw new SdkError("wallet-not-connected", { vm: XMR_VM, surface: "open" });
+      const wanted = plan && plan.address ? String(plan.address) : null;
+      if (wanted && address !== wanted) throw new SdkError("recovery-failed", { step: "address" });
+      return undefined;
+    },
+
+    async sweepUnlocked(request) {
+      return await need("sweepUnlocked").sweepUnlocked({ address: request.address, relay: request.relay });
+    },
+
+    async relay(signed) {
+      return await need("relay").relayTxs(signed);
+    },
+
+    // Optional, like every withdrawal adapter: a library that reports no fee answers null rather than a zero.
+    async fee(signed) {
+      const tx = Array.isArray(signed) ? signed[0] : signed;
+      if (!tx || typeof tx.getFee !== "function") return null;
+      const value = tx.getFee();
+      return value === null || value === undefined ? null : String(value);
+    },
+
     // THE MONERO WALLET HAS NO EVENTS (monero-ts has no on/removeListener): a subscriber receives a notification
     // after connect and after sync, and the subscription promises nothing more. Unsubscribing is the same as the EVM
     // adapter's.

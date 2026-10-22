@@ -1398,6 +1398,11 @@ export interface SweepWallet {
   chainId(): string;
   unlockedBalance(): Promise<bigint | number | string>;
   sync(): Promise<void>;
+  /** The withdrawal role: no-op when this wallet is already open on the plan's address. */
+  open(plan: SweepPlan): Promise<void>;
+  sweepUnlocked(request: { readonly address: string; readonly relay: boolean }): Promise<unknown>;
+  relay(signed: unknown): Promise<readonly string[]>;
+  fee?(signed: unknown): Promise<string | null>;
   close(): Promise<void>;
   driver(): unknown;
 }
@@ -1489,8 +1494,10 @@ export type SweepMissing = "restore-height" | "spendable" | "revealed-half";
 export interface SweepRunRequest extends SweepPlanRequest {
   /** Where to withdraw the XMR to. */
   readonly to: string;
+  /** An already opened and synced adapter, the same one `restore` used. */
+  readonly wallet?: MoneroWalletAdapter;
   /** Returns a Monero wallet: the core does not drag in WASM. */
-  readonly connectWallet: (plan: SweepPlan) => Promise<MoneroWalletAdapter>;
+  readonly connectWallet?: (plan: SweepPlan) => Promise<MoneroWalletAdapter>;
 }
 
 /**
