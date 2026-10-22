@@ -495,22 +495,28 @@ async function moneroReadersFromNodes({ nodes = [], network = null, fetchImpl = 
 
 async function recoveredStartHeight(order, { evmBlockTime, moneroTip, moneroBlockTimestamp, cache }) {
   if (order.blockNumber === null || order.blockNumber === undefined) {
-    return { startHeight: null, startHeightReason: "no-block-number" };
+    return { startHeight: null, startHeightReason: "no-block-number", blockTime: null };
   }
-  if (typeof evmBlockTime !== "function" || typeof moneroTip !== "function" || typeof moneroBlockTimestamp !== "function") {
-    return { startHeight: null, startHeightReason: "no-height-readers" };
+  // NOTHING TO READ WITH: no settlement block time and no Monero readers. That is a missing seam, not a missing date.
+  if (typeof evmBlockTime !== "function" && typeof moneroTip !== "function" && typeof moneroBlockTimestamp !== "function") {
+    return { startHeight: null, startHeightReason: "no-height-readers", blockTime: null };
   }
+  // THE BLOCK TIME IS PART OF THE FOUND ORDER. The page used to read the block again just to show a date; the
+  // timestamp is already needed here for the Monero height, so it is returned with it.
   let timestamp = cache.get(order.blockNumber);
   if (timestamp === undefined) {
-    timestamp = secondsOf(await evmBlockTime(order.blockNumber));
-    if (timestamp === null) return { startHeight: null, startHeightReason: "no-block-time" };
+    timestamp = typeof evmBlockTime === "function" ? secondsOf(await evmBlockTime(order.blockNumber)) : null;
+    if (timestamp === null) return { startHeight: null, startHeightReason: "no-block-time", blockTime: null };
     cache.set(order.blockNumber, timestamp);
+  }
+  if (typeof moneroTip !== "function" || typeof moneroBlockTimestamp !== "function") {
+    return { startHeight: null, startHeightReason: "no-height-readers", blockTime: timestamp };
   }
   try {
     const height = await heightAtOrBefore(timestamp, { tip: moneroTip, headerTimestamp: moneroBlockTimestamp });
-    return { startHeight: Math.max(0, height - MONERO_HEIGHT_SAFETY_BLOCKS), startHeightReason: null };
+    return { startHeight: Math.max(0, height - MONERO_HEIGHT_SAFETY_BLOCKS), startHeightReason: null, blockTime: timestamp };
   } catch {
-    return { startHeight: null, startHeightReason: "monero-header" };
+    return { startHeight: null, startHeightReason: "monero-header", blockTime: timestamp };
   }
 }
 

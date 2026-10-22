@@ -153,6 +153,7 @@ export const recoveryKeyCheck = async () => {
   check(withHeight.swaps.length === 1, "the height search lost the order");
   check(withHeight.swaps[0].startHeight === 939, `the start height is ${withHeight.swaps[0].startHeight}, expected 939 (999 - 60)`);
   check(withHeight.swaps[0].startHeightReason === null, "a derived start height carries a refusal reason");
+  check(withHeight.swaps[0].blockTime === 1_000_000, `the block time is ${withHeight.swaps[0].blockTime}`);
   const nodeFetch = async (url, options) => {
     const request = JSON.parse(options.body);
     // A REAL NODE'S TOP BLOCK IS height - 1: `get_info.height` counts blocks, and a header request at `height` answers
@@ -194,6 +195,7 @@ export const recoveryKeyCheck = async () => {
   });
   check(withoutHeight.swaps[0].startHeight === null && withoutHeight.swaps[0].startHeightReason === "no-height-readers",
     "a search without readers did not name the missing height");
+  check(withoutHeight.swaps[0].blockTime === null, `a search without a block-time reader returned ${withoutHeight.swaps[0].blockTime}`);
   notes.push("the search matches a commitment and filters by address without sending a secret; it derives the Monero start height");
 
   const answer = (result) => async () => ({ ok: true, json: async () => ({ result }) });
