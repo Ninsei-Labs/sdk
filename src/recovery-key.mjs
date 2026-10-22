@@ -612,6 +612,15 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
     const readers = await moneroReadersFromNodes({ nodes: xmrNodes, network: moneroNetwork, fetchImpl });
     if (readers) { tip = tip || readers.tip; header = header || readers.headerTimestamp; }
   }
+  // THE ORDER IS NATIVE, AND THE PAYING TOKEN IS NOT ON THE CHAIN. The escrow receives the settlement network's
+  // native coin (`amount` is wei); which token the person swapped into it (USDC, USDT, ...) belongs to the DEX/quote
+  // record, not to OrderCreated or the clone. `payToken: null` plus a reason is the honest answer here; an invented
+  // "USDC" would be a claim the chain does not support.
+  for (const order of found) {
+    order.settlementToken = "native";
+    order.payToken = null;
+    order.payTokenReason = "not-on-chain";
+  }
   for (const order of found) {
     Object.assign(order, await recoveredStartHeight(order, { evmBlockTime, moneroTip: tip, moneroBlockTimestamp: header, cache }));
   }

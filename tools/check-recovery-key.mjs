@@ -132,6 +132,8 @@ export const recoveryKeyCheck = async () => {
   });
   check(found.swaps.length === 1 && found.swaps[0].index === 0, `the search found ${found.swaps.length} orders`);
   check(found.swaps[0] && found.swaps[0].side === "locker", "the search named the wrong side");
+  check(found.swaps[0].settlementToken === "native" && found.swaps[0].payToken === null &&
+    found.swaps[0].payTokenReason === "not-on-chain", "the found order invented a paying token");
   check(calls.length === 2, `an address query made ${calls.length} log calls, expected 2`);
   check(calls.every((call) => !call.topics.some((topic) => String(topic).toLowerCase().includes(halves.spendHalf.slice(2, 10)))), "a half was put into the log filter");
   check(found.swaps[0].xmrAmount === null && found.swaps[0].xmrAmountReason === "no-code-reader",
