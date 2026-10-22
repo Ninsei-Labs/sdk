@@ -325,6 +325,8 @@ export interface FoundSwap {
   readonly transactionHash: string | null;
   readonly blockNumber: number | null;
   readonly logIndex: number | null;
+  /** The settlement block timestamp in seconds, when the caller passed `evmBlockTime`; null otherwise. */
+  readonly blockTime: number | null;
   readonly index: number;
   readonly side: "locker" | "claimer";
   /** The Monero height a withdrawal may start from, derived from the order's block time. Null when the caller did
