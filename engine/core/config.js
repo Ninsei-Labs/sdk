@@ -908,14 +908,17 @@ export const MONERO = {
 };
 
 // ---------------------------------------------------------------------------
-// The backend (app/): swap sessions and watching the Monero leg.
+// A backend is OPTIONAL (app/): the SDK does not point requests at the page's own origin.
 //
-// The API lives on the same domain at /api/ (Angie proxies to 127.0.0.1:8787), so CSP needs no edit - connect-src
-// 'self' covers it. Locally the same path is served with an --api flag - also without touching the policy.
+// A caller that needs one passes `apiBase` explicitly; without it the swap engine watches the chain and the maker,
+// not a service. The legacy session calls were removed for that reason.
 // ---------------------------------------------------------------------------
 export const API = {
-  base: "/api",
-  // The Monero-leg source: 'app' - the real backend over HTTP, 'mock' - the demo simulator with no network.
+  // NO BACKEND BY DEFAULT. A page that needs one passes the base explicitly; nothing in the SDK points requests at
+  // the page's own origin. The legacy session calls were removed for the same reason: a host could link the visitor
+  // to the escrow from a request the widget never needed.
+  base: null,
+  // The Monero-leg source: 'app' - a backend the caller explicitly configured, 'mock' - the demo simulator.
   xmrSource: "app",
   pollMs: 5_000, // how often the front end polls a swap session
   // HOW MANY PROVIDERS TO SHOW in the price block. A list of dozens of rows is unreadable, and a person cannot

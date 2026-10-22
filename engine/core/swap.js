@@ -29,7 +29,7 @@ import * as node from "../monero/node.js";
 // The Monero-leg source: in "app" mode confirmations and arrivals come from the backend,
 // in "mock" mode - from the demo simulator. Exactly what goes outward (only the address and view key)
 // is checked mechanically.
-import { XMR_STATUS, explorerXmrTx, fetchSession, isLiveSource, openSession, pollInterval, xmrView } from "./chainSource.js";
+import { XMR_STATUS, explorerXmrTx, isLiveSource, xmrView } from "./chainSource.js";
 import { watchOnlyShareFromWallet } from "../recovery/restore.js";
 
 export const STEP_LABELS = [
@@ -788,25 +788,6 @@ function emit() {
   }
 }
 
-// --- live mode: the swap session on the backend -----------------------------------------------
-//
-// The poll runs without waiting: the screen ticker must not wait for the network, else with an unavailable backend
-// the demo starts to lag. The result is put into the swap itself (xmrSession / xmrSessionError), and derive()
-// reads it as ordinary state - it stays a pure function.
-const liveInFlight = new Set();
-
-function applyLive(id, patch) {
-  const s = loadState();
-  if (!s.swaps[id]) return;
-  Object.assign(s.swaps[id], patch);
-  saveState(s);
-}
-
-// The time of the last ATTEMPT to reach the backend per swap. Attempts, not successes: rate limiting must work
-// even when the request fails.
-const liveLastTry = new Map();
-
-
 // THE DEAL KEY: THE PAGE AND THE APP NAME IT DIFFERENTLY. The page has its own id (lives in the browser), the
 // app its own (localtest-...): the id is set by the app when it creates the watch record. The page asked for the
 // XMR state by ITS OWN id, which the app does not know and answers with a refusal. From outside it looks like
@@ -830,188 +811,21 @@ export function dealSwapIds(swap) {
   return [...ids];
 }
 
-const serverIdByAddress = new Map();
-
-// WE LOOK FOR THE DEAL'S FACTS ACROSS ALL ITS RECORDS IN THE BROWSER. The page keeps TWO records per deal: one
-// created by the swap (Monero address, expected XMR amount), another by the escrow (halves, escrow address). A
-// screen opened on the escrow record did not know the expected amount, the session was not created at all and the
-// readiness button did not turn on - although the app was already reporting readiness. The records are tied by the SHARED Monero address: one per deal.
-function dealFactsFor(swap) {
-  const w0 = (() => { try { return halvesWalletOf(swap) || {}; } catch { return {}; } })();
-  let address = w0.address || (swap && swap.escrow && swap.escrow.moneroAddress) || (swap && swap.xmrSession && swap.xmrSession.address) || null;
-  let amountXmr = Number(swap && swap.xmrAmount) > 0 ? Number(swap.xmrAmount) : null;
-  let source = "own record";
-  if (address && amountXmr === null) {
-    for (const other of Object.values((loadState() || {}).swaps || {})) {
-      if (!other || other === swap) continue;
-      const w = (() => { try { return halvesWalletOf(other) || {}; } catch { return {}; } })();
-      if (!w.address || w.address !== address) continue;
-      if (Number(other.xmrAmount) > 0) { amountXmr = Number(other.xmrAmount); source = "another record of the same deal (" + String(other.id || "?") + ")"; break; }
-    }
-  }
-  if (!address) {
-    for (const other of Object.values((loadState() || {}).swaps || {})) {
-      const w = (() => { try { return halvesWalletOf(other) || {}; } catch { return {}; } })();
-      if (w.address && Number(other.xmrAmount) > 0) { address = w.address; amountXmr = amountXmr || Number(other.xmrAmount); source = "another record of the same deal"; break; }
-    }
-  }
-  return { address, amountXmr, source };
-}
-
-// WE TAKE THE DEAL ADDRESS FROM EVERYWHERE IT MAY LIE. A browser deal and the app's watch record are DIFFERENT
-// records about one deal (the page creates its own for the escrow, the app one for watching the address), so the
-// page's record does not always have the address: on the escrow record it lies in the halves, not in the
-// escrow.moneroAddress field. A live run therefore polled a dead id, got 404 and left the readiness button off.
-// Extracted separately so the same address is used by the server height lookup too.
-function dealMoneroAddress(swap) {
-  const fromHalves = (() => { try { return (halvesWalletOf(swap) || {}).address || null; } catch { return null; } })();
-  return (swap && swap.escrow && swap.escrow.moneroAddress)
-    || (swap && swap.xmrSession && swap.xmrSession.address)
-    || (swap && swap.swapWallet && swap.swapWallet.address)
-    || fromHalves
-    || null;
-}
-
 // THE SCAN HEIGHT THE APP KNOWS. Needed by OLD deals' files: their record has no birthHeight (the field appeared
 // later), while the app resolved and stored the height when registering the watch. The source is ours, so it does
 // not depend on someone else's Monero node. The server is silent - we return null and the caller keeps the
 // previous behaviour: the height comes from other sources or the file honestly warns of its absence.
-export async function serverRestoreHeightFor(swap, { attempts = 3, pauseMs = 1200 } = {}) {
-  const addr = dealMoneroAddress(swap);
-  if (!addr) return null;
-  // NOT ONE ATTEMPT. The app's watch row appears the same instant as the escrow, and the file may be issued a
-  // hair earlier: then the fallback source is silent and null goes into the file - and there is nowhere else to
-  // get the height, the file is already with the owner. A few short attempts close this gap instead of turning
-  // it into an empty field; the price is fractions of a second in the rare case when there is no row at all.
-  for (let i = 0; i < attempts; i++) {
-    try {
-      const r = await fetch("/api/swaps", { headers: { accept: "application/json" } });
-      if (r.ok) {
-        const j = await r.json();
-        const rows = Array.isArray(j) ? j : (j.swaps || []);
-        const row = rows.find((x) => String((x && x.address) || "") === String(addr));
-        const h = Number(row && row.restoreHeight);
-        if (Number.isFinite(h) && h > 0) return h;
-      }
-    } catch {
-      /* try again: the service may have been busy with the first request */
-    }
-    if (i < attempts - 1) await new Promise((r) => setTimeout(r, pauseMs));
-  }
+export async function serverRestoreHeightFor() {
+  // NO BACKEND LOOKUP. The app's watch record is not a source for the SDK any more: asking the page's own host by
+  // the deal's Monero address is exactly the request the owner removed. A caller that still has a backend passes the
+  // height itself; otherwise the recovery file says it is missing.
   return null;
 }
 
-async function resolveServerSwapId(swap) {
-  const addr = dealMoneroAddress(swap);
-  if (!addr) return null;
-  if (serverIdByAddress.has(addr)) return serverIdByAddress.get(addr);
-  try {
-    const r = await fetch("/api/swaps", { headers: { accept: "application/json" } });
-    if (!r.ok) return null;
-    const j = await r.json();
-    const rows = Array.isArray(j) ? j : (j.swaps || []);
-    const row = rows.find((x) => String((x && x.address) || "") === String(addr));
-    if (!row || !row.id) return null;
-    serverIdByAddress.set(addr, String(row.id));
-    return String(row.id);
-  } catch {
-    return null;   // the server is silent - we keep the previous behaviour, the screen does not wait for the network
-  }
-}
-
-function refreshLiveSession(id) {
-  if (liveInFlight.has(id)) return;
-  // No more than once per pollMs per swap, REGARDLESS of whether the session survived. The limit used to stand
-  // only in the "session exists" branch: if the request failed (429 from the proxy, 502 from a timeout), the
-  // session was not saved, the limit did not apply - and the tick repeated the request every 5 seconds for EACH
-  // swap. With eight accumulated swaps that produced a stream of 429s: the app fought itself.
-  const now = Date.now();
-  const lastTry = liveLastTry.get(id) || 0;
-  if (now - lastTry < pollInterval()) return;
-  liveLastTry.set(id, now);
-  liveInFlight.add(id);
-  (async () => {
-    try {
-      const fresh = loadState().swaps[id];
-      if (!fresh || fresh.settlement) return;
-      if (!fresh.xmrSession) {
-        // The swap wallet is created in the browser; only the address and view key go outward (see chainSource).
-        // THE EXPECTED AMOUNT IS MANDATORY. Without it we do not create a session at all: the wallet is the same
-        // as on the confirmation screen, so the address is already watched. Otherwise a second truth about one
-        // deal would appear at the same address, and a record without an amount would let an underpayment through.
-        // As soon as the amount appears, the next tick creates the session itself.
-        const facts = dealFactsFor(fresh);
-        const amountXmr = facts.amountXmr;
-        if (!Number.isFinite(amountXmr) || amountXmr <= 0) {
-          pushLog(fresh, simElapsed(fresh), "Backend session not opened yet: amount of XMR is unknown", String((fresh && fresh.xmrAmount) ?? "no"));
-          return;
-        }
-        if (facts.source !== "own record") {
-          pushLog(fresh, simElapsed(fresh), "Amount of XMR taken from the deal's other record", facts.source + ", " + String(amountXmr));
-        }
-        const share = watchOnlyShareFromWallet({ swapId: fresh.id, wallet: fresh.swapWallet });
-        const opened = await openSession({
-          swapId: fresh.id,
-          share,
-          expectedAmountXmr: amountXmr,
-          chain: fresh.network,
-        });
-        if (opened.ok) {
-          applyLive(id, { xmrSession: opened.session, xmrSessionError: null });
-          const s2 = loadState();
-          if (s2.swaps[id]) {
-            pushLog(s2.swaps[id], simElapsed(s2.swaps[id]), "Backend session opened (watch-only: address + view key)", opened.session.address || "");
-            saveState(s2);
-          }
-        } else {
-          applyLive(id, { xmrSessionError: opened.error });
-        }
-      } else if (Date.now() - (fresh.xmrSession.at || 0) >= pollInterval()) {
-        // WE ASK BY THE APP'S ID, not our own: see resolveServerSwapId. If the record was not found, we do NOT
-        // ask by our own id - the app will answer 404 and the screen will silently wait forever. Instead we
-        // create the watch afresh: the app itself ties it by address to the existing record and returns the same
-        // one, not a second truth about one deal.
-        const serverId = await resolveServerSwapId(fresh);
-        const polled = await fetchSession(serverId || id);
-        if (polled.ok) {
-          applyLive(id, { xmrSession: polled.session, xmrSessionError: null });
-        } else if (!serverId) {
-          const share = watchOnlyShareFromWallet({ swapId: fresh.id, wallet: fresh.swapWallet });
-          const again = await openSession({
-            swapId: fresh.id, share, expectedAmountXmr: Number(fresh.xmrAmount), chain: fresh.network,
-          });
-          if (again.ok) {
-            applyLive(id, { xmrSession: again.session, xmrSessionError: null });
-            const s3 = loadState();
-            if (s3.swaps[id]) { pushLog(s3.swaps[id], simElapsed(s3.swaps[id]), "Backend record re-linked by the Monero address", again.session.address || ""); saveState(s3); }
-          } else {
-            applyLive(id, { xmrSessionError: again.error });
-          }
-        } else {
-          applyLive(id, { xmrSessionError: polled.error });
-        }
-      }
-    } catch (e) {
-      applyLive(id, { xmrSessionError: "session did not open: " + e.message });
-    } finally {
-      liveInFlight.delete(id);
-    }
-  })();
-}
-
-// The deals currently open on screen. The core polls the backend ONLY for them.
-//
-// Why: the tick used to poll all unfinished deals indiscriminately. After a few presses of the sign button they
-// accumulated to eight, and the app itself flooded the proxy with requests - a 429 came back. And on the main
-// page there is nothing to watch at all: there is no deal yet.
-//
-// An empty set (the default) means "poll nothing". Screens that need watching report their set themselves: the
-// deal list - all unfinished, the deal screen - one.
-let liveFocusIds = new Set();
-
+// Kept for callers that used to name the deals on screen. There is no backend poll any more; the function only
+// returns how many ids were named, so an old caller does not break.
 export function setLiveFocus(ids) {
-  liveFocusIds = new Set(Array.isArray(ids) ? ids.map(String) : []);
-  return liveFocusIds.size;
+  return new Set(Array.isArray(ids) ? ids.map(String) : []).size;
 }
 
 export function tick() {
@@ -1024,7 +838,6 @@ export function tick() {
     // Live mode: a session on the backend. We create it on the first tick after the swap is created and then
     // poll no more often than API.pollMs. Not awaited: the screen must not wait for the network.
     // We poll only what is open on screen.
-    if (isLiveSource(swap.xmrSource) && liveFocusIds.has(String(swap.id))) refreshLiveSession(swap.id);
 
     const view = derive(swap);
 
@@ -1080,26 +893,7 @@ export function tick() {
       changed = true;
     }
 
-    // Live mode: the withdrawal is confirmed by the sweep page (a watch-only wallet cannot see outgoing
-    // transfers), so the final state is taken from the session status, and the hash is not invented.
-    if (isLiveSource(swap.xmrSource) && swap.xmrSession && swap.xmrSession.status === XMR_STATUS.SWEPT && !swap.settlement) {
-      const atSim = view.sim;
-      swap.settlement = {
-        kind: "success",
-        phase: TERMINAL.success.phase,
-        atSim,
-        txid: swap.xmrSession.sweepTxid || null,
-        by: "your sweep wallet",
-      };
-      pushLog(swap, atSim, "XMR swept by you (backend reported)", swap.settlement.txid || "");
-      const key = swap.id + ":success";
-      if (!notified.has(key)) {
-        notified.add(key);
-        notify("Swap " + swap.id + " complete: XMR is on your address", "ok");
-      }
-      changed = true;
-      continue;
-    }
+    // Live mode: the XMR arrives from the chain; the SDK does not confirm a sweep from a backend session.
 
     // happy path: after claim the user's wallet sweeps the XMR itself (litepaper §4.2)
     if (!isLiveSource(swap.xmrSource) && view.can.sweep && view.phase === "success") {

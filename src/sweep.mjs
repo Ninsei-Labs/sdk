@@ -209,30 +209,15 @@ export function createSweep({ http, config, call = null }) {
       const spendable = !!wallet.spendHalf;
       if (!spendable) missing.push("spendable");
 
-      // THE RESTORE HEIGHT: first from the file, then from the app BY ADDRESS - exactly as the sweep page does it.
-      // An unavailable app is a lack of data, not a refusal: the plan is returned anyway, and `missing` shows what
-      // is lacking.
+      // THE RESTORE HEIGHT COMES FROM THE FILE OR THE CHAIN. The SDK does not ask a service by address: a static
+      // page and a widget must not tell their own host which deal they are recovering. A missing height is named in
+      // `missing`; the caller can pass one from `findSwaps` or the person can type it.
       let restoreHeight = Number(wallet.restoreHeight) || 0;
-      let row = null;
-      try {
-        // THE PATH BY NAME, not by a string: the override comes through the `routes` option.
-        const answer = await http.json(config.route("swaps"));
-        const rows = Array.isArray(answer) ? answer : ((answer && answer.swaps) || []);
-        row = rows.find((x) => String((x && x.address) || "") === String(address)) || null;
-      } catch { row = null; }
-      const fromApp = Number(row && row.restoreHeight) || 0;
-      if (fromApp > 0) restoreHeight = fromApp;
       if (!(restoreHeight > 0)) missing.push("restore-height");
 
-      // THE COUNTERPARTY'S REVEALED HALF - FROM THE CHAIN, VIA THE APP. Exactly as the sweep page does it: POST to
-      // the named path, body { network, address }, where address is the ESCROW ADDRESS (not the Monero address).
-      // The half is published by the settlement that moves the ETH: a claim or a refund. Before that no one has the
-      // spend key, so "not revealed yet" is not an error but a state, and that is exactly where it lands in `missing`.
       // THE COUNTERPARTY'S REVEALED HALF - FROM THE CHAIN WHEN THE CALLER HAS A CHAIN READ. The half is public:
-      // `claim` and `refund` store it in `revealedHalf()` and emit `HalfRevealed`. A recovery page served from a
-      // static host has no `/escrow/revealed-half` route, so asking the app was the only path and a static page
-      // could never withdraw. The app route stays as the fallback for a caller that has no chain read and did
-      // configure an API base.
+      // `claim` and `refund` store it in `revealedHalf()` and emit `HalfRevealed`. There is no service fallback: a
+      // caller without a chain read gets `missing: ["revealed-half"]`, not a request to its own origin.
       let revealed = false;
       let revealedValue = null;
       const escrowAddress = wallet.escrowAddress || (payload.escrow && payload.escrow.address) || null;
@@ -244,17 +229,6 @@ export function createSweep({ http, config, call = null }) {
             revealed = true;
             revealedValue = half;
           }
-        } catch { revealed = false; }
-      }
-      if (!revealed && escrowAddress && config && config.apiBase) {
-        try {
-          const half = await http.json(config.route("revealedHalf"), {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ network: payload.network, address: escrowAddress }),
-          });
-          revealed = !!(half && half.ok && half.revealed && half.half);
-          if (revealed) revealedValue = String(half.half);
         } catch { revealed = false; }
       }
       if (!revealed) missing.push("revealed-half");
@@ -317,24 +291,6 @@ export function createSweep({ http, config, call = null }) {
     // SIGNING AND SENDING ARE DELIBERATELY SPLIT: between them the interface has time to show the person what will
     // leave, rather than telling them about it after sending. An empty remainder stops the withdrawal BEFORE
     // signing - otherwise the wallet would sign a transaction for zero and the refusal would look like success.
-    // TELLING THE SERVICE ABOUT THE WITHDRAWAL - SEPARATELY AND REPEATABLY. The mark does not affect the transfer
-    // (it is already on the network), so it can be repeated: the interface calls this even after `relay` if the
-    // report did not go through then.
-    async report(request) {
-      if (!request || typeof request.swapId !== "string" || !request.swapId) throw new SdkError("bad-input", { field: "swapId" });
-      if (typeof request.txid !== "string" || !request.txid) throw new SdkError("bad-input", { field: "txid" });
-      try {
-        const answer = await http.json(config.route("swept", { id: request.swapId }), {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ txid: request.txid }),
-        });
-        return { reported: !(answer && answer.ok === false) };
-      } catch {
-        // The service is unavailable - that is `reported: false`, not a withdrawal refusal: the money has already left.
-        return { reported: false };
-      }
-    },
 
     // SIGNING WITHOUT SENDING - AS A SEPARATE STEP. The core HOLDS the signed transaction until the person's
     // decision: otherwise the interface could not show what exactly will leave, and would tell about it only after
@@ -410,14 +366,9 @@ export function createSweep({ http, config, call = null }) {
       try {
         const txids = await wallet.relay(signed);
         const list = Array.isArray(txids) ? txids : [];
-        // MARKING THE WITHDRAWAL - AFTER SENDING AND NOT AFFECTING IT. The transfer is already on the network; the
-        // report merely tells the service that the XMR left. So a failed report does NOT make the withdrawal
-        // unsuccessful: it gives `reported: false`, so the interface offers to report again - by the same path as
-        // here (`report`).
-        const reported = plan.swapId && list.length
-          ? (await api.report({ swapId: plan.swapId, txid: list[0] })).reported
-          : false;
-        return { txids: list, swept: plan.address, reported };
+        // NO SERVICE REPORT. The transfer is on the Monero network; the SDK does not ask the page's own host to
+        // record it, so the host cannot link the visitor's IP to the escrow and the withdrawal.
+        return { txids: list, swept: plan.address };
       } finally {
         await wallet.close();
       }

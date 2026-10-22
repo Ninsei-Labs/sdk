@@ -3,6 +3,7 @@
 // The page used to assemble the SDK's own payload from the order and the key. That rule is now here: the side,
 // the person's spend and view points, the other side's points, the joint address and the restore height.
 import { createSweep } from "../src/sweep.mjs";
+import { createSwaps } from "../src/swaps.mjs";
 import { takerHalves } from "../src/recovery-key.mjs";
 
 const WORDS = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
@@ -68,6 +69,16 @@ export const sweepFromOrderCheck = async () => {
   } catch (error) { missing = error; }
   check(missing && missing.code === "bad-input" && missing.params && missing.params.field === "mnemonic",
     "a request without the key was not refused");
+
+  // NO BACKEND BY DEFAULT: a watch without the client's verify data has nothing to ask and must name that, not call
+  // the page's own origin.
+  const swaps = createSwaps({ config: { limits: { watchPollMs: 1, watchTimeoutMs: 5 } } });
+  let noBackend = null;
+  try { await swaps.watch({ id: "no-backend" }); } catch (error) { noBackend = error; }
+  check(noBackend && noBackend.code === "bad-input" && noBackend.params && noBackend.params.why === "no-backend",
+    "a watch without verify data did not name the missing backend");
+  check(typeof sweep.report !== "function", "sweep.report still exists");
+  notes.push("the SDK does not call a backend by default and has no service report");
 
   return { note: "the sweep builds its payload from the key and a found order", problems, notes };
 };

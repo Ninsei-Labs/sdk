@@ -1,3 +1,11 @@
+## Unreleased
+
+- The withdrawal window falls back to the full scan when `scanTxs` or the balance read fails, and reports
+  `window.fallbackWhy: "window-scan"`.
+- The SDK does not call a backend by default: the `/api/swaps` lookups, the `swept` report, the session calls and the
+  relative `apiBase` default are gone. A caller that needs a backend passes its base explicitly; a watch without
+  `verify` data is a named `no-backend` refusal.
+
 ## 0.51.1 — 2026-10-22
 
 A BUSY NODE NO LONGER ENDS A WITHDRAWAL, AND MISSING HEIGHT DATA HAS A NAME.

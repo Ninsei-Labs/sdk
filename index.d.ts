@@ -1303,14 +1303,8 @@ export interface SweepApi {
    * the person what will leave, BEFORE sending.
    */
   sign(request: SweepRunRequest): Promise<SweepSignResult>;
-  /** Send what `sign` signed, close the wallet and tell the service about the withdrawal. */
+  /** Send what `sign` signed, close the wallet and return the transaction hashes. */
   relay(request: SweepRelayRequest): Promise<SweepRunResult>;
-  /**
-   * TELL THE SERVICE ABOUT THE WITHDRAWAL. The mark does not affect the transfer - it is already on the network - so
-   * it can be repeated: the interface calls this even after `relay` if the report did not go through then. A
-   * connection refusal gives `reported: false`.
-   */
-  report(request: SweepReportRequest): Promise<SweepReportResult>;
   /** Perform the withdrawal as a whole (`sign` + `relay`). */
   run(request: SweepRunRequest): Promise<SweepRunResult>;
 }
@@ -1419,16 +1413,6 @@ export interface SweepWallet {
   fee?(signed: unknown): Promise<string | null>;
   close(): Promise<void>;
   driver(): unknown;
-}
-
-/** The withdrawal mark: the swap identifier and the transfer hash. */
-export interface SweepReportRequest {
-  readonly swapId: string;
-  readonly txid: string;
-}
-
-export interface SweepReportResult {
-  readonly reported: boolean;
 }
 
 export interface SweepFromOrderRequest {
@@ -1585,12 +1569,6 @@ export interface SweepRelayRequest {
 export interface SweepRunResult {
   readonly txids: readonly string[];
   readonly swept: string;
-  /**
-   * Whether the service was told about the withdrawal. THE REPORT DOES NOT AFFECT THE TRANSFER - it is already on
-   * the network - so a failed report does not make the withdrawal unsuccessful: it gives `reported: false`, so the
-   * interface offers to report again.
-   */
-  readonly reported: boolean;
 }
 
 // --- Recovery// --- Recovery ------------------------------------------------------------------------------

@@ -142,7 +142,7 @@ const normalizeOptions = (options) => {
   return {
     settlement: { chain: settlement.chain, vm: settlement.vm },
     xmrNetwork: o.xmrNetwork,
-    apiBase: typeof o.apiBase === "string" && o.apiBase ? o.apiBase : "/api",
+    apiBase: typeof o.apiBase === "string" && o.apiBase ? o.apiBase : null,
     assetsBase: typeof o.assetsBase === "string" && o.assetsBase ? o.assetsBase : "/",
     mode,
     storage: o.storage || null,

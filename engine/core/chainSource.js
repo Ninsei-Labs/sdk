@@ -67,6 +67,7 @@ export function pollInterval() {
 // see the reason, not a blank page.
 async function api(path, { method = "GET", body, base, timeoutMs = API.timeoutMs, fetchImpl } = {}) {
   const target = base || apiBaseOverride || API.base;
+  if (!target) return { ok: false, status: 0, error: "no backend base configured" };
   const doFetch = fetchImpl || globalThis.fetch;
   if (typeof doFetch !== "function") return { ok: false, status: 0, error: "no fetch: backend unavailable" };
   const ctl = typeof AbortController === "function" ? new AbortController() : null;
@@ -142,66 +143,9 @@ export function sameSwapTarget(a, b) {
     a.chain === b.chain;
 }
 
-export async function openSession({ swapId, share, expectedAmountXmr, chain, restoreHeight }, opts = {}) {
-  const src = share || {};
-  const address = src.address || null;
-  const viewKey = src.viewKey || src.privateViewKey || null;
-  if (!address || !viewKey) {
-    return { ok: false, status: 0, error: "the watch-only share has no address/viewKey - nothing to send to the backend" };
-  }
-  // THE EXPECTED AMOUNT IS MANDATORY and must be a number. Before, a non-number meant no field, and the swap
-  // was created WITHOUT an amount: any arrival was accepted as enough, so an underpayment looked like a done
-  // deal. Now it is a refusal with an explanation.
-  const amountXmr = Number(expectedAmountXmr);
-  if (!Number.isFinite(amountXmr) || amountXmr <= 0) {
-    const where = (new Error("caller").stack || "").split("\n").slice(1, 4).map((x) => x.trim().split("/").pop()).join(" <- ");
-    console.warn("[chainSource] no expected amount, call from: " + where);
-    return { ok: false, status: 0, error: "the expected XMR amount is unknown (" + String(expectedAmountXmr) + "): without it no watch is created" };
-  }
-  const wanted = {
-    swapId: swapId || src.swapId || null,
-    network: src.network || xmrNetworkForSource(),
-    address,
-    viewKey,
-    expectedAmountXmr: amountXmr,
-    restoreHeight: Number.isFinite(Number(restoreHeight)) && Number(restoreHeight) > 0 ? Number(restoreHeight) : Number(src.restoreHeight) || undefined,
-    chain: chain || undefined,
-  };
-  // The body is rebuilt from the allowlist: what is not in the list never reaches the request.
-  const body = {};
-  for (const field of ALLOWED_SESSION_FIELDS) {
-    if (wanted[field] !== undefined && wanted[field] !== null) body[field] = wanted[field];
-  }
-  const res = await api("/swaps", { method: "POST", body, ...opts });
-  if (!res.ok) return res;
-  return { ok: true, status: res.status, created: res.json?.created !== false, session: normalizeSession(res.json) };
-}
-
-export async function fetchSession(swapId, opts = {}) {
-  const res = await api(`/swaps/${encodeURIComponent(swapId)}`, opts);
-  if (!res.ok) return res;
-  return { ok: true, status: res.status, session: normalizeSession(res.json) };
-}
-
-// Tell the backend the XMR was withdrawn (the hash of the real transfer). Needed because a watch-only wallet
-// cannot see outgoing transfers.
-export async function reportSwept(swapId, txid, opts = {}) {
-  const res = await api(`/swaps/${encodeURIComponent(swapId)}/swept`, { method: "POST", body: { txid }, ...opts });
-  return res.ok ? { ok: true, status: res.status, session: normalizeSession(res.json) } : res;
-}
-
-// Close the swap (cancel or refund on the backend): the watch stops.
-export async function closeSession(swapId, reason = "cancelled", opts = {}) {
-  const res = await api(`/swaps/${encodeURIComponent(swapId)}/closed`, { method: "POST", body: { reason }, ...opts });
-  return res.ok ? { ok: true, status: res.status, session: normalizeSession(res.json) } : res;
-}
-
-// Backend state: is it up and does it see the wallet. The screen needs this to show 'backend unavailable'
-// before the user sends money, not after.
-export async function health(opts = {}) {
-  const res = await api("/health", opts);
-  return res.ok ? { ok: true, ...res.json } : res;
-}
+// NO SESSION CALLS. The swap engine no longer creates a watch on a backend: the address and the view key are not
+// sent to the page's own host, and the SDK does not poll a session for the Monero leg. A caller that needs a
+// backend later passes its base explicitly, outside these rules.
 
 // ---------------------------------------------------------------------------
 // The Monero-leg snapshot for the state engine

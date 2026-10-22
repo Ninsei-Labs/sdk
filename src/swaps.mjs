@@ -46,8 +46,8 @@ import { declineOf, logReaderOf, blockBoundaryOf, DECLINED_TOPIC0, DECLINED_TERM
 //
 // WHAT CAN BE A KIND, EXHAUSTIVELY. The record's settlement belongs to the engine (engine/core/swap.js, the only
 // module that assigns swap.settlement), and `declined` is the one kind written by us (src/decline.mjs):
-//   `success`    - the swap completed and the XMR is on the depositor's address (sweepNow, the auto-sweep in the
-//                  ticker, and the backend-reported sweep on the live path);
+//   `success`    - the swap completed and the XMR is on the depositor's address (sweepNow and the auto-sweep in the
+//                  ticker; the SDK does not take it from a backend session);
 //   `refund_eth` - the ETH went back to the depositor. TWO WRITERS, ONE KIND: the person's own refund (refundEth)
 //                  and the watchtower inside the ticker both write `kind: "refund_eth"` with the phase
 //                  `refunded_eth`, so there is exactly ONE refund-shaped kind here and nothing is collapsed;
@@ -989,20 +989,21 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         }
       }
 
-      // 5. THE SERVER: RECORDING THE SWAP WITH US, THEN THE FACTORY WATCH RECORD FOR THE MONERO ADDRESS.
-      // THE ORDER IS EXACTLY THIS: first the swap becomes known to the service (by it, the service checks the escrow
-      // address against the CHAIN), and only then is the watch opened. The reverse order would leave a watch on a swap
-      // the service does not know.
-      // IF ANYTHING OF THIS FAILED - THE REFUSAL GOES OUT AS A CODE (server-unavailable / server-refused) with the step
-      // and the service's reason: the funds are already locked, and this must not be hidden in silence or in "success".
-      const server = await markOnServer(record.swap, escrowAddress, request.order);
-      const watch = await openWatch(record.swap, request.order);
+      // 5. A BACKEND IS OPTIONAL AND NEVER A DEFAULT. When the caller configured an API base, the swap is recorded
+      // there and the watch row is opened. Without one, the SDK returns the local state and the joint address: the
+      // caller watches the chain itself. The owner's rule: no request to the page's own origin.
+      let server = null;
+      let watch = null;
+      if (config && config.apiBase) {
+        server = await markOnServer(record.swap, escrowAddress, request.order);
+        watch = await openWatch(record.swap, request.order);
+      }
       // THE STATE IS NAMED, NOT PASSED OFF AS COMPLETION: the swap reached exactly "waiting for XMR at the joint address",
-      // and there is no arrival yet - `receivedXmr` is taken from the service's response, not implied by zero.
+      // and there is no arrival yet - `receivedXmr` is never implied by zero.
       return {
         id: record.swap.id || null,
         escrow: escrowAddress,
-        address: watch.address,
+        address: (watch && watch.address) || (record.swapWallet && record.swapWallet.address) || null,
         step: "xmr-incoming",
         server,
         watch,
@@ -1013,8 +1014,9 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
     /**
      * WAIT FOR THE XMR TO ARRIVE AT THE JOINT ADDRESS - the whole point of opening the watch.
      *
-     * The polling uses THE SAME request as the page's (GET /api/swaps/{id}), the rate and the timeout - from the
-     * configuration (config.limits.watchPollMs/watchTimeoutMs, the engine's defaults too) and are overridable here.
+     * The CLIENT checks the arrival from the Monero nodes (`verify`); there is no backend poll by default. The rate
+     * and the timeout come from the configuration (config.limits.watchPollMs/watchTimeoutMs) and are overridable here.
+     * A caller that explicitly configured `apiBase` may use the old watch-row flow instead.
      * IT ARRIVED - we return the FACT (the amount, the confirmations, the txid); WE DID NOT WAIT - a refusal with the
      * code `xmr-timeout`, separate from the others, so "the wait expired" is confused with neither a breakdown nor an
      * empty response. XMR ON THE ADDRESS BUT BARRED BY unlock_time is a THIRD answer with its own code `xmr-locked`
@@ -1056,6 +1058,11 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
           : (request.deadline && request.deadline.readyBy !== undefined ? Number(request.deadline.readyBy) : null);
         if (readyBy) xmrArrival.assertTimeForConfirmations({ readyBySec: readyBy, nowSec: Math.floor(Date.now() / 1000), minConfirmations, blockTimeSec: limitOf("xmrBlockTimeSec", 120) });
       }
+      const hasBackend = Boolean(config && config.apiBase);
+      // THE WATCH DOES NOT CALL A BACKEND BY DEFAULT. The client-side arrival check needs the joint address, the view
+      // secret and the spend public key; without them, and without an explicitly configured backend, there is nothing
+      // to wait on. That is a named refusal, not a request to the page's own origin.
+      if (!verifyRequest && !hasBackend) throw new SdkError("bad-input", { field: "verify", why: "no-backend" });
       const started = Date.now();
       // --- THE MAKER'S DECLINE: THE WAIT IS NOT STARTED AT ALL (issue #40). -------------------------------------
       // A decline leaves the escrow `refunded`, so nothing in the state says "do not wait any longer": without
@@ -1123,8 +1130,12 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       let last = null;
       for (;;) {
         await readDeclineLogs();
-        const body = await readWatch(id);
-        last = incomingOf(body);
+        // THE CLIENT-SIDE CHECK DOES NOT ASK THE SERVICE. Only a watch without `verify` and with an explicitly
+        // configured backend reads the watch row.
+        const body = verifyRequest ? {} : await readWatch(id);
+        last = verifyRequest
+          ? { address: request.address || escrowAddress, expectedXmr: request.expectedXmr ?? null, status: null }
+          : incomingOf(body);
         // THE DECLINE IS DECIDED BEFORE THE ARRIVAL IS LOOKED AT, and before the "foreign response" refusal below:
         // a declined swap's answer carries no `receivedXmr` at all, and refusing it as a bad response would name
         // the wrong thing (the state is known - it is a decline, not a broken answer).

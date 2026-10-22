@@ -1882,7 +1882,7 @@ const declineFacade = (mod, { answers, logs = null }) => {
       return { ok: true, status: 200, body };
     },
   };
-  const config = { route: (name, params) => "http://service.invalid/" + name + (params && params.id ? "/" + params.id : ""),
+  const config = { apiBase: "http://service.invalid", route: (name, params) => "http://service.invalid/" + name + (params && params.id ? "/" + params.id : ""),
     limits: { watchPollMs: 1, watchTimeoutMs: 25 } };
   return { swaps: mod.createSwaps({ http, config, logs }), seen };
 };
