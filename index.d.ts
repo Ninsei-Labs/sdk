@@ -1346,6 +1346,8 @@ export interface SweepRestoreResult {
   /** Present when a window was requested: whether it was used, and why it was skipped. */
   readonly window?: {
     readonly used: boolean;
+    /** Whether the full scan ran because the window found nothing (or could not scan). */
+    readonly fallback: boolean;
     readonly skipped: string | null;
     readonly fromHeight: number;
     readonly toHeight: number;
