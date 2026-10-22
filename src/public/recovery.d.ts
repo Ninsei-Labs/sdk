@@ -327,6 +327,10 @@ export interface FoundSwap {
   readonly logIndex: number | null;
   /** The settlement block timestamp in seconds, when the caller passed `evmBlockTime`; null otherwise. */
   readonly blockTime: number | null;
+  /** The XMR side of the order in atomic units, read from the clone's condition word 18; null when no code reader
+   * was passed or the contract is not the expected clone. */
+  readonly xmrAmount: string | null;
+  readonly xmrAmountReason: "no-code-reader" | "code" | "not-clone" | null;
   readonly index: number;
   readonly side: "locker" | "claimer";
   /** The Monero height a withdrawal may start from, derived from the order's block time. Null when the caller did
@@ -385,6 +389,8 @@ export declare function findSwaps(request: {
   maxIndex?: number;
   /** Reads the settlement block timestamp, in seconds: (blockNumber) -> seconds. */
   evmBlockTime?: (blockNumber: number) => Promise<number>;
+  /** Reads contract code: (address) -> 0x-hex. Used to read the XMR amount from an order clone. */
+  evmCode?: (address: string) => Promise<string>;
   /** The Monero tip at the time of the search: () -> height. */
   moneroTip?: () => Promise<number>;
   /** A Monero block header timestamp, in seconds: (height) -> seconds. */
