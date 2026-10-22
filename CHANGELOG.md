@@ -1,3 +1,18 @@
+## 0.51.1 — 2026-10-22
+
+A BUSY NODE NO LONGER ENDS A WITHDRAWAL, AND MISSING HEIGHT DATA HAS A NAME.
+
+- `windowTxHashes` retries a `429`, a timeout and a `5xx` with `Retry-After` or exponential backoff; only a read that
+  still fails reaches the fallback.
+- `restoreWallet` runs the full scan when the window cannot be read and reports `window.fallback: true`,
+  `fallbackWhy: "window-read"` and the node's status. A malformed window is still a caller error, not a fallback.
+- A null settlement block time is `no-block-time`, not timestamp 0. An unreachable Monero node
+  (`monero-nodes-unreachable`) and a reachable node on another network (`monero-network-mismatch`) no longer share
+  `no-height-readers`.
+- `recoveryIndexTaken` is exported from `@ninsei-labs/sdk/recovery`.
+- The on-chain recovery-number check starts at the registry's escrow deployment block, not block 0; an explicit
+  `fromBlock` still wins.
+
 ## 0.51.0 — 2026-10-22
 
 THE WITHDRAWAL AND THE ON-CHAIN SEARCH NOW CARRY EVERYTHING THE KEY CAN KNOW.
