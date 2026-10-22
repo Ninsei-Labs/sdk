@@ -294,6 +294,12 @@ export interface ChainConfig {
   readonly nativeSymbol: string;
   readonly tokens: readonly TokenConfig[];
   readonly dex: { readonly routes: readonly unknown[] } | null;
+  /** The escrow deployment on this network, when there is one. `deploymentBlock` is the block that holds the factory's creation. */
+  readonly escrow: {
+    readonly address: string | null;
+    readonly mode: string | null;
+    readonly deploymentBlock: number | null;
+  } | null;
 }
 
 export interface TokenConfig {

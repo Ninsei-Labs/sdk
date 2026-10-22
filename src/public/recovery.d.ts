@@ -378,6 +378,8 @@ export declare function findSwaps(request: {
   address?: string | null;
   evmLogs: (request: { address: string; topics: (string | null)[]; fromBlock: number | string; toBlock: number | string }) => Promise<unknown[]>;
   fromBlock?: number | string;
+  /** The factory's deployment block from the chain registry; used when `fromBlock` is omitted. */
+  deploymentBlock?: number | null;
   toBlock?: number | string;
   gap?: number;
   maxIndex?: number;
