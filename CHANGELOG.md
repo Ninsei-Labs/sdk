@@ -1,3 +1,21 @@
+## 0.51.0 — 2026-10-22
+
+THE WITHDRAWAL AND THE ON-CHAIN SEARCH NOW CARRY EVERYTHING THE KEY CAN KNOW.
+
+- `sweep` keeps all 32 bytes of the revealed half; the old slice to 20 bytes made every real withdrawal fail.
+- The Monero node readers return the top block (`height - 1`) and accept the genesis timestamp, so `findSwaps` can
+  derive a start height instead of asking for a block that does not exist.
+- `quotes.firm` sends the taker's maker view half and requires the quote to echo it; without it a buy from the one
+  key could not be restored from the twelve words.
+- `quotes.sale` checks the signed claim tip with base plus priority fee, and `rankOffers` ranks a sale by
+  `amount × rate − claimTip`.
+- `sweep.restore` reports `window.fallback`; `findSwaps` returns `blockTime`, reads `xmrAmount` from the clone with
+  an `evmCode` reader, uses the factory's `deploymentBlock`, and names the native settlement while leaving the
+  paying token off-chain (`payToken: null`, `payTokenReason: "not-on-chain"`).
+- `sweep.fromOrder({ mnemonic, order })` builds the payload without a recovery file, and one wallet adapter now
+  serves both `sweep.restore` and `sweep.sign`.
+- The npm package ships the assets and `order-worker.js` its own code imports; Node floor is `>=24.22.1`.
+
 ## 0.50.0 — 2026-10-21
 
 A CLAIM IS SENT BY ITS CLAIMER, AND A SALE IS RANKED AFTER THE TIP.
