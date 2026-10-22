@@ -327,6 +327,12 @@ export interface FoundSwap {
   readonly logIndex: number | null;
   /** The settlement block timestamp in seconds, when the caller passed `evmBlockTime`; null otherwise. */
   readonly blockTime: number | null;
+  /** The settlement asset of the escrow. Current contracts are native-only. */
+  readonly settlementToken: "native";
+  /** The asset the person actually paid before the DEX leg. Not on the settlement chain, so `null` for a found order. */
+  readonly payToken: string | null;
+  /** Why `payToken` is absent. `not-on-chain` means the order event and clone carry no token; do not infer one. */
+  readonly payTokenReason: "not-on-chain";
   /** The XMR side of the order in atomic units, read from the clone's condition word 18; null when no code reader
    * was passed or the contract is not the expected clone. */
   readonly xmrAmount: string | null;

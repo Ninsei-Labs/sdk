@@ -155,6 +155,24 @@ the size is computed from the person's amount and is snapped to the node's grid 
 range is not aligned: it is the provider's refusal, and it arrives as a code. Indicative quotes commit to nothing;
 `quotes.firm` commits (stage 2).
 
+## Found orders and the paying token
+
+`findSwaps` returns the orders whose commitment came from the recovery key. Each found order reports:
+
+- `amount` — the escrow's **native** amount in wei;
+- `settlementToken: "native"` — what the escrow receives;
+- `xmrAmount` — the XMR side, read from the clone's condition word 18 when an `evmCode` reader is passed;
+- `payToken: null` and `payTokenReason: "not-on-chain"` — the asset the person actually paid before the DEX leg.
+
+The reason is structural, not an omission. `OrderCreated` and the clone carry no token field, and the current escrow is
+native-only. A user may have paid USDC, USDT or DAI, but that happened in the DEX leg and lives in the quote/order
+record, not in the settlement contract. Inventing a token from the pair or the UI would be a claim the chain cannot
+support.
+
+When a token is needed, the order can be joined with an off-chain quote record by the caller. A future ERC-20 escrow
+would have to put the token into the signed quote and the clone (and therefore a new order format and factory); only
+then can `findSwaps` return it from the chain and set `payTokenReason` to something other than `not-on-chain`.
+
 ## Extending to other networks (Tron, Solana and beyond)
 
 The package name is deliberately common: the shared part — the quote client, the Monero leg, the state machine,
