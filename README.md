@@ -26,6 +26,28 @@ machine). The wallet arrives as an EIP-1193 provider, storage as an adapter, and
 What is not ready names itself with the code `not-implemented` with the fields `surface` and `stage`: an empty
 value that looks like data is more dangerous than a refusal.
 
+## Settlement legs and VM profiles
+
+The settlement side is a driver, not a chain id switch. A driver declares what it can do, and a VM profile says
+what that side looks like. The profile is metadata: it does not make a network runnable.
+
+| VM | Address form | Settlement | Ref | Finality | Driver today |
+|---|---|---|---|---|---|
+| `evm` | `hex-20` | contract | address | confirmations | yes |
+| `tron` | `base58check` | contract | address | confirmations | profile only |
+| `solana` | `base58` | program | PDA | commitment | profile only |
+| `bitcoin` | `base58check-or-bech32` | UTXO script | script | confirmations | profile only |
+| `dogecoin` | `base58check` | UTXO script | script | confirmations | profile only |
+
+A driver starts with the base role (`walletChainId`, `sameChain`, `balances`, `normalizeRef`, `sameRef`,
+`finality`). It may claim `capabilities.settlement` only after it also provides `fund`, `markReady`, `claim`,
+`refund` and `readOrder`. `tools/check.mjs --only=leg-contract` enforces this split, so an address format or a
+profile cannot be mistaken for a working settlement side.
+
+`chainConfig(...).settlementProfile` returns the profile for the network, or `null` for an unknown VM. A
+settlement reference is normalized by the leg (`normalizeSettlementRef`): an EVM address is lower-case hex, while
+a Tron or Solana reference is refused with `not-implemented` until its driver exists.
+
 ## The contract
 
 `index.d.ts` is the single source of truth about the API shape, and this is checked: `tools/check-sdk.mjs`

@@ -289,6 +289,15 @@ export interface ChainConfig {
   readonly id: string;
   /** The network's virtual machine: "evm" today; "tron" and "solana" - when their leg drivers appear. */
   readonly vm: string;
+  /** What this settlement side looks like. Metadata only: it does not claim that a driver exists. */
+  readonly settlementProfile?: {
+    readonly vm: string;
+    readonly addressFormat: string;
+    readonly settlementKind: "contract" | "program" | "utxo-script" | string;
+    readonly refKind: "address" | "pda" | "script" | string;
+    readonly txRef: "hash" | "signature" | "txid" | string;
+    readonly finality: { readonly kind: "confirmations" | "commitment" | string; readonly blocks?: number; readonly level?: string };
+  } | null;
   readonly chainId: number;
   readonly name: string;
   readonly nativeSymbol: string;
