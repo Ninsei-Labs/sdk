@@ -32,7 +32,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
-          node-version: '26.x'
+          node-version: '24.22.1'
           cache: pnpm
 
       # --frozen-lockfile: the lock file is the input, not something CI may rewrite.
