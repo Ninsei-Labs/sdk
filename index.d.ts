@@ -1271,6 +1271,11 @@ export interface SweepApi {
   /** What is known about the withdrawal from the recovery file: the address, the restore height, what we can dispose of. */
   plan(request: SweepPlanRequest): Promise<SweepPlan>;
   /**
+   * Build the same withdrawal material from the 12 words and an order found by `findSwaps`, without a recovery file.
+   * The checks are the same: the side, the person's points against the key, the joint address.
+   */
+  fromOrder(request: SweepFromOrderRequest): Promise<SweepFromOrderResult>;
+  /**
    * RESTORE THE WALLET FROM A HEIGHT AND REPORT WHAT IT HOLDS. Sets the restore height a little below the one given,
    * rescans, syncs and reads the total and the spendable balance. Coins that exist but are locked get ONE more pass
    * with a spent-status re-check - the page used to decide that itself, and the rule belongs to wallet2, not to an
@@ -1399,6 +1404,43 @@ export interface SweepReportRequest {
 
 export interface SweepReportResult {
   readonly reported: boolean;
+}
+
+export interface SweepFromOrderRequest {
+  /** The 12 words of the recovery key. */
+  readonly mnemonic: string;
+  readonly chainId: number;
+  /** The settlement network slug, e.g. `arbitrum-sepolia`. */
+  readonly network: string;
+  /** The Monero network the joint address belongs to, e.g. `stagenet`. */
+  readonly moneroNetwork: string;
+  /** One entry from `findSwaps`. */
+  readonly order: {
+    readonly escrow: string;
+    readonly locker: string;
+    readonly claimer: string;
+    readonly edPointLocker: string;
+    readonly edPointClaimer: string;
+    readonly edViewPointLocker: string;
+    readonly index: number;
+    readonly side: "locker" | "claimer";
+    readonly startHeight?: number | null;
+    readonly blockTime?: number | null;
+    readonly readyBy?: number;
+    readonly t1?: number;
+    readonly [field: string]: unknown;
+  };
+  /** Optional encryption boundary for the generated file; empty means an unencrypted file. */
+  readonly passphrase?: string;
+}
+
+export interface SweepFromOrderResult {
+  /** The payload `buildPayload` produced; the same fields a recovery file carries. */
+  readonly payload: unknown;
+  /** The same file `plan`/`keys` accept, so a caller can keep using the file-based API. */
+  readonly contents: string;
+  /** The joint Monero address built from the key and the order. */
+  readonly address: string;
 }
 
 export interface SweepPlanRequest {

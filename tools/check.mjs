@@ -30,6 +30,7 @@ import keccakPkg from "keccak256";
 // THE RECOVERY KEY CHECK (sdk#79): one key, its backup file, reservations and the on-chain search.
 import { recoveryKeyCheck } from "./check-recovery-key.mjs";
 import { sweepWindowCheck } from "./check-sweep-window.mjs";
+import { sweepFromOrderCheck } from "./check-sweep-order.mjs";
 import { claimTipCheck } from "./check-claim-tip.mjs";
 import { claimSenderCheck } from "./check-claim-sender.mjs";
 import { quoteRankCheck } from "./check-quote-rank.mjs";
@@ -2532,6 +2533,7 @@ const CHECKS = {
   provider: providerCheck,
   "recovery-key": recoveryKeyCheck,
   "sweep-window": sweepWindowCheck,
+  "sweep-order": sweepFromOrderCheck,
   "claim-tip": claimTipCheck,
   "claim-sender": claimSenderCheck,
   "quote-rank": quoteRankCheck,
