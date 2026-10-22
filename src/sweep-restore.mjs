@@ -202,15 +202,33 @@ export async function restoreWallet(request = {}) {
     }
     windowReport.txs = hashes.length;
     if (hashes.length && typeof driver.scanTxs === "function") {
-      await step("setRestoreHeight", () => driver.setRestoreHeight(tipHeight));
-      await step("scanTxs", () => driver.scanTxs(hashes));
-      try { await wallet.sync(); } catch { /* the balance below decides */ }
-      windowTotal = asAmount(await step("getBalance", () => driver.getBalance()), "balance");
-      windowUnlocked = asAmount(await step("unlockedBalance", () => wallet.unlockedBalance()), "unlockedBalance");
-      windowReport.used = true;
+      try {
+        await step("setRestoreHeight", () => driver.setRestoreHeight(tipHeight));
+        await step("scanTxs", () => driver.scanTxs(hashes));
+        try { await wallet.sync(); } catch { /* the balance below decides */ }
+        windowTotal = asAmount(await step("getBalance", () => driver.getBalance()), "balance");
+        windowUnlocked = asAmount(await step("unlockedBalance", () => wallet.unlockedBalance()), "unlockedBalance");
+        windowReport.used = true;
+      } catch (e) {
+        // A WINDOW THAT WAS READ BUT NOT APPLIED IS STILL A FAILED WINDOW. `scanTxs` and the balance read use the
+        // wallet's own transport; a node that misses one route (`/gettransactions`) or a wallet that refuses the
+        // scan must not end the withdrawal. The full scan below is the fallback, and the reason says which step.
+        if (e && e.code === "bad-input") throw e;
+        windowTotal = 0n;
+        windowUnlocked = 0n;
+        windowReport.fallback = true;
+        windowReport.fallbackWhy = "window-scan";
+        windowReport.error = {
+          code: e && e.code ? e.code : "wallet-rejected",
+          surface: e && e.params && e.params.surface ? e.params.surface : "scanTxs",
+          status: null,
+          height: null,
+          why: e && e.params && e.params.why ? e.params.why : null,
+        };
+      }
       // THE KEY IMAGES OF THE WALLET, CHECKED AT THE NODE. `scanTxs` finds an output; whether the chain already
-      // spent it is a separate fact, and the caller must not sign on a guess.
-      if (requestWindow.nodeUrl && typeof driver.getKeyImages === "function") {
+      // spent it is a separate fact, and the caller must not sign on a guess. A failed scan has no images to ask for.
+      if (windowReport.used && requestWindow.nodeUrl && typeof driver.getKeyImages === "function") {
         try {
           const exported = await driver.getKeyImages();
           const images = Array.isArray(exported) ? exported
@@ -232,13 +250,13 @@ export async function restoreWallet(request = {}) {
             } else windowReport.spent = null;
           } else { windowReport.spent = null; windowReport.spentWhy = "no-key-images"; }
         } catch { windowReport.spent = null; windowReport.spentWhy = "check-failed"; }
-      } else if (requestWindow.nodeUrl) {
+      } else if (windowReport.used && requestWindow.nodeUrl) {
         windowReport.spent = null;
         windowReport.spentWhy = "no-key-images";
       }
       // A WINDOW WITH COINS IS THE ANSWER. A window with none falls through to the full scan unless the caller
       // explicitly turned the fallback off.
-      if (windowTotal > 0n || windowUnlocked > 0n || requestWindow.fallback === false) {
+      if (windowReport.used && (windowTotal > 0n || windowUnlocked > 0n || requestWindow.fallback === false)) {
         return {
           total: windowTotal.toString(), unlocked: windowUnlocked.toString(), scanHeight, walletHeight: await heightOf(driver, "getHeight"),
           nodeHeight: await heightOf(driver, "getDaemonHeight"), passes: 1, lockedPass: false, window: windowReport,

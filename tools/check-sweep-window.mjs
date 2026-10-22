@@ -7,7 +7,7 @@
 // BREAKING RUNS: the window path is bypassed by a copy of the module in the same shape the other checks use.
 import { restoreWallet, windowTxHashes } from "../src/sweep-restore.mjs";
 
-const fake = ({ balance = 0n, scanTxs = true } = {}) => {
+const fake = ({ balance = 0n, scanTxs = true, scanFails = false } = {}) => {
   const calls = [];
   const driver = {
     async setRestoreHeight(height) { calls.push(["height", Number(height)]); },
@@ -16,7 +16,8 @@ const fake = ({ balance = 0n, scanTxs = true } = {}) => {
     async getDaemonHeight() { return 1000; },
     async rescanBlockchain() { calls.push(["rescan"]); },
   };
-  if (scanTxs) driver.scanTxs = async (hashes) => { calls.push(["scan", hashes.length]); };
+  if (scanFails) driver.scanTxs = async () => { calls.push(["scan-failed"]); throw new Error("Failed to get transaction from daemon"); };
+  else if (scanTxs) driver.scanTxs = async (hashes) => { calls.push(["scan", hashes.length]); };
   return {
     calls,
     wallet: { async sync() {}, async unlockedBalance() { return balance; }, driver: () => driver },
@@ -116,6 +117,21 @@ export const sweepWindowCheck = async () => {
   check(fallbackOnRead.window && fallbackOnRead.window.error && fallbackOnRead.window.error.status === 429, "the window report lost the node status");
   check(readFailed.calls.some((call) => call[0] === "rescan"), "the full scan did not run after the failed window");
   notes.push("a failed window read falls back to the full scan and keeps the node status");
+
+  // A WINDOW THAT WAS READ BUT COULD NOT BE APPLIED IS ALSO A FAILED WINDOW. `scanTxs` talks to the node's
+  // `/gettransactions`; a proxy that misses that route must cost time, not the withdrawal.
+  const scanFailed = fake({ balance: 9n, scanFails: true });
+  const afterScanFailure = await restoreWallet({
+    wallet: scanFailed.wallet, fromHeight: 100,
+    window: { txHashes: ["a", "b"], toHeight: 110, tipHeight: 900 },
+  });
+  check(afterScanFailure.total === "9", `a failed scan did not reach the full scan: ${afterScanFailure.total}`);
+  check(afterScanFailure.window && afterScanFailure.window.fallback === true, "a failed scan did not report the fallback");
+  check(afterScanFailure.window && afterScanFailure.window.fallbackWhy === "window-scan", "a failed scan did not name the step");
+  check(afterScanFailure.window && afterScanFailure.window.error && afterScanFailure.window.error.surface === "scanTxs",
+    "a failed scan lost the surface");
+  check(scanFailed.calls.some((call) => call[0] === "rescan"), "the full scan did not run after the failed scan");
+  notes.push("a failed scanTxs falls back to the full scan and names the step");
 
   return { note: "the withdrawal window scans only the lock and falls back on an empty or unreadable one", problems, notes };
 };
