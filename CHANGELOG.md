@@ -6,6 +6,11 @@
   runs `createOrderAndFund`, `markReady` and `claim`, and checks the event, escrow roles, revealed half and
   dump/rewind repeat. Both checks run in the regular CI; Anvil is pinned to the same Foundry version as the
   contract repository.
+- `check:dex` runs the CoW, Kyber, UniswapX and Uniswap Relay agreement vectors (real order signatures, EIP-712
+  digests, calldata and refusal tables) on every pull request; they used to run only in the release workflow.
+- `check-anvil-uniswap` forks Ethereum mainnet and executes the SDK's UniversalRouter calldata against the real
+  USDC/WETH pool, asserting native ETH reaches the recipient. It caught that Anvil's default account 2 has an
+  EIP-7702 delegation, so the check uses a plain EOA as the recipient.
 - `check-contract-vectors` pins three half commitments, the `OrderCreated` topic and both factory selectors against
   values produced by Foundry `cast`, not by the SDK's own curve and hash code. A copy that hashes the half number
   instead of its secp256k1 point reddens the check.
@@ -509,6 +514,11 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
   runs `createOrderAndFund`, `markReady` and `claim`, and checks the event, escrow roles, revealed half and
   dump/rewind repeat. Both checks run in the regular CI; Anvil is pinned to the same Foundry version as the
   contract repository.
+- `check:dex` runs the CoW, Kyber, UniswapX and Uniswap Relay agreement vectors (real order signatures, EIP-712
+  digests, calldata and refusal tables) on every pull request; they used to run only in the release workflow.
+- `check-anvil-uniswap` forks Ethereum mainnet and executes the SDK's UniversalRouter calldata against the real
+  USDC/WETH pool, asserting native ETH reaches the recipient. It caught that Anvil's default account 2 has an
+  EIP-7702 delegation, so the check uses a plain EOA as the recipient.
 - `check-contract-vectors` pins three half commitments, the `OrderCreated` topic and both factory selectors against
   values produced by Foundry `cast`, not by the SDK's own curve and hash code. A copy that hashes the half number
   instead of its secp256k1 point reddens the check.

@@ -54,7 +54,9 @@
     "check:recovery-open": "node tools/check-recovery-open.mjs",
     "check:contract-vectors": "node tools/check-contract-vectors.mjs",
     "check:live-contract": "node tools/check-live-contract.mjs",
-    "check:anvil-fork": "node tools/check-anvil-fork.mjs"
+    "check:anvil-fork": "node tools/check-anvil-fork.mjs",
+    "check:dex": "node tools/check.mjs --only=cow,cow-refusal,kyber,kyber-refusal,uniswapx,uniswapx-refusal,uniswap-relay,uniswap-relay-refusal",
+    "check:anvil-uniswap": "node tools/check-anvil-uniswap.mjs"
   },
   "types": "./index.d.ts",
   "exports": {
