@@ -42,8 +42,8 @@ const chainConfig = (chain) => ({
   id: chain.id,
   name: chain.name,
   vm: chain.vm || null,
-  // WHAT THIS SETTLEMENT SIDE LOOKS LIKE: address format, contract/program/UTXO, ref kind and finality. It is
-  // metadata and does not claim a driver exists; `implementedVms` and `legFor` decide that.
+  // WHAT THIS SETTLEMENT SIDE LOOKS LIKE: address format, contract/program/UTXO and ref kind. It is metadata and
+  // does not claim a driver exists; `implementedVms` and `legFor` decide that. Finality belongs to a chain.
   settlementProfile: profileOfChain(chain.id),
   chainId: chain.chainId,
   nativeSymbol: chain.native && chain.native.symbol ? chain.native.symbol : null,

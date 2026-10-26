@@ -14,26 +14,6 @@ import { uniswapRelayProvider } from "./uniswaprelay.mjs";
 
 export const vm = "evm";
 
-// THE BASE ROLE THIS DRIVER CAN ALREADY CARRY. Settlement is not flipped to true until the escrow reads/writes live
-// here; a driver that claimed it today would pass the contract check without doing the work.
-export const capabilities = Object.freeze({ identity: true, balances: true, refs: true, finality: true, settlement: false });
-
-/** A canonical EVM reference: a 20-byte hex address, lower-cased. Null for anything else. */
-export const normalizeRef = (value) => {
-  const text = typeof value === "string" ? value.trim() : "";
-  return /^0x[0-9a-fA-F]{40}$/.test(text) ? text.toLowerCase() : null;
-};
-
-/** Two EVM references are the same address. A malformed side is never equal to anything. */
-export const sameRef = (a, b) => {
-  const left = normalizeRef(a);
-  const right = normalizeRef(b);
-  return left !== null && right !== null && left === right;
-};
-
-/** The confirmation policy this profile names. It is metadata for the caller, not a transaction decision here. */
-export const finality = () => Object.freeze({ kind: "confirmations", blocks: 12 });
-
 /** What this network is called for the wallet: for EVM - a numeric chainId. */
 export const walletChainId = (chain) => Number(chain.chainId);
 

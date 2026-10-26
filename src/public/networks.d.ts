@@ -21,21 +21,21 @@ export interface ChainUniswap {
   [field: string]: unknown;
 }
 
-/** What a settlement side looks like: address format, account/UTXO settlement and finality. Metadata, not a claim
- * that a driver exists. */
+/** What a settlement side looks like: address format, account/UTXO settlement and reference shape. Metadata, not a
+ * claim that a driver exists. */
 export interface SettlementProfile {
   vm: string;
   addressFormat: string;
   settlementKind: "contract" | "program" | "utxo-script" | string;
   refKind: "address" | "pda" | "script" | string;
   txRef: "hash" | "signature" | "txid" | string;
-  finality: { kind: "confirmations" | "commitment" | string; blocks?: number; level?: string };
 }
 
 export interface Chain {
   id: string;
   name: string;
-  vm: string;
+  /** A registry chain names its VM; the type allows null so an unknown network is never read as EVM. */
+  vm: string | null;
   /** Present when the VM has a profile; unknown VMs are null, never silently EVM. */
   settlementProfile?: SettlementProfile | null;
   chainId: number;

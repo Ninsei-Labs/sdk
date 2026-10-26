@@ -35,7 +35,7 @@ import { sweepAdapterCheck } from "./check-sweep-adapter.mjs";
 import { claimTipCheck } from "./check-claim-tip.mjs";
 import { claimSenderCheck } from "./check-claim-sender.mjs";
 import { quoteRankCheck } from "./check-quote-rank.mjs";
-import { legContractCheck } from "./check-leg-contract.mjs";
+import { settlementProfilesCheck } from "./check-settlement-profiles.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const p = (...parts) => join(ROOT, ...parts);
@@ -2540,7 +2540,7 @@ const CHECKS = {
   "claim-tip": claimTipCheck,
   "claim-sender": claimSenderCheck,
   "quote-rank": quoteRankCheck,
-  "leg-contract": legContractCheck,
+  "settlement-profiles": settlementProfilesCheck,
 };
 
 export const runCheck = async (name) => {
