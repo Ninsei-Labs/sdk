@@ -1083,7 +1083,8 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
      *
      * The CLIENT checks the arrival from the Monero nodes (`verify`); there is no backend poll by default. The rate
      * and the timeout come from the configuration (config.limits.watchPollMs/watchTimeoutMs) and are overridable here.
-     * A caller that explicitly configured `apiBase` may use the old watch-row flow instead.
+     * A caller that explicitly configured `apiBase` may still read the old watch row, but that row is only an
+     * observation: it never declares readiness or a decline.
      * IT ARRIVED - we return the FACT (the amount, the confirmations, the txid); WE DID NOT WAIT - a refusal with the
      * code `xmr-timeout`, separate from the others, so "the wait expired" is confused with neither a breakdown nor an
      * empty response. XMR ON THE ADDRESS BUT BARRED BY unlock_time is a THIRD answer with its own code `xmr-locked`
@@ -1203,10 +1204,9 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         last = verifyRequest
           ? { address: request.address || escrowAddress, expectedXmr: request.expectedXmr ?? null, status: null }
           : incomingOf(body);
-        // THE DECLINE IS DECIDED BEFORE THE ARRIVAL IS LOOKED AT, and before the "foreign response" refusal below:
-        // a declined swap's answer carries no `receivedXmr` at all, and refusing it as a bad response would name
-        // the wrong thing (the state is known - it is a decline, not a broken answer).
-        const declineNow = declineOf({ logs: chainDecline.logs, status: body, escrow: escrowAddress, at: Date.now() });
+        // THE DECLINE IS THE ESCROW'S EVENT, NOT THE SERVICE'S WORD. The legacy backend's `declined` status used
+        // to become a settlement and end the wait; it no longer does. A service answer is at most a notification.
+        const declineNow = declineOf({ logs: chainDecline.logs, escrow: escrowAddress, at: Date.now() });
         if (declineNow.declined) {
           settleDecline(record, declineNow.at);
           return declineResult({ source: declineNow.source, at: declineNow.at, waitedMs: Date.now() - started,
@@ -1255,18 +1255,13 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
           return verified;
         }
         if (last.seen) {
-          const result = { seen: true, id, address: last.address, status: last.status,
+          // THE SERVICE MAY OBSERVE MONEY, BUT IT DOES NOT DECLARE AN ARRIVAL. Readiness hands a foreign address
+          // the settlement, and only the client's own two-node check may do that. The observation is returned with
+          // `seen: false` and the next step named; no mark is ever signed from this body.
+          return { seen: false, observed: { id: last.id, address: last.address, status: last.status,
             expectedXmr: last.expectedXmr, receivedXmr: last.receivedXmr, confirmations: last.confirmations,
-            txids: last.txids, at: Date.now() };
-          if (wantExpect && wantWallet) {
-            result.marked = await actions.markReady(
-              { escrow: request.escrow || last.address, expect: request.expect, onStep: request.onStep }, request.wallet);
-          } else {
-            // WITHOUT EXPECTATIONS AND A WALLET, THE WATCH HONESTLY NAMES THE NEXT STEP, rather than pretending the mark
-            // has already been placed.
-            result.next = "mark-ready";
-          }
-          return result;
+            txids: last.txids }, id, address: last.address, expectedXmr: last.expectedXmr,
+            next: "verify", source: "service" };
         }
         if (Date.now() - started >= timeoutMs) {
           throw new SdkError("xmr-timeout", { id, address: last.address, expectedXmr: last.expectedXmr,
