@@ -2,6 +2,9 @@
 
 - The default stagenet node is `https://xmr-stagenet.ninsei.finance`, operated by Ninsei. The old
   `xmr.arrakisswap.trade` address is retired.
+- `sweep.fromOrder` keeps the order's XMR amount in the recovery file. A found order carries the amount the
+  provider signed in atomic units; the file now records it in whole XMR, so a withdrawal restored from that file
+  checks the arrival against the signed figure instead of a missing or shown amount.
 - `check:monero-live` starts against a real `monerod` in regtest: it refuses a non-regtest nettype, generates a
   block range to an SDK-built address, runs `scanRange` over the range, and checks the daemon's `get_fee_estimate`
   shape. It runs in the nightly workflow, not on every PR.
