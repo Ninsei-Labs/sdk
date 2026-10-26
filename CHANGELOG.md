@@ -1,3 +1,16 @@
+## 0.52.0 — 2026-10-26
+
+THE NEXT CONTRACT VERSION IS WIRED IN.
+
+- `arbitrum-sepolia` moves to factory `0x69b5a6878b542960af4d239ecc60ad1c9e3e6932`, cashier
+  `0x05b7433f66f2b75cc7ece9ec00af0fb810f9c9e0`, registry
+  `0x4707a6684b654fbd74372ec624efc0f825af0537` and implementation code hash
+  `0xc6cde36301b6551a6ca8bd2c47fbd5ffd01ffcdf22d2f6909be2b3b2dcf360b4`
+  (deployment block `323014007`).
+- `OrderCreated` now carries `xmrAmount`. `findSwaps` reads it from the current event and reports
+  `xmrAmountReason: "event"`; orders from the previous event keep the clone word-18 fallback.
+- The previous event topic is still accepted, so an old factory remains searchable.
+
 ## 0.51.2 — 2026-10-22
 
 - The withdrawal window falls back to the full scan when `scanTxs` or the balance read fails, and reports

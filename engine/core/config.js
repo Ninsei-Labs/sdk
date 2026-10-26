@@ -363,35 +363,22 @@ export const CHAINS = [
     explorerName: "arbiscan (sepolia)",
     gasUsd: 0.01,
     routeType: "atomic",
-    // THE DEMO'S MAIN NETWORK: the Ninsei escrow factory and the interface's fee cashier live here; the
-    // ArrakisFeeRouter is gone. The factory is a FACT, not an intention:
-    // 0x3eE25f12758ec28e5b3045d16132D89Cd0bf341F (height 321430239, transaction
-    // 0x61da6d34c77dee1e1ada04dbbe9cbb1c86e5297acbc5a5b08320df20a2cf3ef6, code 2049 bytes, keccak256
-    // 0xf490764213ae9569f9ef19a174e237f4a22c3ff6613756852571672ae7dea2a8); every order is an EIP-1167 clone and
-    // the factory carries the pair (implementation(), implementationCodeHash()). The fee cashier is the second CREATE
-    // of the same pass - 0x1123A3875775Da25FA181Af0d91EB278E94a5dfb (height 321430248, code 582 bytes, keccak256
-    // 0xf5cb00c7974e6fab3f04dbd2cdc24976249dc4d55de2fa31524bce60205a1877). This release did NOT deploy a maker
-    // registry (DEPLOY_REGISTRY=false): the registry is a separate contract, and the node must name an existing one
-    // in RFQ_REGISTRY_ADDRESS until a fresh one is deployed and its keys are registered.
-    // `npm run check:deployed -- --address=0x3eE25f12758ec28e5b3045d16132D89Cd0bf341F`).
-    // PREVIOUS (the factory before claimTip): 0x1029D6bC53f6b9919F8ec6Ac922327F7e5A3DdF2 (height 318033203,
-    // transaction 0x0f82c556f056f2dcaba5c12da75a749c257dfb1ccbf0eb6962a4e7f0119d166d, code 4226 bytes, keccak256
-    // 0x4b515f600c641bffde054b3a98f4e26bd43d2dd2b2d8e60e8cfe36ee03686dd9). PREVIOUS (the ArrakisFeeRouter of
-    // the previous rules, now removed): 0xaEB1c0455C76551dcEb2E6B1245B65F0458b0aE8 (height 314323871, code 8223
-    // bytes, keccak256 0x90f26f641b48a2a630463195d4429b0818d29187563e09711a40811fcf08a0ba).
-    // PREVIOUS (ceiling 3%, no early refund): 0xEa619bDC78989627093B7830990367B2ECE52CE5 (height 314309038,
-    // code 8143 bytes). PREVIOUS live (router with a 10% ceiling): 0x9f856cd9c14fd9493961473b804039b09a4012ef
-    // (height 313597131, code 8723 bytes). PREVIOUS before it (factory without a fee):
-    // 0xcb54af9ec11344d448c7900ccb08530a23783259 (height 312222006, code 6035 bytes), and earlier ones still.
-    // mode: "live" - the form sends REAL transactions: order creation TOGETHER WITH THE MONEY in one transaction
-    // (createOrderAndFund; the escrow has no separate funding function - an order is born funded, see FACTORY_METHODS
-    // in www/js/evm/factory.js and ESCROW_METHODS in escrow.js). The old lock(sealedHalf) and hashlock are gone: the
-    // half is not sent but revealed by presentation. Switching back to "simulated" is one edit, to show a demo with
-    // no money movement. cashier: the INTERFACE's fee cashier, named in quotes and now deployed (the second CREATE of
-    // the same pass). implementationCodeHash: the escrow implementation the factory carries, checked against the chain.
-    // deploymentBlock: the height the factory was created at; a log search for its orders starts here, not at zero,
-    // because public RPCs cap a log query at about 10M blocks and would refuse a scan from genesis.
-    escrow: { address: "0x3eE25f12758ec28e5b3045d16132D89Cd0bf341F", mode: "live", deploymentBlock: 321430239, cashier: "0x1123A3875775Da25FA181Af0d91EB278E94a5dfb", implementationCodeHash: "0xf97af2b4eed8c646d82bce001e52ff03c065d43127073f8ee52271b65c35d659" },
+    // THE DEMO'S MAIN NETWORK: the Ninsei escrow factory and the interface's fee cashier live here. The next
+    // contract version (contracts-testnet-2026.10.26) is a FACT, not an intention:
+    //   factory 0x69b5a6878b542960af4d239ecc60ad1c9e3e6932 (height 323014007,
+    //   transaction 0xbe8244da0cb1429edc92d18c7c8b5ba1c6b17c42a5806609d930a6496e918408);
+    //   cashier 0x05b7433f66f2b75cc7ece9ec00af0fb810f9c9e0;
+    //   registry 0x4707a6684b654fbd74372ec624efc0f825af0537 (this release deploys it);
+    //   implementation 0x2E0214c6242fB794a4cC861D609Ecee544735170, codehash
+    //   0xc6cde36301b6551a6ca8bd2c47fbd5ffd01ffcdf22d2f6909be2b3b2dcf360b4.
+    // `OrderCreated` now carries xmrAmount; the SDK reads it from the event and keeps the clone fallback for the
+    // previous event. PREVIOUS factory before this version: 0x3eE25f12758ec28e5b3045d16132D89Cd0bf341F
+    // (height 321430239, cashier 0x1123A3875775Da25FA181Af0d91EB278E94a5dfb).
+    // mode: "live" - order creation TOGETHER WITH THE MONEY in one transaction (createOrderAndFund). cashier: the
+    // INTERFACE's fee cashier, named in quotes. implementationCodeHash: the escrow implementation the factory
+    // carries, checked against the chain. deploymentBlock: the height the factory was created at; a log search for
+    // its orders starts here, not at zero, because public RPCs cap a log query at about 10M blocks.
+    escrow: { address: "0x69b5a6878b542960af4d239ecc60ad1c9e3e6932", mode: "live", deploymentBlock: 323014007, cashier: "0x05b7433f66f2b75cc7ece9ec00af0fb810f9c9e0", implementationCodeHash: "0xc6cde36301b6551a6ca8bd2c47fbd5ffd01ffcdf22d2f6909be2b3b2dcf360b4" },
     tokens: [
       // Test USDC (Circle): decimals 6 and symbol "USDC" verified on chain by the same node.
       { symbol: "USDC", address: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d", decimals: 6, usd: 1, cls: "ar-token-usdc" },
