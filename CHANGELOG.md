@@ -1,5 +1,10 @@
 ## Unreleased
 
+- `check-contract-vectors` pins three half commitments, the `OrderCreated` topic and both factory selectors against
+  values produced by Foundry `cast`, not by the SDK's own curve and hash code. A copy that hashes the half number
+  instead of its secp256k1 point reddens the check.
+- `check-order-proof` also exercises `orderStep`: a foreign commitment, a foreign point and a missing commitment are
+  refused before funding, not only by the builder in isolation.
 - Pull-request CI now runs the guards that were previously release-only: sale authentication, backup confirmation,
   the one-key view half, arrival consensus, the recorded arrival fixture, order proof binding, both recovery-key
   paths and recovery file opening. `check-ci-scripts` also refuses a `check:*` script that no workflow names, with a
@@ -492,6 +497,11 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
 
 ## Unreleased
 
+- `check-contract-vectors` pins three half commitments, the `OrderCreated` topic and both factory selectors against
+  values produced by Foundry `cast`, not by the SDK's own curve and hash code. A copy that hashes the half number
+  instead of its secp256k1 point reddens the check.
+- `check-order-proof` also exercises `orderStep`: a foreign commitment, a foreign point and a missing commitment are
+  refused before funding, not only by the builder in isolation.
 - Pull-request CI now runs the guards that were previously release-only: sale authentication, backup confirmation,
   the one-key view half, arrival consensus, the recorded arrival fixture, order proof binding, both recovery-key
   paths and recovery file opening. `check-ci-scripts` also refuses a `check:*` script that no workflow names, with a

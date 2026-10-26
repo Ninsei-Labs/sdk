@@ -194,6 +194,12 @@ jobs:
       - name: Check order proof binding (the proven point funds its own commitment)
         run: pnpm run check:order-proof
 
+      # THE CONTRACT IS THE ORACLE. These fixed vectors were produced by `cast`, not by the SDK's own curve code:
+      # three half commitments, the OrderCreated topic and both factory selectors. A green suite that derives its
+      # expected value with the function under test cannot see a wrong point, unit or wire format.
+      - name: Check contract vectors (commitments, event topic, selectors from cast)
+        run: pnpm run check:contract-vectors
+
       - name: Check recovery key paths (v1 index and v2 salt)
         run: pnpm run check:recovery-key
 
