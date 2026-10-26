@@ -1,5 +1,9 @@
 ## Unreleased
 
+- A height lock is judged at the witnessing node's tip, not at the block that mined the transfer. A transfer mined at
+  100 with `unlock_time` 101 is no longer `xmr-locked` at tip 120; confirmations still use the inclusion height.
+  `matchTransaction` takes `tipHeight` (and `scanRange` passes its top); the duplicate unlock rule in
+  `engine/monero/arrivalRead.js` now re-exports `engine/monero/unlock.js`.
 - A split sweep reports the SUM of every signed transaction's fee, not the first one. Both wallet adapters use one
   helper; `sweep.sign` subtracts the total from the remainder, and `sweep.relay` already returns every txid. One
   unreadable fee makes the total unknown (`null`), never a partial figure.
@@ -466,6 +470,10 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
 
 ## Unreleased
 
+- A height lock is judged at the witnessing node's tip, not at the block that mined the transfer. A transfer mined at
+  100 with `unlock_time` 101 is no longer `xmr-locked` at tip 120; confirmations still use the inclusion height.
+  `matchTransaction` takes `tipHeight` (and `scanRange` passes its top); the duplicate unlock rule in
+  `engine/monero/arrivalRead.js` now re-exports `engine/monero/unlock.js`.
 - A split sweep reports the SUM of every signed transaction's fee, not the first one. Both wallet adapters use one
   helper; `sweep.sign` subtracts the total from the remainder, and `sweep.relay` already returns every txid. One
   unreadable fee makes the total unknown (`null`), never a partial figure.

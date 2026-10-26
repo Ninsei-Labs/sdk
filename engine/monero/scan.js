@@ -252,8 +252,16 @@ export function findOurOutputs({ txPublicKey, viewSecretHex, spendPubHex, output
 // ============================================================================================
 
 
+// A trailing-slash trim without a backtracking regular expression: the daemon URL is caller input, and CodeQL
+// flags `/+$` on a long run of slashes as a possible denial of service.
+const baseUrl = (value) => {
+  let out = String(value);
+  while (out.endsWith("/")) out = out.slice(0, -1);
+  return out;
+};
+
 export async function fetchBlock(daemonUrl, height) {
-  const res = await fetch(`${String(daemonUrl).replace(/\/+$/, "")}/json_rpc`, {
+  const res = await fetch(`${baseUrl(daemonUrl)}/json_rpc`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: "block", method: "get_block", params: { height } }),
   });
@@ -266,7 +274,7 @@ export async function fetchBlock(daemonUrl, height) {
 // silently returns empty, which looks like "no transactions".
 export async function fetchTransactions(daemonUrl, hashes) {
   if (!hashes.length) return [];
-  const res = await fetch(`${String(daemonUrl).replace(/\/+$/, "")}/get_transactions`, {
+  const res = await fetch(`${baseUrl(daemonUrl)}/get_transactions`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ txs_hashes: hashes, decode_as_json: true }),
   });
@@ -287,14 +295,18 @@ export async function fetchTransactions(daemonUrl, hashes) {
 
 // Parsing one transaction against the watched addresses. watched: [{ address, viewSecret, spendPub }] - viewSecret
 // is taken as a number, LE-hex or BE-hex. The result carries viewKeyForm: the form name that matched.
-export function matchTransaction(tx, watched, { height = null, nowSec = null } = {}) {
+export function matchTransaction(tx, watched, { height = null, tipHeight = null, nowSec = null } = {}) {
   const out = [];
   const txPublicKey = txPublicKeyFromExtra(tx.extra);
   if (!txPublicKey) return out;                       // no key in extra - nothing to look at
   // WHETHER THE OUTPUT IS LOCKED IS DECIDED HERE, ONCE PER TRANSACTION: all its outputs carry one unlock_time.
   // A normal transaction (unlock_time = 0) goes as before; the height comes from the block holding the transfer.
   const blockHeight = height === null || height === undefined ? (tx.block_height ?? null) : height;
-  const unlock = unlockStateOf(tx.unlock_time, { height: blockHeight, nowSec });
+  // THE INCLUSION HEIGHT IS FOR CONFIRMATIONS, THE TIP FOR THE LOCK. A height lock at 101 is open once the chain
+  // has reached 101, not once the transaction was mined at 100; using the inclusion height kept a matured lock
+  // reporting `xmr-locked` forever.
+  const unlockHeight = tipHeight === null || tipHeight === undefined ? blockHeight : Number(tipHeight);
+  const unlock = unlockStateOf(tx.unlock_time, { height: unlockHeight, nowSec });
   const keyOf = (o) => ((o.target || {}).tagged_key || o.target || {}).key;
   const outputs = (tx.vout || []).map((o, i) => ({ index: i, key: keyOf(o) }));
   const ecdh = ((tx.rct_signatures || {}).ecdhInfo || []);
@@ -314,7 +326,7 @@ export function matchTransaction(tx, watched, { height = null, nowSec = null } =
 
 // Range scan. Returns per address the sum (receivedAtomic - only the UNLOCKED), hashes, the locked sum
 // (lockedAtomic) with its boundary (lockedUntil) and the best (highest) height of a found output.
-export async function scanRange({ daemonUrl, fromHeight, toHeight, watched, log = () => {}, concurrency = 4, nowSec = null }) {
+export async function scanRange({ daemonUrl, fromHeight, toHeight, watched, log = () => {}, concurrency = 4, nowSec = null, tipHeight = null }) {
   const from = Number(fromHeight), to = Number(toHeight);
   if (!(from >= 0) || !(to >= from)) throw new Error("bad height range: " + fromHeight + ".." + toHeight);
   const acc = new Map();
@@ -333,7 +345,7 @@ export async function scanRange({ daemonUrl, fromHeight, toHeight, watched, log 
         if (!hashes.length) continue;
         const txs = await fetchTransactions(daemonUrl, hashes);
         for (const tx of txs) {
-          for (const hit of matchTransaction(tx, watched, { height: h, nowSec })) {
+          for (const hit of matchTransaction(tx, watched, { height: h, tipHeight: tipHeight === null || tipHeight === undefined ? to : tipHeight, nowSec })) {
             const a = acc.get(hit.address);
             if (!a) continue;
             if (hit.viewKeyForm) a.viewKeyForm = hit.viewKeyForm;   // what matched - this goes to the log
