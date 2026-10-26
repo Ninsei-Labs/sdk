@@ -10,6 +10,8 @@
 // What must not be in a driver: no user strings, no DOM. A driver is chain reads and writes plus knowing what the
 // network is measured in for this VM.
 import * as evm from "./evm.mjs";
+export { profileOf, VM_PROFILES } from "./profiles.mjs";
+import { profileOf } from "./profiles.mjs";
 
 export const LEGS = { evm };
 
@@ -35,6 +37,12 @@ export const chainOf = (chainId) => (engine.config.CHAINS || []).find((c) => c &
 export const vmOfChain = (chainId) => {
   const chain = chainOf(chainId);
   return chain && chain.vm ? chain.vm : null;
+};
+
+/** The VM profile for a network, or null when the network or the profile is unknown. */
+export const profileOfChain = (chainId) => {
+  const vm = vmOfChain(chainId);
+  return vm ? profileOf(vm) : null;
 };
 
 /**

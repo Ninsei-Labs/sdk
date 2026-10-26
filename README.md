@@ -26,6 +26,26 @@ machine). The wallet arrives as an EIP-1193 provider, storage as an adapter, and
 What is not ready names itself with the code `not-implemented` with the fields `surface` and `stage`: an empty
 value that looks like data is more dangerous than a refusal.
 
+## Settlement legs and VM profiles
+
+The settlement side is a driver, not a chain id switch. A VM profile says what that side looks like. The profile is
+metadata: it does not make a network runnable, and it does not carry a finality claim - finality is a chain policy,
+not a VM shape.
+
+| VM | Address form | Settlement | Ref | Driver today |
+|---|---|---|---|---|
+| `evm` | `hex-20` | contract | address | yes |
+| `tron` | `base58check` | contract | address | profile only |
+| `solana` | `base58` | program | PDA | profile only |
+| `bitcoin` | `base58check-or-bech32` | UTXO script | script | profile only |
+
+The planned order is Tron, Solana, then Bitcoin. Dogecoin is not on that list and has no profile. A profile is not
+a driver: `LEGS` still holds only `evm`, so Tron, Solana and Bitcoin are refused by name until their own work lands.
+
+`chainConfig(...).settlementProfile` returns the profile for the network, or `null` for an unknown VM. The check
+`tools/check.mjs --only=settlement-profiles` guards the table, the absence of Dogecoin and the absence of a finality
+claim. A future driver adds its own settlement methods; the profile alone never authorizes a fund, claim or refund.
+
 ## The contract
 
 `index.d.ts` is the single source of truth about the API shape, and this is checked: `tools/check-sdk.mjs`
