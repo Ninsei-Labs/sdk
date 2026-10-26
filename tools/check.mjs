@@ -1597,6 +1597,25 @@ export const dtsProblems = (dts, label) => {
   return problems;
 };
 
+// A DECLARATION FILE MUST PARSE, NOT ONLY READ AS TEXT. The textual rules above cannot see a comment opener that
+// is missing, and a broken `index.d.ts` is invisible to every consumer. Node's own TypeScript parser is used on a
+// temporary `.ts` copy, so the check has no dependency and no build step.
+const declarationParseProblem = (file, label) => {
+  const dir = mkdtempSync(join(tmpdir(), "sdk-types-parse-"));
+  const copy = join(dir, "declarations.ts");
+  try {
+    writeFileSync(copy, readFileSync(file));
+    execFileSync(process.execPath, ["--experimental-strip-types", copy], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    return null;
+  } catch (error) {
+    const text = String((error && (error.stderr || error.message)) || error);
+    const line = text.split("\n").find((x) => /SyntaxError|Error:/.test(x)) || text.split("\n")[0];
+    return `${label}: does not parse: ${line.trim()}`;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+};
+
 export const typesCheck = () => {
   const pkg = JSON.parse(read(p("package.json")));
   const declaredExports = pkg.exports && typeof pkg.exports === "object" ? pkg.exports : {};
@@ -1631,6 +1650,8 @@ export const typesCheck = () => {
     }
     const dts = read(typesFile);
     for (const problem of dtsProblems(dts, types)) problems.push(problem);
+    const parseProblem = declarationParseProblem(typesFile, types);
+    if (parseProblem) problems.push(parseProblem);
     if (!existsSync(barrelFile)) {
       problems.push(`"${subpath}": points at ${target}, which is not in the package, so ${types} cannot be compared with it`);
       continue;
@@ -2545,6 +2566,7 @@ const orderProofCheck = () => runScriptCheck("check-order-proof.mjs", "order pro
 const fundingReceiptCheck = () => runScriptCheck("check-funding-receipt.mjs", "funding receipt");
 const storageCheck = () => runScriptCheck("check-storage.mjs", "storage");
 const scanRangeCheck = () => runScriptCheck("check-scan-range.mjs", "scan range");
+const recoveryOpenCheck = () => runScriptCheck("check-recovery-open.mjs", "recovery open");
 const CHECKS = {
   syntax: syntaxCheck,
   import: importCheck,
@@ -2585,6 +2607,7 @@ const CHECKS = {
   "funding-receipt": fundingReceiptCheck,
   storage: storageCheck,
   "scan-range": scanRangeCheck,
+  "recovery-open": recoveryOpenCheck,
 };
 
 export const runCheck = async (name) => {

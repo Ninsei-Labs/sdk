@@ -23,9 +23,17 @@ export function createRecovery({ http = null, config = null } = {}) {
     async open(file, passphrase) {
       const contents = contentsOf(file);
       if (contents === null) throw new SdkError("bad-input", { field: "file" });
+      // THE ENVELOPE IS PARSED AT THE BOUNDARY: `restoreFromFile` takes the OBJECT, while the file arrives as text.
+      // A text passed through reached the parser as a string and every valid file failed as `stage: restore`.
+      let envelope;
+      try {
+        envelope = JSON.parse(contents);
+      } catch {
+        throw new SdkError("recovery-failed", { stage: "parse" });
+      }
       let restored;
       try {
-        restored = await engine.restore.restoreFromFile(contents, passphrase);
+        restored = await engine.restore.restoreFromFile(envelope, passphrase);
       } catch (error) {
         // Parsing, decryption and the address check live in the engine; a code goes out, not the engine's wording.
         throw new SdkError("recovery-failed", { stage: "restore" });

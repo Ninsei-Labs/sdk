@@ -212,6 +212,9 @@ logs from the registry's deployment block.
 A revealed half published as `h + n` (the alias the escrow accepts) is reduced modulo the secp256k1 order before the
 sweep key check, so it rebuilds the same key and remains withdrawable.
 
+`recovery.open` accepts the file as text or `{ contents }`: the envelope is parsed at the boundary, so a valid file
+opens and a non-JSON one fails with its own `parse` stage.
+
 The per-swap recovery file start path is gone: a start requires the one recovery key, shown and confirmed before
 funding, and a file that could not name the escrow is no longer produced.
 

@@ -1275,6 +1275,7 @@ export interface SweepApi {
    */
   wallet(request: SweepWalletRequest): SweepWallet;
 
+  /**
    * COMPARE A DESTINATION WITH THE FILE'S PROMISE. `ok` is "usable address on the file's network", `matches` is
    * "the promised one" and is null when the file named nobody. Sending XMR elsewhere is a different payment, so the
    * comparison is not presentation.
