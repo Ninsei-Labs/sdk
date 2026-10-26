@@ -218,6 +218,12 @@ jobs:
       - name: Check quote field binding (every field changes the digest)
         run: pnpm run check:quote-binding
 
+      # THE DECLARATIONS MUST BE CONSUMABLE, NOT ONLY PARSEABLE. A minimal TypeScript consumer imports the root,
+      # ./xmr and ./recovery and assigns the public interfaces; tsc --noEmit is the type gate that the textual
+      # surface check cannot provide.
+      - name: Check the TypeScript consumer (declarations compile)
+        run: pnpm run check:types-consumer
+
       # THE TARBALL, NOT THE WORKING TREE. Pack the package, install that tarball in an empty project and import
       # every public subpath from it. This catches a missing asset or a subpath that only resolves from the repo.
       - name: Check the packed consumer (pack, install, import every subpath)

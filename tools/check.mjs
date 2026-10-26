@@ -2569,6 +2569,18 @@ const scanRangeCheck = () => runScriptCheck("check-scan-range.mjs", "scan range"
 const recoveryOpenCheck = () => runScriptCheck("check-recovery-open.mjs", "recovery open");
 const contractVectorsCheck = () => runScriptCheck("check-contract-vectors.mjs", "contract vectors");
 const atomicFlowCheck = () => runScriptCheck("check-atomic-flow.mjs", "atomic flow");
+// THE DECLARATIONS MUST COMPILE FOR A CONSUMER. This is the one check that needs the TypeScript devDependency.
+const typesConsumerCheck = () => {
+  const problems = [];
+  try {
+    execFileSync(process.execPath, [p("node_modules", "typescript", "bin", "tsc"), "-p", p("tools", "ts-consumer", "tsconfig.json")], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  } catch (error) {
+    const text = String((error && (error.stdout || error.stderr || error.message)) || error);
+    for (const line of text.split("\n")) if (/error TS/.test(line)) problems.push(line.trim());
+    if (!problems.length) problems.push("tsc failed: " + text.split("\n")[0]);
+  }
+  return { note: problems.length ? "TypeScript consumer failed" : "TypeScript consumer compiles", problems, notes: [] };
+};
 const quoteBindingCheck = () => runScriptCheck("check-quote-binding.mjs", "quote binding");
 const CHECKS = {
   syntax: syntaxCheck,
@@ -2614,6 +2626,7 @@ const CHECKS = {
   "contract-vectors": contractVectorsCheck,
   "atomic-flow": atomicFlowCheck,
   "quote-binding": quoteBindingCheck,
+  "types-consumer": typesConsumerCheck,
 };
 
 export const runCheck = async (name) => {

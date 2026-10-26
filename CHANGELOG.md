@@ -1,5 +1,8 @@
 ## Unreleased
 
+- `check:types-consumer` compiles a minimal TypeScript consumer with `tsc --noEmit` against the package's own
+  exports map. It imports the root, `./xmr` and `./recovery`, assigns the public interfaces and calls the declared
+  entry points; a declaration that parses but cannot be consumed reddens here.
 - `check-packed-consumer` packs the package, installs that tarball into an empty project and imports every public
   subpath, then checks the engine's relative assets. It catches a package that reads as complete but fails at the
   consumer's first import.
@@ -522,6 +525,9 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
 
 ## Unreleased
 
+- `check:types-consumer` compiles a minimal TypeScript consumer with `tsc --noEmit` against the package's own
+  exports map. It imports the root, `./xmr` and `./recovery`, assigns the public interfaces and calls the declared
+  entry points; a declaration that parses but cannot be consumed reddens here.
 - `check-packed-consumer` packs the package, installs that tarball into an empty project and imports every public
   subpath, then checks the engine's relative assets. It catches a package that reads as complete but fails at the
   consumer's first import.
