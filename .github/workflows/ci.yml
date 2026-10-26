@@ -235,7 +235,10 @@ jobs:
         env:
           RPC_URL: https://sepolia-rollup.arbitrum.io/rpc
         run: |
-          anvil --fork-url "$RPC_URL" --port 8545 --chain-id 421614 > /tmp/anvil-fork.log 2>&1 &
+          # --fork-state-by-number: several public RPCs answer the header by hash but cannot serve
+          # eth_getBalance/getCode for that hash ("block not found"); read state by number instead. The retry
+          # backoff covers a load-balanced endpoint that briefly answers behind the fork block.
+          anvil --fork-url "$RPC_URL" --fork-state-by-number --fork-retry-backoff 1000 --retries 10 --port 8545 --chain-id 421614 > /tmp/anvil-fork.log 2>&1 &
           echo $! > /tmp/anvil-fork.pid
           for i in $(seq 1 60); do
             if cast chain-id --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1; then exit 0; fi
@@ -264,7 +267,9 @@ jobs:
         env:
           RPC_URL: https://ethereum-rpc.publicnode.com
         run: |
-          anvil --fork-url "$RPC_URL" --port 8546 --chain-id 1 > /tmp/anvil-uniswap.log 2>&1 &
+          # Same reason as the escrow fork: public mainnet RPCs are load balanced, and an account read by block
+          # hash can land on a node that does not have that block.
+          anvil --fork-url "$RPC_URL" --fork-url "https://eth.drpc.org" --fork-state-by-number --fork-retry-backoff 1000 --retries 10 --port 8546 --chain-id 1 > /tmp/anvil-uniswap.log 2>&1 &
           echo $! > /tmp/anvil-uniswap.pid
           for i in $(seq 1 60); do
             if cast chain-id --rpc-url http://127.0.0.1:8546 >/dev/null 2>&1; then exit 0; fi
