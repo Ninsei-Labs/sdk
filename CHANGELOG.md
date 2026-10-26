@@ -1,5 +1,9 @@
 ## Unreleased
 
+- `moneroFeeEstimate` reads the daemon's real units: `fee` and `fees` are atomic units per byte, and
+  `quantization_mask` is kept as `quantizationMask`. `feeForBytes` multiplies by the size instead of dividing by
+  1024, so a 1024-byte transaction at 20000/byte is 20,480,000, not 20,000. The old `feePerKB`/`medianFeePerKB`
+  fields were never sent by a daemon and are gone.
 - `scanRange` no longer reports a partial range as complete. A block that failed, a BUSY transaction answer, and a
   response missing a requested transaction hash now appear in `missingHeights` with `complete: false` and
   `incompleteReason: "blocks-unreadable"`; the per-address sums are still returned.
@@ -473,6 +477,10 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
 
 ## Unreleased
 
+- `moneroFeeEstimate` reads the daemon's real units: `fee` and `fees` are atomic units per byte, and
+  `quantization_mask` is kept as `quantizationMask`. `feeForBytes` multiplies by the size instead of dividing by
+  1024, so a 1024-byte transaction at 20000/byte is 20,480,000, not 20,000. The old `feePerKB`/`medianFeePerKB`
+  fields were never sent by a daemon and are gone.
 - `scanRange` no longer reports a partial range as complete. A block that failed, a BUSY transaction answer, and a
   response missing a requested transaction hash now appear in `missingHeights` with `complete: false` and
   `incompleteReason: "blocks-unreadable"`; the per-address sums are still returned.

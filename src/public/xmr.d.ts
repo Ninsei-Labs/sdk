@@ -407,17 +407,18 @@ export declare function judgeDaemonAddress(
   options?: { network?: string; allowPlainLoopback?: boolean },
 ): DaemonAddressJudgement;
 
-/** A per-KB price -> the fee for a transaction of `bytes`, rounded UP. Throws on a non-integer or a negative input. */
-export declare function feeForBytes(feePerKB: bigint | number | string, bytes: bigint | number | string): string;
+/** A per-byte price -> the fee for a transaction of `bytes`/weight. Exact integer multiplication. */
+export declare function feeForBytes(feePerByte: bigint | number | string, bytes: bigint | number | string): string;
 
 export interface FeeEstimateOk {
   readonly ok: true;
   readonly url: string;
-  /** The price per kilobyte for the next block, in atomic units, or null when the daemon did not send it. */
-  readonly feePerKB: string | null;
-  readonly medianFeePerKB: string | null;
-  /** The daemon's own priority list, in its order, or null. */
+  /** The price per byte for the next block, in atomic units, or null when the daemon did not send it. */
+  readonly feePerByte: string | null;
+  /** The daemon's own priority list, per byte and in its order, or null. */
   readonly perPriority: readonly string[] | null;
+  /** The unit the final fee is rounded to, or null when the daemon did not send it. */
+  readonly quantizationMask: string | null;
 }
 
 export interface FeeEstimateRefusal {
@@ -430,7 +431,7 @@ export interface FeeEstimateRefusal {
 
 /**
  * ASK A NODE WHAT A TRANSACTION WILL COST (`get_fee_estimate`). The exact sum needs the assembled transaction, so
- * this is a price per kilobyte; `feeForBytes` is the only arithmetic that turns it into a fee. Never throws.
+ * this is a price per byte; `feeForBytes` is the only arithmetic that turns it into a fee. Never throws.
  */
 export declare function moneroFeeEstimate(options: {
   url: string;
