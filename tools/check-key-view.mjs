@@ -79,6 +79,31 @@ console.log("=== 1c) A SALT THE QUOTE DID NOT CARRY IS REFUSED ===");
   else bad("salt mismatch: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
 }
 
+async function startPending() {
+  setStorage(memoryStorage());
+  let sent = 0;
+  const wallet = { address: async () => order.locker,
+    send: async () => { sent += 1; return "0x" + "99".repeat(32); },
+    receipt: async () => ({ status: "0x1", logs: [], blockNumber: 10 }) };
+  const counterparty = { proof: maker.side.proof, edPointClaimer: maker.spendPoint,
+    commitHalfClaimer: quote.commitHalfClaimer, viewHalfClaimer: derived.makerViewHalf };
+  const request = { quote: { id: "q", chain: "arbitrum-sepolia", asset: "ETH", amount: 1, size: 1 }, order, orderQuote: quote,
+    counterparty, recoveryKey: WORDS, recoveryIndex: 0, receiveTo: "synthetic-xmr-destination",
+    restoreHeight: 100, wallet, onRecoveryKey: async () => true };
+  const result = await createSwaps({ mode: "live", xmrNetwork: "stagenet", logs: async () => [],
+    call: async ({ data }) => (data.startsWith(FACTORY_METHODS.predict) ? "0x" + "0".repeat(24) + "88".repeat(20) : "0x"),
+  }).start(request).catch((error) => error);
+  return { result, sent };
+}
+
+console.log("=== 1d) A RECEIPT WITHOUT THE EVENT IS NOT xmr-incoming ===");
+{
+  const { result, sent } = await startPending();
+  if (result && result.code === "funding-pending" && result.params && result.params.txHash && sent === 1) {
+    ok("a status-1 receipt with no OrderCreated is funding-pending, not a funded escrow");
+  } else bad("pending funding: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
+}
+
 console.log("=== 2) ANOTHER VIEW HALF IS REFUSED BEFORE FUNDING ===");
 {
   const { result, sent } = await startWith("0x04");

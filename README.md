@@ -209,6 +209,10 @@ a dead node, and a node on another network is not an absent reader. A page that 
 path can call `recoveryIndexTaken` from `./recovery` before using a number; it checks the factory's `OrderCreated`
 logs from the registry's deployment block.
 
+Funding is reported from the receipt, not from the send. A status-0 receipt is `contract-reverted`; a missing
+receipt, a receipt without `OrderCreated`, or an event from another factory is `funding-pending` with the transaction
+hash, and `swaps.start` does not save an escrow or retire a recovery number in that state.
+
 The withdrawal window retries a `429`, a timeout or a `5xx` before it gives up. If the window still cannot be read,
 `restoreWallet` falls back to the full scan and reports `window.fallback: true` with `fallbackWhy: "window-read"` and
 the node's status; a withdrawal is not refused because the node was busy. When the wallet cannot reach the node's

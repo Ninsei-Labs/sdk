@@ -1781,6 +1781,8 @@ export type ErrorCode =
   | "server-unavailable"
   /** The service answered and did not accept: the connection got through, the request did not (status and reason in params). */
   | "server-refused"
+  /** The funding transaction was sent, but no status-1 receipt with the expected OrderCreated proves the escrow. */
+  | "funding-pending"
   /** The wait for the XMR to arrive expired: a separate code, because this is a state of the money, not a breakdown. */
   | "xmr-timeout"
   /**

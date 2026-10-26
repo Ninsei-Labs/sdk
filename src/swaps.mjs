@@ -1023,6 +1023,16 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         if (error && typeof error.code === "string") throw error;
         throw new SdkError("server-unavailable", { step: "lock" });
       }
+      // A SENT TRANSACTION IS NOT A FUNDED ESCROW. Without a status-1 receipt and the expected OrderCreated, the
+      // address is unknown and calling the step xmr-incoming would make the person wait for XMR at a guess. Keep
+      // the swap pending: the transaction hash is the handle for a later receipt read.
+      if (funded && funded.pending) {
+        throw new SdkError("funding-pending", {
+          txHash: funded.createHash || null,
+          reason: funded.pendingReason || "no-receipt",
+          predictedEscrow: funded.predictedEscrow || null,
+        });
+      }
       // THE ESCROW ADDRESS IS TAKEN FROM THE RECEIPT (lock.send does this), not from a prediction. It is also written
       // into the swap: otherwise the progress screen and the explorer link would show an address that is not on the
       // chain (the page does this on its side: www/js/ui/views/confirm.js:463).
