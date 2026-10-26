@@ -483,6 +483,19 @@ export interface ScannedMatch {
   [field: string]: unknown;
 }
 
+/** A range scan's answer: the per-address totals and whether every block was read. */
+export interface ScanRangeResult {
+  readonly fromHeight: number;
+  readonly toHeight: number;
+  readonly results: ScannedMatch[];
+  /** False when at least one block or its transactions could not be read. */
+  readonly complete: boolean;
+  /** The heights that failed; empty when `complete` is true. */
+  readonly missingHeights: number[];
+  /** `blocks-unreadable` when `complete` is false. */
+  readonly incompleteReason?: "blocks-unreadable";
+}
+
 /** Walk a block range and return the transactions that pay a watched address. */
 export declare function scanRange(options: {
   daemonUrl: string;
@@ -494,4 +507,6 @@ export declare function scanRange(options: {
   nowSec?: number | null;
   /** The chain tip used to judge a height lock; defaults to `toHeight`. Inclusion height still drives confirmations. */
   tipHeight?: number | null;
-}): Promise<ScannedMatch[]>;
+  /** The fetch used for the daemon requests; absent - the global fetch. */
+  fetchImpl?: typeof fetch;
+}): Promise<ScanRangeResult>;
