@@ -5,8 +5,8 @@
 // ONE CASE PER PROMISE THE GUARD MAKES (issue #40):
 //   a) THE ESCROW'S `Declined` EVENT IS THE DECLINE - cut the topic comparison and the chain source goes silent;
 //   b) THE EVENT'S IDENTITY IS PINNED - move the event's name and the topic stops being the contract's event;
-//   c) THE NODE'S `declined` + `compliance` STATUS IS THE OTHER SOURCE - drop it from the decision and the wait
-//      runs on to `xmr-timeout` about an order whose ETH is already back;
+//   c) THE RETIRED SERVICE'S `declined` + `compliance` STATUS IS NOT A DECISION - fold it back into the wait and
+//      the guard reddens on the settlement written from a service word;
 //   d) THE STATE IS WRITTEN DOWN - stop writing the settlement and nothing that reads the record reports it;
 //   e) NO REASON TRAVELS - let one key named like a reason into the answer and the guard refuses it.
 //
@@ -61,13 +61,13 @@ const CASES = [
       'export const DECLINE_EVENT_NAME = "DeclinedAgain";'),
   },
   {
-    name: "the node's declined + compliance status is dropped from the decision",
-    wants: "c) the wire source is load-bearing: without it the wait runs to xmr-timeout",
+    name: "the retired service's declined + compliance status is folded back into the decision",
+    wants: "c) the service is not the decision: passing its status again reddens on a settlement written from it",
     file: "src/swaps.mjs",
-    expects: "the node's declined status did not end the wait as a decline",
+    expects: "the service's declined status was written into the record as a settlement",
     patch: (text) => text.replace(
-      "const declineNow = declineOf({ logs: chainDecline.logs, status: body, escrow: escrowAddress, at: Date.now() });",
-      "const declineNow = declineOf({ logs: chainDecline.logs, escrow: escrowAddress, at: Date.now() });"),
+      "const declineNow = declineOf({ logs: chainDecline.logs, escrow: escrowAddress, at: Date.now() });",
+      "const declineNow = declineOf({ logs: chainDecline.logs, status: body, escrow: escrowAddress, at: Date.now() });"),
   },
   {
     name: "the decline is not written into the record",

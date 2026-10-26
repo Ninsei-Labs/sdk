@@ -1956,18 +1956,19 @@ export const declineCheck = async () => {
     problems.push(`an answer that is not a list of logs did not refuse with bad-input: ${JSON.stringify({ code: (notAList && notAList.code) || null })}`);
   }
 
-  // (d) SOURCE 2 - THE NODE'S STATUS `declined` WITH THE CODE `compliance`, through the real watch. THE WAIT MUST
-  // STOP AT ONCE: one poll, no timeout, and the state written into the record.
+  // (d) THE SERVICE'S `declined` STATUS IS NOT A DECISION. The backend is retired: a wire word may notify, but it
+  // must not write a settlement or stop a wait as a decline. The body carries no `receivedXmr`, so the watch refuses
+  // it as an unreadable answer - and leaves the record alone.
   const declinedRecord = declineRecord(engine);
   const wire = declineFacade(swapsMod, { answers: [{ status: "declined", code: "compliance", id: "w" }], logs: () => Promise.resolve([]) });
-  const wireOutcome = await watchOutcome("the watch on the node's declined status",
-    () => wire.swaps.watch({ id: declinedRecord.id, escrow: DECLINE_ESCROW, pollMs: 1, timeoutMs: 25 }));
-  if (!(wireOutcome && wireOutcome.declined === true && wireOutcome.terminal === "declined" && wireOutcome.code === "compliance"
-        && wireOutcome.source === "status" && wireOutcome.seen === false)) {
-    problems.push(`the node's declined status did not end the wait as a decline: ${JSON.stringify(wireOutcome)}`);
+  let wireRefusal = null;
+  try { await wire.swaps.watch({ id: declinedRecord.id, escrow: DECLINE_ESCROW, pollMs: 1, timeoutMs: 25 }); }
+  catch (error) { wireRefusal = error; }
+  if (!(wireRefusal && typeof wireRefusal.code === "string" && wireRefusal.code)) {
+    problems.push(`the service's declined status was not refused as an unreadable answer: ${JSON.stringify({ code: (wireRefusal && wireRefusal.code) || null })}`);
   }
-  if (wire.seen.polls !== 1) {
-    problems.push(`the wait was not stopped at once on the node's declined status: ${wire.seen.polls} poll(s) instead of 1`);
+  if (engine.swap.getSwap(declinedRecord.id).settlement) {
+    problems.push("the service's declined status was written into the record as a settlement");
   }
 
   // (d2) SOURCE 1 AT THE WATCH LEVEL TOO - the escrow's event stops the wait even when the service says nothing.
@@ -1996,6 +1997,18 @@ export const declineCheck = async () => {
   if (plain.seen.polls < 2) {
     problems.push(`an ordinary wait stopped after ${plain.seen.polls} poll(s): the decline branch is not conditional`);
   }
+  // A SERVICE THAT SAW MONEY DOES NOT DECLARE READINESS. The old path marked the escrow ready on receivedXmr > 0,
+  // ignoring the expected amount and confirmations. The observation is now returned with `seen: false` and the
+  // next step `verify`; only the client's own two-node check can produce an arrival.
+  const observedRecord = declineRecord(engine);
+  const observed = declineFacade(swapsMod, { answers: [{ status: "awaiting_funding", receivedXmr: 1, expectedAmountXmr: 10, confirmations: 0, id: "w-observed" }], logs: () => Promise.resolve([]) });
+  let observedOutcome = null;
+  try { observedOutcome = await observed.swaps.watch({ id: observedRecord.id, escrow: DECLINE_ESCROW, pollMs: 1, timeoutMs: 20 }); }
+  catch (error) { observedOutcome = error; }
+  if (!(observedOutcome && observedOutcome.seen === false && observedOutcome.next === "verify"
+        && observedOutcome.observed && observedOutcome.observed.receivedXmr === 1)) {
+    problems.push(`a service observation became readiness: ${JSON.stringify(observedOutcome && (observedOutcome.code || observedOutcome))}`);
+  }
   // A BARE `declined` WITHOUT THE NODE'S CODE IS NOT THE STATE THE NODE NAMES: it is an answer that is not a watch
   // response at all (no `receivedXmr` in it), so the watch names THAT and no decline is written down.
   const bareRecord = declineRecord(engine);
@@ -2023,21 +2036,21 @@ export const declineCheck = async () => {
 
   // (f) THE STATE, ONCE SEEN, IS WRITTEN INTO THE RECORD: every surface that reads the record reports the decline
   // without asking the chain again - and the app can no longer offer a manual refund for an order that is over.
-  const stored = await swapsMod.toState(engine.swap.getSwap(declinedRecord.id));
+  const stored = await swapsMod.toState(engine.swap.getSwap(eventRecord.id));
   if (stored.terminal !== "declined") {
     problems.push(`the record of a declined swap does not report the state: ${JSON.stringify({ terminal: stored.terminal })}`);
   }
   if (!(stored.settled === true && stored.actions.markReady === false && stored.actions.sweep === false && stored.actions.refund === false)) {
     problems.push(`a declined swap still offers an action or is not settled: ${JSON.stringify(stored.actions)} / settled=${stored.settled}`);
   }
-  const settledRecord = engine.swap.getSwap(declinedRecord.id);
+  const settledRecord = engine.swap.getSwap(eventRecord.id);
   if (!(settledRecord.settlement && settledRecord.settlement.kind === "declined")) {
     problems.push("the decline was not written into the swap record as its settlement");
   }
   // AND A LATER WATCH RETURNS IT AT ONCE, WITHOUT POLLING AT ALL (a page reload).
   const afterReload = declineFacade(swapsMod, { answers: [{ status: "awaiting_funding", receivedXmr: 0, id: "w6" }], logs: () => Promise.resolve([]) });
   const reloadOutcome = await watchOutcome("the watch after a reload",
-    () => afterReload.swaps.watch({ id: declinedRecord.id, escrow: DECLINE_ESCROW, pollMs: 1, timeoutMs: 25 }));
+    () => afterReload.swaps.watch({ id: eventRecord.id, escrow: DECLINE_ESCROW, pollMs: 1, timeoutMs: 25 }));
   if (!(reloadOutcome && reloadOutcome.declined === true && reloadOutcome.source === "record" && afterReload.seen.polls === 0)) {
     problems.push(`a reloaded watch did not return the recorded decline at once: ${JSON.stringify(reloadOutcome)} / polls=${afterReload.seen.polls}`);
   }
@@ -2066,7 +2079,7 @@ export const declineCheck = async () => {
 
   // (h) WHAT THE APP IS TOLD, AND WHAT IT IS DELIBERATELY NOT TOLD. Exactly the declared fields, no key anywhere
   // that would carry a reason, a category or a provider, and the node's code unchanged.
-  const verdicts = { fromEvent, fromWire: wireOutcome, fromChain: chainOutcome, fromRecord: reloadOutcome };
+  const verdicts = { fromEvent, fromChain: chainOutcome, fromRecord: reloadOutcome };
   for (const [label, verdict] of Object.entries(verdicts)) {
     if (!verdict || typeof verdict !== "object") continue;      // already named above as "refused instead"
     const forbidden = keysDeep(verdict).filter((key) => DECLINE_FORBIDDEN_KEYS.includes(key));
@@ -2089,7 +2102,7 @@ export const declineCheck = async () => {
   const green = problems.length === 0;
   return {
     note: green
-      ? "2 sources (the escrow's Declined event, the node's declined+compliance status), the wait stops at once, the state is written down, no action and no reason offered"
+      ? "the escrow's Declined event is the only decline source, the wait stops at once, the state is written down, no action and no reason offered"
       : "the maker's decline is not handled as its own state",
     problems,
     notes,

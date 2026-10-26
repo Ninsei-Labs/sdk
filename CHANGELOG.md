@@ -1,5 +1,8 @@
 ## Unreleased
 
+- The retired backend no longer decides a swap. A service watch row is an observation only: `receivedXmr > 0` is
+  returned as `seen: false` with `next: "verify"` and never signs `markReady`, and a service `declined` status is
+  no longer written into the record as a settlement. The escrow's `Declined` event remains the decline source.
 - Storage failures are named, not silent. A failed read, corrupt JSON, a failed write and a failed remove raise
   `storage-unavailable` with `step` (`read`, `parse`, `write`, `serialize`, `remove`); only a missing value returns
   the empty state. A second client with a different adapter is refused with `step: "conflict"` instead of taking
@@ -458,6 +461,9 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
 
 ## Unreleased
 
+- The retired backend no longer decides a swap. A service watch row is an observation only: `receivedXmr > 0` is
+  returned as `seen: false` with `next: "verify"` and never signs `markReady`, and a service `declined` status is
+  no longer written into the record as a settlement. The escrow's `Declined` event remains the decline source.
 - Storage failures are named, not silent. A failed read, corrupt JSON, a failed write and a failed remove raise
   `storage-unavailable` with `step` (`read`, `parse`, `write`, `serialize`, `remove`); only a missing value returns
   the empty state. A second client with a different adapter is refused with `step: "conflict"` instead of taking

@@ -209,6 +209,9 @@ a dead node, and a node on another network is not an absent reader. A page that 
 path can call `recoveryIndexTaken` from `./recovery` before using a number; it checks the factory's `OrderCreated`
 logs from the registry's deployment block.
 
+The retired backend no longer decides a swap: its watch row may observe money, but it cannot declare readiness or
+a decline; the client's two-node check and the escrow's own `Declined` event do.
+
 Storage is a refusal, not a silent empty state: a failed read, corrupt JSON, a failed write or remove is
 `storage-unavailable` with a step, and a second client with another adapter is refused rather than taking over the
 first client's records.
