@@ -38,7 +38,7 @@ const bad = (m) => { fails.push(m); console.log("  FAIL  " + m); };
 // THE STAND-IN: the driver surface the pass reads, and the wallet surface it calls. `locked` models coins that
 // exist but are not spendable until the spent status is re-checked.
 function standIn({ total = 0n, unlocked = 0n, unlockAfterRescan = null, syncThrows = false, balanceThrows = false,
-  rescanSpent = true, rescanBlockchain = true, heights = true } = {}) {
+  rescanSpent = true, rescanBlockchain = true, heights = true, walletHeight = 2_232_400, nodeHeight = 2_232_400 } = {}) {
   const calls = { setRestoreHeight: [], rescanBlockchain: 0, rescanSpent: 0, sync: 0, getBalance: 0, unlocked: 0 };
   const driver = {
     async setRestoreHeight(h) { calls.setRestoreHeight.push(h); },
@@ -52,8 +52,8 @@ function standIn({ total = 0n, unlocked = 0n, unlockAfterRescan = null, syncThro
     };
   }
   if (heights) {
-    driver.getHeight = async () => 2_232_400;
-    driver.getDaemonHeight = async () => 2_232_405;
+    driver.getHeight = async () => walletHeight;
+    driver.getDaemonHeight = async () => nodeHeight;
   }
   const wallet = {
     calls,
@@ -87,8 +87,10 @@ console.log("=== 1) HEIGHT AND THE FIRST PASS ===");
     else bad("amounts: " + JSON.stringify({ total: r.total, unlocked: r.unlocked }));
     if (r.passes === 1 && r.lockedPass === false) ok("one pass, and the locked pass is named as not taken");
     else bad("passes/lockedPass: " + JSON.stringify({ passes: r.passes, lockedPass: r.lockedPass }));
-    if (r.walletHeight === 2_232_400 && r.nodeHeight === 2_232_405) ok("heights come from the driver");
+    if (r.walletHeight === 2_232_400 && r.nodeHeight === 2_232_400) ok("heights come from the driver");
     else bad("heights: " + JSON.stringify({ walletHeight: r.walletHeight, nodeHeight: r.nodeHeight }));
+    if (r.scanComplete === true && r.scanIncompleteReason === undefined) ok("a wallet at the node's height reports a complete scan");
+    else bad("a complete scan was not named: " + JSON.stringify({ scanComplete: r.scanComplete, reason: r.scanIncompleteReason }));
     if (r.scanHeight === 0 || r.scanHeight > 0) ok("scan height is a number");
   }
 }
@@ -135,6 +137,18 @@ console.log("=== 3) A FAILING SYNC DOES NOT HIDE THE BALANCE ===");
   const o = await outcome({ wallet, fromHeight: 2_232_000 });
   if (o.kind === "ok" && o.result.unlocked === "4000000000000") ok("the remainder is reported although sync() threw");
   else bad("a failing sync hid the balance: " + JSON.stringify(o.kind === "ok" ? o.result : codeOf(o)));
+  if (o.kind === "ok" && o.result.scanComplete === false && o.result.scanIncompleteReason === "sync-failed")
+    ok("a failing sync is named as scan-incomplete, not reported as an empty wallet");
+  else bad("a failing sync was not named: " + JSON.stringify(o.kind === "ok" ? { scanComplete: o.result.scanComplete, reason: o.result.scanIncompleteReason } : codeOf(o)));
+}
+
+console.log("=== 3b) A WALLET BEHIND THE NODE IS NOT A ZERO BALANCE ===");
+{
+  const wallet = standIn({ total: 0n, unlocked: 0n, walletHeight: 2_232_400, nodeHeight: 2_232_405 });
+  const o = await outcome({ wallet, fromHeight: 2_232_000 });
+  if (o.kind === "ok" && o.result.scanComplete === false && o.result.scanIncompleteReason === "behind-node")
+    ok("a wallet five blocks behind the node is named behind-node");
+  else bad("a wallet behind the node was reported complete: " + JSON.stringify(o.kind === "ok" ? { scanComplete: o.result.scanComplete, reason: o.result.scanIncompleteReason } : codeOf(o)));
 }
 
 console.log("=== 4) REFUSALS CARRY CODES ===");
@@ -212,7 +226,7 @@ console.log("=== 7) BREAKING RUN C: a fatal sync -> the balance case reddens ===
 {
   const { file, dir } = mutated((src) => {
     const before = src;
-    src = src.replace('try { await wallet.sync(); } catch { /* the remainder decides */ }', 'await wallet.sync();');
+    src = src.replace('try { await wallet.sync(); } catch (error) { syncError = error; }', 'await wallet.sync();');
     if (src === before) throw new Error("mutation C did not apply");
     return src;
   }, "c");

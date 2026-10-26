@@ -1,5 +1,11 @@
 ## Unreleased
 
+- `sweep.restore` reports `scanComplete: false` with `scanIncompleteReason: "sync-failed"`, `"behind-node"` or
+  `"no-heights"` when the wallet did not reach the node's height. A zero balance after a failed sync is no longer
+  reported as an empty wallet.
+- `findSwaps` no longer stops after five empty numbers. It searches the whole allocator range by default and
+  returns `complete: false` with `searchedUpTo` when a caller supplies a smaller `maxIndex`; `gap` is retained
+  but ignored.
 - `quotes.sale` authenticates the ticket instead of trusting its `signed` flag: the EIP-712 signature, expiry,
   registry provider, interface allow-list, factory policy and the sale claimer's denylist are checked before the
   ticket is returned.
@@ -432,6 +438,12 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
 
 ## Unreleased
 
+- `sweep.restore` reports `scanComplete: false` with `scanIncompleteReason: "sync-failed"`, `"behind-node"` or
+  `"no-heights"` when the wallet did not reach the node's height. A zero balance after a failed sync is no longer
+  reported as an empty wallet.
+- `findSwaps` no longer stops after five empty numbers. It searches the whole allocator range by default and
+  returns `complete: false` with `searchedUpTo` when a caller supplies a smaller `maxIndex`; `gap` is retained
+  but ignored.
 THE ENGINE MIRROR (`engine/**`) CROSSES OVER IN ENGLISH, WITHOUT THE OLD BRAND AND WITHOUT A HARDCODED DOMAIN.
 All 45 modules are copied byte-for-byte from the demo repository's `sdk/engine` (`tools/build-sdk-engine.mjs`):
 comments are concise technical English and message strings are translated one to one, `Arrakis` is renamed to

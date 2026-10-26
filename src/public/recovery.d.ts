@@ -405,7 +405,9 @@ export declare function findSwaps(request: {
   /** The factory's deployment block from the chain registry; used when `fromBlock` is omitted. */
   deploymentBlock?: number | null;
   toBlock?: number | string;
+  /** Deprecated and ignored: discovery no longer stops after a run of empty numbers. */
   gap?: number;
+  /** The last index to try. Defaults to the allocator's ceiling; a smaller value returns `complete: false`. */
   maxIndex?: number;
   /** Reads the settlement block timestamp, in seconds: (blockNumber) -> seconds. */
   evmBlockTime?: (blockNumber: number) => Promise<number>;
@@ -422,4 +424,13 @@ export declare function findSwaps(request: {
   moneroNetwork?: string | null;
   /** The fetch used for those node requests; absent - the global fetch. */
   fetchImpl?: typeof fetch;
-}): Promise<{ swaps: FoundSwap[]; scanned: number }>;
+}): Promise<{
+  swaps: FoundSwap[];
+  scanned: number;
+  /** The last index tried, or null when no index was scanned. */
+  searchedUpTo: number | null;
+  /** True only when the whole allocator range was searched. */
+  complete: boolean;
+  /** `max-index` when a smaller caller-supplied bound stopped the search. */
+  incompleteReason?: string;
+}>;

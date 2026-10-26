@@ -140,7 +140,7 @@ export const recoveryKeyCheck = async () => {
   const found = await recovery.findSwaps({
     mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
     evmLogs: async (request) => { calls.push(request); return request.topics.includes(pad(address("bb"))) ? [order] : []; },
-    gap: 2,
+    maxIndex: 4,
   });
   check(found.swaps.length === 1 && found.swaps[0].index === 0, `the search found ${found.swaps.length} orders`);
   check(found.swaps[0] && found.swaps[0].side === "locker", "the search named the wrong side");
@@ -150,19 +150,32 @@ export const recoveryKeyCheck = async () => {
   check(calls.every((call) => !call.topics.some((topic) => String(topic).toLowerCase().includes(halves.spendHalf.slice(2, 10)))), "a half was put into the log filter");
   check(found.swaps[0].xmrAmount === null && found.swaps[0].xmrAmountReason === "no-code-reader",
     `a search without a code reader answered ${found.swaps[0].xmrAmount}/${found.swaps[0].xmrAmountReason}`);
+  // A RUN OF EMPTY NUMBERS IS NOT A STOP. The number before this order (5) is empty; an old gap rule of 2 would
+  // have returned no swaps while the matching log was already in hand.
+  const gappedHalves = recovery.takerHalves({ mnemonic: WORDS, chainId: CHAIN, index: 5 });
+  const gappedOrder = logFor({ commitment: gappedHalves.spendCommitment, locker: address("bb"), claimer: address("cc"), index: 5 });
+  const gapped = await recovery.findSwaps({
+    mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
+    evmLogs: async () => [gappedOrder], gap: 2, maxIndex: 6,
+  });
+  check(gapped.swaps.length === 1 && gapped.swaps[0].index === 5,
+    `a gap of two hid the order at number 5: found ${gapped.swaps.length}`);
+  check(gapped.complete === false && gapped.incompleteReason === "max-index" && gapped.searchedUpTo === 5,
+    `a bounded search did not name its bound: ${JSON.stringify({ complete: gapped.complete, reason: gapped.incompleteReason, searchedUpTo: gapped.searchedUpTo })}`);
+  notes.push("discovery scans past empty numbers and names a caller-supplied bound");
   const xmrWord = BigInt(5_000_000_000_000).toString(16).padStart(64, "0");
   const cloneCode = "0x" + "00".repeat(621) + xmrWord + "00".repeat(877 - 621 - 32);
   const withXmr = await recovery.findSwaps({
     mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
     evmLogs: async (request) => request.topics.includes(pad(address("bb"))) ? [order] : [],
-    evmCode: async () => cloneCode, gap: 2,
+    evmCode: async () => cloneCode, maxIndex: 4,
   });
   check(withXmr.swaps[0].xmrAmount === "5000000000000" && withXmr.swaps[0].xmrAmountReason === null,
     `the clone's XMR amount became ${withXmr.swaps[0].xmrAmount}/${withXmr.swaps[0].xmrAmountReason}`);
   const modernLog = modernLogFor({ commitment: halves.spendCommitment, locker: address("bb"), claimer: address("cc"), xmrAmount: "7000000000000" });
   const modern = await recovery.findSwaps({
     mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
-    evmLogs: async () => [modernLog], gap: 2,
+    evmLogs: async () => [modernLog], maxIndex: 4,
   });
   check(modern.swaps[0] && modern.swaps[0].xmrAmount === "7000000000000" && modern.swaps[0].xmrAmountReason === "event",
     `the current event's XMR amount became ${modern.swaps[0]?.xmrAmount}/${modern.swaps[0]?.xmrAmountReason}`);
@@ -171,7 +184,7 @@ export const recoveryKeyCheck = async () => {
   const all = await recovery.findSwaps({
     mnemonic: WORDS, chainId: CHAIN, factory: address("dd"),
     evmLogs: async (request) => { allCalls.push(request); return [order]; },
-    gap: 2,
+    maxIndex: 4,
   });
   check(all.swaps.length === 1 && allCalls.length === 1, `a full scan made ${allCalls.length} calls and found ${all.swaps.length} orders`);
   // THE FACTORY'S BIRTH HEIGHT IS THE DEFAULT START. A public RPC refuses a log query from genesis; the registry
@@ -180,7 +193,7 @@ export const recoveryKeyCheck = async () => {
   await recovery.findSwaps({
     mnemonic: WORDS, chainId: CHAIN, factory: address("dd"),
     evmLogs: async (request) => { deploymentCalls.push(request.fromBlock); return [order]; },
-    gap: 2, deploymentBlock: 321430239,
+    maxIndex: 4, deploymentBlock: 321430239,
   });
   check(deploymentCalls.length === 1 && deploymentCalls[0] === 321430239,
     `the deployment block became ${deploymentCalls[0]}, expected 321430239`);
@@ -188,7 +201,7 @@ export const recoveryKeyCheck = async () => {
   await recovery.findSwaps({
     mnemonic: WORDS, chainId: CHAIN, factory: address("dd"),
     evmLogs: async (request) => { explicitCalls.push(request.fromBlock); return [order]; },
-    gap: 2, fromBlock: 7, deploymentBlock: 321430239,
+    maxIndex: 4, fromBlock: 7, deploymentBlock: 321430239,
   });
   check(explicitCalls.length === 1 && explicitCalls[0] === 7,
     `an explicit fromBlock became ${explicitCalls[0]}, expected 7`);
@@ -198,7 +211,7 @@ export const recoveryKeyCheck = async () => {
     evmBlockTime: async () => 1_000_000,
     moneroTip: async () => 2_000,
     moneroBlockTimestamp: async (height) => 500 + height * 1_000,
-    gap: 2,
+    maxIndex: 4,
   });
   check(withHeight.swaps.length === 1, "the height search lost the order");
   check(withHeight.swaps[0].startHeight === 939, `the start height is ${withHeight.swaps[0].startHeight}, expected 939 (999 - 60)`);
@@ -221,7 +234,7 @@ export const recoveryKeyCheck = async () => {
     evmLogs: async (request) => request.topics.includes(pad(address("bb"))) ? [order] : [],
     evmBlockTime: async () => 1_000_000,
     xmrNodes: ["https://node.example"], moneroNetwork: "stagenet", fetchImpl: nodeFetch,
-    gap: 2,
+    maxIndex: 4,
   });
   check(throughNode.swaps[0].startHeight === 939, `the node-backed start height is ${throughNode.swaps[0].startHeight}`);
   const genesis = await recovery.findSwaps({
@@ -234,14 +247,14 @@ export const recoveryKeyCheck = async () => {
       if (request.method === "get_info") return { ok: true, json: async () => ({ result: { height: 1, nettype: "stagenet", synchronized: true } }) };
       return { ok: true, json: async () => ({ result: { block_header: { timestamp: 0 } } }) };
     },
-    gap: 2,
+    maxIndex: 4,
   });
   check(genesis.swaps[0].startHeightReason === null, `genesis timestamp 0 was refused: ${genesis.swaps[0].startHeightReason}`);
   check(genesis.swaps[0].startHeight === 0, `genesis start height is ${genesis.swaps[0].startHeight}`);
   notes.push("the search can use node URLs without three callbacks");
   const withoutHeight = await recovery.findSwaps({
     mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
-    evmLogs: async (request) => request.topics.includes(pad(address("bb"))) ? [order] : [], gap: 2,
+    evmLogs: async (request) => request.topics.includes(pad(address("bb"))) ? [order] : [], maxIndex: 4,
   });
   check(withoutHeight.swaps[0].startHeight === null && withoutHeight.swaps[0].startHeightReason === "no-height-readers",
     "a search without readers did not name the missing height");
@@ -249,7 +262,7 @@ export const recoveryKeyCheck = async () => {
   const noTime = await recovery.findSwaps({
     mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
     evmLogs: async (request) => request.topics.includes(pad(address("bb"))) ? [order] : [],
-    evmBlockTime: async () => null, gap: 2,
+    evmBlockTime: async () => null, maxIndex: 4,
   });
   check(noTime.swaps[0].startHeightReason === "no-block-time" && noTime.swaps[0].blockTime === null,
     `a null block time became ${JSON.stringify({ reason: noTime.swaps[0].startHeightReason, time: noTime.swaps[0].blockTime })}`);
@@ -257,7 +270,7 @@ export const recoveryKeyCheck = async () => {
     mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
     evmLogs: async (request) => request.topics.includes(pad(address("bb"))) ? [order] : [],
     evmBlockTime: async () => 1_000_000, xmrNodes: ["https://node.example"], moneroNetwork: "stagenet",
-    fetchImpl: async () => { throw new Error("down"); }, gap: 2,
+    fetchImpl: async () => { throw new Error("down"); }, maxIndex: 4,
   });
   check(unreachable.swaps[0].startHeightReason === "monero-nodes-unreachable",
     `an unreachable node was reported as ${unreachable.swaps[0].startHeightReason}`);
@@ -266,7 +279,7 @@ export const recoveryKeyCheck = async () => {
     evmLogs: async (request) => request.topics.includes(pad(address("bb"))) ? [order] : [],
     evmBlockTime: async () => 1_000_000, xmrNodes: ["https://node.example"], moneroNetwork: "mainnet",
     fetchImpl: async () => ({ ok: true, json: async () => ({ result: { height: 2_000, nettype: "stagenet", synchronized: true } }) }),
-    gap: 2,
+    maxIndex: 4,
   });
   check(otherNet.swaps[0].startHeightReason === "monero-network-mismatch",
     `a node on another network was reported as ${otherNet.swaps[0].startHeightReason}`);

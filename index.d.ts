@@ -1352,6 +1352,10 @@ export interface SweepRestoreRequest {
 export interface SweepRestoreResult {
   readonly total: string;
   readonly unlocked: string;
+  /** False when the wallet did not reach the node's height after its sync; a zero balance is then not evidence. */
+  readonly scanComplete: boolean;
+  /** `sync-failed`, `behind-node` or `no-heights` when `scanComplete` is false. */
+  readonly scanIncompleteReason?: string;
   /** The height the scan actually started from. */
   readonly scanHeight: number;
   readonly walletHeight: number | null;
