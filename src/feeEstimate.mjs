@@ -13,13 +13,16 @@ const DEFAULT_TIMEOUT_MS = 8000;
 
 const text = (value) => (typeof value === "string" ? value.trim() : "");
 
-/** A per-KB price -> the fee for a transaction of `bytes`, rounded UP: one unit short is still short. */
-export function feeForBytes(feePerKB, bytes) {
-  let perKB;
+/**
+ * A PER-BYTE price -> the fee for a transaction of `bytes`/weight. Monero's `get_fee_estimate` returns `fee` and
+ * `fees` in atomic units per byte; dividing by 1024 made every estimate 1024 times too low.
+ */
+export function feeForBytes(feePerByte, bytes) {
+  let perByte;
   let size;
-  try { perKB = BigInt(feePerKB); size = BigInt(bytes); } catch { throw new RangeError("feeForBytes: whole numbers only"); }
-  if (perKB < 0n || size < 0n) throw new RangeError("feeForBytes: negative input");
-  return ((perKB * size + 1023n) / 1024n).toString();
+  try { perByte = BigInt(feePerByte); size = BigInt(bytes); } catch { throw new RangeError("feeForBytes: whole numbers only"); }
+  if (perByte < 0n || size < 0n) throw new RangeError("feeForBytes: negative input");
+  return (perByte * size).toString();
 }
 
 const atomicField = (source, ...names) => {
@@ -34,8 +37,9 @@ const atomicField = (source, ...names) => {
 /**
  * ASK A NODE WHAT A TRANSACTION WILL COST.
  *
- * The answer is a price per kilobyte (and the median, and the daemon's own priority list). The exact sum needs the
- * assembled transaction; `feeForBytes` is the arithmetic that gets there. Never throws - a refusal names the problem.
+ * The answer is a price per byte (and the daemon's own priority list, and its quantization mask). The exact sum
+ * needs the assembled transaction; `feeForBytes` is the arithmetic that gets there. Never throws - a refusal names
+ * the problem.
  */
 export async function moneroFeeEstimate({ url, fetchImpl = globalThis.fetch, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   // TRAILING SLASHES WITHOUT A REGEX: a pattern anchored on a run of slashes is flagged as a slow expression on
@@ -65,9 +69,12 @@ export async function moneroFeeEstimate({ url, fetchImpl = globalThis.fetch, tim
   try { body = await response.json(); } catch { return { ok: false, why: "not-json" }; }
   if (!body || body.error) return { ok: false, why: "rpc", rpc: body && body.error ? body.error.code ?? null : null };
   const result = body.result || {};
-  const feePerKB = atomicField(result, "fee_per_kb", "feePerKB");
-  const medianFeePerKB = atomicField(result, "median_fee_per_kb", "medianFeePerKB");
-  const list = result.fees ?? result.feesPerKB ?? null;
+  // THE DAEMON'S OWN UNITS. `fee` and each entry of `fees` are atomic units PER BYTE; `quantization_mask` is the
+  // unit the final fee is rounded to. `fee_per_kb` was never sent, so the old read found nothing on a real node and
+  // the old fallback then divided per-byte values by 1024.
+  const feePerByte = atomicField(result, "fee", "feePerByte");
+  const quantizationMask = atomicField(result, "quantization_mask", "quantizationMask");
+  const list = result.fees ?? result.feesPerByte ?? null;
   let perPriority = null;
   if (Array.isArray(list)) {
     perPriority = [];
@@ -75,6 +82,6 @@ export async function moneroFeeEstimate({ url, fetchImpl = globalThis.fetch, tim
       try { perPriority.push(BigInt(value).toString()); } catch { perPriority = null; break; }
     }
   }
-  if (feePerKB === null && medianFeePerKB === null && !perPriority) return { ok: false, why: "no-estimate" };
-  return { ok: true, url: base, feePerKB, medianFeePerKB, perPriority };
+  if (feePerByte === null && !perPriority) return { ok: false, why: "no-estimate" };
+  return { ok: true, url: base, feePerByte, perPriority, quantizationMask };
 }

@@ -209,6 +209,9 @@ a dead node, and a node on another network is not an absent reader. A page that 
 path can call `recoveryIndexTaken` from `./recovery` before using a number; it checks the factory's `OrderCreated`
 logs from the registry's deployment block.
 
+`moneroFeeEstimate` reports the daemon's per-byte `fee`/`fees` and its `quantization_mask`; `feeForBytes` multiplies
+the price by the transaction size (1024 bytes at 20000/byte is 20,480,000).
+
 A range scan says whether it was complete: `scanRange` returns `complete: false`, `missingHeights` and
 `incompleteReason: "blocks-unreadable"` when a block, a BUSY transaction answer or a missing transaction hash leaves
 the range partial.

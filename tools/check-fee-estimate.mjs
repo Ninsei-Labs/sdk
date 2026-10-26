@@ -40,20 +40,20 @@ const result = (r) => respond({ jsonrpc: "2.0", id: "0", result: r });
 
 console.log("=== 1) THE DAEMON'S ANSWER, BOTH SPELLINGS ===");
 {
-  const r = await moneroFeeEstimate({ url: "http://node.invalid", fetchImpl: result({ fee_per_kb: 20000, median_fee_per_kb: 18000, fees: [10000, 20000, 40000] }) });
-  if (r.ok && r.feePerKB === "20000" && r.medianFeePerKB === "18000") ok("snake_case is read");
+  const r = await moneroFeeEstimate({ url: "http://node.invalid", fetchImpl: result({ fee: 20000, fees: [10000, 20000, 40000], quantization_mask: 1000 }) });
+  if (r.ok && r.feePerByte === "20000" && r.quantizationMask === "1000") ok("the daemon's per-byte fee and mask are read");
   else bad("snake_case: " + JSON.stringify(r));
   if (Array.isArray(r.perPriority) && r.perPriority.join(",") === "10000,20000,40000") ok("the priority list keeps the daemon's order");
   else bad("priorities: " + JSON.stringify(r.perPriority));
 }
 {
-  const r = await moneroFeeEstimate({ url: "http://node.invalid", fetchImpl: result({ feePerKB: 21000, medianFeePerKB: 19000, feesPerKB: [21000] }) });
-  if (r.ok && r.feePerKB === "21000" && r.medianFeePerKB === "19000") ok("camelCase is read");
+  const r = await moneroFeeEstimate({ url: "http://node.invalid", fetchImpl: result({ feePerByte: 21000, feesPerByte: [21000], quantizationMask: 1000 }) });
+  if (r.ok && r.feePerByte === "21000" && r.quantizationMask === "1000") ok("camelCase is read");
   else bad("camelCase: " + JSON.stringify(r));
 }
 {
   const calls = [];
-  await moneroFeeEstimate({ url: "http://node.invalid/", fetchImpl: async (url, init) => { calls.push({ url, init }); return { ok: true, status: 200, async json() { return { result: { fee_per_kb: 1 } }; } }; } });
+  await moneroFeeEstimate({ url: "http://node.invalid/", fetchImpl: async (url, init) => { calls.push({ url, init }); return { ok: true, status: 200, async json() { return { result: { fee: 1 } }; } }; } });
   const call = calls[0] || {};
   if (call.url === "http://node.invalid/json_rpc" && /get_fee_estimate/.test(call.init.body)) ok("one POST to /json_rpc with get_fee_estimate");
   else bad("request: " + JSON.stringify(call.url));
@@ -61,8 +61,8 @@ console.log("=== 1) THE DAEMON'S ANSWER, BOTH SPELLINGS ===");
 
 console.log("=== 2) A MISSING NUMBER IS NULL, NOT ZERO ===");
 {
-  const r = await moneroFeeEstimate({ url: "http://node.invalid", fetchImpl: result({ fee_per_kb: 20000 }) });
-  if (r.ok && r.medianFeePerKB === null && r.perPriority === null) ok("what the node did not send is null");
+  const r = await moneroFeeEstimate({ url: "http://node.invalid", fetchImpl: result({ fee: 20000 }) });
+  if (r.ok && r.quantizationMask === null && r.perPriority === null) ok("what the node did not send is null");
   else bad("partial: " + JSON.stringify(r));
 }
 {
@@ -73,9 +73,9 @@ console.log("=== 2) A MISSING NUMBER IS NULL, NOT ZERO ===");
 
 console.log("=== 3) THE FEE FOR A SIZE ===");
 {
-  if (feeForBytes(20000, 1500) === "29297") ok("1500 bytes at 20000/kB rounds up to 29297");
-  else bad("ceil: " + feeForBytes(20000, 1500));
-  if (feeForBytes(20000, 1024) === "20000") ok("an exact kilobyte is exact");
+  if (feeForBytes(20000, 1500) === "30000000") ok("1500 bytes at 20000/byte is 30,000,000");
+  else bad("per-byte: " + feeForBytes(20000, 1500));
+  if (feeForBytes(20000, 1024) === "20480000") ok("1024 bytes at 20000/byte is 20,480,000");
   else bad("exact: " + feeForBytes(20000, 1024));
   if (feeForBytes("0", 1500) === "0") ok("a zero price is zero, not a refusal");
   else bad("zero: " + feeForBytes(0, 1500));
@@ -121,14 +121,14 @@ console.log("=== 5) BREAKING RUN A: round down -> case 3 reddens ===");
 {
   const { file, dir } = mutated((src) => {
     const before = src;
-    src = src.replace("return ((perKB * size + 1023n) / 1024n).toString();", "return (perKB * size / 1024n).toString();");
+    src = src.replace("return (perByte * size).toString();", "return (perByte * size / 1024n).toString();");
     if (src === before) throw new Error("mutation A did not apply");
     return src;
   }, "a");
   try {
     const mod = await importFresh(file);
     const got = mod.feeForBytes(20000, 1500);
-    if (got !== "29297") ok("breaking run A REDDENS: 1500 bytes became " + got);
+    if (got !== "30000000") ok("breaking run A REDDENS: 1500 bytes became " + got);
     else bad("breaking run A does not redden");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
@@ -143,8 +143,8 @@ console.log("=== 6) BREAKING RUN B: a missing price becomes zero -> case 2 redde
   }, "b");
   try {
     const mod = await importFresh(file);
-    const r = await mod.moneroFeeEstimate({ url: "http://node.invalid", fetchImpl: result({ fee_per_kb: 20000 }) });
-    if (r.medianFeePerKB !== null) ok("breaking run B REDDENS: a missing median became " + JSON.stringify(r.medianFeePerKB));
+    const r = await mod.moneroFeeEstimate({ url: "http://node.invalid", fetchImpl: result({ fee: 20000 }) });
+    if (r.quantizationMask !== null) ok("breaking run B REDDENS: a missing mask became " + JSON.stringify(r.quantizationMask));
     else bad("breaking run B does not redden: still null");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
