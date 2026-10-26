@@ -111,7 +111,7 @@ self.onmessage = async (event) => {
       });
     } else if (type === "verify") {
       say("verify", "проверяю доказательство контрагента");
-      const side = { proof: counterparty.proof, pub: { ed: counterparty.edPub } };
+      const side = { proof: counterparty.proof, pub: { ed: counterparty.edPub }, commitHalfClaimer: counterparty.commitHalfClaimer || null };
       // Вскрываем тем ключом, на который посылка была зашифрована в этом контексте.
       const recipient = sealedToPub.get(String(orderContext));
       const openWith = recipient ? encPrivByPub.get(recipient) : null;

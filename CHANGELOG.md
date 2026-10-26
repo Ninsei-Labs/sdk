@@ -12,6 +12,8 @@
   verifies every decoded amount against its Pedersen commitment (`mask*G + amount*H == outPk`). One altered node
   can no longer turn a short payment into `arrived`; an unbacked amount is `xmr-nodes-disagree`. The compact
   RingCT encoding (types 4-6) derives the mask, and a recorded stagenet type-6 transfer is pinned as a fixture.
+- The counterparty DLEQ proof is bound to the signed `commitHalfClaimer`: the proven secp256k1 point must match the
+  commitment the contract compares, and a side without a commitment is refused as input.
 
 ## 0.52.0 — 2026-10-26
 

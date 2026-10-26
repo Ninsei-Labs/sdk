@@ -193,7 +193,8 @@ export async function runAtomicOrder({
       // string, and that turned the check into a ritual: the stand-in's proof was bound to a different string,
       // that is, to nothing. Now exactly the path a real provider would take is checked.
       const mock = await worker.buildSide(orderContext);
-      counter = { proof: mock.proof, edPub: mock.pub.ed, mock, viewHalf: mock.viewHalf, viewPoint: mock.viewPub };
+      counter = { proof: mock.proof, edPub: mock.pub.ed, mock, viewHalf: mock.viewHalf, viewPoint: mock.viewPub,
+        commitHalfClaimer: (await worker.halfCommitment(mock.half)).commitment };
     }
     // THE COUNTERPARTY CHECK REMAINS ONE AND IT IS THE MAIN ONE: the DLEQ proof in the context of this order.
     // It confirms that both public points stand for ONE scalar - that is, that the half declared for the Monero
@@ -203,7 +204,7 @@ export async function runAtomicOrder({
     // receive: without that check a correct proof would guarantee nothing about the chain.
     say("verify", "dleq");
     const verdict = await worker.verifyCounterparty(orderContext, {
-      proof: counter.proof, edPub: counter.edPub,
+      proof: counter.proof, edPub: counter.edPub, commitHalfClaimer: counter.commitHalfClaimer,
     }, null);
     if (!verdict.ok) throw new SdkError("quote-refused", { step: "proof", why: "rejected" });
 
