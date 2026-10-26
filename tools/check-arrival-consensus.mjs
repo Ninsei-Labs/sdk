@@ -32,7 +32,6 @@ const AMOUNT = 1_000_000_000n; // 0.001 XMR
 const VIEW = 11n;
 const SPEND = 13n;
 const R = 17n;
-const MASK = 0x1234n;
 
 let pass = 0;
 const fails = [];
@@ -57,14 +56,16 @@ function factor(label, scalarLE) {
   return keccak256(buf);
 }
 
-function fixture({ amount = AMOUNT, mask = MASK, unlockTime = 0 } = {}) {
+function fixture({ amount = AMOUNT, unlockTime = 0 } = {}) {
   const spendPub = G.multiply(SPEND).toHex();
   const txPublicKey = G.multiply(R).toHex();
   const derivation = keyDerivation(txPublicKey, VIEW);
   const scalar = hashToScalar(derivation, varint(0));
   const scalarLE = scalarToBytesLE(scalar);
   const amountCipher = xorBytes(le8(amount), factor("amount", scalarLE));
-  const maskCipher = xorBytes(scalarToBytesLE(mask), factor("mask", scalarLE));
+  // TYPES 4-6 SEND NO mask FIELD. The receiver derives it as Hs("commitment_mask" || sharedSec); a fixture
+  // that supplied a mask here would test an encoding no node produces.
+  const mask = hashToScalar(new TextEncoder().encode("commitment_mask"), scalarLE);
   const outPk = amountMaskCommitment(amount, mask);
   const key = derivedOutputKey(derivation, 0, spendPub);
   return {
@@ -74,7 +75,7 @@ function fixture({ amount = AMOUNT, mask = MASK, unlockTime = 0 } = {}) {
     vout: [{ amount: 0, target: { tagged_key: { key, view_tag: "00" } } }],
     rct_signatures: {
       type: 6,
-      ecdhInfo: [{ amount: bytesToHex(amountCipher), mask: bytesToHex(maskCipher) }],
+      ecdhInfo: [{ amount: bytesToHex(amountCipher) }],
       outPk: [outPk],
     },
   };
@@ -121,6 +122,8 @@ async function run({ nodes, txByHost, expectedAtomic = AMOUNT, minConfirmations 
 console.log("=== 1) TWO HONEST NODES AGREE ===");
 {
   const tx = fixture();
+  if (tx.rct_signatures.ecdhInfo[0].mask === undefined) ok("the fixture has the compact type-6 shape: no ecdhInfo.mask");
+  else bad("the fixture supplied a mask that a type-6 transaction does not carry");
   const verdict = await run({
     nodes: [{ url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" }],
     txByHost: { default: tx },

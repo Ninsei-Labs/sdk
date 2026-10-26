@@ -157,39 +157,47 @@ export function txPublicKeyFromExtra(extra) {
   return null;
 }
 
-// Amount and mask decryption. version: 2 = current scheme (xor of the first bytes), 1 = old (scalar subtraction).
+// Amount and mask decryption. THE ENCODING IS CHOSEN BY THE RingCT TYPE, not by a boolean:
+//   types 0-3 (old): every ecdhInfo entry carries a 32-byte amount and a 32-byte mask;
+//   types 4-6 (Bulletproof2, CLSAG, BulletproofPlus): the entry carries only the 8-byte amount, and the
+//   receiver DERIVES the mask as Hs("commitment_mask" || sharedSec). A transaction from a current node has no
+//   `ecdhInfo.mask` at all.
 //
 // THE SECRET IS THE DERIVATION SCALAR, NOT THE DERIVATION. Easy to get wrong: both are 32 bytes, but what goes
 // into genAmountEncodingFactor is the scalar (derivation_to_scalar), written LEAST-SIGNIFICANT first. With the
 // derivation the result looks plausible and is WRONG (checked on live numbers).
 //
-// THE MASK IS DECRYPTED THE SAME WAY, with the label "mask": without it the Pedersen commitment cannot be
-// recomputed and a node could invent an amount that no `outPk` backs.
-function decodeField(ecdhHex, scalarLE, rctVersion, label) {
-  const enc = hexToBytes(ecdhHex);
-  if (Number(rctVersion) >= 2) {
-    // Multiplier: keccak(label || scalar_LE), 32 bytes. Amount uses "amount"; mask uses "mask".
+// THE TWO OLD FACTORS ARE DIFFERENT: amount -= Hs(Hs(sharedSec)), mask -= Hs(sharedSec). Using the amount's
+// double hash for the mask (the first version) makes every old-encoding commitment fail.
+function compactEncoding(rctType) { return Number(rctType) >= 4; }
+function oldFactor(scalarLE, label) {
+  const base = hashToScalar(scalarLE);
+  if (label === "mask") return base;
+  return hashToScalar(hexToBytes(base.toString(16).padStart(64, "0")));
+}
+function decodeField(ecdhHex, scalarLE, rctType, label) {
+  if (compactEncoding(rctType)) {
+    if (label === "mask") return hashToScalar(new TextEncoder().encode("commitment_mask"), scalarLE);
+    const enc = hexToBytes(ecdhHex);
     const prefix = new TextEncoder().encode(label);
     const buf = new Uint8Array(prefix.length + scalarLE.length);
     buf.set(prefix, 0); buf.set(scalarLE, prefix.length);
     const factor = keccak(buf);
     const out = enc.slice();
     for (let i = 0; i < out.length && i < factor.length; i++) out[i] ^= factor[i];
-    // And again LEAST-SIGNIFICANT first: Monero amounts are little-endian too.
     return scalarFromBytesLE(out);
   }
-  // RingCT v1: ecdhInfo.amount and ecdhInfo.mask are both encrypted by subtraction of the same scalar.
-  const s2 = hashToScalar(hexToBytes(hashToScalar(hexToBytes(bytesToHex(rctVersion === 1 ? scalarLE : scalarLE))).toString(16).padStart(64, "0")));
+  const enc = hexToBytes(ecdhHex);
   const value = BigInt("0x" + bytesToHex(enc)) % ED_ORDER;
-  return (value - s2 + ED_ORDER) % ED_ORDER;
+  return (value - oldFactor(scalarLE, label) + ED_ORDER) % ED_ORDER;
 }
 
-export function decodeAmount(ecdhAmountHex, scalarLE, rctVersion) {
-  return decodeField(ecdhAmountHex, scalarLE, rctVersion, "amount");
+export function decodeAmount(ecdhAmountHex, scalarLE, rctType) {
+  return decodeField(ecdhAmountHex, scalarLE, rctType, "amount");
 }
 
-export function decodeMask(ecdhMaskHex, scalarLE, rctVersion) {
-  return decodeField(ecdhMaskHex, scalarLE, rctVersion, "mask");
+export function decodeMask(ecdhMaskHex, scalarLE, rctType) {
+  return decodeField(ecdhMaskHex, scalarLE, rctType, "mask");
 }
 
 // MAIN: parse a transaction and return OUR outputs (their indices, keys and amounts).
@@ -212,7 +220,10 @@ export function findOurOutputs({ txPublicKey, viewSecretHex, spendPubHex, output
         // THE COMMITMENT CHECK: outPk[i] = mask*G + amount*H. A node can flip a bit of the encrypted amount
         // without any key; the commitment is the only figure it cannot forge. A missing or mismatching
         // commitment is named on the output instead of being accepted as an arrival.
-        const mask = ecdhMasks[o.index] ? decodeMask(ecdhMasks[o.index], scalarToBytesLE(scalar), rctVersion) : null;
+        // COMPACT TYPES HAVE NO mask FIELD: it is derived from the same scalar. Old types carry it.
+        const mask = compactEncoding(rctVersion)
+          ? decodeMask(null, scalarToBytesLE(scalar), rctVersion)
+          : (ecdhMasks[o.index] ? decodeMask(ecdhMasks[o.index], scalarToBytesLE(scalar), rctVersion) : null);
         let amountVerified = false;
         if (amount !== null && mask !== null && outPk[o.index]) {
           try {
@@ -294,7 +305,7 @@ export function matchTransaction(tx, watched, { height = null, nowSec = null } =
   for (const w of watched) {
     const r = findOurOutputs({
       txPublicKey, viewSecretHex: w.viewSecret, spendPubHex: w.spendPub,
-      outputs, ecdhAmounts, ecdhMasks, outPk, rctVersion: Number(rctVersion) >= 2 ? 2 : 1,
+      outputs, ecdhAmounts, ecdhMasks, outPk, rctVersion: Number(rctVersion) || 1,
     });
     if (r.outputs.length) out.push({ address: w.address, index: w.index ?? null, outputs: r.outputs, derivation: r.derivation, viewKeyForm: r.viewKeyForm, unlockTime: Number(tx.unlock_time) || 0, unlock });
   }
