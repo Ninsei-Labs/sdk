@@ -1,5 +1,10 @@
 ## Unreleased
 
+- `recovery.open` parses the envelope before handing it to `restoreFromFile`, which takes the object. Every valid
+  file used to fail as `recovery-failed { stage: "restore" }`; a non-JSON file now fails at its own `parse` stage,
+  and a valid file opens from both text and `{ contents }`.
+- The `types` group parses each declaration file with Node's TypeScript parser, not only its text. A missing comment
+  opener in `index.d.ts` is now a named syntax failure; that opener is restored.
 - `spendKeysFromRevealedHalf` reduces the revealed word modulo the secp256k1 order before adding it to our half. The
   escrow accepts `h + n` in `claim`/`refund`; that alias is the same key on secp256k1 but not on edwards25519, so
   reducing it makes such a swap withdrawable instead of refused as `revealedHalf`.
@@ -483,6 +488,11 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
 
 ## Unreleased
 
+- `recovery.open` parses the envelope before handing it to `restoreFromFile`, which takes the object. Every valid
+  file used to fail as `recovery-failed { stage: "restore" }`; a non-JSON file now fails at its own `parse` stage,
+  and a valid file opens from both text and `{ contents }`.
+- The `types` group parses each declaration file with Node's TypeScript parser, not only its text. A missing comment
+  opener in `index.d.ts` is now a named syntax failure; that opener is restored.
 - `spendKeysFromRevealedHalf` reduces the revealed word modulo the secp256k1 order before adding it to our half. The
   escrow accepts `h + n` in `claim`/`refund`; that alias is the same key on secp256k1 but not on edwards25519, so
   reducing it makes such a swap withdrawable instead of refused as `revealedHalf`.
