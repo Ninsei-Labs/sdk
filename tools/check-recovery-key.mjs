@@ -20,7 +20,7 @@ const memory = () => {
   return { get: (key) => (map.has(key) ? map.get(key) : null), set: (key, value) => map.set(key, value), remove: (key) => map.delete(key) };
 };
 
-const logFor = ({ commitment, locker, claimer, index = 0 }) => ({
+const logFor = ({ commitment, locker, claimer, index = 0, salt = "0x" + "33".repeat(32) }) => ({
   topics: [TOPIC, pad(address("aa")), pad(locker), pad(claimer)],
   data: "0x" + [
     commitment,
@@ -31,7 +31,7 @@ const logFor = ({ commitment, locker, claimer, index = 0 }) => ({
     "0x1",
     "0x2",
     "0x3",
-    "0x" + "44".repeat(32),
+    salt,
     pad(address("55")),
     pad(address("66")),
     pad(address("77")),
@@ -61,6 +61,19 @@ export const recoveryKeyCheck = async () => {
   check(imported.fingerprint === "3ae0", `fingerprint changed: ${imported.fingerprint}`);
   check(recovery.fingerprintOf(WORDS) === "3ae0", "fingerprintOf disagrees with importRecoveryKey");
   check(recovery.recoveryBinding(CHAIN, 0) === "ninsei-taker-v1|421614|0", "the binding changed");
+  const saltV2 = "0x" + "ab".repeat(32);
+  const factoryV2 = address("dd");
+  const bindingV2 = recovery.recoveryBindingV2({ chainId: CHAIN, factory: factoryV2, salt: saltV2 });
+  check(bindingV2 === `ninsei-taker-v2|421614|${factoryV2}|taker|${saltV2}`, `the v2 binding changed: ${bindingV2}`);
+  const halvesV2 = recovery.takerHalvesV2({ mnemonic: WORDS, chainId: CHAIN, factory: factoryV2, salt: saltV2 });
+  check(halvesV2.spendHalf === "0x007c77c781458811e2c9aabd59361f2360112c70cb8b20168cf468a5037b9ac6", `v2 spend half changed: ${halvesV2.spendHalf}`);
+  check(halvesV2.spendCommitment === "0xedea6e219238e63caa05acc46a3a144c4d4d34e889b7f4e9c58f23fce6ee1601", `v2 commitment changed: ${halvesV2.spendCommitment}`);
+  check(halvesV2.index === null && halvesV2.derivation === "salt-v2", "v2 did not name its derivation");
+  const otherFactory = recovery.takerHalvesV2({ mnemonic: WORDS, chainId: CHAIN, factory: address("ee"), salt: saltV2 });
+  check(otherFactory.spendCommitment !== halvesV2.spendCommitment, "the same salt at another factory produced the same half");
+  const freshSalt = recovery.newRecoverySalt();
+  check(/^0x[0-9a-f]{64}$/.test(freshSalt) && freshSalt !== recovery.newRecoverySalt(), "a fresh salt is not a unique 32-byte word");
+  notes.push("v2 is salt-based: the factory, role and public salt are in the binding");
 
   const halves = recovery.takerHalves({ mnemonic: WORDS, chainId: CHAIN, index: 0 });
   check(halves.spendHalf === "0x08a3f2c84abe73db766e8925647c65c44e63439e6cb9aa0065816c8ada646200", `spend half changed: ${halves.spendHalf}`);
@@ -144,6 +157,8 @@ export const recoveryKeyCheck = async () => {
   });
   check(found.swaps.length === 1 && found.swaps[0].index === 0, `the search found ${found.swaps.length} orders`);
   check(found.swaps[0] && found.swaps[0].side === "locker", "the search named the wrong side");
+  check(found.swaps[0] && found.swaps[0].derivation === "index-v1" && found.swaps[0].factory === address("dd"),
+    "a v1 order did not name its derivation and factory");
   check(found.swaps[0].settlementToken === "native" && found.swaps[0].payToken === null &&
     found.swaps[0].payTokenReason === "not-on-chain", "the found order invented a paying token");
   check(calls.length === 2, `an address query made ${calls.length} log calls, expected 2`);
@@ -163,6 +178,18 @@ export const recoveryKeyCheck = async () => {
   check(gapped.complete === false && gapped.incompleteReason === "max-index" && gapped.searchedUpTo === 5,
     `a bounded search did not name its bound: ${JSON.stringify({ complete: gapped.complete, reason: gapped.incompleteReason, searchedUpTo: gapped.searchedUpTo })}`);
   notes.push("discovery scans past empty numbers and names a caller-supplied bound");
+  const v2Log = logFor({ commitment: halvesV2.spendCommitment, locker: address("bb"), claimer: address("cc"), index: 0, salt: saltV2 });
+  const v2Found = await recovery.findSwaps({
+    mnemonic: WORDS, chainId: CHAIN, factory: factoryV2, address: address("bb"),
+    evmLogs: async () => [v2Log], maxIndex: 1,
+  });
+  check(v2Found.swaps.length === 1 && v2Found.swaps[0].index === null && v2Found.swaps[0].derivation === "salt-v2",
+    `a v2 order was not found from its salt: ${JSON.stringify(v2Found.swaps[0] && { index: v2Found.swaps[0].index, derivation: v2Found.swaps[0].derivation })}`);
+  check(v2Found.scanned === 0 && v2Found.complete === true && v2Found.searchedUpTo === null,
+    `a v2-only search still scanned a range: ${JSON.stringify({ scanned: v2Found.scanned, complete: v2Found.complete, searchedUpTo: v2Found.searchedUpTo })}`);
+  check(v2Found.swaps[0].factory === factoryV2 && v2Found.swaps[0].salt === saltV2,
+    "the v2 result did not carry the factory and salt needed by the withdrawal");
+  notes.push("v2 discovery uses the event salt and needs no index reservation");
   const xmrWord = BigInt(5_000_000_000_000).toString(16).padStart(64, "0");
   const cloneCode = "0x" + "00".repeat(621) + xmrWord + "00".repeat(877 - 621 - 32);
   const withXmr = await recovery.findSwaps({

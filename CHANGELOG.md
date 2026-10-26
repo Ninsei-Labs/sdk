@@ -1,5 +1,11 @@
 ## Unreleased
 
+- The recovery key has a salt-based v2 derivation: `ninsei-taker-v2|<chain>|<factory>|taker|<salt>`. The client draws
+  a fresh public salt per order; the salt is already in `OrderCreated`, so recovery costs one derivation per order
+  instead of an index scan. No index is reserved, and the same words on a second device or at another factory do not
+  repeat a half. Existing v1 orders still recover through `ninsei-taker-v1|<chain>|<index>`.
+- `swaps.start` accepts the client-owned `recoverySalt` and requires it to equal `order.salt`; without it the v1 index
+  path is unchanged. `newRecoverySalt` and `recoverySaltOf` are exported for the quote client.
 - `sweep.restore` reports `scanComplete: false` with `scanIncompleteReason: "sync-failed"`, `"behind-node"` or
   `"no-heights"` when the wallet did not reach the node's height. A zero balance after a failed sync is no longer
   reported as an empty wallet.
@@ -438,6 +444,12 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
 
 ## Unreleased
 
+- The recovery key has a salt-based v2 derivation: `ninsei-taker-v2|<chain>|<factory>|taker|<salt>`. The client draws
+  a fresh public salt per order; the salt is already in `OrderCreated`, so recovery costs one derivation per order
+  instead of an index scan. No index is reserved, and the same words on a second device or at another factory do not
+  repeat a half. Existing v1 orders still recover through `ninsei-taker-v1|<chain>|<index>`.
+- `swaps.start` accepts the client-owned `recoverySalt` and requires it to equal `order.salt`; without it the v1 index
+  path is unchanged. `newRecoverySalt` and `recoverySaltOf` are exported for the quote client.
 - `sweep.restore` reports `scanComplete: false` with `scanIncompleteReason: "sync-failed"`, `"behind-node"` or
   `"no-heights"` when the wallet did not reach the node's height. A zero balance after a failed sync is no longer
   reported as an empty wallet.

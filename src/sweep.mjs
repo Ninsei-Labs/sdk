@@ -11,7 +11,7 @@ import { restoreWallet } from "./sweep-restore.mjs";
 import { moneroWalletAdapter } from "./adapters/monero-wallet.mjs";
 import { checkDestination } from "./destination.mjs";
 import { revealedHalfWord } from "./sweep-half.mjs";
-import { takerHalves } from "./recovery-key.mjs";
+import { takerHalves, takerHalvesV2 } from "./recovery-key.mjs";
 import { jointAddress } from "./order.mjs";
 
 // The same boundary as when the file was issued: a passphrase shorter than twelve characters will not open the file.
@@ -34,8 +34,6 @@ const payloadFromOrder = async (request) => {
   if (typeof request.mnemonic !== "string" || !request.mnemonic.trim()) throw new SdkError("bad-input", { field: "mnemonic" });
   const chainId = Number(request.chainId);
   if (!Number.isSafeInteger(chainId) || chainId <= 0) throw new SdkError("bad-input", { field: "chainId" });
-  const index = Number(order.index);
-  if (!Number.isSafeInteger(index) || index < 0) throw new SdkError("bad-input", { field: "order.index" });
   const network = typeof request.network === "string" ? request.network.trim() : "";
   const moneroNetwork = typeof request.moneroNetwork === "string" ? request.moneroNetwork.trim() : "";
   if (!network) throw new SdkError("bad-input", { field: "network" });
@@ -47,7 +45,20 @@ const payloadFromOrder = async (request) => {
 
   const side = order.side === "locker" ? "buy" : order.side === "claimer" ? "sell" : null;
   if (!side) throw new SdkError("bad-input", { field: "order.side" });
-  const halves = takerHalves({ mnemonic: request.mnemonic, chainId, index });
+  // TWO DERIVATIONS, BOTH LIVE. A v1 order has an index; a v2 order has the public salt from OrderCreated and
+  // the factory in its binding. The page may hand either shape back; reading `index` from a v2 order would invent
+  // a number and rebuild the wrong address.
+  let halves;
+  if (order.derivation === "salt-v2") {
+    if (typeof order.factory !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(order.factory)) {
+      throw new SdkError("bad-input", { field: "order.factory" });
+    }
+    halves = takerHalvesV2({ mnemonic: request.mnemonic, chainId, factory: order.factory, salt: order.salt });
+  } else {
+    const index = Number(order.index);
+    if (!Number.isSafeInteger(index) || index < 0) throw new SdkError("bad-input", { field: "order.index" });
+    halves = takerHalves({ mnemonic: request.mnemonic, chainId, index });
+  }
   const buy = side === "buy";
   if (bare(buy ? order.edPointLocker : order.edPointClaimer) !== bare(halves.spendPoint)) {
     throw new SdkError("bad-input", { field: "order", why: "spend-point" });

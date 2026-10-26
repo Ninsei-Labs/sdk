@@ -275,6 +275,8 @@ export declare const RECOVERY_KEY_STORE: string;
 export declare const RECOVERY_KEY_FILE_MAGIC: string;
 /** The domain half derivation binds to; the chain id and swap number join it. */
 export declare const RECOVERY_KEY_DOMAIN: string;
+/** The salt-based derivation domain; the chain, factory, role and order salt join it. */
+export declare const RECOVERY_KEY_DOMAIN_V2: string;
 /** The domain of the counterparty's view half, derived from the same one key. */
 export declare const MAKER_VIEW_HALF_DOMAIN: string;
 /** The encrypted backup envelope version. */
@@ -305,6 +307,15 @@ export interface TakerHalves {
   readonly makerViewHalf: string;
   readonly makerViewPoint: string;
   readonly spendCommitment: string;
+}
+
+/** A salt-based derivation: no number is reserved, and the public order salt is the input. */
+export interface TakerHalvesV2 extends Omit<TakerHalves, "index"> {
+  readonly index: null;
+  readonly derivation: "salt-v2";
+  readonly factory: string;
+  readonly role: string;
+  readonly salt: string;
 }
 
 /** One order found by the key's commitments. */
@@ -340,7 +351,12 @@ export interface FoundSwap {
    * the expected clone. */
   readonly xmrAmount: string | null;
   readonly xmrAmountReason: "event" | "no-code-reader" | "code" | "not-clone" | null;
-  readonly index: number;
+  /** The v1 swap number; null for a salt-based v2 order. */
+  readonly index: number | null;
+  /** Which derivation found this order. v1 orders keep recovering through the index path. */
+  readonly derivation: "index-v1" | "salt-v2";
+  /** The factory the order was read from; the v2 binding needs it. */
+  readonly factory: string;
   readonly side: "locker" | "claimer";
   /** The Monero height a withdrawal may start from, derived from the order's block time. Null when the caller did
    * not pass the readers; `startHeightReason` then names why. */
@@ -363,8 +379,16 @@ export declare function importRecoveryKey(mnemonic: string, options?: { createdA
 export declare function fingerprintOf(mnemonic: string): string;
 /** The binding for a chain and swap number: `ninsei-taker-v1|<chainId>|<index>`. */
 export declare function recoveryBinding(chainId: number, index: number): string;
+/** The salt-based binding: `ninsei-taker-v2|<chainId>|<factory>|<role>|<salt>`. */
+export declare function recoveryBindingV2(request: { chainId: number; factory: string; role?: string; salt: string }): string;
+/** Normalises a 32-byte salt from an event word, a hex string, a bigint or a safe integer. */
+export declare function recoverySaltOf(value: string | number | bigint): string;
+/** A fresh 32-byte public salt for one salt-based order. */
+export declare function newRecoverySalt(): string;
 /** Derives the taker spend and view halves for one swap number. */
 export declare function takerHalves(request: { mnemonic: string; chainId: number; index: number }): TakerHalves;
+/** Derives the taker halves from a public per-order salt; no index is reserved. */
+export declare function takerHalvesV2(request: { mnemonic: string; chainId: number; factory: string; role?: string; salt: string }): TakerHalvesV2;
 /** The stable backup name, with `DO-NOT-DELETE` in it on purpose. */
 export declare function recoveryKeyFileName(request: { mnemonic?: string; fingerprint?: string; createdAt?: string | Date }): string;
 /** A plain backup file: readable header above the words. */

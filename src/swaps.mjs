@@ -27,7 +27,8 @@ import { createActions } from "./actions.mjs";
 // THE ONE RECOVERY KEY (sdk#76): the taker's halves come from it, not from a fresh random pair per swap.
 import {
   commitRecoveryIndex, createRecoveryKeyFile, importRecoveryKey, loadRecoveryKey,
-  recoveryIndexTaken, recoveryKeyFileName, reserveRecoveryIndex, saveRecoveryKey, takerHalves,
+  recoveryIndexTaken, recoveryKeyFileName, recoverySaltOf, reserveRecoveryIndex, saveRecoveryKey,
+  takerHalves, takerHalvesV2,
 } from "./recovery-key.mjs";
 // THE XMR ARRIVAL CHECK ON TWO NODES (issue #85) - IN THE CORE, from the same mirrored rule and block parser.
 import * as xmrArrival from "./xmr-arrival.mjs";
@@ -808,38 +809,57 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         if (!saved) saveRecoveryKey(storage, { ...key, backupConfirmed: false });
         const chainId = request.order.chainId;
         const explicit = request.recoveryIndex !== undefined && request.recoveryIndex !== null;
-        let index = explicit ? Number(request.recoveryIndex) : reserveRecoveryIndex(storage, { chainId });
-        if (!Number.isSafeInteger(index) || index < 0) throw new SdkError("bad-input", { field: "recoveryIndex" });
-        // A BROWSER STORE IS PER DEVICE. The same words opened elsewhere start at the same number, so the factory's own
-        // log is asked before the number is used; a taken number is retired locally and the next one is reserved.
-        // Without a log seam the previous behaviour is kept - the caller cannot be asked to invent a chain read.
-        if (typeof chainLogs === "function" && request.order.factory) {
-          // THE CHAIN'S BIRTH HEIGHT IS THE DEFAULT START, NOT ZERO. The factory's own log cannot hold an order
-          // before it existed; asking from zero is tens of log queries per number on a public RPC. An explicit
-          // `fromBlock` still wins, including the literal zero.
-          const chain = config && Array.isArray(config.chains)
-            ? config.chains.find((entry) => Number(entry.chainId) === Number(chainId)) : null;
-          const deploymentBlock = chain && chain.escrow ? chain.escrow.deploymentBlock : null;
-          const fromBlock = request.fromBlock !== undefined
-            ? request.fromBlock
-            : (Number.isSafeInteger(deploymentBlock) ? deploymentBlock : 0);
-          let hops = 0;
-          while (await recoveryIndexTaken({ mnemonic: key.mnemonic, chainId, index, factory: request.order.factory,
-            evmLogs: chainLogs, fromBlock })) {
-            if (explicit) throw new SdkError("bad-input", { field: "recoveryIndex", why: "on-chain" });
-            commitRecoveryIndex(storage, index);
-            index = reserveRecoveryIndex(storage, { chainId });
-            hops += 1;
-            if (!Number.isSafeInteger(index) || index < 0 || hops > 1000) throw new SdkError("bad-input", { field: "recoveryIndex", why: "exhausted" });
+        const saltRequested = request.recoverySalt !== undefined && request.recoverySalt !== null;
+        let derived;
+        if (saltRequested) {
+          // THE CLIENT OWNS THE SALT. A maker that chose it could hand the same salt to the same client twice, so
+          // the caller composes the signed quote with this value and passes it here. The order's own salt must be
+          // the same bytes; a mismatch means the quote is not the one being started.
+          if (explicit) throw new SdkError("bad-input", { field: "recoverySalt", why: "with-recovery-index" });
+          if (typeof request.order.factory !== "string" || !request.order.factory) {
+            throw new SdkError("bad-input", { field: "order.factory" });
           }
+          let salt;
+          try { salt = recoverySaltOf(request.recoverySalt); } catch { throw new SdkError("bad-input", { field: "recoverySalt" }); }
+          let orderSalt;
+          try { orderSalt = recoverySaltOf(request.order.salt); } catch { throw new SdkError("bad-input", { field: "recoverySalt", why: "order-salt" }); }
+          if (salt !== orderSalt) throw new SdkError("bad-input", { field: "recoverySalt", why: "order-salt" });
+          derived = takerHalvesV2({ mnemonic: key.mnemonic, chainId, factory: request.order.factory, salt });
+          recovery = { storage, key, salt, derivation: "salt-v2", newKey: !saved || saved.backupConfirmed !== true };
+        } else {
+          let index = explicit ? Number(request.recoveryIndex) : reserveRecoveryIndex(storage, { chainId });
+          if (!Number.isSafeInteger(index) || index < 0) throw new SdkError("bad-input", { field: "recoveryIndex" });
+          // A BROWSER STORE IS PER DEVICE. The same words opened elsewhere start at the same number, so the factory's own
+          // log is asked before the number is used; a taken number is retired locally and the next one is reserved.
+          // Without a log seam the previous behaviour is kept - the caller cannot be asked to invent a chain read.
+          if (typeof chainLogs === "function" && request.order.factory) {
+            // THE CHAIN'S BIRTH HEIGHT IS THE DEFAULT START, NOT ZERO. The factory's own log cannot hold an order
+            // before it existed; asking from zero is tens of log queries per number on a public RPC. An explicit
+            // `fromBlock` still wins, including the literal zero.
+            const chain = config && Array.isArray(config.chains)
+              ? config.chains.find((entry) => Number(entry.chainId) === Number(chainId)) : null;
+            const deploymentBlock = chain && chain.escrow ? chain.escrow.deploymentBlock : null;
+            const fromBlock = request.fromBlock !== undefined
+              ? request.fromBlock
+              : (Number.isSafeInteger(deploymentBlock) ? deploymentBlock : 0);
+            let hops = 0;
+            while (await recoveryIndexTaken({ mnemonic: key.mnemonic, chainId, index, factory: request.order.factory,
+              evmLogs: chainLogs, fromBlock })) {
+              if (explicit) throw new SdkError("bad-input", { field: "recoveryIndex", why: "on-chain" });
+              commitRecoveryIndex(storage, index);
+              index = reserveRecoveryIndex(storage, { chainId });
+              hops += 1;
+              if (!Number.isSafeInteger(index) || index < 0 || hops > 1000) throw new SdkError("bad-input", { field: "recoveryIndex", why: "exhausted" });
+            }
+          }
+          derived = takerHalves({ mnemonic: key.mnemonic, chainId, index });
+          recovery = { storage, key, index, derivation: "index-v1", newKey: !saved || saved.backupConfirmed !== true };
         }
-        const derived = takerHalves({ mnemonic: key.mnemonic, chainId, index });
         keySide = buildOwnSideFromHalves(request.order, { spendHalf: derived.spendHalf, viewHalf: derived.viewHalf }).side;
         // THE MAKER'S VIEW HALF IS DERIVED FROM THE KEY, NOT CHOSEN BY THE NODE. Without this binding a
         // signed quote could carry another view half; the funded address would differ from the one the twelve
         // words rebuild, and `sweep.fromOrder` would refuse after the funds were locked.
         derivedViewHalf = { half: derived.makerViewHalf, point: derived.makerViewPoint };
-        recovery = { storage, key, index, newKey: !saved || saved.backupConfirmed !== true };
       }
 
       // THE KEY PATH BINDS THE VIEW HALF BEFORE THE ORDER IS BUILT. The quote must echo the half derived from
@@ -1017,7 +1037,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         try { engine.swap.saveSwap(record.swap); } catch { throw new SdkError("storage-unavailable", { step: "save-escrow" }); }
         // THE NUMBER IS SPENT ONLY NOW, WHEN THE ORDER EXISTS ON CHAIN. A failed or abandoned start keeps the
         // reservation, so a retry uses the same number and the later search has no gap.
-        if (recovery) {
+        if (recovery && recovery.index !== undefined) {
           try { commitRecoveryIndex(recovery.storage, recovery.index); } catch { /* the reservation stays; the key still works */ }
         }
       }

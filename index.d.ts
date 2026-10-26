@@ -1148,6 +1148,9 @@ export interface StartRequest {
   recoveryKey?: string | { readonly mnemonic: string };
   /** The swap number, when the caller already reserved one. Absent - the SDK reserves the next free number. */
   recoveryIndex?: number;
+  /** The per-order salt the caller put into the signed quote. When present, the key uses the v2 salt binding and
+   * no index is reserved; it must equal `order.salt`. */
+  recoverySalt?: string | number | bigint;
   /** The first block for the on-chain number check. Absent - the chain registry's escrow deployment block, and
    * zero only when the registry has no height. */
   fromBlock?: string | number;
@@ -1443,7 +1446,10 @@ export interface SweepFromOrderRequest {
     readonly edPointLocker: string;
     readonly edPointClaimer: string;
     readonly edViewPointLocker: string;
-    readonly index: number;
+    readonly index?: number | null;
+    readonly derivation?: "index-v1" | "salt-v2";
+    readonly factory?: string;
+    readonly salt?: string;
     readonly side: "locker" | "claimer";
     readonly startHeight?: number | null;
     readonly blockTime?: number | null;
