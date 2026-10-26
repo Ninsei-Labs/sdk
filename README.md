@@ -209,6 +209,9 @@ a dead node, and a node on another network is not an absent reader. A page that 
 path can call `recoveryIndexTaken` from `./recovery` before using a number; it checks the factory's `OrderCreated`
 logs from the registry's deployment block.
 
+Every body route the SDK sends carries `sdkVersion` from the package (`quotes.firm`, `quotes.sale` and the funding
+mark). The caller cannot override it with a different line.
+
 Funding is reported from the receipt, not from the send. A status-0 receipt is `contract-reverted`; a missing
 receipt, a receipt without `OrderCreated`, or an event from another factory is `funding-pending` with the transaction
 hash, and `swaps.start` does not save an escrow or retire a recovery number in that state.

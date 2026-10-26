@@ -1,5 +1,8 @@
 ## Unreleased
 
+- The SDK names its own line on every body route it sends to a node: `quotes.firm`, `quotes.sale` and the funding
+  mark carry `sdkVersion` from the package (`src/version.mjs`). A default node no longer refuses a current SDK with
+  `422 sdk-version-absent`; the caller cannot claim a different line.
 - Funding is no longer reported as complete from a sent transaction. `fundOrder` accepts only a status-1 receipt
   with an `OrderCreated` from the factory that was called, for the predicted escrow; a reverted receipt is
   `contract-reverted`, and a missing receipt, a missing event or a foreign event returns `pending` with a reason.
@@ -451,6 +454,9 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
 
 ## Unreleased
 
+- The SDK names its own line on every body route it sends to a node: `quotes.firm`, `quotes.sale` and the funding
+  mark carry `sdkVersion` from the package (`src/version.mjs`). A default node no longer refuses a current SDK with
+  `422 sdk-version-absent`; the caller cannot claim a different line.
 - Funding is no longer reported as complete from a sent transaction. `fundOrder` accepts only a status-1 receipt
   with an `OrderCreated` from the factory that was called, for the predicted escrow; a reverted receipt is
   `contract-reverted`, and a missing receipt, a missing event or a foreign event returns `pending` with a reason.

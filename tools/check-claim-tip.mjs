@@ -1,6 +1,7 @@
 // THE CLAIM TIP CHECK (sdk#18): a quote's tip is sized by the claim, and an unmeasured base fee is refused.
 import { claimGasGiftWei } from "../engine/evm/claimGas.js";
 import { claimTipVerdict, createQuotes } from "../src/quotes.mjs";
+import { SDK_VERSION } from "../src/version.mjs";
 import { primitives } from "../src/primitives.mjs";
 import { quoteDigest, signQuoteDigest } from "../src/quoteEip712Spec.mjs";
 
@@ -33,6 +34,8 @@ export const claimTipCheck = async () => {
   await quotes.firm({ providerId: "p", order: { locker: "0x" + "11".repeat(20) }, viewHalfClaimer: half }).catch(() => null);
   await quotes.firm({ providerId: "p", order: { locker: "0x" + "11".repeat(20) } }).catch(() => null);
   check(sent[0] && sent[0].viewHalfClaimer === half, "the firm request did not carry the supplied view half");
+  check(sent[0] && sent[0].sdkVersion === SDK_VERSION && sent[1] && sent[1].sdkVersion === SDK_VERSION,
+    "the firm request did not carry the SDK version");
   check(sent[1] && !("viewHalfClaimer" in sent[1]), "a request without a view half gained one");
 
   // A SALE TICKET'S TIP IS CHECKED ON THE SIGNED FIGURE, WITH THE PRIORITY FEE. The node sizes the tip from gas price
@@ -62,17 +65,19 @@ export const claimTipCheck = async () => {
   const l1Estimate = claimGasGiftWei({ baseFeeWei: baseL1, priorityFeeWei: priorityL1 });
   let currentQuote = null;
   let chainReads = 0;
+  const saleBodies = [];
   const sale = (body, block = { baseFeePerGas: baseL1, gasPrice: baseL1 + priorityL1 }) => {
     currentQuote = body.handoff.quote;
     chainReads = 0;
     return createQuotes({
-      config: { route: () => "/order-sell" }, http: { async tryJson() { return { ok: true, body }; } },
+      config: { route: () => "/order-sell" }, http: { async tryJson(_path, request) { saleBodies.push(JSON.parse(request.body)); return { ok: true, body }; } },
       evmBlock: async () => block,
       evmCall: async () => "0x" + "0".repeat(24) + ((chainReads++ === 0 ? currentQuote.provider : currentQuote.factory).slice(2)),
     }).sale({ claimer: addr("33"), xmr: 1 });
   };
   const accepted = await sale(ticketFor(l1Estimate)).catch((error) => error);
   check(accepted && accepted.ok === true, "a ticket at the node's own L1 estimate was refused: " + (accepted && accepted.code));
+  check(saleBodies[0] && saleBodies[0].sdkVersion === SDK_VERSION, "the sale request did not carry the SDK version");
   const tooLarge = await sale(ticketFor(l1Estimate * 2n + 1n)).catch((error) => error);
   check(tooLarge && tooLarge.code === "quote-tip-too-large", "a ticket above twice the L1 estimate was not refused");
   const mismatched = await sale({ ...ticketFor(l1Estimate), claimTip: { wei: String(l1Estimate + 1n), signed: true } })
