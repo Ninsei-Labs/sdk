@@ -25,6 +25,7 @@
 // with a code and params. Neither `null` nor a zero in place of the answer: an empty address and a zero balance
 // look like real data, and that is exactly why they are not returned.
 import { SdkError } from "../errors.mjs";
+import { signedFeeTotal } from "../sweep-fees.mjs";
 import { config as engineConfig, xmrAddress } from "../engine.mjs";
 
 const XMR_VM = "monero";
@@ -191,11 +192,9 @@ export function moneroWalletAdapter({
     },
 
     // Optional, like every withdrawal adapter: a library that reports no fee answers null rather than a zero.
+    // A split sweep pays a fee on EVERY signed transaction; the total is what leaves the remainder.
     async fee(signed) {
-      const tx = Array.isArray(signed) ? signed[0] : signed;
-      if (!tx || typeof tx.getFee !== "function") return null;
-      const value = tx.getFee();
-      return value === null || value === undefined ? null : String(value);
+      return signedFeeTotal(signed);
     },
 
     // THE MONERO WALLET HAS NO EVENTS (monero-ts has no on/removeListener): a subscriber receives a notification

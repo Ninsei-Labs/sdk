@@ -16,7 +16,7 @@ export const sweepAdapterCheck = async () => {
     async setRestoreHeight(height) { calls.push(["height", height]); },
     async getUnlockedBalance() { return 5n; },
     async sync() { calls.push(["sync"]); },
-    async sweepUnlocked(request) { calls.push(["sweep", request]); return [{ getFee: () => 3n }]; },
+    async sweepUnlocked(request) { calls.push(["sweep", request]); return [{ getFee: () => 3n }, { getFee: () => 4n }]; },
     async relayTxs(signed) { calls.push(["relay", signed]); return ["tx-1"]; },
     async close() { calls.push(["close"]); },
   };
@@ -36,7 +36,7 @@ export const sweepAdapterCheck = async () => {
     "open accepted a plan for another address");
   const signed = await adapter.sweepUnlocked({ address: ADDRESS, relay: false });
   check(calls.some((call) => call[0] === "sweep" && call[1].relay === false), "sweepUnlocked did not sign only");
-  check((await adapter.fee(signed)) === "3", "the fee was not read from the signed transaction");
+  check((await adapter.fee(signed)) === "7", "the fee was not summed over every signed transaction");
   check(JSON.stringify(await adapter.relay(signed)) === JSON.stringify(["tx-1"]), "relay did not send the signed transaction");
   notes.push("the wallet adapter carries the restore and the withdrawal surface");
 

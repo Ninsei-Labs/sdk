@@ -8,6 +8,7 @@
 // sending is a separate call. That way the interface has a point where it can show the person what exactly will
 // leave, BEFORE sending rather than after.
 import { SdkError } from "../errors.mjs";
+import { signedFeeTotal } from "../sweep-fees.mjs";
 
 export function moneroWallet({ createWallet, networkType, serverUri, password = "ninsei-sweep-session", fields = {} }) {
   const build = typeof createWallet === "function" ? createWallet : null;
@@ -41,15 +42,12 @@ export function moneroWallet({ createWallet, networkType, serverUri, password = 
       return await wallet.sweepUnlocked({ address, relay });
     },
     // THE FEE OF WHAT WAS SIGNED, when the library reports one. `sweepUnlocked` answers with the signed
-    // transactions; monero-ts puts the fee on each transaction. Optional by contract - the core treats a missing
-    // method as "unknown", so this adapter says what it can and nothing more.
+    // transactions; monero-ts puts the fee on each transaction and a split sweep pays every one of them. Optional
+    // by contract - the core treats a missing method as "unknown", so this adapter says what it can and nothing
+    // more; one unreadable fee makes the total unknown, not partial.
     async fee(signed) {
       need();
-      const list = Array.isArray(signed) ? signed : [signed];
-      const tx = list[0];
-      if (!tx || typeof tx.getFee !== "function") return null;
-      const value = tx.getFee();
-      return value === null || value === undefined ? null : String(value);
+      return signedFeeTotal(signed);
     },
 
     async relay(signed) {

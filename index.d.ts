@@ -1567,8 +1567,9 @@ export interface SweepSignResult {
   /** The free remainder at the moment of signing, in atomic units (string). */
   readonly amount: string;
   /**
-   * THE FEE OF THE SIGNED TRANSFER, in atomic units, or null when the wallet could not report one. A withdrawal
-   * moves the whole remainder, so the fee comes out of it - `receive` is what the recipient gets.
+   * THE FEE OF THE SIGNED TRANSFER, in atomic units, summed over every signed transaction, or null when any of
+   * them could not report one. A withdrawal moves the whole remainder, so the fee comes out of it - `receive` is
+   * what the recipient gets.
    */
   readonly fee: string | null;
   /** The remainder minus the fee. Null when the fee is unknown, or when a reported fee claims more than the remainder. */
