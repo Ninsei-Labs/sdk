@@ -290,6 +290,8 @@ export interface RecoveryKey {
   readonly mnemonic: string;
   readonly fingerprint: string;
   readonly createdAt: string;
+  /** True only after the person confirmed that the key is saved; a key in storage is not proof of that. */
+  readonly backupConfirmed?: boolean;
 }
 
 /** A derived swap number: the halves cross JSON as hex scalars. */
@@ -372,9 +374,9 @@ export declare function createRecoveryKeyFile(request: { mnemonic: string; creat
 /** Reads a plain or encrypted backup file and validates the words. */
 export declare function openRecoveryKeyFile(contents: string, passphrase?: string): Promise<RecoveryKey>;
 /** Saves the key through a storage adapter. */
-export declare function saveRecoveryKey(storage: RecoveryKeyStorage, key: RecoveryKey & { nextIndex?: number; reserved?: Record<string, unknown>; retired?: Record<string, unknown> }): RecoveryKey;
+export declare function saveRecoveryKey(storage: RecoveryKeyStorage, key: RecoveryKey & { nextIndex?: number; reserved?: Record<string, unknown>; retired?: Record<string, unknown>; backupConfirmed?: boolean }): RecoveryKey;
 /** Reads the key from a storage adapter, or null. */
-export declare function loadRecoveryKey(storage: RecoveryKeyStorage): (RecoveryKey & { nextIndex: number; reserved: Record<string, unknown>; retired: Record<string, unknown> }) | null;
+export declare function loadRecoveryKey(storage: RecoveryKeyStorage): (RecoveryKey & { nextIndex: number; reserved: Record<string, unknown>; retired: Record<string, unknown>; backupConfirmed?: boolean }) | null;
 /** Reserves a swap number; the caller releases it if the request is abandoned. */
 export declare function reserveRecoveryIndex(storage: RecoveryKeyStorage, request: { chainId: number; swapId?: string | null }): number;
 /** True when an order already holds this number's commitment on chain. A page that starts swaps without the SDK's

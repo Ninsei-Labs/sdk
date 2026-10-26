@@ -412,6 +412,131 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
       const ticket = res.body;
       const quote = (ticket.handoff && ticket.handoff.quote) || ticket.quote || null;
       if (!quote || typeof quote !== "object") fail("quote-field-unbound", { step: "order-sell", field: "quote" });
+      // THE SALE TICKET IS A SIGNED QUOTE, AND IT GETS THE SAME GATES AS `firm`: every field of the signed set,
+      // its expiry, the EIP-712 signature and the named key, the registry's provider mapping, the interface's
+      // allow-list, and the factory/implementation policy. The one difference is the binding below: a sale has no
+      // caller-supplied order terms, so its context is checked against `ticket.order` when the node returns it.
+      // A MISSING FIELD OF THE SIGNED SET IS NOT "PROBABLY ZERO": the digest cannot be built, so the quote is
+      // not verifiable and is refused (its own code, so the interface can say which field is unbound).
+      const missingFields = orderQuoteMissingFields(quote);
+      if (missingFields.length) fail("quote-field-unbound", { step: "signature", missing: missingFields });
+      // THE QUOTE'S OWN EXPIRY, checked against the clock the core already has. It is bound in the signature too,
+      // but a stale quote is refused by its own code rather than looking like a signature failure.
+      const validUntil = Number(quote.validUntil);
+      // THE SCALE IS SECONDS: the same as the order's deadlines and block.timestamp. The core's clock is in
+      // milliseconds (Date.now), so exactly ONE boundary is converted - "now", not the quote value itself: one
+      // unit for the value, one conversion at the input.
+      const nowSec = Math.floor(now() / 1000);
+      if (Number.isFinite(validUntil) && validUntil > 0 && validUntil <= nowSec) {
+        fail("quote-expired", { step: "signature", validUntil });
+      }
+      // RECOVER, THEN MATCH THE NAMED KEY. A signature that does not recover is one refusal; a valid signature
+      // that recovers to a DIFFERENT address is another (the quote names a key that did not sign it).
+      const recoveredKey = recoverOrderQuoteKey(quote);
+      if (recoveredKey === null) fail("quote-signature-invalid", { step: "signature" });
+      const declaredKey = String(quote.quoteKey).toLowerCase();
+      if (recoveredKey !== declaredKey) fail("quote-key-mismatch", { step: "signature", got: recoveredKey, want: declaredKey });
+      // WHO OWNS THE KEY - ASKED OF THE REGISTRY NAMED BY THE QUOTE. Both fields are part of the signed set, so
+      // they cannot be swapped after signing; this is what turns "a key signed it" into "this provider's key
+      // signed it". No chain-read seam - refuse rather than take the signature on trust.
+      const registry = String(quote.registry || "").toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(registry) || registry === ZERO_ADDRESS) {
+        fail("quote-field-unbound", { step: "registry", field: "registry" });
+      }
+      const declaredProvider = String(quote.provider || "").toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(declaredProvider) || declaredProvider === ZERO_ADDRESS) {
+        fail("quote-field-unbound", { step: "registry", field: "provider" });
+      }
+      if (typeof evmCall !== "function") fail("quote-registry-unchecked", { step: "registry", why: "no-chain-read" });
+      let mappedProvider = null;
+      try {
+        mappedProvider = addressFromWord(await evmCall({ to: registry, data: providerOfData(declaredKey) }));
+      } catch {
+        fail("quote-registry-unchecked", { step: "registry", why: "read-failed", registry });
+      }
+      if (mappedProvider === null || mappedProvider === ZERO_ADDRESS) {
+        fail("quote-key-unknown", { step: "registry", registry, quoteKey: declaredKey });
+      }
+      if (mappedProvider !== declaredProvider) {
+        fail("quote-provider-mismatch", { step: "registry", got: mappedProvider, want: declaredProvider });
+      }
+      // THE INTERFACE'S OWN ADMISSION LIST - POLICY, NOT PROOF. The chain says whose key it is; whether this
+      // interface trades with that provider at all is the interface's decision, and it rides as a hook.
+      if (typeof providerAllowed === "function" && providerAllowed(declaredProvider) !== true) {
+        fail("quote-provider-not-allowed", { step: "policy", provider: declaredProvider });
+      }
+      // THE FACTORY: NAMED BY THE PROVIDER'S RECORD, CHECKED BY ITS CODE (#103). The factory will verify the
+      // quote in EVM (it is the EIP-712 verifyingContract), so it must be the one the record names AND its
+      // code must be a build this interface knows. The record lookup always runs; the code check runs when a
+      // policy list was supplied (nothing to pin against otherwise).
+      const declaredFactory = String(quote.factory || "").toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(declaredFactory) || declaredFactory === ZERO_ADDRESS) {
+        fail("quote-field-unbound", { step: "factory", field: "factory" });
+      }
+      let recordedFactory = null;
+      try {
+        recordedFactory = addressFromWord(await evmCall({ to: registry, data: factoryOfData(declaredProvider) }));
+      } catch {
+        fail("quote-factory-unchecked", { step: "factory", why: "read-failed", registry });
+      }
+      if (recordedFactory === null || recordedFactory === ZERO_ADDRESS) {
+        fail("quote-factory-unknown", { step: "factory", registry, provider: declaredProvider });
+      }
+      if (recordedFactory !== declaredFactory) {
+        fail("quote-factory-mismatch", { step: "factory", got: declaredFactory, want: recordedFactory });
+      }
+      if (factoryPolicy) {
+        if (typeof evmCode !== "function") fail("quote-factory-unchecked", { step: "factory", why: "no-code-read" });
+        let codeHex = null;
+        try { codeHex = await evmCode(declaredFactory); } catch { fail("quote-factory-unchecked", { step: "factory", why: "code-read-failed", factory: declaredFactory }); }
+        const codeBytes = hexToBytesQ(codeHex);
+        // EXTCODEHASH SEMANTICS: keccak256 of the runtime code. An address with no code (empty/0x) hashes to
+        // the keccak of empty, which is not on any build list - refused like any unknown build.
+        const codeHash = bytesToHexQ(keccak256(codeBytes || new Uint8Array(0)));
+        if (!factoryPolicy.includes(codeHash)) {
+          fail("quote-factory-code-unknown", { step: "factory", factory: declaredFactory, codeHash });
+        }
+      }
+      // THE IMPLEMENTATION THE CLONES WILL EXECUTE (#114). A pinned factory CODE is not enough on its own: the
+      // implementation ADDRESS lives in the factory's STORAGE, so the client re-reads the pair the factory itself
+      // checks (implementation() / implementationCodeHash()) and the CODE at that address, then applies the same
+      // verdict (verifyFactoryImplementationOnChain). A delegatecall to an address WITHOUT code SUCCEEDS, so a
+      // clone without an implementation would take the ETH and its markReady/claim/refund would appear to go
+      // through while doing nothing - that is exactly the case this refuses. The live code is re-hashed here, so
+      // the verdict does not trust the factory's own answer alone.
+      if (implementationPolicy) {
+        if (typeof evmCall !== "function") fail("quote-factory-unchecked", { step: "factory", why: "no-chain-read" });
+        if (typeof evmCode !== "function") fail("quote-factory-unchecked", { step: "factory", why: "no-code-read" });
+        const verdict = await engine.evm.verifyFactoryImplementationOnChain({
+          factory: declaredFactory,
+          read: evmCall,
+          code: (address) => evmCode(address),
+          policy: implementationPolicy,
+          hashCode: (codeHex) => bytesToHexQ(keccak256(hexToBytesQ(codeHex) || new Uint8Array(0))),
+        });
+        if (!verdict.ok) {
+          const unknown = verdict.why === "implementation-code-unknown" ||
+            verdict.why === "implementation-code-mismatch" || verdict.why === "implementation-has-no-code";
+          fail(unknown ? "quote-factory-code-unknown" : "quote-factory-unchecked",
+            { step: "factory", why: verdict.why, factory: declaredFactory, implementation: verdict.implementation || null });
+        }
+      }
+      // THE PERSON SELLING IS THE CLAIMER. The interface's denylist is applied to that address, not to a
+      // caller-chosen value: a ticket that names a denied claimer must not reach the funding step.
+      const saleClaimer = String((request && request.claimer) || quote.claimer || "").toLowerCase();
+      if (saleClaimer && denylist && denylist.has(saleClaimer)) fail("address-denied", { step: "order-sell" });
+      if (request && request.claimer && quote.claimer && String(request.claimer).toLowerCase() !== String(quote.claimer).toLowerCase()) {
+        fail("quote-refused", { step: "order-sell", why: "claimer-not-bound" });
+      }
+      // THE CONTEXT WHEN THE TICKET CARRIES ITS ORDER. The signed quote binds the order terms; when the node
+      // returns the order it priced, recompute the context with our own engine and refuse a mismatch.
+      if (ticket.order && typeof ticket.order === "object" && quote.context) {
+        let expectedSaleContext = null;
+        try { expectedSaleContext = engine.orderContext.orderContextString(ticket.order); } catch { expectedSaleContext = null; }
+        if (expectedSaleContext !== null && String(quote.context) !== expectedSaleContext) {
+          fail("quote-refused", { step: "order-sell", why: "other-terms" });
+        }
+      }
       // THE TICKET'S TIP MUST BE THE SIGNED ONE. The node returns both the ticket's `claimTip` object and the quote it
       // signed; a difference means the figure shown to the person is not the figure the escrow will pay.
       const shown = ticket.claimTip && ticket.claimTip.wei !== undefined && ticket.claimTip.wei !== null

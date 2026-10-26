@@ -1,15 +1,18 @@
 // THE COUNTERPARTY'S SIDE AND THE JOINT ADDRESS.
 //
-// TWO CHECKS, BOTH MANDATORY BEFORE SIGNING - after it there is nothing to fix:
+// THREE CHECKS, ALL MANDATORY BEFORE SIGNING - after it there is nothing to fix:
 //
 //   1) the DLEQ proof stands in the CONTEXT OF THIS order: the counterparty proved for our terms, not for others.
 //      The context is the same one the quote signature is bound to (see quotes.firm);
 //   2) the proven ed25519 point is THE VERY ONE that will go into the contract and from which the address is
 //      assembled. Without this check the counterparty could prove one thing and substitute another: on our side
 //      everything would look sound, and the discrepancy would surface when claiming the XMR, with nothing left to
-//      fix.
+//      fix;
+//   3) the proven secp256k1 point matches `commitHalfClaimer`, the commitment the contract compares on claim and
+//      refund. A proof without this comparison binds the wrong half and the escrow rejects it after the other side
+//      has paid.
 //
-// Both are done by the engine (order.js: the verifying code is the same for us and for the counterparty). The
+// All three are done by the engine (order.js: the verifying code is the same for us and for the counterparty). The
 // core has no cryptography of its own and should not: a copy would silently drift from the original.
 import { SdkError } from "./errors.mjs";
 import { primitives } from "./primitives.mjs";
@@ -155,13 +158,18 @@ export function acceptCounterparty({ context, side = null, counterparty = null, 
     // not what the page runs on.
     const mock = builder().newSide(context, true);
     accepted = { proof: sameFormAsPoint(mock.proof), edPub: norm(mock.pub.ed), viewPoint: norm(mock.viewPub),
-      viewHalf: mock.viewHalf, half: mock.half, commitHalfClaimer: null, sealed: null, providerId: null, standIn: true, mock };
+      viewHalf: mock.viewHalf, half: mock.half,
+      // THE STAND-IN DOES CARRY A COMMITMENT: it is derived from the half it just built, by the same formula
+      // the contract uses. The proof check below is therefore the real one, not a path that skips it.
+      commitHalfClaimer: norm(builder().halfCommitment(mock.half)), sealed: null, providerId: null, standIn: true, mock };
   } else {
     throw new SdkError("bad-input", { field: "counterparty" });
   }
   const missing = [];
   if (!accepted.proof) missing.push("proof");
   if (!accepted.edPub) missing.push("edPub");
+  // THE COMMITMENT IS NOT OPTIONAL. Without it the proof says nothing about the half the contract will compare.
+  if (!accepted.commitHalfClaimer) missing.push("commitHalfClaimer");
   if (missing.length) throw new SdkError("bad-input", { field: "counterparty", missing });
   // OPENING THE SEALED PACKAGE - BY THE SAME ENGINE CALL, and the key is OURS (the package is addressed to us).
   // The envelope's composition is locked separately (www/js/atomic/halfenc.js, HALFENC_LOCK_REASON): in the live
@@ -169,7 +177,7 @@ export function acceptCounterparty({ context, side = null, counterparty = null, 
   // with a refusal rather than passing itself off as a working key handover.
   const ownEncPriv = accepted.sealed && side && side.enc ? side.enc.priv : null;
   let verdict = null;
-  try { verdict = builder().verifySide({ proof: accepted.proof, pub: { ed: accepted.edPub } }, context, accepted.sealed, ownEncPriv); }
+  try { verdict = builder().verifySide({ proof: accepted.proof, pub: { ed: accepted.edPub }, commitHalfClaimer: accepted.commitHalfClaimer }, context, accepted.sealed, ownEncPriv); }
   catch { throw new SdkError("bad-input", { field: "counterparty" }); }
   if (!verdict || verdict.ok !== true) {
     throw new SdkError("quote-refused", { step: "proof", why: verdict && verdict.reason ? "rejected" : "unknown" });

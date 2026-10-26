@@ -290,7 +290,8 @@ const readStore = (storage) => {
 /** Save the key next to the swap records. The words are the secret; the store is the caller's. */
 export function saveRecoveryKey(storage, key) {
   const checked = recoveryKeyOf(key && key.mnemonic, key && key.createdAt);
-  storage.set(RECOVERY_KEY_STORE, JSON.stringify({ ...checked, nextIndex: Number(key.nextIndex) || 0, reserved: key.reserved || {}, retired: key.retired || {} }));
+  storage.set(RECOVERY_KEY_STORE, JSON.stringify({ ...checked, nextIndex: Number(key.nextIndex) || 0,
+    reserved: key.reserved || {}, retired: key.retired || {}, backupConfirmed: key.backupConfirmed === true }));
   return checked;
 }
 

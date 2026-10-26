@@ -1,3 +1,20 @@
+## Unreleased
+
+- `quotes.sale` authenticates the ticket instead of trusting its `signed` flag: the EIP-712 signature, expiry,
+  registry provider, interface allow-list, factory policy and the sale claimer's denylist are checked before the
+  ticket is returned.
+- On the key path, `start` requires the counterparty's view half to be the one derived from the words, chain
+  and index. A foreign or missing half is refused before funding, so the funded address can always be rebuilt.
+- A recovery key in storage is no longer treated as backed up. `backupConfirmed` is recorded only after
+  `onRecoveryKey` returns true; a declined or failed confirmation leaves the key unconfirmed, so the next start
+  asks again and cannot fund the escrow.
+- The XMR arrival check requires witnesses to agree on the whole observation, not only on a block hash, and
+  verifies every decoded amount against its Pedersen commitment (`mask*G + amount*H == outPk`). One altered node
+  can no longer turn a short payment into `arrived`; an unbacked amount is `xmr-nodes-disagree`. The compact
+  RingCT encoding (types 4-6) derives the mask, and a recorded stagenet type-6 transfer is pinned as a fixture.
+- The counterparty DLEQ proof is bound to the signed `commitHalfClaimer`: the proven secp256k1 point must match the
+  commitment the contract compares, and a side without a commitment is refused as input.
+
 ## 0.52.0 — 2026-10-26
 
 THE NEXT CONTRACT VERSION IS WIRED IN.

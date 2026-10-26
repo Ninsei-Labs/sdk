@@ -60,6 +60,30 @@ export function createOrderBuilder({ ed25519, secp256k1, keccak256, sha3_512, ra
     if (side.pub && side.pub.ed && String(side.proof.XB).toLowerCase() !== String(side.pub.ed).toLowerCase()) {
       return { ok: false, reason: "the proven ed25519 point does not match the declared one: " + side.proof.XB + " vs " + side.pub.ed };
     }
+    // THE COMMITMENT IS PART OF THE PROOF'S MEANING. The contract does not compare halves to a hash of a number:
+    // it compares `half*G` (through ecrecover) with `commitHalfClaimer`. A proof confirms only that XA and XB stand
+    // for one scalar; without this comparison a counterparty could prove XA, put another point in the quote, and
+    // the contract would reject the half at claim time - after the other side has paid.
+    //
+    // `proof.XA` is the compressed secp256k1 point of the half. The commitment is keccak256 of the UNCOMPRESSED
+    // 64-byte coordinates, and the contract compares only its low 160 bits (`uint160`), so the comparison is made
+    // on the same 20 bytes.
+    if (side.commitHalfClaimer) {
+      let provenCommit = null;
+      try {
+        const point = secp256k1.Point.fromHex(String(side.proof.XA).replace(/^0x/, ""));
+        const xy = point.toBytes(false).slice(1);
+        provenCommit = "0x" + Array.from(keccak256(xy), (b) => b.toString(16).padStart(2, "0")).join("");
+      } catch { provenCommit = null; }
+      const low160 = (v) => String(v || "").replace(/^0x/, "").toLowerCase().slice(-40);
+      if (!provenCommit || low160(provenCommit) !== low160(side.commitHalfClaimer)) {
+        return { ok: false, reason: "the proven secp256k1 point does not match commitHalfClaimer: " + (provenCommit || "unparsed") + " vs " + side.commitHalfClaimer };
+      }
+    } else {
+      // A REAL COUNTERPARTY MUST CARRY THE COMMITMENT. Accepting a proof without it leaves the link between the
+      // proven half and the contract unchecked; the stand-in path supplies its own commitment in order.mjs.
+      return { ok: false, reason: "the counterparty side carries no commitHalfClaimer" };
+    }
     if (sealedPayloadBytes && ownEncPriv) {
       const opened = enc.open(enc.unpackSealed(sealedPayloadBytes), ownEncPriv, side.pub.ed);
       if (!opened.ok) return { ok: false, reason: "the counterparty envelope does not confirm the half: " + opened.reason };

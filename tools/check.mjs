@@ -2510,6 +2510,25 @@ const providerCheck = async () => {
   return { note: "provider code, key path, settings file and bound quote verification all behave", problems, notes };
 };
 
+const runScriptCheck = (tool, label) => {
+  const problems = [];
+  try {
+    const out = execFileSync(process.execPath, [p("tools", tool)], { encoding: "utf8" });
+    const passed = (out.match(/^  ok    /gm) || []).length;
+    return { note: `${label}: ${passed} checks passed`, problems, notes: [] };
+  } catch (error) {
+    const text = String((error && (error.stdout || error.message)) || error);
+    for (const line of text.split("\n")) if (/FAIL|FAILED/.test(line)) problems.push(line.trim());
+    return { note: `${label} failed`, problems, notes: [] };
+  }
+};
+
+const saleAuthCheck = () => runScriptCheck("check-sale-auth.mjs", "sale auth");
+const backupConfirmationCheck = () => runScriptCheck("check-backup-confirmation.mjs", "backup confirmation");
+const keyViewCheck = () => runScriptCheck("check-key-view.mjs", "key view");
+const arrivalConsensusCheck = () => runScriptCheck("check-arrival-consensus.mjs", "arrival consensus");
+const arrivalRealCheck = () => runScriptCheck("check-arrival-real.mjs", "real arrival");
+const orderProofCheck = () => runScriptCheck("check-order-proof.mjs", "order proof");
 const CHECKS = {
   syntax: syntaxCheck,
   import: importCheck,
@@ -2534,6 +2553,12 @@ const CHECKS = {
   terminal: terminalCheck,
   provider: providerCheck,
   "recovery-key": recoveryKeyCheck,
+  "sale-auth": saleAuthCheck,
+  "backup-confirmation": backupConfirmationCheck,
+  "key-view": keyViewCheck,
+  "arrival-consensus": arrivalConsensusCheck,
+  "arrival-real": arrivalRealCheck,
+  "order-proof": orderProofCheck,
   "sweep-window": sweepWindowCheck,
   "sweep-order": sweepFromOrderCheck,
   "sweep-adapter": sweepAdapterCheck,
