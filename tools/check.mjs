@@ -2529,6 +2529,7 @@ const keyViewCheck = () => runScriptCheck("check-key-view.mjs", "key view");
 const arrivalConsensusCheck = () => runScriptCheck("check-arrival-consensus.mjs", "arrival consensus");
 const arrivalRealCheck = () => runScriptCheck("check-arrival-real.mjs", "real arrival");
 const orderProofCheck = () => runScriptCheck("check-order-proof.mjs", "order proof");
+const fundingReceiptCheck = () => runScriptCheck("check-funding-receipt.mjs", "funding receipt");
 const CHECKS = {
   syntax: syntaxCheck,
   import: importCheck,
@@ -2566,6 +2567,7 @@ const CHECKS = {
   "claim-sender": claimSenderCheck,
   "quote-rank": quoteRankCheck,
   "settlement-profiles": settlementProfilesCheck,
+  "funding-receipt": fundingReceiptCheck,
 };
 
 export const runCheck = async (name) => {

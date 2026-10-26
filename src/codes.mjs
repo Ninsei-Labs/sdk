@@ -92,6 +92,9 @@ export const ERROR_CODES = [
   // through - server-unavailable, while the service answered and did not accept - server-refused (with the
   // status and its own reason). The advice to the interface differs: "retry" versus "investigate".
   "server-refused",
+  // THE TRANSACTION WAS SENT BUT THE RECEIPT DOES NOT PROVE AN ESCROW: no receipt yet, no expected OrderCreated,
+  // or a receipt from another factory. The tx hash is the handle for a retry read; nothing was saved as funded.
+  "funding-pending",
   // A TIMEOUT WAITING FOR XMR TO ARRIVE - a separate code. "We did not wait long enough" is a state of the
   // money, not a breakdown and not an empty response: mixing it with other refusals, the interface could not
   // tell "not arrived yet" from "broken".
@@ -167,6 +170,7 @@ export const ERROR_META = Object.freeze({
   "storage-unavailable": { retryable: true, side: "service" },
   "server-unavailable": { retryable: true, side: "service" },
   "server-refused": { retryable: false, side: "service" },
+  "funding-pending": { retryable: true, side: "chain" },
   "xmr-timeout": { retryable: true, side: "chain" },
   "xmr-locked": { retryable: true, side: "chain" },
   "xmr-nodes-disagree": { retryable: true, side: "chain" },

@@ -125,16 +125,43 @@ export const GAS_CREATE_ORDER_AND_FUND = 700_000n;
 
 // The ACTUAL escrow address from the receipt. Returns null when the event is absent (the transaction is not in a
 // block, or the factory is another) - then the caller must say so aloud rather than substitute a guess.
-export function escrowFromReceipt(receipt) {
+export function escrowFromReceipt(receipt, { factory = null, expectedEscrow = null } = {}) {
   if (!receipt || !Array.isArray(receipt.logs)) return null;
+  const wantFactory = factory ? String(factory).toLowerCase() : null;
+  const wantEscrow = expectedEscrow ? String(expectedEscrow).toLowerCase() : null;
   for (const log of receipt.logs) {
+    // THE EVENT MUST COME FROM THE FACTORY THAT WAS CALLED. Another contract can emit the same topic; accepting
+    // it would let a receipt from a different order name the escrow that gets saved and used for the withdrawal.
+    if (wantFactory && String(log && log.address || "").toLowerCase() !== wantFactory) continue;
     const topics = log.topics || [];
     if (String(topics[0]).toLowerCase() !== ORDER_CREATED_TOPIC) continue;
     if (topics.length < 2) continue;
     const addr = "0x" + String(topics[1]).slice(26).toLowerCase();
-    if (/^0x[0-9a-f]{40}$/.test(addr) && !/^0x0{40}$/.test(addr)) return addr;
+    if (!/^0x[0-9a-f]{40}$/.test(addr) || /^0x0{40}$/.test(addr)) continue;
+    // THE PREDICTED ADDRESS IS THE EXPECTED ONE. A different escrow in the same factory is not this order; the
+    // caller must not save it as funded.
+    if (wantEscrow && addr !== wantEscrow) continue;
+    return addr;
   }
   return null;
+}
+
+// A RECEIPT IS A VERDICT, NOT A PRESENCE CHECK. `status: 0` is a reverted transaction; a receipt with no
+// OrderCreated from the expected factory is not a funded escrow; a missing receipt is pending. Only status 1 plus
+// the expected event is funded, and the caller saves the escrow only on that answer.
+export function fundingReceiptVerdict(receipt, { factory = null, expectedEscrow = null } = {}) {
+  if (!receipt || typeof receipt !== "object") return { status: "pending", reason: "no-receipt" };
+  if (receipt.status === undefined || receipt.status === null || receipt.status === "") {
+    return { status: "pending", reason: "no-status" };
+  }
+  const status = Number(receipt.status);
+  if (!Number.isFinite(status)) return { status: "pending", reason: "bad-status" };
+  if (status === 0) return { status: "reverted", reason: "status-0" };
+  if (status !== 1) return { status: "pending", reason: "bad-status" };
+  const escrow = escrowFromReceipt(receipt, { factory, expectedEscrow });
+  if (!escrow) return { status: "pending", reason: "no-order-created" };
+  const blockNumber = Number(receipt.blockNumber);
+  return { status: "funded", escrow, birthBlock: Number.isFinite(blockNumber) ? blockNumber : null };
 }
 
 // Wait for a receipt: right after signing there is none, which is normal. Waiting forever is not allowed - we say so honestly.
@@ -260,20 +287,29 @@ export async function fundOrder({ factory, locker, claimer, commitHalfLocker, co
   // independent of the Monero node. Declared outside the branch on purpose: a variable declared inside a block is
   // not visible outside, and it must always be returned.
   let birthBlock = null;
+  let verdict = { status: "pending", reason: "no-receipt-reader" };
   if (typeof receipt === "function") {
     const rc = await waitReceipt(receipt, createHash);
-    actualEscrow = escrowFromReceipt(rc);
-    if (rc && Number.isFinite(Number(rc.blockNumber))) birthBlock = Number(rc.blockNumber);
-    if (!rc) {
-      onStep?.("no receipt yet - using the predicted address");
-    } else if (!actualEscrow) {
-      onStep?.("no OrderCreated in the receipt - using the predicted address");
-    } else if (actualEscrow !== String(escrow).toLowerCase()) {
-      console.warn("[escrow] receipt address " + actualEscrow + " != predicted " + escrow + " - using the receipt one");
-      onStep?.("receipt address differs from predicted - using the receipt one");
+    verdict = fundingReceiptVerdict(rc, { factory, expectedEscrow: escrow });
+    if (verdict.status === "reverted") {
+      const error = new Error("the funding transaction reverted");
+      error.code = "contract-reverted";
+      error.receiptStatus = 0;
+      throw error;
+    }
+    if (verdict.status === "funded") {
+      actualEscrow = verdict.escrow;
+      birthBlock = verdict.birthBlock;
+      if (actualEscrow !== String(escrow).toLowerCase()) {
+        console.warn("[escrow] receipt address " + actualEscrow + " != predicted " + escrow + " - using the receipt one");
+        onStep?.("receipt address differs from predicted - using the receipt one");
+      }
+    } else if (!rc) {
+      onStep?.("no receipt yet - funding is pending, not funded");
+    } else {
+      onStep?.("receipt has no matching OrderCreated - funding is pending, not funded");
     }
   }
-  const escrowToUse = actualEscrow || escrow;
 
   // 3) THE SECOND TRANSACTION IS GONE: the money left together with order creation. The name lockHash is kept on
   // purpose - callers look at it, and renaming would touch them with no benefit. THERE IS AND WILL BE NO TOP-UP:
@@ -282,10 +318,16 @@ export async function fundOrder({ factory, locker, claimer, commitHalfLocker, co
   // created without money.
   const lockHash = createHash;
 
-  // escrow is the ACTUAL address (from the receipt, if there was one); predictedEscrow is kept so a divergence is
-  // visible outside, not only in the log.
+  // ONLY A STATUS-1 RECEIPT WITH THE EXPECTED ORDER CREATED IS FUNDED. A missing receipt, a receipt without the
+  // event, or an event from another factory keeps `escrow` null and is returned as pending; the caller must not
+  // save it, retire a recovery number for it, or call it xmr-incoming.
   // THE FEE GOES OUTWARD: it went into the transaction and the deal record must keep it - otherwise the record
   // cannot tell how much the person deposited, and it would diverge from what the chain shows.
-  return { feeWei: fee.feeWei, feeTotalWei: totalValueWei, feeBps: fee.bps, feeWasLegacyFactory: Boolean(fee.legacy),
-           escrow: escrowToUse, predictedEscrow: escrow, escrowMismatch: Boolean(actualEscrow && actualEscrow !== String(escrow).toLowerCase()), salt, birthBlock, terms, createHash, lockHash };
+  const common = { feeWei: fee.feeWei, feeTotalWei: totalValueWei, feeBps: fee.bps, feeWasLegacyFactory: Boolean(fee.legacy),
+    predictedEscrow: escrow, salt, terms, createHash, lockHash };
+  if (verdict.status !== "funded") {
+    return { ...common, escrow: null, birthBlock: null, funded: false, pending: true, pendingReason: verdict.reason };
+  }
+  return { ...common, escrow: actualEscrow, escrowMismatch: actualEscrow !== String(escrow).toLowerCase(),
+    birthBlock, funded: true, pending: false };
 }

@@ -99,12 +99,10 @@ export async function send(request, wallet, deps = {}) {
       send: (tx) => wallet.send(tx),
       // NORMALISING THE RECEIPT ARGUMENT'S SHAPE - HERE, AT THE CORE'S BOUNDARY, NOT AT EVERY CALLER.
       //
-      // www/js/evm/funding.js calls the receipt with an OBJECT { hash } (waitReceipt), while the adapter contract
-      // declares receipt(txHash: string). A strict adapter (sdk/src/adapters/evm-wallet.mjs) answers bad-input to
-      // an object, the refusal is SWALLOWED by the receipt wait, and the escrow address is silently replaced with
-      // the PREDICTED one - that is, the "address from the receipt" check stops working without saying so. We
-      // normalise the argument to a string here: funding.js is foreign code and must not be edited, and every
-      // adapter should not repeat the normalisation.
+      // funding.js calls the receipt with an OBJECT { hash } (waitReceipt), while the adapter contract declares
+      // receipt(txHash: string). A strict adapter (sdk/src/adapters/evm-wallet.mjs) answers bad-input to an object,
+      // the refusal is SWALLOWED by the receipt wait, and the address would silently fall back. We normalise the
+      // argument to a string at this boundary so every adapter sees one shape.
       receipt: (arg) => wallet.receipt(typeof arg === "string" ? arg : (arg && typeof arg.hash === "string" ? arg.hash : arg)),
     });
   } catch (error) {

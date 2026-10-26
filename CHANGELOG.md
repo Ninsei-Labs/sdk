@@ -1,5 +1,9 @@
 ## Unreleased
 
+- Funding is no longer reported as complete from a sent transaction. `fundOrder` accepts only a status-1 receipt
+  with an `OrderCreated` from the factory that was called, for the predicted escrow; a reverted receipt is
+  `contract-reverted`, and a missing receipt, a missing event or a foreign event returns `pending` with a reason.
+  `swaps.start` refuses with `funding-pending` and does not save an escrow or retire a recovery number.
 - The recovery key has a salt-based v2 derivation: `ninsei-taker-v2|<chain>|<factory>|taker|<salt>`. The client draws
   a fresh public salt per order; the salt is already in `OrderCreated`, so recovery costs one derivation per order
   instead of an index scan. No index is reserved, and the same words on a second device or at another factory do not
@@ -444,6 +448,10 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
 
 ## Unreleased
 
+- Funding is no longer reported as complete from a sent transaction. `fundOrder` accepts only a status-1 receipt
+  with an `OrderCreated` from the factory that was called, for the predicted escrow; a reverted receipt is
+  `contract-reverted`, and a missing receipt, a missing event or a foreign event returns `pending` with a reason.
+  `swaps.start` refuses with `funding-pending` and does not save an escrow or retire a recovery number.
 - The recovery key has a salt-based v2 derivation: `ninsei-taker-v2|<chain>|<factory>|taker|<salt>`. The client draws
   a fresh public salt per order; the salt is already in `OrderCreated`, so recovery costs one derivation per order
   instead of an index scan. No index is reserved, and the same words on a second device or at another factory do not
