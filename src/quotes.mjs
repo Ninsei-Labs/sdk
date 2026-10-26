@@ -16,6 +16,7 @@
 //   3) a quote older than its own ttlMs is not shown, and a row that contradicts itself (the named sides disagree
 //      with the pair's name) is not read at all.
 import { fail } from "./errors.mjs";
+import { SDK_VERSION } from "./version.mjs";
 import * as engine from "./engine.mjs";
 import { orderQuoteMissingFields, recoverOrderQuoteKey } from "./quoteEip712.mjs";
 import { claimGasGiftWei } from "../engine/evm/claimGas.js";
@@ -398,7 +399,9 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
     // plus the priority part of the gas price. A buy quote has no tip; a sale is the only route where one exists.
     async sale(request) {
       if (!request || typeof request !== "object") fail("bad-input", { field: "request" });
-      const payload = request.request && typeof request.request === "object" ? request : { request };
+      // THE NODE GATES THE THREE BROWSER BODY ROUTES ON THE CLIENT'S SDK LINE. The value is the package's own
+      // baked-in version, not a caller field: a caller cannot claim a line it was not built from.
+      const payload = { ...(request.request && typeof request.request === "object" ? request : { request }), sdkVersion: SDK_VERSION };
       let res = null;
       try {
         res = await http.tryJson(config.route("orderSell"), {
@@ -592,7 +595,7 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ providerId: request.providerId, order: request.order,
-            ...(viewHalfClaimer === null ? {} : { viewHalfClaimer }) }),
+            ...(viewHalfClaimer === null ? {} : { viewHalfClaimer }), sdkVersion: SDK_VERSION }),
         });
       } catch (error) {
         if (error && error.code === "bad-input") throw error;

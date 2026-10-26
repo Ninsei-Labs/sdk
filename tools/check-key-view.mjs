@@ -14,6 +14,8 @@ import { halfCommitmentHex } from "../engine/atomic/orderHalfCommit.js";
 import { memoryStorage, setStorage } from "../engine/core/store.js";
 import { FACTORY_METHODS } from "../engine/evm/factory.js";
 import { takerHalves, takerHalvesV2 } from "../src/recovery-key.mjs";
+import { markBodyOf } from "../src/swaps.mjs";
+import { SDK_VERSION } from "../src/version.mjs";
 
 const WORDS = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 const addr = (b) => "0x" + b.repeat(20);
@@ -102,6 +104,13 @@ console.log("=== 1d) A RECEIPT WITHOUT THE EVENT IS NOT xmr-incoming ===");
   if (result && result.code === "funding-pending" && result.params && result.params.txHash && sent === 1) {
     ok("a status-1 receipt with no OrderCreated is funding-pending, not a funded escrow");
   } else bad("pending funding: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
+}
+
+console.log("=== 1e) THE MARK BODY NAMES THE SDK LINE ===");
+{
+  const mark = markBodyOf({ id: "x", network: "n", escrow: {} });
+  if (mark.sdkVersion === SDK_VERSION) ok("the mark body carries the SDK version");
+  else bad("mark body version: " + JSON.stringify(mark.sdkVersion));
 }
 
 console.log("=== 2) ANOTHER VIEW HALF IS REFUSED BEFORE FUNDING ===");

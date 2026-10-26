@@ -5,6 +5,7 @@
 // order and halves -> server -> watching the Monero address. A lock without a recovery file is a lock with nothing
 // to open it with if the browser is lost, so the confirmation stands BEFORE anything that locks funds.
 import { SdkError } from "./errors.mjs";
+import { SDK_VERSION } from "./version.mjs";
 import * as engine from "./engine.mjs";
 // The name is NOT `record`: inside start there is a variable with that name, and referencing the module before it
 // ran into "Cannot access 'record' before initialization" - a refusal without a code, that is, a breakdown. A check
@@ -99,7 +100,7 @@ const LOCKED_STATUS = "xmr_locked";
 // WHAT IS DELIBERATELY ABSENT HERE: a waiting policy of its own inside the step. How long to wait for the XMR to
 // arrive is the caller's decision, so the watch is exposed as a separate method (`swaps.watch`) with a timeout from
 // the configuration.
-const MARK_FIELDS = ["id", "network", "escrow", "quoteId", "providerId", "hashlock", "amount", "t0", "t1"];
+const MARK_FIELDS = ["id", "network", "escrow", "quoteId", "providerId", "hashlock", "amount", "t0", "t1", "sdkVersion"];
 // THE FIELDS OF THE FACTORY WATCH RECORD - the same whitelist as the page client's
 // (www/js/core/chainSource.js:33, ALLOWED_SESSION_FIELDS). The body is assembled FROM IT anew, so neither the spend
 // half nor the spend key can get into the request, even if someone adds them to the record "just in case".
@@ -133,6 +134,7 @@ export function markBodyOf(swap, escrow, order = null) {
     amount: first(e.amountWei, o.amount, swap.amountWei),
     t0: first(e.t0, o.t0),
     t1: first(e.t1, o.t1),
+    sdkVersion: SDK_VERSION,
   };
 }
 
@@ -448,6 +450,8 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
   async function markOnServer(swap, escrow, order) {
     if (!http || typeof http.tryJson !== "function") throw new SdkError("bad-input", { field: "http", step: "mark" });
     const mark = markBodyOf(swap, escrow, order);
+    // THE BROWSER SDK LINE IS PART OF THE BODY. The node's body routes read it before any work; a mark request
+    // without it is refused as sdk-version-absent even though the swap is already funded.
     const body = JSON.stringify(Object.fromEntries(MARK_FIELDS.map((field) => [field, mark[field]])));
     const headers = { "content-type": "application/json" };
     // THE PASS IS ASKED EVERY TIME, NOT CACHED: it is short-lived (an hour: app/server.mjs, AUTH_TOKEN_TTL_MS), and a
@@ -497,7 +501,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       restoreHeight,
       chain: swap.network || swap.chain || null,
     };
-    const body = {};
+    const body = { sdkVersion: SDK_VERSION };
     for (const field of ALLOWED_SESSION_FIELDS) if (wanted[field] !== undefined && wanted[field] !== null) body[field] = wanted[field];
     // THE VIEW KEY IS NOT NEEDED BY THE SERVICE FOR THE DECISION ANY MORE: since the arrival is checked by the
     // client (verifyArrival), the backend may keep a watch only for notifications, and even that it can do from
