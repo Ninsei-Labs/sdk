@@ -260,8 +260,8 @@ const baseUrl = (value) => {
   return out;
 };
 
-export async function fetchBlock(daemonUrl, height) {
-  const res = await fetch(`${baseUrl(daemonUrl)}/json_rpc`, {
+export async function fetchBlock(daemonUrl, height, fetchImpl = globalThis.fetch) {
+  const res = await fetchImpl(`${baseUrl(daemonUrl)}/json_rpc`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: "block", method: "get_block", params: { height } }),
   });
@@ -272,17 +272,26 @@ export async function fetchBlock(daemonUrl, height) {
 
 // Transactions by hash list. We hit the PATH /get_transactions, not /json_rpc: over JSON-RPC this method
 // silently returns empty, which looks like "no transactions".
-export async function fetchTransactions(daemonUrl, hashes) {
+export async function fetchTransactions(daemonUrl, hashes, fetchImpl = globalThis.fetch) {
   if (!hashes.length) return [];
-  const res = await fetch(`${baseUrl(daemonUrl)}/get_transactions`, {
+  const res = await fetchImpl(`${baseUrl(daemonUrl)}/get_transactions`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ txs_hashes: hashes, decode_as_json: true }),
   });
   const j = await res.json();
-  const wrappers = j.txs || [];
+  // A BUSY ANSWER IS NOT AN EMPTY BLOCK. The daemon says BUSY while it is still indexing; returning [] would turn
+  // money that is there into a complete scan with a zero balance.
+  if (j && String(j.status || "").toUpperCase() === "BUSY") throw new Error("transactions-busy");
+  const wrappers = Array.isArray(j && j.txs) ? j.txs : [];
+  const encoded = Array.isArray(j && j.txs_as_json) ? j.txs_as_json : [];
+  // EVERY HASH WE ASKED FOR MUST COME BACK. A partial answer is a missing block, not a quiet "no transactions".
+  const returned = new Set(wrappers.map((w) => String((w && w.tx_hash) || "").replace(/^0x/, "").toLowerCase()).filter(Boolean));
+  const missing = hashes.map((h) => String(h).replace(/^0x/, "").toLowerCase()).filter((h) => !returned.has(h));
+  if (missing.length) throw new Error("transactions-missing: " + missing.length);
+  if (!encoded.length && wrappers.length) throw new Error("transactions-undecoded");
   // HASH AND HEIGHT LIVE IN THE WRAPPER, not in the parsed body: as_json omits them. Without this stitching a
   // "found transfer" would have neither hash nor height - useless to the caller, yet everything would look successful.
-  return (j.txs_as_json || []).map((s, i) => {
+  return encoded.map((s, i) => {
     const body = typeof s === "string" ? JSON.parse(s) : s;
     const w = wrappers[i] || {};
     body.tx_hash = w.tx_hash || body.tx_hash || null;
@@ -326,13 +335,14 @@ export function matchTransaction(tx, watched, { height = null, tipHeight = null,
 
 // Range scan. Returns per address the sum (receivedAtomic - only the UNLOCKED), hashes, the locked sum
 // (lockedAtomic) with its boundary (lockedUntil) and the best (highest) height of a found output.
-export async function scanRange({ daemonUrl, fromHeight, toHeight, watched, log = () => {}, concurrency = 4, nowSec = null, tipHeight = null }) {
+export async function scanRange({ daemonUrl, fromHeight, toHeight, watched, log = () => {}, concurrency = 4, nowSec = null, tipHeight = null, fetchImpl = globalThis.fetch }) {
   const from = Number(fromHeight), to = Number(toHeight);
   if (!(from >= 0) || !(to >= from)) throw new Error("bad height range: " + fromHeight + ".." + toHeight);
   const acc = new Map();
   for (const w of watched) acc.set(w.address, { address: w.address, receivedAtomic: 0n, lockedAtomic: 0n, lockedUntil: null, lockedTxids: [], txids: [], bestHeight: null, outputs: 0, viewKeyForm: null });
   const heights = [];
   for (let h = from; h <= to; h++) heights.push(h);
+  const missingHeights = [];
 
   // Bounded parallelism: the node is a shared resource and blocks are independent.
   let cursor = 0;
@@ -340,10 +350,10 @@ export async function scanRange({ daemonUrl, fromHeight, toHeight, watched, log 
     while (cursor < heights.length) {
       const h = heights[cursor++];
       try {
-        const block = await fetchBlock(daemonUrl, h);
+        const block = await fetchBlock(daemonUrl, h, fetchImpl);
         const hashes = block.json ? (typeof block.json === "string" ? JSON.parse(block.json) : block.json).tx_hashes || [] : [];
         if (!hashes.length) continue;
-        const txs = await fetchTransactions(daemonUrl, hashes);
+        const txs = await fetchTransactions(daemonUrl, hashes, fetchImpl);
         for (const tx of txs) {
           for (const hit of matchTransaction(tx, watched, { height: h, tipHeight: tipHeight === null || tipHeight === undefined ? to : tipHeight, nowSec })) {
             const a = acc.get(hit.address);
@@ -371,11 +381,22 @@ export async function scanRange({ daemonUrl, fromHeight, toHeight, watched, log 
           }
         }
       } catch (e) {
+        // A BLOCK THAT COULD NOT BE READ IS NOT A BLOCK WITH NO MONEY. Keep its height so the caller can say the
+        // range is partial instead of treating a smaller sum as complete.
+        missingHeights.push(h);
         log({ event: "indexer_block_error", height: h, error: String(e.message).slice(0, 160) });
       }
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, heights.length)) }, worker));
-  return { fromHeight: from, toHeight: to, results: Array.from(acc.values()) };
+  const missing = [...new Set(missingHeights)].sort((a, b) => a - b);
+  return {
+    fromHeight: from,
+    toHeight: to,
+    results: Array.from(acc.values()),
+    complete: missing.length === 0,
+    missingHeights: missing,
+    ...(missing.length ? { incompleteReason: "blocks-unreadable" } : {}),
+  };
 }
 

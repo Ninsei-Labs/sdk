@@ -1,5 +1,8 @@
 ## Unreleased
 
+- `scanRange` no longer reports a partial range as complete. A block that failed, a BUSY transaction answer, and a
+  response missing a requested transaction hash now appear in `missingHeights` with `complete: false` and
+  `incompleteReason: "blocks-unreadable"`; the per-address sums are still returned.
 - A height lock is judged at the witnessing node's tip, not at the block that mined the transfer. A transfer mined at
   100 with `unlock_time` 101 is no longer `xmr-locked` at tip 120; confirmations still use the inclusion height.
   `matchTransaction` takes `tipHeight` (and `scanRange` passes its top); the duplicate unlock rule in
@@ -470,6 +473,9 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
 
 ## Unreleased
 
+- `scanRange` no longer reports a partial range as complete. A block that failed, a BUSY transaction answer, and a
+  response missing a requested transaction hash now appear in `missingHeights` with `complete: false` and
+  `incompleteReason: "blocks-unreadable"`; the per-address sums are still returned.
 - A height lock is judged at the witnessing node's tip, not at the block that mined the transfer. A transfer mined at
   100 with `unlock_time` 101 is no longer `xmr-locked` at tip 120; confirmations still use the inclusion height.
   `matchTransaction` takes `tipHeight` (and `scanRange` passes its top); the duplicate unlock rule in

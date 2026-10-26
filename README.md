@@ -209,6 +209,10 @@ a dead node, and a node on another network is not an absent reader. A page that 
 path can call `recoveryIndexTaken` from `./recovery` before using a number; it checks the factory's `OrderCreated`
 logs from the registry's deployment block.
 
+A range scan says whether it was complete: `scanRange` returns `complete: false`, `missingHeights` and
+`incompleteReason: "blocks-unreadable"` when a block, a BUSY transaction answer or a missing transaction hash leaves
+the range partial.
+
 A height lock is judged at the witnessing node's tip, not at the block that mined the transfer; confirmations still
 use the inclusion height.
 
