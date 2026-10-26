@@ -31,10 +31,18 @@ const XMR_VM = "monero";
 // The wallet session label - the same as the withdrawal page's. This is not a secret and not an address, but a session name.
 const DEFAULT_PASSWORD = "ninsei-wallet-session";
 
-/** Monero network names declared by the core's registry. The adapter keeps no table of its own. */
+// THE STANDARD NAMES ARE PART OF THE PROTOCOL, NOT OF A DEPLOYMENT. XMR_NETWORKS names what the demo is configured
+// for (stagenet in CI, fakechain in regtest); a mainnet or testnet wallet is still a valid Monero wallet and the
+// withdrawal page takes the network from its own node. Refuse only a name that is not a Monero network at all.
+const STANDARD_XMR_NETWORKS = ["mainnet", "stagenet", "testnet", "fakechain"];
+
+/** Monero network names declared by the core's registry plus the standard names. */
 const knownNetworks = () => {
   const declared = engineConfig.XMR_NETWORKS || {};
-  return [...new Set(Object.values(declared).filter((v) => typeof v === "string" && v))].sort();
+  return [...new Set([
+    ...Object.values(declared).filter((v) => typeof v === "string" && v),
+    ...STANDARD_XMR_NETWORKS,
+  ])].sort();
 };
 
 /**

@@ -40,5 +40,23 @@ export const sweepAdapterCheck = async () => {
   check(JSON.stringify(await adapter.relay(signed)) === JSON.stringify(["tx-1"]), "relay did not send the signed transaction");
   notes.push("the wallet adapter carries the restore and the withdrawal surface");
 
+  // A MAINNET WALLET IS A WALLET. The adapter used to accept only the networks declared by the demo's engine
+  // registry (stagenet/fakechain), so a production withdrawal was refused as bad-input before the library was even
+  // called. The address below is stagenet, so the shape check must still refuse it as wrong-chain - but only AFTER
+  // the name mainnet passed and createWallet was called.
+  let mainnetConfig = null;
+  const mainnet = moneroWalletAdapter({
+    createWallet: async (config) => { mainnetConfig = config; return library; },
+    network: "mainnet",
+    serverUri: "https://node.example",
+    keys: { seed: "check seed" },
+    restoreHeight: 100,
+  });
+  let wrongChain = null;
+  try { await mainnet.connect(); } catch (error) { wrongChain = error; }
+  check(wrongChain && wrongChain.code === "wrong-chain", "a stagenet address under mainnet is not refused as wrong-chain: " + JSON.stringify(wrongChain && wrongChain.code));
+  check(mainnetConfig && mainnetConfig.networkType === "mainnet", "mainnet did not reach createWallet");
+  notes.push("mainnet and testnet are valid Monero networks, not demo-only names");
+
   return { note: "one wallet adapter serves restore and sign", problems, notes };
 };

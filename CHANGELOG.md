@@ -4,6 +4,9 @@
   with an `OrderCreated` from the factory that was called, for the predicted escrow; a reverted receipt is
   `contract-reverted`, and a missing receipt, a missing event or a foreign event returns `pending` with a reason.
   `swaps.start` refuses with `funding-pending` and does not save an escrow or retire a recovery number.
+- The Monero wallet adapter accepts the standard networks `mainnet`, `stagenet`, `testnet` and `fakechain`, not only
+  the names the demo's engine registry declares. A mainnet withdrawal is no longer refused as `bad-input` before the
+  library is called; the address-shape check still rejects an address from another network.
 - The recovery key has a salt-based v2 derivation: `ninsei-taker-v2|<chain>|<factory>|taker|<salt>`. The client draws
   a fresh public salt per order; the salt is already in `OrderCreated`, so recovery costs one derivation per order
   instead of an index scan. No index is reserved, and the same words on a second device or at another factory do not
