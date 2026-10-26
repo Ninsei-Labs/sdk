@@ -52,7 +52,9 @@
     "check:node-probe": "node tools/check-node-probe.mjs",
     "check:recovery-key": "node tools/check.mjs --only=recovery-key",
     "check:recovery-open": "node tools/check-recovery-open.mjs",
-    "check:contract-vectors": "node tools/check-contract-vectors.mjs"
+    "check:contract-vectors": "node tools/check-contract-vectors.mjs",
+    "check:live-contract": "node tools/check-live-contract.mjs",
+    "check:anvil-fork": "node tools/check-anvil-fork.mjs"
   },
   "types": "./index.d.ts",
   "exports": {

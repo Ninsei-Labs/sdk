@@ -1,5 +1,11 @@
 ## Unreleased
 
+- `check-live-contract` asks the configured RPC for the chain id, the factory and cashier code, and the
+  implementation code hash. It is the cheapest check against the deployed contract.
+- `check-anvil-fork` forks Arbitrum Sepolia, registers a provider in the deployed registry, signs a quote locally,
+  runs `createOrderAndFund`, `markReady` and `claim`, and checks the event, escrow roles, revealed half and
+  dump/rewind repeat. Both checks run in the regular CI; Anvil is pinned to the same Foundry version as the
+  contract repository.
 - `check-contract-vectors` pins three half commitments, the `OrderCreated` topic and both factory selectors against
   values produced by Foundry `cast`, not by the SDK's own curve and hash code. A copy that hashes the half number
   instead of its secp256k1 point reddens the check.
@@ -497,6 +503,12 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
 
 ## Unreleased
 
+- `check-live-contract` asks the configured RPC for the chain id, the factory and cashier code, and the
+  implementation code hash. It is the cheapest check against the deployed contract.
+- `check-anvil-fork` forks Arbitrum Sepolia, registers a provider in the deployed registry, signs a quote locally,
+  runs `createOrderAndFund`, `markReady` and `claim`, and checks the event, escrow roles, revealed half and
+  dump/rewind repeat. Both checks run in the regular CI; Anvil is pinned to the same Foundry version as the
+  contract repository.
 - `check-contract-vectors` pins three half commitments, the `OrderCreated` topic and both factory selectors against
   values produced by Foundry `cast`, not by the SDK's own curve and hash code. A copy that hashes the half number
   instead of its secp256k1 point reddens the check.

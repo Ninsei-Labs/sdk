@@ -35,6 +35,13 @@ jobs:
           node-version: '24.22.1'
           cache: pnpm
 
+      # ANVIL AND CAST COME FROM THE SAME PINNED FOUNDRY THE CONTRACT REPOSITORY USES. The fork check below needs
+      # both; pinning here keeps the local run and CI on one node implementation.
+      - name: Set up Foundry (anvil and cast, pinned)
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.6
+
       # --frozen-lockfile: the lock file is the input, not something CI may rewrite.
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -205,6 +212,36 @@ jobs:
 
       - name: Check recovery file opening (text is parsed, v3 opens)
         run: pnpm run check:recovery-open
+
+      # THE DEPLOYED CONTRACT IS THE ORACLE. One read-only call: the chain id, the factory and cashier code, and
+      # implementation() + its code hash. No anvil, no wallet, no transaction; it catches a stale address, network
+      # or implementation before anyone funds an order.
+      - name: Check the live testnet contract (read-only)
+        env:
+          RPC_URL: https://sepolia-rollup.arbitrum.io/rpc
+        run: pnpm run check:live-contract
+
+      # A REAL ROUND TRIP ON A LOCAL FORK. Anvil forks Arbitrum Sepolia, so factory, registry, cashier and
+      # implementation are the deployed ones; two unlocked accounts sign/register and fund an order, then claim it.
+      # No testnet funds and no shared server. The check also dumps state and rewinds an EVM snapshot, so one fork
+      # serves several scenarios.
+      - name: Start anvil fork
+        env:
+          RPC_URL: https://sepolia-rollup.arbitrum.io/rpc
+        run: |
+          anvil --fork-url "$RPC_URL" --port 8545 --chain-id 421614 > /tmp/anvil-fork.log 2>&1 &
+          echo $! > /tmp/anvil-fork.pid
+          for i in $(seq 1 60); do
+            if cast chain-id --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/anvil-fork.log
+          exit 1
+
+      - name: Check anvil fork (register, fund, claim, snapshot)
+        env:
+          ANVIL_RPC: http://127.0.0.1:8545
+        run: pnpm run check:anvil-fork
 
       # THE WALLET IS BUILT WITHOUT KNOWING THE LIBRARY. The page used to pass a `createWallet` callback that
       # translated "stagenet" into monero-ts's enum, and it owned the only `networkFromNode`. Both are the
