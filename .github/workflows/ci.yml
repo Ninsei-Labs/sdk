@@ -243,6 +243,35 @@ jobs:
           ANVIL_RPC: http://127.0.0.1:8545
         run: pnpm run check:anvil-fork
 
+      # THE DEX INTENT PROVIDERS ARE AGREEMENTS WITH OTHER PROTOCOLS. CoW, Kyber, UniswapX and Uniswap Relay each
+      # pin a real order vector, the EIP-712 digest that recovers its signer and the calldata encoding. They used
+      # to run only in the release workflow through `pnpm run check`; a change in a type string or field order could
+      # pass every PR. This step runs all four providers and their refusal tables.
+      - name: Check DEX intents (CoW, Kyber, UniswapX, Uniswap Relay vectors)
+        run: pnpm run check:dex
+
+      # THE DEX CALLDATA AGAINST THE REAL ROUTER. A second fork of Ethereum mainnet carries the real USDC/WETH
+      # pools and UniversalRouter. The test impersonates a USDC holder, moves the input to the router (the relay
+      # shape pays from the router's own balance), executes the SDK's calldata and checks that native ETH reached
+      # the recipient.
+      - name: Start mainnet anvil fork
+        env:
+          RPC_URL: https://ethereum-rpc.publicnode.com
+        run: |
+          anvil --fork-url "$RPC_URL" --port 8546 --chain-id 1 > /tmp/anvil-uniswap.log 2>&1 &
+          echo $! > /tmp/anvil-uniswap.pid
+          for i in $(seq 1 60); do
+            if cast chain-id --rpc-url http://127.0.0.1:8546 >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/anvil-uniswap.log
+          exit 1
+
+      - name: Check anvil Uniswap (USDC to native through the real UniversalRouter)
+        env:
+          ANVIL_RPC: http://127.0.0.1:8546
+        run: pnpm run check:anvil-uniswap
+
       # THE WALLET IS BUILT WITHOUT KNOWING THE LIBRARY. The page used to pass a `createWallet` callback that
       # translated "stagenet" into monero-ts's enum, and it owned the only `networkFromNode`. Both are the
       # package's: a caller passes the namespace, and an unknown nettype is null rather than a guess.
