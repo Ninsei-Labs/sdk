@@ -13,7 +13,7 @@ import { quoteDigest, signQuoteDigest } from "../src/quoteEip712Spec.mjs";
 import { halfCommitmentHex } from "../engine/atomic/orderHalfCommit.js";
 import { memoryStorage, setStorage } from "../engine/core/store.js";
 import { FACTORY_METHODS } from "../engine/evm/factory.js";
-import { takerHalves } from "../src/recovery-key.mjs";
+import { takerHalves, takerHalvesV2 } from "../src/recovery-key.mjs";
 
 const WORDS = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 const addr = (b) => "0x" + b.repeat(20);
@@ -22,6 +22,7 @@ const order = { chainId: 421614, factory: addr("11"), locker: addr("22"), claime
   amount: "1000000000000000000", readyBy: now + 7200, t1: now + 14400, salt: "0x" + "44".repeat(32) };
 const maker = buildOwnSideFromHalves(order, { spendHalf: "0x03", viewHalf: "0x04" });
 const derived = takerHalves({ mnemonic: WORDS, chainId: 421614, index: 0 });
+const derivedV2 = takerHalvesV2({ mnemonic: WORDS, chainId: 421614, factory: order.factory, salt: order.salt });
 const makerKey = "0x" + "11".repeat(32);
 const pub = primitives.secp256k1.getPublicKey(Buffer.from(makerKey.slice(2), "hex"), false);
 const quote = { ...order, provider: order.claimer,
@@ -37,7 +38,7 @@ const fails = [];
 const ok = (m) => { pass += 1; console.log("  ok    " + m); };
 const bad = (m) => { fails.push(m); console.log("  FAIL  " + m); };
 
-async function startWith(view) {
+async function startWith(view, v2 = false, salt = order.salt) {
   setStorage(memoryStorage());
   let sent = 0;
   const wallet = { address: async () => order.locker,
@@ -48,8 +49,8 @@ async function startWith(view) {
   if (view === "missing") delete counterparty.viewHalfClaimer;
   else counterparty.viewHalfClaimer = view;
   const request = { quote: { id: "q", chain: "arbitrum-sepolia", asset: "ETH", amount: 1, size: 1 }, order, orderQuote: quote,
-    counterparty, recoveryKey: WORDS, recoveryIndex: 0, receiveTo: "synthetic-xmr-destination",
-    restoreHeight: 100, wallet, onRecoveryKey: async () => true };
+    counterparty, recoveryKey: WORDS, ...(v2 ? { recoverySalt: salt } : { recoveryIndex: 0 }),
+    receiveTo: "synthetic-xmr-destination", restoreHeight: 100, wallet, onRecoveryKey: async () => true };
   const result = await createSwaps({ mode: "live", xmrNetwork: "stagenet", logs: async () => [],
     call: async ({ data }) => (data.startsWith(FACTORY_METHODS.predict) ? "0x" + "0".repeat(24) + "88".repeat(20) : "0x"),
   }).start(request).catch((error) => error);
@@ -61,6 +62,21 @@ console.log("=== 1) THE DERIVED VIEW HALF IS ACCEPTED ===");
   const { result, sent } = await startWith(derived.makerViewHalf);
   if (result && result.code === "wallet-rejected" && sent === 1) ok("the derived half reaches the wallet");
   else bad("derived half: " + JSON.stringify({ code: result && result.code, sent }));
+}
+
+console.log("=== 1b) THE SALT-BASED KEY USES THE SAME CHECK ===");
+{
+  const { result, sent } = await startWith(derivedV2.makerViewHalf, true);
+  if (result && result.code === "wallet-rejected" && sent === 1) ok("a v2 salt start reaches the wallet with its own derived half");
+  else bad("v2 salt start: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
+}
+
+console.log("=== 1c) A SALT THE QUOTE DID NOT CARRY IS REFUSED ===");
+{
+  const { result, sent } = await startWith(derivedV2.makerViewHalf, true, "0x" + "55".repeat(32));
+  if (result && result.code === "bad-input" && result.params && result.params.field === "recoverySalt" &&
+      result.params.why === "order-salt" && sent === 0) ok("a salt different from order.salt is refused before the wallet");
+  else bad("salt mismatch: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
 }
 
 console.log("=== 2) ANOTHER VIEW HALF IS REFUSED BEFORE FUNDING ===");

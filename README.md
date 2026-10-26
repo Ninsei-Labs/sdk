@@ -177,9 +177,13 @@ range is not aligned: it is the provider's refusal, and it arrives as a code. In
 
 ## Found orders and the paying token
 
-`findSwaps` returns the orders whose commitment came from the recovery key. It does **not** stop after a run of
-empty numbers: the allocator's whole range is searched by default, and a smaller caller-supplied `maxIndex` returns
-`complete: false` with `searchedUpTo`, so a page can say where it stopped. Each found order reports:
+`findSwaps` returns the orders whose commitment came from the recovery key. A salt-based order is found from the
+public `salt` in its own `OrderCreated`: the binding is `ninsei-taker-v2|<chain>|<factory>|taker|<salt>`, so the same
+words on another device or at another factory produce a different half and no number is reserved. The result says
+`derivation: "salt-v2"` and leaves `index` null. Existing v1 orders stay on `ninsei-taker-v1|<chain>|<index>` and are
+still found by the index path; a v2 result needs no range scan. For a v1 fallback, discovery does **not** stop after a
+run of empty numbers: the allocator's whole range is searched by default, a smaller caller-supplied `maxIndex` returns
+`complete: false` with `searchedUpTo`, and `gap` is ignored. Each found order reports:
 
 - `amount` — the escrow's **native** amount in wei;
 - `settlementToken: "native"` — what the escrow receives;
@@ -194,6 +198,10 @@ support.
 When a token is needed, the order can be joined with an off-chain quote record by the caller. A future ERC-20 escrow
 would have to put the token into the signed quote and the clone (and therefore a new order format and factory); only
 then can `findSwaps` return it from the chain and set `payTokenReason` to something other than `not-on-chain`.
+
+`swaps.start` takes the client-owned `recoverySalt` when the signed quote already carries that salt; it must equal
+`order.salt`. `newRecoverySalt()` draws a fresh 32-byte value, and `takerHalvesV2()` derives the halves without
+touching the index allocator.
 
 The found order also carries the Monero start height and the reason it is absent. `no-block-time`,
 `monero-nodes-unreachable` and `monero-network-mismatch` are different answers: a missing settlement timestamp is not

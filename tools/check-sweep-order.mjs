@@ -4,7 +4,7 @@
 // the person's spend and view points, the other side's points, the joint address and the restore height.
 import { createSweep } from "../src/sweep.mjs";
 import { createSwaps } from "../src/swaps.mjs";
-import { takerHalves } from "../src/recovery-key.mjs";
+import { takerHalves, takerHalvesV2 } from "../src/recovery-key.mjs";
 
 const WORDS = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 const CHAIN = 421614;
@@ -51,6 +51,19 @@ export const sweepFromOrderCheck = async () => {
   check(sell.payload.side === "sell" && sell.address === sell.payload.moneroWallet.address,
     "the sell did not build the claimer's joint address");
   notes.push("a found sell names the person as the claimer");
+
+  // A V2 ORDER CARRIES NO INDEX. Its salt, factory and the words rebuild the same address; reading an index would
+  // invent a number and produce a different wallet.
+  const saltV2 = "0x" + "ab".repeat(32);
+  const factoryV2 = field("dd");
+  const halvesV2 = takerHalvesV2({ mnemonic: WORDS, chainId: CHAIN, factory: factoryV2, salt: saltV2 });
+  const v2Order = { ...orderFor(halvesV2, "locker"), index: null, derivation: "salt-v2", factory: factoryV2, salt: saltV2 };
+  const v2 = await sweep.fromOrder({
+    mnemonic: WORDS, chainId: CHAIN, network: "arbitrum-sepolia", moneroNetwork: "stagenet", order: v2Order,
+  });
+  check(v2.address === v2.payload.moneroWallet.address, "the v2 order did not build the joint address");
+  check(v2.payload.moneroWallet.spendHalf === halvesV2.spendHalf, "the v2 order used a different spend half");
+  notes.push("a salt-based found order builds the same payload without an index");
 
   let mismatch = null;
   try {

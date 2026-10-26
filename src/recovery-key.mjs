@@ -33,6 +33,10 @@ export const RECOVERY_INDEX_MAX = 100000;
 export const RECOVERY_KEY_STORE = "ninsei.recovery.key.v1";
 export const RECOVERY_KEY_FILE_MAGIC = "NINSEI RECOVERY KEY";
 export const RECOVERY_KEY_DOMAIN = "ninsei-taker-v1";
+// THE SALT-BASED VERSION. A v1 number is the same at every factory and every device; a v2 binding names the fresh
+// order salt, the factory and the role, so two orders cannot share a taker half even when the words are restored
+// elsewhere. The salt is already public in `OrderCreated`; recovery reads it back instead of reserving a number.
+export const RECOVERY_KEY_DOMAIN_V2 = "ninsei-taker-v2";
 // The counterparty's view half is derived from the SAME ONE KEY, in a domain of its own. The taker sends this
 // number to the maker (the node), which uses it as its own view half; the taker keeps it, so the joint view key
 // can be rebuilt from the twelve words without any server.
@@ -43,6 +47,7 @@ export const RECOVERY_KEY_ITER = 600000;
 const ITER_MIN = 600000;
 const ITER_MAX = 6000000;
 
+const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const te = new TextEncoder();
 const td = new TextDecoder();
 
@@ -127,10 +132,35 @@ export function takerHalves({ mnemonic, chainId, index }) {
   return takerHalvesFromSeed(seedOf(mnemonic), chainId, index);
 }
 
+// THE SAME KEY, A PUBLIC PER-ORDER SALT. The factory and role are in the binding, so the same words, chain and
+// salt at another factory produce another half. `role` is fixed for the taker's side; the maker's view half is
+// separated by its own domain. Salt is the `salt` word from `OrderCreated`, never a secret.
+export function recoveryBindingV2({ chainId, factory, role = "taker", salt } = {}) {
+  if (typeof factory !== "string" || !ADDRESS_RE.test(factory)) throw bad("factory");
+  if (typeof role !== "string" || !/^[a-z0-9-]{1,32}$/.test(role)) throw bad("role");
+  return `${RECOVERY_KEY_DOMAIN_V2}|${numberField(chainId, "chainId")}|${factory.toLowerCase()}|${role}|${recoverySaltOf(salt)}`;
+}
+
+export function takerHalvesV2({ mnemonic, chainId, factory, role = "taker", salt } = {}) {
+  const normalized = recoverySaltOf(salt);
+  const binding = recoveryBindingV2({ chainId, factory, role, salt: normalized });
+  return {
+    ...halvesFromBinding(seedOf(mnemonic), binding),
+    index: null,
+    derivation: "salt-v2",
+    factory: factory.toLowerCase(),
+    role,
+    salt: normalized,
+  };
+}
+
 // Discovery derives thousands of numbers from one mnemonic. The BIP39 seed is the expensive part (PBKDF2), so it
 // is computed once by the caller and passed here; the per-number work is only HMAC and a curve point.
 function takerHalvesFromSeed(seed, chainId, index) {
-  const binding = recoveryBinding(chainId, index);
+  return { index: numberField(index, "index"), ...halvesFromBinding(seed, recoveryBinding(chainId, index)) };
+}
+
+function halvesFromBinding(seed, binding) {
   const spendHalf = halves.halfFromSeed(seed, binding, halves.HALF_DOMAIN);
   const viewHalf = halves.halfFromSeed(seed, binding, halves.VIEW_HALF_DOMAIN);
   // THE OTHER SIDE'S VIEW HALF. The same key, a third domain: the taker gives this number to the maker, so the
@@ -140,7 +170,6 @@ function takerHalvesFromSeed(seed, chainId, index) {
   const view = halves.publicHalves(viewHalf);
   const makerView = halves.publicHalves(makerViewHalf);
   return {
-    index: numberField(index, "index"),
     binding,
     spendHalf: hex32(spendHalf),
     viewHalf: hex32(viewHalf),
@@ -158,6 +187,33 @@ function takerHalvesFromSeed(seed, chainId, index) {
 function spendCommitmentFromSeed(seed, chainId, index) {
   const spendHalf = halves.halfFromSeed(seed, recoveryBinding(chainId, index), halves.HALF_DOMAIN);
   return halfCommitmentHex(spendHalf, secp256k1, keccak256).toLowerCase();
+}
+
+function spendCommitmentFromSeedV2(seed, { chainId, factory, role = "taker", salt }) {
+  const binding = recoveryBindingV2({ chainId, factory, role, salt });
+  const spendHalf = halves.halfFromSeed(seed, binding, halves.HALF_DOMAIN);
+  return halfCommitmentHex(spendHalf, secp256k1, keccak256).toLowerCase();
+}
+
+// The salt is the 32-byte word from the order, not a secret and not a tag. Lower-case it so the binding is stable
+// across an event decoder and a caller that hand-wrote the value.
+/** A fresh public salt for one v2 order. The client owns it; a maker must not hand the same value back twice. */
+export function newRecoverySalt() {
+  return "0x" + Array.from(randomBytes(32), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export function recoverySaltOf(value) {
+  if (typeof value === "bigint") return saltField("0x" + value.toString(16).padStart(64, "0"));
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
+    return saltField("0x" + BigInt(value).toString(16).padStart(64, "0"));
+  }
+  return saltField(value);
+}
+
+function saltField(value) {
+  const salt = String(value == null ? "" : value).trim().toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(salt)) throw bad("salt");
+  return salt;
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -366,8 +422,6 @@ export function commitRecoveryIndex(storage, index) {
 // ---------------------------------------------------------------------------------------------------
 // THE SEARCH
 // ---------------------------------------------------------------------------------------------------
-
-const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
 function topicAddress(address) {
   if (typeof address !== "string" || !ADDRESS_RE.test(address)) throw bad("address");
@@ -621,11 +675,40 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
     logs = await readLogs(evmLogs, { ...base, topics: [ORDER_CREATED_TOPICS] });
   }
   const orders = logs.map(decodeOrderLog).filter(Boolean);
-  // MATCH BY COMMITMENT, NOT BY A DENSE INDEX RANGE. The logs are already in hand; the only cost of a missing
+  for (const order of orders) order.factory = factory;
+  const orderKey = (order) => `${order.transactionHash || ""}:${order.logIndex ?? ""}`;
+  const seed = seedOf(mnemonic);
+  const found = [];
+  const foundKeys = new Set();
+  const v2Matched = new Set();
+
+  // A V2 ORDER IS FOUND FROM ITS OWN SALT. No index is reserved and no range is scanned: the binding names the
+  // factory, the role and the public `OrderCreated` salt, so the same words on another device or at another
+  // factory produce a different half. The v2 pass runs first; v1 orders are left for the index scan below.
+  for (const order of orders) {
+    let commitment;
+    try {
+      commitment = spendCommitmentFromSeedV2(seed, { chainId: chain, factory, role: "taker", salt: order.salt });
+    } catch {
+      continue;
+    }
+    const locker = order.commitHalfLocker.toLowerCase();
+    const claimer = order.commitHalfClaimer.toLowerCase();
+    const side = commitment === locker ? "locker" : commitment === claimer ? "claimer" : null;
+    if (!side) continue;
+    const key = orderKey(order);
+    if (foundKeys.has(key)) continue;
+    foundKeys.add(key);
+    v2Matched.add(key);
+    found.push({ ...order, index: null, derivation: "salt-v2", side });
+  }
+
+  // MATCH V1 BY COMMITMENT, NOT BY A DENSE INDEX RANGE. The logs are already in hand; the only cost of a missing
   // index is one derivation. Building the map first also keeps each order from being compared against every
   // index.
   const byCommit = new Map();
   for (const order of orders) {
+    if (v2Matched.has(orderKey(order))) continue;
     const locker = order.commitHalfLocker.toLowerCase();
     const claimer = order.commitHalfClaimer.toLowerCase();
     if (locker) {
@@ -637,19 +720,19 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
       byCommit.get(claimer).push({ order, side: "claimer" });
     }
   }
-  const seed = seedOf(mnemonic);
-  const found = [];
-  const foundKeys = new Set();
+  const v1Needed = orders.some((order) => !v2Matched.has(orderKey(order)));
   let scanned = 0;
-  for (let index = 0; index < max; index += 1) {
-    scanned = index + 1;
-    const commitment = spendCommitmentFromSeed(seed, chain, index);
-    const matches = byCommit.get(commitment) || [];
-    for (const { order, side } of matches) {
-      const key = `${order.transactionHash || ""}:${order.logIndex ?? ""}:${index}`;
-      if (foundKeys.has(key)) continue;
-      foundKeys.add(key);
-      found.push({ ...order, index, side });
+  if (v1Needed) {
+    for (let index = 0; index < max; index += 1) {
+      scanned = index + 1;
+      const commitment = spendCommitmentFromSeed(seed, chain, index);
+      const matches = byCommit.get(commitment) || [];
+      for (const { order, side } of matches) {
+        const key = orderKey(order);
+        if (foundKeys.has(key)) continue;
+        foundKeys.add(key);
+        found.push({ ...order, index, derivation: "index-v1", side });
+      }
     }
   }
   // EACH FOUND ORDER CARRIES THE MONERO HEIGHT ITS WITHDRAWAL MAY START FROM. The rule lives here, not in a
@@ -700,13 +783,15 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
     order.xmrAmount = read.value;
     order.xmrAmountReason = read.reason;
   }
+  const complete = !v1Needed || max >= RECOVERY_INDEX_MAX;
   return {
     swaps: found,
     scanned,
     // A CALLER MUST NOT READ "NO SWAPS" AS "THE WHOLE RANGE WAS SEARCHED". The allocator ceiling is the only
-    // complete range; a smaller caller-supplied bound says where the search stopped.
+    // complete range; a smaller caller-supplied bound says where the search stopped. A result made only of v2
+    // orders has no range to search and is complete by construction.
     searchedUpTo: scanned ? scanned - 1 : null,
-    complete: max >= RECOVERY_INDEX_MAX,
-    ...(max >= RECOVERY_INDEX_MAX ? {} : { incompleteReason: "max-index" }),
+    complete,
+    ...(complete ? {} : { incompleteReason: "max-index" }),
   };
 }
