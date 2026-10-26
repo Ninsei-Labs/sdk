@@ -1,5 +1,9 @@
 ## Unreleased
 
+- Pull-request CI now runs the guards that were previously release-only: sale authentication, backup confirmation,
+  the one-key view half, arrival consensus, the recorded arrival fixture, order proof binding, both recovery-key
+  paths and recovery file opening. `check-ci-scripts` also refuses a `check:*` script that no workflow names, with a
+  breaking run; a guard that no pull request executes no longer counts as coverage.
 - `recovery.open` parses the envelope before handing it to `restoreFromFile`, which takes the object. Every valid
   file used to fail as `recovery-failed { stage: "restore" }`; a non-JSON file now fails at its own `parse` stage,
   and a valid file opens from both text and `{ contents }`.
@@ -488,6 +492,10 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
 
 ## Unreleased
 
+- Pull-request CI now runs the guards that were previously release-only: sale authentication, backup confirmation,
+  the one-key view half, arrival consensus, the recorded arrival fixture, order proof binding, both recovery-key
+  paths and recovery file opening. `check-ci-scripts` also refuses a `check:*` script that no workflow names, with a
+  breaking run; a guard that no pull request executes no longer counts as coverage.
 - `recovery.open` parses the envelope before handing it to `restoreFromFile`, which takes the object. Every valid
   file used to fail as `recovery-failed { stage: "restore" }`; a non-JSON file now fails at its own `parse` stage,
   and a valid file opens from both text and `{ contents }`.

@@ -6,8 +6,11 @@
 // Nothing local noticed - the guard itself was green when run by hand - and the failure appeared only in CI, as
 // ERR_PNPM_NO_SCRIPT, after a push.
 //
-// WHAT IS PROVEN: every `pnpm run <name>` in every workflow names a script that exists. A workflow may also run
-// `pnpm install`, `pnpm exec ...` or a package binary; those are not scripts and are not checked.
+// WHAT IS PROVEN: every `pnpm run <name>` in every workflow names a script that exists; and every `check:*`
+// script is named by at least one workflow. The second rule closes the gap that let sale authentication, backup
+// confirmation, the one-key view half, arrival consensus, order proof and the recovery paths run only in the
+// release workflow: a guard that no PR runs is not a guard on a pull request. A workflow may also run `pnpm
+// install`, `pnpm exec ...` or a package binary; those are not scripts and are not checked.
 //
 // BREAKING RUN (a COPY of package.json in a temp directory): drop a script the workflow names -> the case reddens.
 //
@@ -37,6 +40,12 @@ export function namedScripts(files) {
   return found;
 }
 
+/** Every `check:*` script that no workflow names, sorted. */
+export function unrunCheckScripts(scripts, files) {
+  const named = new Set(namedScripts(files).map((n) => n.name));
+  return Object.keys(scripts).filter((name) => name.startsWith("check:") && !named.has(name)).sort();
+}
+
 const scripts = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).scripts || {};
 const files = {};
 for (const entry of readdirSync(WORKFLOWS)) {
@@ -51,6 +60,11 @@ else bad("no `pnpm run` steps were found at all - the scanner is looking at noth
 if (!missing.length) ok("every one of them exists in package.json");
 else bad("missing from package.json: " + JSON.stringify(missing));
 
+console.log("=== EVERY check:* SCRIPT IS RUN BY A WORKFLOW ===");
+const unrun = unrunCheckScripts(scripts, files);
+if (!unrun.length) ok("every check:* script has a workflow step");
+else bad("check scripts no workflow runs: " + JSON.stringify(unrun));
+
 console.log("=== BREAKING RUN: a dropped script reddens ===");
 {
   const dir = mkdtempSync(join(tmpdir(), "check-ci-scripts-"));
@@ -63,6 +77,16 @@ console.log("=== BREAKING RUN: a dropped script reddens ===");
     const wouldMiss = named.filter((n) => !(n.name in reread));
     if (wouldMiss.some((n) => n.name === target.name)) ok("breaking run REDDENS: dropping " + JSON.stringify(target.name) + " is caught");
     else bad("breaking run does not redden");
+
+    // A guard can exist and still be unrun: remove the only workflow line that names a check script and require it.
+    const unrunTarget = "check:recovery-open";
+    const without = Object.fromEntries(Object.entries(files).map(([name, text]) => [
+      name,
+      text.replace(/^.*pnpm run check:recovery-open.*(?:\r?\n|$)/gm, ""),
+    ]));
+    const wouldMissUnrun = unrunCheckScripts(scripts, without);
+    if (wouldMissUnrun.includes(unrunTarget)) ok("breaking run REDDENS: an unrun " + JSON.stringify(unrunTarget) + " is caught");
+    else bad("breaking run does not catch an unrun check script");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
