@@ -2530,6 +2530,7 @@ const arrivalConsensusCheck = () => runScriptCheck("check-arrival-consensus.mjs"
 const arrivalRealCheck = () => runScriptCheck("check-arrival-real.mjs", "real arrival");
 const orderProofCheck = () => runScriptCheck("check-order-proof.mjs", "order proof");
 const fundingReceiptCheck = () => runScriptCheck("check-funding-receipt.mjs", "funding receipt");
+const storageCheck = () => runScriptCheck("check-storage.mjs", "storage");
 const CHECKS = {
   syntax: syntaxCheck,
   import: importCheck,
@@ -2568,6 +2569,7 @@ const CHECKS = {
   "quote-rank": quoteRankCheck,
   "settlement-profiles": settlementProfilesCheck,
   "funding-receipt": fundingReceiptCheck,
+  storage: storageCheck,
 };
 
 export const runCheck = async (name) => {

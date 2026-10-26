@@ -209,6 +209,10 @@ a dead node, and a node on another network is not an absent reader. A page that 
 path can call `recoveryIndexTaken` from `./recovery` before using a number; it checks the factory's `OrderCreated`
 logs from the registry's deployment block.
 
+Storage is a refusal, not a silent empty state: a failed read, corrupt JSON, a failed write or remove is
+`storage-unavailable` with a step, and a second client with another adapter is refused rather than taking over the
+first client's records.
+
 Every body route the SDK sends carries `sdkVersion` from the package (`quotes.firm`, `quotes.sale` and the funding
 mark). The caller cannot override it with a different line.
 

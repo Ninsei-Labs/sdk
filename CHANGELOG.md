@@ -1,5 +1,9 @@
 ## Unreleased
 
+- Storage failures are named, not silent. A failed read, corrupt JSON, a failed write and a failed remove raise
+  `storage-unavailable` with `step` (`read`, `parse`, `write`, `serialize`, `remove`); only a missing value returns
+  the empty state. A second client with a different adapter is refused with `step: "conflict"` instead of taking
+  over the first client's records.
 - The SDK names its own line on every body route it sends to a node: `quotes.firm`, `quotes.sale` and the funding
   mark carry `sdkVersion` from the package (`src/version.mjs`). A default node no longer refuses a current SDK with
   `422 sdk-version-absent`; the caller cannot claim a different line.
@@ -454,6 +458,10 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
 
 ## Unreleased
 
+- Storage failures are named, not silent. A failed read, corrupt JSON, a failed write and a failed remove raise
+  `storage-unavailable` with `step` (`read`, `parse`, `write`, `serialize`, `remove`); only a missing value returns
+  the empty state. A second client with a different adapter is refused with `step: "conflict"` instead of taking
+  over the first client's records.
 - The SDK names its own line on every body route it sends to a node: `quotes.firm`, `quotes.sale` and the funding
   mark carry `sdkVersion` from the package (`src/version.mjs`). A default node no longer refuses a current SDK with
   `422 sdk-version-absent`; the caller cannot claim a different line.

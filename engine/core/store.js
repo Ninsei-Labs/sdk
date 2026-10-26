@@ -46,11 +46,40 @@ const webStorage = (name) => {
 };
 
 let adapter = webStorage("localStorage") || memoryStorage();
+// A SECOND CLIENT WITH ANOTHER STORE USED TO TAKE OVER THE FIRST ONE'S RECORDS: the adapter was module-wide, so
+// A listed B's swaps and A's forget deleted them. The SDK binds one explicit store to the process; a different
+// one is refused instead of silently switching under a live client. `setStorage` remains the test/setup reset.
+let bound = null;
 
-/** Swap the storage. The shape is checked, not the origin: localStorage, memory and the SDK all qualify. */
-export function setStorage(next) {
+const checkAdapter = (next) => {
   const ok = next && typeof next.get === "function" && typeof next.set === "function" && typeof next.remove === "function";
   if (!ok) throw new Error("storage must support get/set/remove");
+};
+
+const storageFailure = (step, cause) => {
+  const error = new Error("storage-unavailable");
+  error.code = "storage-unavailable";
+  error.params = { step };
+  if (cause) error.cause = cause;
+  return error;
+};
+
+/** Swap the storage for setup and tests. It also releases the exclusive binding, so a later client may bind. */
+export function setStorage(next) {
+  checkAdapter(next);
+  adapter = next;
+  bound = null;
+  return adapter;
+}
+
+/**
+ * Bind the store of a client instance. A second, different store is a refusal: records and recovery keys are
+ * addressed through one adapter, and switching it under a live client loses the first client's records.
+ */
+export function bindStorage(next) {
+  checkAdapter(next);
+  if (bound && bound !== next) throw storageFailure("conflict");
+  bound = next;
   adapter = next;
   return adapter;
 }
@@ -59,14 +88,23 @@ export function setStorage(next) {
 export const storage = () => adapter;
 
 export function loadState() {
+  let raw;
   try {
-    const raw = adapter.get(APP.storageKey);
-    if (!raw) return structuredClone(EMPTY);
-    const parsed = JSON.parse(raw);
-    return { ...structuredClone(EMPTY), ...parsed, settings: { ...EMPTY.settings, ...(parsed.settings || {}) } };
-  } catch {
-    return structuredClone(EMPTY);
+    raw = adapter.get(APP.storageKey);
+  } catch (error) {
+    throw storageFailure("read", error);
   }
+  // NOTHING STORED IS NOT AN UNREADABLE STORE. Only a missing value returns the empty state; a value that does
+  // not parse is a refusal, so the next write cannot silently save over a corrupt record.
+  if (raw === null || raw === undefined || raw === "") return structuredClone(EMPTY);
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw storageFailure("parse", error);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw storageFailure("parse");
+  return { ...structuredClone(EMPTY), ...parsed, settings: { ...EMPTY.settings, ...(parsed.settings || {}) } };
 }
 
 // BigInt IS NOT SERIALISED IN JSON - and the key halves are BigInt. JSON.stringify FAILS on them
@@ -75,10 +113,16 @@ export function loadState() {
 // We turn BigInt into a hex string: the same meaning, but serialisable, and the secret is not lost.
 const bigintSafe = (key, value) => (typeof value === "bigint" ? "0x" + value.toString(16) : value);
 export function saveState(state) {
+  let text;
   try {
-    adapter.set(APP.storageKey, JSON.stringify(state, bigintSafe));
-  } catch (e) {
-    console.warn("state save failed", e);
+    text = JSON.stringify(state, bigintSafe);
+  } catch (error) {
+    throw storageFailure("serialize", error);
+  }
+  try {
+    adapter.set(APP.storageKey, text);
+  } catch (error) {
+    throw storageFailure("write", error);
   }
   return state;
 }
@@ -91,7 +135,11 @@ export function update(mutator) {
 }
 
 export function reset() {
-  adapter.remove(APP.storageKey);
+  try {
+    adapter.remove(APP.storageKey);
+  } catch (error) {
+    throw storageFailure("remove", error);
+  }
 }
 
 export function exportState() {
