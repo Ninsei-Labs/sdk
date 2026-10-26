@@ -71,25 +71,6 @@ export function viewKeyMatchesAddress(viewScalar, expectedViewPubHex, halves) {
   return got === want;
 }
 
-/** A boundary up to this value is a BLOCK HEIGHT; from it on, a unix TIME. Monero's own convention. */
-export const UNLOCK_TIME_BLOCK_MAX = 500_000_000;
-
-/**
- * IS THE COIN SPENDABLE AT THIS MOMENT, AND IF NOT, WHAT IS THE BOUNDARY.
- *
- * `unlocked` / `locked_height` / `locked_time`, with the boundary named in `untilHeight` or `untilTime`. A height
- * that is not known is NOT "unlocked": without a height the answer stays locked, because the caller has no fact
- * that would open it. `nowSec` defaults to the wall clock, and is a parameter so a check can pin it.
- */
-export function unlockStateOf(unlockTime, { height = null, nowSec = null } = {}) {
-  const u = Number(unlockTime) || 0;
-  if (u <= 0) return { code: "unlocked", locked: false, untilHeight: null, untilTime: null };
-  if (u >= UNLOCK_TIME_BLOCK_MAX) {
-    const now = nowSec === null || nowSec === undefined ? Math.floor(Date.now() / 1000) : Number(nowSec);
-    const open = Number.isFinite(now) && now >= u;
-    return { code: open ? "unlocked" : "locked_time", locked: !open, untilHeight: null, untilTime: u };
-  }
-  const h = height === null || height === undefined ? null : Number(height);
-  const open = h !== null && Number.isFinite(h) && h >= u;
-  return { code: open ? "unlocked" : "locked_height", locked: !open, untilHeight: u, untilTime: null };
-}
+// THE UNLOCK RULE HAS ONE HOME: ./unlock.js. This module re-exports it for the public xmr entry instead of keeping
+// a second copy; a second copy is a second truth about whether money can be spent.
+export { UNLOCK_TIME_BLOCK_MAX, unlockStateOf } from "./unlock.js";

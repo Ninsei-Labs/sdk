@@ -209,6 +209,9 @@ a dead node, and a node on another network is not an absent reader. A page that 
 path can call `recoveryIndexTaken` from `./recovery` before using a number; it checks the factory's `OrderCreated`
 logs from the registry's deployment block.
 
+A height lock is judged at the witnessing node's tip, not at the block that mined the transfer; confirmations still
+use the inclusion height.
+
 A split sweep reports the sum of every signed transaction's fee, not only the first; one unreadable fee makes the
 total unknown.
 

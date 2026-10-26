@@ -212,7 +212,13 @@ export async function verifyArrival(request) {
     try { body = (await getBlockTxs(node, block.txHashes, fetchImpl, timeoutMs)).find((t) => t.tx_hash === located.txid) || null; }
     catch { record.state = "down"; seen.push(record); continue; }
     if (!body) { record.state = "no-tx"; seen.push(record); continue; }
-    const hit = engine.xmrScan.matchTransaction(body, [watched], { height: located.height, nowSec });
+    // THE LOCK IS JUDGED AT THE WITNESS'S TIP, NOT AT THE BLOCK THAT MINED THE TRANSFER. `located.height` stays for
+    // confirmations; a height lock that has matured is no longer `xmr-locked`.
+    const hit = engine.xmrScan.matchTransaction(body, [watched], {
+      height: located.height,
+      tipHeight: Math.max(0, info.height - 1),
+      nowSec,
+    });
     if (!hit.length) { record.state = "no-output"; seen.push(record); continue; }
     record.state = "ok";
     record.amountAtomic = sumOutputs(hit[0]);

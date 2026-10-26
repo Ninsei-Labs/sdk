@@ -492,4 +492,6 @@ export declare function scanRange(options: {
   log?: (event: unknown) => void;
   concurrency?: number;
   nowSec?: number | null;
+  /** The chain tip used to judge a height lock; defaults to `toHeight`. Inclusion height still drives confirmations. */
+  tipHeight?: number | null;
 }): Promise<ScannedMatch[]>;

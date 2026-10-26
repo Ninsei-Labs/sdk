@@ -136,6 +136,28 @@ console.log("=== 1) TWO HONEST NODES AGREE ===");
   else bad("confirmations: " + verdict.confirmations);
 }
 
+console.log("=== 1b) A HEIGHT LOCK IS JUDGED AT THE WITNESS'S TIP ===");
+{
+  // Mined at 100 with unlock_time 101; both witnesses are at 121 (top 120). The lock has matured, so this is an
+  // arrival - the inclusion height alone used to keep it xmr-locked forever.
+  const matured = fixture({ unlockTime: 101 });
+  const verdict = await run({
+    nodes: [{ url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" }],
+    txByHost: { default: matured },
+  });
+  if (verdict.seen === true && verdict.state === "arrived") ok("a matured height lock is an arrival");
+  else bad("a matured height lock returned " + JSON.stringify(verdict));
+  let stillLocked = null;
+  try {
+    await run({
+      nodes: [{ url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" }],
+      txByHost: { default: fixture({ unlockTime: 130 }) },
+    });
+  } catch (error) { stillLocked = error; }
+  if (stillLocked && stillLocked.code === "xmr-locked") ok("a future height lock is still xmr-locked");
+  else bad("a future height lock returned " + (stillLocked ? stillLocked.code : "a verdict"));
+}
+
 console.log("=== 2) ONE ALTERED AMOUNT DEFEATS THE OLD MAXIMUM ===");
 {
   const honest = fixture();

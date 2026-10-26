@@ -30,6 +30,7 @@ import { ed25519, secp256k1, keccak256 } from "../src/primitives.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const MODULE = join(ROOT, "engine", "monero", "arrivalRead.js");
+const UNLOCK_MODULE = join(ROOT, "engine", "monero", "unlock.js");
 const ADDRESS = "59DnddZzVBCevVg9YB3zCs24DSRH4ByS2FMBafPpYxSEB6FMegQNEbtNzbLjrrEUPNAg9NhK5uMiiAZpAvENBS4D4mEPcRq";
 
 let pass = 0;
@@ -94,14 +95,15 @@ console.log("=== 4) unlock_time ===");
   eq("the boundary itself is a TIME, not a height", unlockStateOf(UNLOCK_TIME_BLOCK_MAX, { height: 999_999_999, nowSec: 0 }).code, "locked_time");
 }
 
-function mutated(mutate, name) {
+function mutatedFrom(modulePath, mutate, name) {
   const dir = mkdtempSync(join(tmpdir(), "check-arrival-read-"));
-  const source = mutate(readFileSync(MODULE, "utf8").replace(/\r\n/g, "\n"));
-  const rewritten = source.replace(/from\s+"(\.[^"]+)"/g, (whole, rel) => `from "${pathToFileURL(join(dirname(MODULE), rel)).href}"`);
+  const source = mutate(readFileSync(modulePath, "utf8").replace(/\r\n/g, "\n"));
+  const rewritten = source.replace(/from\s+"(\.[^"]+)"/g, (whole, rel) => `from "${pathToFileURL(join(dirname(modulePath), rel)).href}"`);
   const file = join(dir, name + ".mjs");
   writeFileSync(file, rewritten, "utf8");
   return { file, dir };
 }
+const mutated = (mutate, name) => mutatedFrom(MODULE, mutate, name);
 const importFresh = (p) => import(pathToFileURL(p).href + "?run=" + Math.random().toString(16).slice(2));
 
 console.log("=== 5) BREAKING RUN A: high byte first -> case 2 reddens ===");
@@ -123,7 +125,7 @@ console.log("=== 5) BREAKING RUN A: high byte first -> case 2 reddens ===");
 
 console.log("=== 6) BREAKING RUN B: the boundary treated as a height -> case 4 reddens ===");
 {
-  const { file, dir } = mutated((src) => {
+  const { file, dir } = mutatedFrom(UNLOCK_MODULE, (src) => {
     const before = src;
     src = src.replace("if (u >= UNLOCK_TIME_BLOCK_MAX) {", "if (u > UNLOCK_TIME_BLOCK_MAX) {");
     if (src === before) throw new Error("mutation B did not apply");
