@@ -7,11 +7,12 @@
 // decision moves into the client, which reads the chain itself with its own view key.
 //
 // TWO NODES OF DIFFERENT OPERATORS. A single node is a single truth that can lie. So `ready` opens only when at
-// least two nodes belonging to DIFFERENT operators see the transaction IN THE SAME BLOCK (the block hash matches)
-// with the required number of confirmations. A failed or lagging node does not count and blocks nothing; a synced
-// node that does not have the transaction in that block, or has a different block hash there, is a DISAGREEMENT -
-// the button stays closed and the screen says the nodes do not agree. When only one operator has confirmed, the
-// core names that state (`one-node`) instead of waiting silently.
+// least two nodes belonging to DIFFERENT operators see THE WHOLE OBSERVATION THE SAME WAY: the same transaction in
+// the same block, with the same output keys, the same decoded amounts (each backed by its Pedersen commitment) and
+// the same unlock state. A failed or lagging node does not count and blocks nothing; a synced node that does not
+// have the transaction, reports another block, or reports another amount is a DISAGREEMENT - the button stays closed
+// and the screen says the nodes do not agree. When only one operator has confirmed, the core names that state
+// (`one-node`) instead of waiting silently.
 //
 // WHERE THE RULE LIVES. "Locked by unlock_time is not an arrival" is ONE rule (issue #84). It is not copied here:
 // it lives under www/js/monero/unlock.js, is mirrored byte-for-byte into the engine (sdk/engine/monero/unlock.js,
@@ -108,8 +109,9 @@ async function getBlockTxs(node, hashes, fetchImpl, timeoutMs) {
   });
 }
 
-// The amount of our own outputs in a matched transaction (a swap can be paid in several outputs).
-const sumOutputs = (hit) => hit.outputs.reduce((n, o) => n + (o.amountAtomic || 0n), 0n);
+// The amount of our own outputs in a matched transaction (a swap can be paid in several outputs). An output whose
+// amount did not match its Pedersen commitment is NOT money: it contributes zero, and the caller names it.
+const sumOutputs = (hit) => hit.outputs.reduce((n, o) => n + (o.amountVerified ? (o.amountAtomic || 0n) : 0n), 0n);
 
 /**
  * FIND THE TRANSACTION, IF IT IS THERE. Blocks are walked from the swap's birth height upwards and the whole block
@@ -128,7 +130,10 @@ async function locate(node, { txid, address, viewSecret, spendPub, fromHeight, t
     for (const tx of txs) {
       if (txid && tx.tx_hash !== txid) continue;
       const hit = engine.xmrScan.matchTransaction(tx, [{ address, viewSecret, spendPub }], { height: h, nowSec });
-      if (hit.length && sumOutputs(hit[0]) > 0n) return { txid: tx.tx_hash, height: h };
+      // LOCATE FINDS AN OUTPUT, NOT AN AMOUNT. The amount can be forged or unbacked; the verification step below
+      // refuses it. Requiring a positive verified sum here made two nodes that agreed on a forged amount look like
+      // "no transaction at all".
+      if (hit.length) return { txid: tx.tx_hash, height: h };
     }
   }
   return null;
@@ -211,18 +216,41 @@ export async function verifyArrival(request) {
     if (!hit.length) { record.state = "no-output"; seen.push(record); continue; }
     record.state = "ok";
     record.amountAtomic = sumOutputs(hit[0]);
+    record.amountVerified = hit[0].outputs.every((o) => o.amountVerified === true);
+    record.outputs = hit[0].outputs.map((o) => ({
+      index: o.index,
+      key: String(o.key || "").replace(/^0x/, "").toLowerCase(),
+      amountAtomic: o.amountVerified ? String(o.amountAtomic ?? null) : null,
+      amountVerified: o.amountVerified === true,
+    }));
     record.unlock = hit[0].unlock;
     // Confirmations of a block: top - height + 1, and top = info.height - 1 (see above), so this is height - located.
     record.confirmations = Number.isFinite(Number(body.confirmations)) ? Number(body.confirmations) : (info.height - located.height);
+    // A NODE THAT CHANGED THE AMOUNT IS A DISAGREEMENT, NOT A WITNESS. The commitment check above is what
+    // makes this observable: without it an altered ecdhInfo.amount would still look like a valid output.
+    if (!record.amountVerified) { record.state = "amount-unverified"; seen.push(record); continue; }
+    // THE WHOLE OBSERVATION, NOT A BLOCK HASH. Two nodes must agree on the transaction id, the block, every
+    // output key and amount, and the unlock state. A block hash alone let one node change the amount and still
+    // form its own group; that is exactly the finding this closes.
+    record.observation = {
+      txid: located.txid,
+      blockHash: String(block.hash || "").replace(/^0x/, "").toLowerCase(),
+      outputs: record.outputs,
+      unlock: record.unlock ? {
+        locked: record.unlock.locked === true,
+        untilHeight: record.unlock.untilHeight ?? null,
+        untilTime: record.unlock.untilTime ?? null,
+      } : null,
+    };
     seen.push(record);
   }
 
-  // A DISAGREEMENT CLOSES THE BUTTON - it is named, and the nodes and hashes travel in the params.
-  const disagreeing = seen.filter((r) => r.state === "no-tx" || r.state === "no-output");
+  // A DISAGREEMENT CLOSES THE BUTTON - it is named, and the nodes and observations travel in the params.
+  const disagreeing = seen.filter((r) => r.state === "no-tx" || r.state === "no-output" || r.state === "amount-unverified");
   if (disagreeing.length) {
     throw new SdkError("xmr-nodes-disagree", {
       txid: located.txid, height: located.height,
-      nodes: disagreeing.map((r) => ({ url: r.url, operator: r.operator, blockHash: r.blockHash || null, why: r.state })),
+      nodes: disagreeing.map((r) => ({ url: r.url, operator: r.operator, blockHash: r.blockHash || null, why: r.state, outputs: r.outputs || null })),
       agreed: seen.filter((r) => r.state === "ok").map((r) => ({ url: r.url, operator: r.operator, blockHash: r.blockHash })),
     });
   }
@@ -230,43 +258,53 @@ export async function verifyArrival(request) {
   const okay = seen.filter((r) => r.state === "ok");
   if (!okay.length) return { seen: false, state: "pending", txid: located.txid, height: located.height, checked: seen };
 
+  // THE OBSERVATIONS MUST BE IDENTICAL. Grouping by the whole observation (not just the block hash) means a
+  // node that reports a different amount, output key or unlock state does not count as agreeing with anyone.
+  const byObservation = new Map();
+  for (const r of okay) {
+    const key = JSON.stringify(r.observation);
+    if (!byObservation.has(key)) byObservation.set(key, { observation: r.observation, operators: new Set(), nodes: [] });
+    const g = byObservation.get(key);
+    g.operators.add(r.operator);
+    g.nodes.push(r);
+  }
+  if (byObservation.size > 1) {
+    throw new SdkError("xmr-nodes-disagree", {
+      txid: located.txid, height: located.height,
+      nodes: okay.map((r) => ({ url: r.url, operator: r.operator, blockHash: r.blockHash || null, outputs: r.outputs, why: "observation" })),
+      agreed: [],
+    });
+  }
+  const best = [...byObservation.values()][0];
+  // A node that is further along is not a liar: the minimum is the figure every witness can support. What
+  // matters is that the transaction itself is identical; confirmations only decide when the button opens.
+  const confirmations = Math.min(...best.nodes.map((r) => r.confirmations));
+  const amountAtomic = best.nodes[0].amountAtomic;
+  const agreedBy = best.nodes.map((r) => ({ url: r.url, operator: r.operator, blockHash: r.blockHash, confirmations: r.confirmations }));
+
   // LOCKED IS NOT AN ARRIVAL, and the rule for that is the shared one (issue #84), mirrored from www/js.
-  const locked = okay.find((r) => r.unlock && r.unlock.locked);
+  const locked = best.nodes.find((r) => r.unlock && r.unlock.locked);
   if (locked) {
     const until = locked.unlock;
     throw new SdkError("xmr-locked", { txid: located.txid, height: located.height, address: request.address,
       untilHeight: until.untilHeight ?? null, untilTime: until.untilTime ?? null });
   }
 
-  // THE AMOUNT IS NOT LESS THAN EXPECTED. A shortfall is named rather than shown as a completed swap.
-  const amountAtomic = okay.reduce((best, r) => (r.amountAtomic > best ? r.amountAtomic : best), 0n);
+  // THE AMOUNT IS NOT LESS THAN EXPECTED. A shortfall is named rather than shown as a completed swap. The figure
+  // comes from the agreed observation, never from the largest answer of one node: that maximum was the defect.
   if (amountAtomic < expectedAtomic) {
     throw new SdkError("xmr-underpaid", { txid: located.txid, height: located.height, got: amountAtomic.toString(), want: expectedAtomic.toString() });
   }
 
-  // AGREEMENT: the same block hash, held by at least two DIFFERENT operators, with the required confirmations.
-  const byHash = new Map();
-  for (const r of okay) {
-    const key = r.blockHash;
-    if (!byHash.has(key)) byHash.set(key, { blockHash: key, operators: new Set(), nodes: [] });
-    const g = byHash.get(key);
-    g.operators.add(r.operator);
-    g.nodes.push(r);
-  }
-  let best = null;
-  for (const g of byHash.values()) if (!best || g.operators.size > best.operators.size) best = g;
-  const confirmations = Math.min(...best.nodes.map((r) => r.confirmations));
-  const agreedBy = best.nodes.map((r) => ({ url: r.url, operator: r.operator, blockHash: r.blockHash, confirmations: r.confirmations }));
-
   if (best.operators.size < 2) {
-    return { seen: false, state: "one-node", txid: located.txid, height: located.height, blockHash: best.blockHash,
+    return { seen: false, state: "one-node", txid: located.txid, height: located.height, blockHash: best.observation.blockHash,
       amountAtomic: amountAtomic.toString(), confirmations, operators: [...best.operators], agreedBy, checked: seen };
   }
   if (confirmations < minConfirmations) {
-    return { seen: false, state: "pending", why: "confirmations", txid: located.txid, height: located.height, blockHash: best.blockHash,
+    return { seen: false, state: "pending", why: "confirmations", txid: located.txid, height: located.height, blockHash: best.observation.blockHash,
       amountAtomic: amountAtomic.toString(), confirmations, needConfirmations: minConfirmations, agreedBy, checked: seen };
   }
-  return { seen: true, state: "arrived", txid: located.txid, height: located.height, blockHash: best.blockHash,
+  return { seen: true, state: "arrived", txid: located.txid, height: located.height, blockHash: best.observation.blockHash,
     amountAtomic: amountAtomic.toString(), confirmations, needConfirmations: minConfirmations,
     operators: [...best.operators], agreedBy, checked: seen };
 }

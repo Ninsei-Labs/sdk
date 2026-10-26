@@ -8,6 +8,9 @@
 - A recovery key in storage is no longer treated as backed up. `backupConfirmed` is recorded only after
   `onRecoveryKey` returns true; a declined or failed confirmation leaves the key unconfirmed, so the next start
   asks again and cannot fund the escrow.
+- The XMR arrival check requires witnesses to agree on the whole observation, not only on a block hash, and
+  verifies every decoded amount against its Pedersen commitment (`mask*G + amount*H == outPk`). One altered node
+  can no longer turn a short payment into `arrived`; an unbacked amount is `xmr-nodes-disagree`.
 
 ## 0.52.0 — 2026-10-26
 

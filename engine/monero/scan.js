@@ -33,6 +33,25 @@ export function keccak(bytes) { return keccak_256(bytes); }
 // corrupt the scalar, the derivation and the sum - an "invisible arrival".
 export const ED_ORDER = ed25519.Point.CURVE().n;
 
+// THE SECOND PEDERSEN GENERATOR, FROM THE MONERO SOURCE. `rct::H` is a fixed point whose discrete logarithm to
+// the base point is unknown: C = mask*G + amount*H. The bytes are the compressed point from
+// monero/src/ringct/rctTypes.h (`static const key H`), not a value recomputed from a remembered string.
+// It is the same point the DLEQ module calls Galt - one constant, two uses, no second derivation.
+export const PEDERSEN_H = "8b655970153799af2aeadc9ff1add0ea6c7251d54154cfa92c173a0dd39c1f94";
+const PEDERSEN_H_POINT = ed25519.Point.fromHex(PEDERSEN_H);
+
+function scalarPoint(point, scalar) {
+  const mod = ((BigInt(scalar) % ED_ORDER) + ED_ORDER) % ED_ORDER;
+  return mod === 0n ? ed25519.Point.ZERO : point.multiply(mod);
+}
+
+/** The Pedersen commitment C = mask*G + amount*H, compressed. Used to check a decoded amount against `outPk`. */
+export function amountMaskCommitment(amount, mask) {
+  const value = BigInt(amount);
+  if (value < 0n) throw new Error("the amount must not be negative");
+  return scalarPoint(ed25519.Point.BASE, mask).add(scalarPoint(PEDERSEN_H_POINT, value)).toHex();
+}
+
 export function hexToBytes(hex) {
   const t = String(hex).trim().replace(/^0x/, "");
   if (t.length % 2) throw new Error("odd hex length");
@@ -138,32 +157,44 @@ export function txPublicKeyFromExtra(extra) {
   return null;
 }
 
-// Amount decryption. version: 2 = current scheme (xor of the first 8 bytes), 1 = old (scalar subtraction).
+// Amount and mask decryption. version: 2 = current scheme (xor of the first bytes), 1 = old (scalar subtraction).
 //
 // THE SECRET IS THE DERIVATION SCALAR, NOT THE DERIVATION. Easy to get wrong: both are 32 bytes, but what goes
 // into genAmountEncodingFactor is the scalar (derivation_to_scalar), written LEAST-SIGNIFICANT first. With the
 // derivation the result looks plausible and is WRONG (checked on live numbers).
-export function decodeAmount(ecdhAmountHex, scalarLE, rctVersion) {
-  const enc = hexToBytes(ecdhAmountHex);
+//
+// THE MASK IS DECRYPTED THE SAME WAY, with the label "mask": without it the Pedersen commitment cannot be
+// recomputed and a node could invent an amount that no `outPk` backs.
+function decodeField(ecdhHex, scalarLE, rctVersion, label) {
+  const enc = hexToBytes(ecdhHex);
   if (Number(rctVersion) >= 2) {
-    // Multiplier: keccak("amount" || scalar_LE), 38 bytes - order checked against the source.
-    const label = new TextEncoder().encode("amount");
-    const buf = new Uint8Array(label.length + scalarLE.length);
-    buf.set(label, 0); buf.set(scalarLE, label.length);
+    // Multiplier: keccak(label || scalar_LE), 32 bytes. Amount uses "amount"; mask uses "mask".
+    const prefix = new TextEncoder().encode(label);
+    const buf = new Uint8Array(prefix.length + scalarLE.length);
+    buf.set(prefix, 0); buf.set(scalarLE, prefix.length);
     const factor = keccak(buf);
     const out = enc.slice();
-    for (let i = 0; i < 8; i++) out[i] ^= factor[i];             // xor of the FIRST 8 bytes only
+    for (let i = 0; i < out.length && i < factor.length; i++) out[i] ^= factor[i];
     // And again LEAST-SIGNIFICANT first: Monero amounts are little-endian too.
     return scalarFromBytesLE(out);
   }
+  // RingCT v1: ecdhInfo.amount and ecdhInfo.mask are both encrypted by subtraction of the same scalar.
   const s2 = hashToScalar(hexToBytes(hashToScalar(hexToBytes(bytesToHex(rctVersion === 1 ? scalarLE : scalarLE))).toString(16).padStart(64, "0")));
-  const amt = BigInt("0x" + bytesToHex(enc)) % ED_ORDER;
-  return (amt - s2 + ED_ORDER) % ED_ORDER;
+  const value = BigInt("0x" + bytesToHex(enc)) % ED_ORDER;
+  return (value - s2 + ED_ORDER) % ED_ORDER;
+}
+
+export function decodeAmount(ecdhAmountHex, scalarLE, rctVersion) {
+  return decodeField(ecdhAmountHex, scalarLE, rctVersion, "amount");
+}
+
+export function decodeMask(ecdhMaskHex, scalarLE, rctVersion) {
+  return decodeField(ecdhMaskHex, scalarLE, rctVersion, "mask");
 }
 
 // MAIN: parse a transaction and return OUR outputs (their indices, keys and amounts).
-// txView - { txPublicKey, vout: [{key, index}], ecdhAmounts: [...], rctVersion }
-export function findOurOutputs({ txPublicKey, viewSecretHex, spendPubHex, outputs, ecdhAmounts = [], rctVersion = 2 }) {
+// txView - { txPublicKey, vout: [{key, index}], ecdhAmounts: [...], ecdhMasks: [...], outPk: [...], rctVersion }
+export function findOurOutputs({ txPublicKey, viewSecretHex, spendPubHex, outputs, ecdhAmounts = [], ecdhMasks = [], outPk = [], rctVersion = 2 }) {
   if (!txPublicKey) throw new Error("the transaction has no public key (extra tag 0x01) - nothing to parse");
   // The key form is tried EXPLICITLY; the winner's name goes up so the log shows what was used. If none matched,
   // the first meaningful form is returned, not nothing.
@@ -178,7 +209,17 @@ export function findOurOutputs({ txPublicKey, viewSecretHex, spendPubHex, output
       if (derived.toLowerCase() === String(o.key).toLowerCase()) {
         // The amount decryption uses THIS output's SCALAR, least-significant first.
         const amount = ecdhAmounts[o.index] ? decodeAmount(ecdhAmounts[o.index], scalarToBytesLE(scalar), rctVersion) : null;
-        found.push({ index: o.index, key: o.key, amountAtomic: amount });
+        // THE COMMITMENT CHECK: outPk[i] = mask*G + amount*H. A node can flip a bit of the encrypted amount
+        // without any key; the commitment is the only figure it cannot forge. A missing or mismatching
+        // commitment is named on the output instead of being accepted as an arrival.
+        const mask = ecdhMasks[o.index] ? decodeMask(ecdhMasks[o.index], scalarToBytesLE(scalar), rctVersion) : null;
+        let amountVerified = false;
+        if (amount !== null && mask !== null && outPk[o.index]) {
+          try {
+            amountVerified = amountMaskCommitment(amount, mask).toLowerCase() === String(outPk[o.index]).replace(/^0x/, "").toLowerCase();
+          } catch { amountVerified = false; }
+        }
+        found.push({ index: o.index, key: o.key, amountAtomic: amount, maskAtomic: mask, amountVerified });
       }
     }
     if (found.length) return { derivation: bytesToHex(derivation), outputs: found, viewKeyForm: form };
@@ -245,12 +286,15 @@ export function matchTransaction(tx, watched, { height = null, nowSec = null } =
   const unlock = unlockStateOf(tx.unlock_time, { height: blockHeight, nowSec });
   const keyOf = (o) => ((o.target || {}).tagged_key || o.target || {}).key;
   const outputs = (tx.vout || []).map((o, i) => ({ index: i, key: keyOf(o) }));
-  const ecdhAmounts = ((tx.rct_signatures || {}).ecdhInfo || []).map((e) => e.amount);
+  const ecdh = ((tx.rct_signatures || {}).ecdhInfo || []);
+  const ecdhAmounts = ecdh.map((e) => e.amount);
+  const ecdhMasks = ecdh.map((e) => e.mask);
+  const outPk = ((tx.rct_signatures || {}).outPk || []);
   const rctVersion = (tx.rct_signatures || {}).type || 2;
   for (const w of watched) {
     const r = findOurOutputs({
       txPublicKey, viewSecretHex: w.viewSecret, spendPubHex: w.spendPub,
-      outputs, ecdhAmounts, rctVersion: Number(rctVersion) >= 2 ? 2 : 1,
+      outputs, ecdhAmounts, ecdhMasks, outPk, rctVersion: Number(rctVersion) >= 2 ? 2 : 1,
     });
     if (r.outputs.length) out.push({ address: w.address, index: w.index ?? null, outputs: r.outputs, derivation: r.derivation, viewKeyForm: r.viewKeyForm, unlockTime: Number(tx.unlock_time) || 0, unlock });
   }
@@ -285,7 +329,9 @@ export async function scanRange({ daemonUrl, fromHeight, toHeight, watched, log 
             const lockedHere = !!(hit.unlock && hit.unlock.locked);
             const hash = String(tx.tx_hash || "").replace(/^0x/, "");
             for (const o of hit.outputs) {
-              const amount = o.amountAtomic || 0n;
+              // AN UNVERIFIED AMOUNT IS NOT MONEY. A node can alter ecdhInfo.amount; until the Pedersen
+              // commitment confirms it, the figure is not added to any sum.
+              const amount = o.amountVerified ? (o.amountAtomic || 0n) : 0n;
               // A LOCKED OUTPUT IS NOT AN ARRIVAL. Its transfer shows in txids (money is on the address) but the
               // sum does NOT go into receivedAtomic: else 'ready' would allow claiming ETH against locked XMR.
               if (lockedHere) {
