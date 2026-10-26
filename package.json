@@ -59,7 +59,8 @@
     "check:anvil-uniswap": "node tools/check-anvil-uniswap.mjs",
     "check:atomic-flow": "node tools/check-atomic-flow.mjs",
     "check:packed-consumer": "node tools/check-packed-consumer.mjs",
-    "check:quote-binding": "node tools/check-quote-binding.mjs"
+    "check:quote-binding": "node tools/check-quote-binding.mjs",
+    "check:types-consumer": "node node_modules/typescript/bin/tsc -p tools/ts-consumer/tsconfig.json"
   },
   "types": "./index.d.ts",
   "exports": {
@@ -141,5 +142,8 @@
     "@scure/bip39": "2.4.0",
     "keccak256": "^1.0.6"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "devDependencies": {
+    "typescript": "7.0.2"
+  }
 }
