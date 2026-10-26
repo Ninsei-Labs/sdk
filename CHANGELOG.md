@@ -1,5 +1,7 @@
 ## Unreleased
 
+- The default stagenet node is `https://xmr-stagenet.ninsei.finance`, operated by Ninsei. The old
+  `xmr.arrakisswap.trade` address is retired.
 - `check:monero-live` starts against a real `monerod` in regtest: it refuses a non-regtest nettype, generates a
   block range to an SDK-built address, runs `scanRange` over the range, and checks the daemon's `get_fee_estimate`
   shape. It runs in the nightly workflow, not on every PR.
