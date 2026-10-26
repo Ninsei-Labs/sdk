@@ -198,10 +198,11 @@ export function createNinsei(options) {
   // THE STORAGE THE INTERFACE BROUGHT BECOMES THE CORE'S STORAGE: unfinished swaps and the agent session live
   // where the interface decided (browser storage, memory, a server). Without the option the core takes its
   // default: web storage if it is present in the environment, otherwise memory.
-  if (o.storage) {
-    engine.store.setStorage(o.storage);
-    engine.auth.setSessionStore(o.storage);
-  }
+  // ONE CLIENT, ONE STORE. A second client with another adapter used to replace the module-wide store, so the
+  // first client listed the second's swaps and could delete them. Even a client that brought no adapter binds the
+  // current one, so a later explicit store cannot take it over.
+  engine.store.bindStorage(o.storage || engine.store.storage());
+  if (o.storage) engine.auth.setSessionStore(o.storage);
   const http = createHttp({ apiBase: config.apiBase, fetchImpl: o.fetch, timeoutMs: config.limits.httpTimeoutMs });
   // THE CHAIN READ AND THE ALLOW-LIST GO INTO THE QUOTE CHECK: without the read the signature certifies itself,
   // so the same evmCall seam the lock and the actions use is handed to the quotes too.
