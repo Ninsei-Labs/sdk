@@ -9,7 +9,7 @@
 //   2) not a single DOM access: `document`, `window`, `localStorage` do not occur in the SDK. Storage and the wallet
 //      come from outside: as an adapter and an EIP-1193 provider;
 //   3) the SDK opens no windows: the interface shows the wallet modal, the SDK accepts a ready provider;
-//   4) funds are not locked until the interface has confirmed the recovery file is saved (onRecoveryFile);
+//   4) funds are not locked until the interface has confirmed the one recovery key is saved (onRecoveryKey);
 //   5) the guards cannot be bypassed: preflight is part of the same path, not a separate button.
 //
 // Naming language: the values are data. `step` and `code` are stable strings from the tables below; they are
@@ -750,14 +750,12 @@ export interface SwapsApi {
   /**
    * Start a swap. The SDK holds the step order, not the screen:
    *   1) guards (preflight); 2) the swap record (createSwap); 3) the order - it GENERATES the key halves;
-   *   4) the recovery file / one key and the interface's confirmation that it is saved; 5) locking the funds (signature);
+   *   4) the one recovery key and the interface's confirmation that it is saved; 5) locking the funds (signature);
    *   6) saving on the server; 7) opening the watch on the Monero address.
-   * HALVES DO NOT EXIST BEFORE THE ORDER: the recovery file carries MY half of the spend key and the counterparty's
-   * open points, and they are taken from the signed order (www/js/atomic/order-worker.js, createOrderBuilder; in the
-   * engine they are fetched by halvesWalletOf). So the file is assembled AFTER the order, but BEFORE locking the
-   * funds.
-   * FUNDS ARE NOT LOCKED UNTIL onRecoveryFile ALLOWS IT: the order is like this not for convenience, but because a
-   * lock without a recovery file is a lock with nothing to open it with if the browser is lost.
+   * HALVES DO NOT EXIST BEFORE THE ORDER: the key's halves and the counterparty's open points are taken from the
+   * signed order. The key is shown BEFORE locking the funds.
+   * FUNDS ARE NOT LOCKED UNTIL onRecoveryKey ALLOWS IT: a lock without a saved key is a lock with nothing to open
+   * the swap with if the browser is lost.
    */
   start(request: StartRequest): Promise<SwapStart>;
   /**
@@ -1131,19 +1129,13 @@ export interface StartRequest {
   /**
    * The EVM wallet for LOCKING THE FUNDS: an adapter with `send` and `receipt` (the same role as WalletAdapter).
    * It comes from outside and is NOT substituted by default: without it the lock step answers with a code
-   * (`bad-input`), rather than going in blind. The recovery file has by now been confirmed by the person.
+   * (`bad-input`), rather than going in blind. The recovery key has by now been confirmed by the person.
    */
   readonly wallet?: WalletAdapter;
   /**
-   * Hand the OLD per-swap recovery file to the interface and wait for the person's decision.
-   * `true` - the person confirmed the file is saved; `false` - the swap is not started.
-   * Not used when `recoveryKey` is present: that path has one key, saved once.
-   */
-  onRecoveryFile?(file: RecoveryFile): Promise<boolean>;
-  /**
    * THE ONE RECOVERY KEY (sdk#76). A BIP39 mnemonic, or a key object from `@ninsei-labs/sdk/recovery`.
-   * When present, the swap's spend and view halves are derived from it instead of being generated, and no
-   * per-swap recovery file is written. The key is kept through the SDK's storage adapter.
+   * The swap's spend and view halves are derived from it; the per-swap recovery file path is gone, and the key is
+   * kept through the SDK's storage adapter.
    */
   recoveryKey?: string | { readonly mnemonic: string };
   /** The swap number, when the caller already reserved one. Absent - the SDK reserves the next free number. */

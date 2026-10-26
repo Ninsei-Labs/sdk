@@ -59,6 +59,14 @@ async function startWith(view, v2 = false, salt = order.salt) {
   return { result, sent };
 }
 
+console.log("=== 0) THE PER-SWAP FILE PATH IS GONE ===");
+{
+  const result = await createSwaps({}).start({ quote: {}, order: {}, receiveTo: "synthetic-xmr-destination" }).catch((error) => error);
+  if (result && result.code === "bad-input" && result.params && result.params.field === "recoveryKey") {
+    ok("a start without a recovery key is refused by name");
+  } else bad("start without a key -> " + JSON.stringify(result && (result.code || result)));
+}
+
 console.log("=== 1) THE DERIVED VIEW HALF IS ACCEPTED ===");
 {
   const { result, sent } = await startWith(derived.makerViewHalf);
