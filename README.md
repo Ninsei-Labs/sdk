@@ -209,6 +209,9 @@ a dead node, and a node on another network is not an absent reader. A page that 
 path can call `recoveryIndexTaken` from `./recovery` before using a number; it checks the factory's `OrderCreated`
 logs from the registry's deployment block.
 
+A failed settlement block-time read keeps the matched order: `findSwaps` returns `blockTime: null` with
+`startHeightReason: "block-time-read"` instead of throwing away every row.
+
 The retired backend no longer decides a swap: its watch row may observe money, but it cannot declare readiness or
 a decline; the client's two-node check and the escrow's own `Declined` event do.
 

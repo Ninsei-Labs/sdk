@@ -293,6 +293,22 @@ export const recoveryKeyCheck = async () => {
   });
   check(noTime.swaps[0].startHeightReason === "no-block-time" && noTime.swaps[0].blockTime === null,
     `a null block time became ${JSON.stringify({ reason: noTime.swaps[0].startHeightReason, time: noTime.swaps[0].blockTime })}`);
+  // ONE FAILING BLOCK-TIME READ KEEPS THE ORDER IT ALREADY MATCHED. A thrown reader used to escape findSwaps and
+  // drop every row, so a page showed the whole network as unreadable.
+  const secondHalves = recovery.takerHalves({ mnemonic: WORDS, chainId: CHAIN, index: 1 });
+  const secondOrder = logFor({ commitment: secondHalves.spendCommitment, locker: address("bb"), claimer: address("cc"), index: 1 });
+  const mixed = await recovery.findSwaps({
+    mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
+    evmLogs: async () => [order, secondOrder], maxIndex: 3,
+    evmBlockTime: async (block) => { if (block === 101) throw new Error("rpc down"); return 1_000_000; },
+  });
+  check(mixed.swaps.length === 2, `a failed block-time read dropped matched orders: ${mixed.swaps.length}`);
+  const failed = mixed.swaps.find((row) => row.blockNumber === 101);
+  const kept = mixed.swaps.find((row) => row.blockNumber === 100);
+  check(failed && failed.startHeight === null && failed.startHeightReason === "block-time-read" && failed.blockTime === null,
+    `a failed block-time read was not named: ${JSON.stringify(failed && { reason: failed.startHeightReason, time: failed.blockTime })}`);
+  check(kept && kept.blockTime === 1_000_000, "the other matched order lost its block time");
+  notes.push("a failed block-time read keeps the matched order and names the reason");
   const unreachable = await recovery.findSwaps({
     mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
     evmLogs: async (request) => request.topics.includes(pad(address("bb"))) ? [order] : [],
