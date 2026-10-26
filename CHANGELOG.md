@@ -1,5 +1,8 @@
 ## Unreleased
 
+- `check-anvil-fork` now covers the refund and decline paths, a claim by a relayer with a non-zero `claimTip`, a
+  wrong half, `markReady` from a non-locker and a reused salt. The refund must publish the locker half; the decline
+  must publish none.
 - `check-atomic-flow` calls `runAtomicOrder` itself with stand-in worker and funding seams: it proves the sequence
   reaches funding once, carries the salt, both commitments and the view point, returns the stand-in half and joint
   address, and refuses a rejected counterparty before funding.
@@ -514,6 +517,9 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
 
 ## Unreleased
 
+- `check-anvil-fork` now covers the refund and decline paths, a claim by a relayer with a non-zero `claimTip`, a
+  wrong half, `markReady` from a non-locker and a reused salt. The refund must publish the locker half; the decline
+  must publish none.
 - `check-atomic-flow` calls `runAtomicOrder` itself with stand-in worker and funding seams: it proves the sequence
   reaches funding once, carries the salt, both commitments and the view point, returns the stand-in half and joint
   address, and refuses a rejected counterparty before funding.

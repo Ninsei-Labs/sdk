@@ -23,6 +23,7 @@ const CASHIER = (process.env.ANVIL_CASHIER || "0x05b7433f66f2b75cc7ece9ec00af0fb
 const PROVIDER = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266";
 const PROVIDER_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const LOCKER = "0x70997970c51812dc3a010c7d01b50e0d17dc79c8";
+const RELAYER = "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"; // sends a claim for the tip; never the claimer
 const AMOUNT = 1_000_000_000_000_000_000n; // 1 ETH, no fee
 const XMR_AMOUNT = 1_000_000_000_000n; // 1 XMR in atomic units
 
@@ -45,6 +46,7 @@ async function rpc(method, params = []) {
   return body.result;
 }
 const call = (to, data) => rpc("eth_call", [{ to, data }, "latest"]);
+const ethBalance = async (a) => BigInt(await rpc("eth_getBalance", [a, "latest"]));
 const send = (from, to, data, value = 0) => rpc("eth_sendTransaction", [{ from, to, data, value: "0x" + BigInt(value).toString(16), gas: "0xc3500" }]);
 async function receipt(hash) {
   for (let i = 0; i < 40; i += 1) {
@@ -70,7 +72,7 @@ async function registerProvider(factory) {
   return "0x" + answer.slice(-40).toLowerCase();
 }
 
-async function runOrder({ salt, nonce, label }) {
+async function runOrder({ salt, nonce, label, mode = "claim", claimTip = 0n, claimSender = PROVIDER }) {
   const latest = await rpc("eth_getBlockByNumber", ["latest", false]);
   const now = Number(BigInt(latest.timestamp));
   const readyBy = now + 3600;
@@ -87,7 +89,7 @@ async function runOrder({ salt, nonce, label }) {
     locker: LOCKER, claimer: PROVIDER, amount: AMOUNT.toString(),
     readyBy, t1, salt, chainId: 421614,
     feeBps: 0, fee: "0", feeRecipient: PROVIDER, validUntil: now + 600, nonce,
-    xmrAmount: XMR_AMOUNT.toString(), claimTip: "0",
+    xmrAmount: XMR_AMOUNT.toString(), claimTip: BigInt(claimTip).toString(),
     factory: FACTORY, ...halves,
   };
   quote.signature = signQuoteDigest({ crypto: { secp256k1 }, digest: quoteDigest({ crypto: { secp256k1, keccak256 }, quote }), privateKey: PROVIDER_KEY });
@@ -101,21 +103,42 @@ async function runOrder({ salt, nonce, label }) {
   const escrow = "0x" + String(log.topics[1]).slice(26).toLowerCase();
   if (escrow !== predicted) throw new Error(label + ": event escrow " + escrow + " != predicted " + predicted);
 
-  // markReady is the locker's statement that the XMR arrived; then the provider claims its own half.
-  const mark = selector("markReady()");
-  await receipt(await send(LOCKER, escrow, mark));
-  const claim = selector("claim(bytes32)");
-  await receipt(await send(PROVIDER, escrow, claim + word(7n)));
+  if (mode === "claim" || mode === "claim-tip") {
+    // markReady is the locker's statement that the XMR arrived; then the claimer (or a relayer) claims the half.
+    const mark = selector("markReady()");
+    await receipt(await send(LOCKER, escrow, mark));
+    const claim = selector("claim(bytes32)");
+    await receipt(await send(claimSender, escrow, claim + word(7n)));
+  } else if (mode === "refund") {
+    // Before readyBy, with no mark, the locker may take the deposit back; it needs the locker's half.
+    await receipt(await send(LOCKER, escrow, selector("refund(bytes32)") + word(11n)));
+  } else if (mode === "decline") {
+    // The claimer may decline while no readiness mark exists; the whole balance returns to the locker.
+    await receipt(await send(PROVIDER, escrow, selector("decline()")));
+  }
 
   const claimed = await call(escrow, selector("claimed()"));
   const revealed = await call(escrow, selector("revealedHalf()"));
   const locker = await call(escrow, selector("locker()"));
   const claimer = await call(escrow, selector("claimer()"));
+  const status = await call(escrow, selector("status()"));
+  const statusWords = status.replace(/^0x/, "").match(/.{64}/g) || [];
   return {
-    escrow, predicted, claimed: BigInt(claimed) === 1n,
+    escrow, predicted, quote, claimed: BigInt(claimed) === 1n, refunded: BigInt(statusWords[2] || 0) === 1n,
     revealed: "0x" + revealed.slice(-64), locker: "0x" + locker.slice(-40).toLowerCase(),
     claimer: "0x" + claimer.slice(-40).toLowerCase(),
   };
+}
+
+async function expectRevert(label, sendIt) {
+  try {
+    const hash = await sendIt();
+    const r = await receipt(hash);
+    if (Number(r.status) === 0) return { ok: true, hash };
+    return { ok: false, why: "transaction succeeded: " + hash };
+  } catch (error) {
+    return { ok: true, why: "RPC refused: " + String(error.message || error) };
+  }
 }
 
 console.log("=== 0) THE FORK HAS THE DEPLOYED CONTRACTS ===");
@@ -132,6 +155,7 @@ try {
 // fork at an old block may not.
 await rpc("anvil_setBalance", [PROVIDER, "0x" + (100n * 10n ** 18n).toString(16)]);
 await rpc("anvil_setBalance", [LOCKER, "0x" + (100n * 10n ** 18n).toString(16)]);
+await rpc("anvil_setBalance", [RELAYER, "0x" + (100n * 10n ** 18n).toString(16)]);
 
 console.log("=== 1) REGISTER THE PROVIDER IN THE REAL REGISTRY ===");
 try {
@@ -171,6 +195,53 @@ try {
   else ok("a second order ran after the revert with no new fork");
 } catch (error) {
   bad("order round trip: " + String(error.message || error));
+}
+
+console.log("=== 3) REFUND BEFORE READY, DECLINE BEFORE READY ===");
+try {
+  const refund = await runOrder({ salt: "0x" + randomBytes(32).toString("hex"), nonce: 3, label: "refund", mode: "refund" });
+  if (refund.refunded && !refund.claimed && refund.revealed === "0x" + word(11n)) ok("refund before ready returns the deposit and publishes the locker half");
+  else bad("refund: " + JSON.stringify(refund));
+
+  const decline = await runOrder({ salt: "0x" + randomBytes(32).toString("hex"), nonce: 4, label: "decline", mode: "decline" });
+  if (decline.refunded && !decline.claimed && decline.revealed === "0x" + word(0n)) ok("decline returns the deposit and publishes no half");
+  else bad("decline: " + JSON.stringify(decline));
+} catch (error) {
+  bad("refund/decline: " + String(error.message || error));
+}
+
+console.log("=== 4) A RELAYER TAKES THE CLAIM TIP ===");
+try {
+  const tip = 10_000_000_000_000_000n; // 0.01 ETH
+  const before = await ethBalance(PROVIDER);
+  const result = await runOrder({ salt: "0x" + randomBytes(32).toString("hex"), nonce: 5, label: "tip",
+    mode: "claim-tip", claimTip: tip, claimSender: RELAYER });
+  const after = await ethBalance(PROVIDER);
+  if (result.claimed && after - before === AMOUNT - tip) ok("the claimer receives amount - tip when a relayer sends the claim");
+  else bad("claim tip: " + JSON.stringify({ claimed: result.claimed, delta: (after - before).toString() }));
+} catch (error) {
+  bad("claim tip: " + String(error.message || error));
+}
+
+console.log("=== 5) WRONG HALF, WRONG markReady SENDER, DUPLICATE SALT ===");
+try {
+  const base = await runOrder({ salt: "0x" + randomBytes(32).toString("hex"), nonce: 6, label: "negatives", mode: "none" });
+  const mark = selector("markReady()");
+  await receipt(await send(LOCKER, base.escrow, mark));
+  const wrongHalf = await expectRevert("wrong half", () => send(PROVIDER, base.escrow, selector("claim(bytes32)") + word(8n)));
+  if (wrongHalf.ok) ok("a half other than the committed one reverts");
+  else bad("wrong half: " + JSON.stringify(wrongHalf));
+
+  const other = await runOrder({ salt: "0x" + randomBytes(32).toString("hex"), nonce: 7, label: "marker", mode: "none" });
+  const wrongMarker = await expectRevert("wrong marker", () => send(PROVIDER, other.escrow, mark));
+  if (wrongMarker.ok) ok("markReady from a non-locker reverts");
+  else bad("wrong markReady sender: " + JSON.stringify(wrongMarker));
+
+  const duplicate = await expectRevert("duplicate salt", () => send(LOCKER, FACTORY, encodeCreateOrderAndFund(base.quote), AMOUNT));
+  if (duplicate.ok) ok("reusing the salt for a second createOrderAndFund reverts");
+  else bad("duplicate salt: " + JSON.stringify(duplicate));
+} catch (error) {
+  bad("negative matrix: " + String(error.message || error));
 }
 
 console.log("");
