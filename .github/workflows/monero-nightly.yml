@@ -1,0 +1,62 @@
+name: Monero live
+
+# THE REAL NODE IS TOO HEAVY FOR EVERY PULL REQUEST: it downloads a Monero release, starts monerod in regtest and
+# mines a block range. The nightly job proves the wire format and the scanner against a node; the PR checks keep
+# using the deterministic fixtures.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  monero-live:
+    name: Monero regtest scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm (from packageManager)
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24.22.1'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download and verify Monero 0.18.5.4
+        run: |
+          curl -fsSLo monero.tar.bz2 https://downloads.getmonero.org/cli/monero-linux-x64-v0.18.5.4.tar.bz2
+          echo "ba2928962c101b609434bf8c1b43ad59ebe96c5525977284ca599d8bf0f02d10  monero.tar.bz2" | sha256sum -c -
+          tar -xjf monero.tar.bz2
+          find . -maxdepth 2 -name monerod -type f -exec chmod +x {} \;
+
+      - name: Start regtest monerod
+        run: |
+          MONEROD=$(find . -maxdepth 2 -name monerod -type f | head -1)
+          mkdir -p /tmp/monero-regtest
+          "$MONEROD" --regtest --offline --fixed-difficulty=1 \
+            --rpc-bind-port 38181 --p2p-bind-port 38180 \
+            --data-dir /tmp/monero-regtest --log-file /tmp/monerod.log --non-interactive &
+          echo $! > /tmp/monerod.pid
+          for i in $(seq 1 60); do
+            if curl -fsS -X POST http://127.0.0.1:38181/json_rpc \
+              -H 'Content-Type: application/json' \
+              -d '{"jsonrpc":"2.0","id":"0","method":"get_info"}' | grep -q '"height"'; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/monerod.log
+          exit 1
+
+      - name: Check the real node and the SDK scanner
+        run: pnpm run check:monero-live
+        env:
+          MONERO_DAEMON_URL: http://127.0.0.1:38181

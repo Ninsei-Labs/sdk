@@ -1,5 +1,8 @@
 ## Unreleased
 
+- `check:monero-live` starts against a real `monerod` in regtest: it refuses a non-regtest nettype, generates a
+  block range to an SDK-built address, runs `scanRange` over the range, and checks the daemon's `get_fee_estimate`
+  shape. It runs in the nightly workflow, not on every PR.
 - `check:types-consumer` compiles a minimal TypeScript consumer with `tsc --noEmit` against the package's own
   exports map. It imports the root, `./xmr` and `./recovery`, assigns the public interfaces and calls the declared
   entry points; a declaration that parses but cannot be consumed reddens here.
@@ -525,6 +528,9 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
 
 ## Unreleased
 
+- `check:monero-live` starts against a real `monerod` in regtest: it refuses a non-regtest nettype, generates a
+  block range to an SDK-built address, runs `scanRange` over the range, and checks the daemon's `get_fee_estimate`
+  shape. It runs in the nightly workflow, not on every PR.
 - `check:types-consumer` compiles a minimal TypeScript consumer with `tsc --noEmit` against the package's own
   exports map. It imports the root, `./xmr` and `./recovery`, assigns the public interfaces and calls the declared
   entry points; a declaration that parses but cannot be consumed reddens here.
