@@ -1,5 +1,8 @@
 ## Unreleased
 
+- `spendKeysFromRevealedHalf` reduces the revealed word modulo the secp256k1 order before adding it to our half. The
+  escrow accepts `h + n` in `claim`/`refund`; that alias is the same key on secp256k1 but not on edwards25519, so
+  reducing it makes such a swap withdrawable instead of refused as `revealedHalf`.
 - The per-swap recovery file start path is gone. It was assembled before funding and could not carry the escrow
   address, so `sweep.plan` on that file reported `revealed-half` missing. Every start now requires the one recovery
   key; the key is shown and confirmed before the lock. `StartRequest.onRecoveryFile` is removed.
@@ -480,6 +483,9 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
 
 ## Unreleased
 
+- `spendKeysFromRevealedHalf` reduces the revealed word modulo the secp256k1 order before adding it to our half. The
+  escrow accepts `h + n` in `claim`/`refund`; that alias is the same key on secp256k1 but not on edwards25519, so
+  reducing it makes such a swap withdrawable instead of refused as `revealedHalf`.
 - The per-swap recovery file start path is gone. It was assembled before funding and could not carry the escrow
   address, so `sweep.plan` on that file reported `revealed-half` missing. Every start now requires the one recovery
   key; the key is shown and confirmed before the lock. `StartRequest.onRecoveryFile` is removed.
