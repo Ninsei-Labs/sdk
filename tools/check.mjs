@@ -2523,6 +2523,7 @@ const runScriptCheck = (tool, label) => {
 };
 
 const saleAuthCheck = () => runScriptCheck("check-sale-auth.mjs", "sale auth");
+const backupConfirmationCheck = () => runScriptCheck("check-backup-confirmation.mjs", "backup confirmation");
 
 const CHECKS = {
   syntax: syntaxCheck,
@@ -2549,6 +2550,7 @@ const CHECKS = {
   provider: providerCheck,
   "recovery-key": recoveryKeyCheck,
   "sale-auth": saleAuthCheck,
+  "backup-confirmation": backupConfirmationCheck,
   "sweep-window": sweepWindowCheck,
   "sweep-order": sweepFromOrderCheck,
   "sweep-adapter": sweepAdapterCheck,

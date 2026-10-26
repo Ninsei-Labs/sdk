@@ -3,6 +3,9 @@
 - `quotes.sale` authenticates the ticket instead of trusting its `signed` flag: the EIP-712 signature, expiry,
   registry provider, interface allow-list, factory policy and the sale claimer's denylist are checked before the
   ticket is returned.
+- A recovery key in storage is no longer treated as backed up. `backupConfirmed` is recorded only after
+  `onRecoveryKey` returns true; a declined or failed confirmation leaves the key unconfirmed, so the next start
+  asks again and cannot fund the escrow.
 
 ## 0.52.0 — 2026-10-26
 
