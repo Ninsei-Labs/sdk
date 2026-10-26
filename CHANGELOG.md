@@ -1,3 +1,9 @@
+## Unreleased
+
+- `quotes.sale` authenticates the ticket instead of trusting its `signed` flag: the EIP-712 signature, expiry,
+  registry provider, interface allow-list, factory policy and the sale claimer's denylist are checked before the
+  ticket is returned.
+
 ## 0.52.0 — 2026-10-26
 
 THE NEXT CONTRACT VERSION IS WIRED IN.
