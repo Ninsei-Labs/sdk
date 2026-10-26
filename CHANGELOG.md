@@ -1,5 +1,7 @@
 ## Unreleased
 
+- A failed settlement block-time read no longer drops every order already matched by `findSwaps`. The order is kept
+  with `blockTime: null` and `startHeightReason: "block-time-read"`; the other orders keep their heights.
 - The retired backend no longer decides a swap. A service watch row is an observation only: `receivedXmr > 0` is
   returned as `seen: false` with `next: "verify"` and never signs `markReady`, and a service `declined` status is
   no longer written into the record as a settlement. The escrow's `Declined` event remains the decline source.
@@ -461,6 +463,8 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
 
 ## Unreleased
 
+- A failed settlement block-time read no longer drops every order already matched by `findSwaps`. The order is kept
+  with `blockTime: null` and `startHeightReason: "block-time-read"`; the other orders keep their heights.
 - The retired backend no longer decides a swap. A service watch row is an observation only: `receivedXmr > 0` is
   returned as `seen: false` with `next: "verify"` and never signs `markReady`, and a service `declined` status is
   no longer written into the record as a settlement. The escrow's `Declined` event remains the decline source.

@@ -614,7 +614,13 @@ async function recoveredStartHeight(order, { evmBlockTime, moneroTip, moneroBloc
   // timestamp is already needed here for the Monero height, so it is returned with it.
   let timestamp = cache.get(order.blockNumber);
   if (timestamp === undefined) {
-    timestamp = typeof evmBlockTime === "function" ? secondsOf(await evmBlockTime(order.blockNumber)) : null;
+    // ONE UNREADABLE BLOCK TIME MUST NOT THROW AWAY THE ORDERS ALREADY MATCHED. The order is still a fact from
+    // its log; only the start height is unknown, and the reason says which read failed.
+    try {
+      timestamp = typeof evmBlockTime === "function" ? secondsOf(await evmBlockTime(order.blockNumber)) : null;
+    } catch {
+      return { startHeight: null, startHeightReason: "block-time-read", blockTime: null };
+    }
     if (timestamp === null) return { startHeight: null, startHeightReason: "no-block-time", blockTime: null };
     cache.set(order.blockNumber, timestamp);
   }

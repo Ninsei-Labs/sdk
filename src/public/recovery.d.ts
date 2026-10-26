@@ -361,7 +361,7 @@ export interface FoundSwap {
   /** The Monero height a withdrawal may start from, derived from the order's block time. Null when the caller did
    * not pass the readers; `startHeightReason` then names why. */
   readonly startHeight: number | null;
-  readonly startHeightReason: "no-block-number" | "no-height-readers" | "monero-nodes-unreachable" | "monero-network-mismatch" | "no-block-time" | "monero-header" | null;
+  readonly startHeightReason: "no-block-number" | "no-height-readers" | "monero-nodes-unreachable" | "monero-network-mismatch" | "no-block-time" | "block-time-read" | "monero-header" | null;
 }
 
 /** A storage adapter: the same shape the SDK store takes. */
