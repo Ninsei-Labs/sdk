@@ -172,6 +172,34 @@ jobs:
       - name: Check the restore height (service wins, file is the fallback, none is named)
         run: pnpm run check:restore-height
 
+      # THESE GUARDS USED TO RUN ONLY IN THE RELEASE WORKFLOW. Each one covers a defect from the 0.51.2 review:
+      # a ticket that was not authenticated, a declined backup counted as saved, a foreign view half, a lying
+      # witness, a proof not tied to its commitment, and the v1/v2 recovery paths. A regression in any of them
+      # must redden a pull request, not the release after it.
+      - name: Check sale authentication (the ticket and the signed tip)
+        run: pnpm run check:sale-auth
+
+      - name: Check backup confirmation (a declined key is not a saved key)
+        run: pnpm run check:backup-confirmation
+
+      - name: Check the one-key view half (the funded address matches the words)
+        run: pnpm run check:key-view
+
+      - name: Check arrival consensus (every witness agrees on the whole observation)
+        run: pnpm run check:arrival-consensus
+
+      - name: Check a recorded arrival fixture (the block and transaction parser)
+        run: pnpm run check:arrival-real
+
+      - name: Check order proof binding (the proven point funds its own commitment)
+        run: pnpm run check:order-proof
+
+      - name: Check recovery key paths (v1 index and v2 salt)
+        run: pnpm run check:recovery-key
+
+      - name: Check recovery file opening (text is parsed, v3 opens)
+        run: pnpm run check:recovery-open
+
       # THE WALLET IS BUILT WITHOUT KNOWING THE LIBRARY. The page used to pass a `createWallet` callback that
       # translated "stagenet" into monero-ts's enum, and it owned the only `networkFromNode`. Both are the
       # package's: a caller passes the namespace, and an unknown nettype is null rather than a guess.
