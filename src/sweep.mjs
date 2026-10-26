@@ -13,6 +13,18 @@ import { checkDestination } from "./destination.mjs";
 import { revealedHalfWord } from "./sweep-half.mjs";
 import { takerHalves, takerHalvesV2 } from "./recovery-key.mjs";
 import { jointAddress } from "./order.mjs";
+import { formatXmr } from "../engine/core/xmrAmount.js";
+
+// THE XMR AMOUNT IS PART OF THE RECOVERY FILE. A found order carries the amount the provider signed, in atomic
+// units; the file keeps it in whole XMR, the unit every other payload user reads. An order without the amount
+// stays null rather than silently falling back to the ETH side or to zero.
+const xmrAmountOf = (value) => {
+  if (value === null || value === undefined || value === "") return null;
+  const text = String(value);
+  if (/^\d+$/.test(text)) return formatXmr(BigInt(text));
+  const numeric = Number(text);
+  return Number.isFinite(numeric) && numeric > 0 ? text : null;
+};
 
 // The same boundary as when the file was issued: a passphrase shorter than twelve characters will not open the file.
 const MIN_PASSPHRASE = 12;
@@ -78,7 +90,7 @@ const payloadFromOrder = async (request) => {
     swap: {
       id: order.escrow, side, network, moneroNetwork,
       createdAt: order.blockTime ? Number(order.blockTime) * 1000 : null,
-      payToken: null, payAmount: null, xmrAmount: null, rate: null, maker: null, quoteSignature: null,
+      payToken: null, payAmount: null, xmrAmount: xmrAmountOf(order.xmrAmount), rate: null, maker: null, quoteSignature: null,
       escrow, timeline: null,
     },
     swapWallet: {

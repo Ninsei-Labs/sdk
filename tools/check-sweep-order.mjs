@@ -19,6 +19,7 @@ const orderFor = (halves, side) => ({
   edViewPointLocker: side === "locker" ? halves.viewPoint : halves.makerViewPoint,
   index: 0,
   side,
+  xmrAmount: "1250000000000",
   startHeight: 2_100_000,
   blockTime: 1_700_000_000,
   readyBy: 1_700_000_100,
@@ -40,6 +41,8 @@ export const sweepFromOrderCheck = async () => {
   check(buy.address === buy.payload.moneroWallet.address, "the returned address is not the payload's joint address");
   check(buy.payload.side === "buy" && buy.payload.moneroWallet.otherViewHalf === halves.makerViewHalf,
     "the buy did not carry the maker's view half");
+  check(buy.payload.receive && buy.payload.receive.amount === "1.25",
+    `the signed XMR amount is not in the recovery file: ${JSON.stringify(buy.payload.receive)}`);
   check(buy.payload.moneroWallet.restoreHeight === 2_100_000, `the restore height is ${buy.payload.moneroWallet.restoreHeight}`);
   check(buy.payload.moneroWallet.escrowAddress === orderFor(halves, "locker").escrow, "the escrow is not on the wallet");
   notes.push("a found buy becomes the same payload a recovery file carries");
