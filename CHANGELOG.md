@@ -1,5 +1,8 @@
 ## Unreleased
 
+- Pull-request CI now runs the complete registered check battery, not only the individually named steps. Storage,
+  scan-range, funding receipt, sweep window/order/adapter, claim-tip, claim-sender, quote-rank, provider, compose,
+  entries, version and settlement-profiles were registered in `check.mjs` but ran only in the release workflow.
 - `check-live-contract` asks the configured RPC for the chain id, the factory and cashier code, and the
   implementation code hash. It is the cheapest check against the deployed contract.
 - `check-anvil-fork` forks Arbitrum Sepolia, registers a provider in the deployed registry, signs a quote locally,
@@ -508,6 +511,9 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
 
 ## Unreleased
 
+- Pull-request CI now runs the complete registered check battery, not only the individually named steps. Storage,
+  scan-range, funding receipt, sweep window/order/adapter, claim-tip, claim-sender, quote-rank, provider, compose,
+  entries, version and settlement-profiles were registered in `check.mjs` but ran only in the release workflow.
 - `check-live-contract` asks the configured RPC for the chain id, the factory and cashier code, and the
   implementation code hash. It is the cheapest check against the deployed contract.
 - `check-anvil-fork` forks Arbitrum Sepolia, registers a provider in the deployed registry, signs a quote locally,
