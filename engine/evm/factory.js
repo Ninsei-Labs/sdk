@@ -22,11 +22,18 @@ export const FACTORY_METHODS = {
   createOrderAndFund: "0x3a504547",
 };
 
-// The OrderCreated event topic. It grew the registry address, the provider and the signing key:
-//   cast keccak "OrderCreated(address,address,address,bytes32,bytes32,bytes32,bytes32,bytes32,uint256,uint64,uint64,bytes32,address,address,address)"
+// The OrderCreated event topic. It grew the registry address, the provider and the signing key, and now carries
+// `xmrAmount` in bulk (#32):
+//   cast keccak "OrderCreated(address,address,address,bytes32,bytes32,bytes32,bytes32,bytes32,uint256,uint256,uint64,uint64,bytes32,address,address,address)"
 // The topic lives in TWO places and both must match; a check pins them.
 export const ORDER_CREATED_TOPIC =
+  "0x09add13cca47b227c377447295bfaa00ef3169bfed0f5513d06f8be04af78aad";
+
+// THE PREVIOUS EVENT, KEPT FOR ORDERS ALREADY ON CHAIN. It has no `xmrAmount`, so those orders still fall back to
+// reading word 18 of the clone's code. A new order uses the topic above.
+export const ORDER_CREATED_TOPIC_V1 =
   "0xa22cdabaed3cce4f51dde71626a108ffe9c7bc4216fd14d5e719f892e2fd8ab0";
+export const ORDER_CREATED_TOPICS = Object.freeze([ORDER_CREATED_TOPIC, ORDER_CREATED_TOPIC_V1]);
 
 // QUOTE FIELDS IN CONTRACT ORDER. The order is part of the ABI: a swap gives another call. One list for both
 // functions, so they cannot diverge.

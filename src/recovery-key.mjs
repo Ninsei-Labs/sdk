@@ -17,7 +17,7 @@ import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from "@scure/b
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { createHalves } from "../engine/atomic/halves.js";
 import { halfCommitmentHex } from "../engine/atomic/orderHalfCommit.js";
-import { ORDER_CREATED_TOPIC } from "../engine/evm/factory.js";
+import { ORDER_CREATED_TOPIC, ORDER_CREATED_TOPICS } from "../engine/evm/factory.js";
 import { SdkError } from "./errors.mjs";
 import { probeMoneroNode } from "./probes.mjs";
 import { ed25519, keccak256, randomBytes, secp256k1 } from "./primitives.mjs";
@@ -359,10 +359,15 @@ function topicAddress(address) {
 
 function decodeOrderLog(log) {
   const topics = Array.isArray(log && log.topics) ? log.topics : [];
-  if (topics.length < 4 || String(topics[0]).toLowerCase() !== ORDER_CREATED_TOPIC) return null;
+  const topic0 = String(topics[0] || "").toLowerCase();
+  if (topics.length < 4 || !ORDER_CREATED_TOPICS.includes(topic0)) return null;
   const data = String(log.data || "").replace(/^0x/, "");
-  if (data.length < 64 * 2) return null;
+  const modern = topic0 === ORDER_CREATED_TOPIC;
+  if (data.length < 64 * (modern ? 13 : 12)) return null;
   const word = (i) => "0x" + data.slice(i * 64, (i + 1) * 64).toLowerCase();
+  // THE FIELD OFFSETS MOVED WHEN `xmrAmount` JOINED THE EVENT. The old topic has no XMR amount; its orders fall
+  // back to the clone read, and a caller can still tell why from `xmrAmountReason`.
+  const shift = modern ? 1 : 0;
   return {
     escrow: "0x" + String(topics[1]).slice(26).toLowerCase(),
     locker: "0x" + String(topics[2]).slice(26).toLowerCase(),
@@ -373,12 +378,13 @@ function decodeOrderLog(log) {
     edPointClaimer: word(3),
     edViewPointLocker: word(4),
     amount: BigInt(word(5)).toString(),
-    readyBy: Number(BigInt(word(6))),
-    t1: Number(BigInt(word(7))),
-    salt: word(8),
-    registry: "0x" + data.slice(9 * 64 + 24, 10 * 64),
-    provider: "0x" + data.slice(10 * 64 + 24, 11 * 64),
-    quoteKey: "0x" + data.slice(11 * 64 + 24, 12 * 64),
+    xmrAmount: modern ? BigInt(word(6)).toString() : null,
+    readyBy: Number(BigInt(word(6 + shift))),
+    t1: Number(BigInt(word(7 + shift))),
+    salt: word(8 + shift),
+    registry: "0x" + data.slice((9 + shift) * 64 + 24, (10 + shift) * 64),
+    provider: "0x" + data.slice((10 + shift) * 64 + 24, (11 + shift) * 64),
+    quoteKey: "0x" + data.slice((11 + shift) * 64 + 24, (12 + shift) * 64),
     transactionHash: log.transactionHash || null,
     blockNumber: log.blockNumber != null ? Number(log.blockNumber) : null,
     logIndex: log.logIndex != null ? Number(log.logIndex) : null,
@@ -431,7 +437,7 @@ async function readLogs(evmLogs, request) {
 export async function recoveryIndexTaken({ mnemonic, chainId, index, factory, evmLogs, fromBlock = 0, toBlock = "latest" } = {}) {
   if (typeof factory !== "string" || !ADDRESS_RE.test(factory)) throw bad("factory");
   const own = takerHalves({ mnemonic, chainId, index });
-  const logs = await readLogs(evmLogs, { address: factory, topics: [ORDER_CREATED_TOPIC], fromBlock, toBlock });
+  const logs = await readLogs(evmLogs, { address: factory, topics: [ORDER_CREATED_TOPICS], fromBlock, toBlock });
   return logs.map(decodeOrderLog).filter(Boolean).some((order) =>
     order.commitHalfLocker.toLowerCase() === own.spendCommitment.toLowerCase() ||
     order.commitHalfClaimer.toLowerCase() === own.spendCommitment.toLowerCase());
@@ -581,8 +587,8 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
   if (address) {
     const padded = topicAddress(address);
     const [asLocker, asClaimer] = await Promise.all([
-      readLogs(evmLogs, { ...base, topics: [ORDER_CREATED_TOPIC, null, padded, null] }),
-      readLogs(evmLogs, { ...base, topics: [ORDER_CREATED_TOPIC, null, null, padded] }),
+      readLogs(evmLogs, { ...base, topics: [ORDER_CREATED_TOPICS, null, padded, null] }),
+      readLogs(evmLogs, { ...base, topics: [ORDER_CREATED_TOPICS, null, null, padded] }),
     ]);
     const seen = new Set();
     for (const log of asLocker.concat(asClaimer)) {
@@ -592,7 +598,7 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
       logs.push(log);
     }
   } else {
-    logs = await readLogs(evmLogs, { ...base, topics: [ORDER_CREATED_TOPIC] });
+    logs = await readLogs(evmLogs, { ...base, topics: [ORDER_CREATED_TOPICS] });
   }
   const orders = logs.map(decodeOrderLog).filter(Boolean);
   const found = [];
@@ -637,9 +643,14 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
   for (const order of found) {
     Object.assign(order, await recoveredStartHeight(order, { evmBlockTime, moneroTip: tip, moneroBlockTimestamp: header, cache, readersReason }));
   }
-  // THE XMR AMOUNT IS IN THE CLONE, NOT IN THE LOG. A caller without a code reader gets null and a named reason;
-  // an unreadable or differently-shaped contract does the same. This is data, not a withdrawal verdict.
+  // THE XMR AMOUNT COMES FROM THE EVENT IN THE CURRENT FACTORY. The previous event has no field; those orders fall
+  // back to the clone read, where word 18 is read only from a clone of the exact shape. This is data, not a
+  // withdrawal verdict.
   for (const order of found) {
+    if (order.xmrAmount !== null && order.xmrAmount !== undefined) {
+      order.xmrAmountReason = "event";
+      continue;
+    }
     if (typeof evmCode !== "function") {
       order.xmrAmount = null;
       order.xmrAmountReason = "no-code-reader";

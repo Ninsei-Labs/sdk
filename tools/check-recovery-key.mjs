@@ -11,6 +11,7 @@ import { startHeightFromNodes } from "../src/swaps.mjs";
 const WORDS = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 const CHAIN = 421614;
 const TOPIC = "0xa22cdabaed3cce4f51dde71626a108ffe9c7bc4216fd14d5e719f892e2fd8ab0";
+const MODERN_TOPIC = "0x09add13cca47b227c377447295bfaa00ef3169bfed0f5513d06f8be04af78aad";
 const pad = (value) => "0x" + String(value).toLowerCase().replace(/^0x/, "").padStart(64, "0");
 const address = (byte) => "0x" + byte.repeat(20);
 
@@ -39,6 +40,16 @@ const logFor = ({ commitment, locker, claimer, index = 0 }) => ({
   logIndex: index,
   blockNumber: 100 + index,
 });
+
+/// The current event: the same fields plus `xmrAmount` after `amount`.
+const modernLogFor = ({ commitment, locker, claimer, index = 0, xmrAmount = "5000000000000" }) => {
+  const legacy = logFor({ commitment, locker, claimer, index });
+  const words = [];
+  const data = legacy.data.slice(2);
+  for (let i = 0; i < data.length; i += 64) words.push(data.slice(i, i + 64));
+  words.splice(6, 0, BigInt(xmrAmount).toString(16).padStart(64, "0"));
+  return { ...legacy, topics: [MODERN_TOPIC, ...legacy.topics.slice(1)], data: "0x" + words.join("") };
+};
 
 export const recoveryKeyCheck = async () => {
   const problems = [];
@@ -148,6 +159,13 @@ export const recoveryKeyCheck = async () => {
   });
   check(withXmr.swaps[0].xmrAmount === "5000000000000" && withXmr.swaps[0].xmrAmountReason === null,
     `the clone's XMR amount became ${withXmr.swaps[0].xmrAmount}/${withXmr.swaps[0].xmrAmountReason}`);
+  const modernLog = modernLogFor({ commitment: halves.spendCommitment, locker: address("bb"), claimer: address("cc"), xmrAmount: "7000000000000" });
+  const modern = await recovery.findSwaps({
+    mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
+    evmLogs: async () => [modernLog], gap: 2,
+  });
+  check(modern.swaps[0] && modern.swaps[0].xmrAmount === "7000000000000" && modern.swaps[0].xmrAmountReason === "event",
+    `the current event's XMR amount became ${modern.swaps[0]?.xmrAmount}/${modern.swaps[0]?.xmrAmountReason}`);
 
   const allCalls = [];
   const all = await recovery.findSwaps({
