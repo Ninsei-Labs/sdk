@@ -2525,7 +2525,8 @@ const runScriptCheck = (tool, label) => {
 const saleAuthCheck = () => runScriptCheck("check-sale-auth.mjs", "sale auth");
 const backupConfirmationCheck = () => runScriptCheck("check-backup-confirmation.mjs", "backup confirmation");
 const keyViewCheck = () => runScriptCheck("check-key-view.mjs", "key view");
-
+const arrivalConsensusCheck = () => runScriptCheck("check-arrival-consensus.mjs", "arrival consensus");
+const arrivalRealCheck = () => runScriptCheck("check-arrival-real.mjs", "real arrival");
 const CHECKS = {
   syntax: syntaxCheck,
   import: importCheck,
@@ -2553,6 +2554,8 @@ const CHECKS = {
   "sale-auth": saleAuthCheck,
   "backup-confirmation": backupConfirmationCheck,
   "key-view": keyViewCheck,
+  "arrival-consensus": arrivalConsensusCheck,
+  "arrival-real": arrivalRealCheck,
   "sweep-window": sweepWindowCheck,
   "sweep-order": sweepFromOrderCheck,
   "sweep-adapter": sweepAdapterCheck,
