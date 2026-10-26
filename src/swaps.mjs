@@ -750,9 +750,11 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
     async start(request) {
       if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
       if (!request.quote || typeof request.quote !== "object") throw new SdkError("bad-input", { field: "quote" });
-      // THE OLD PATH IS UNCHANGED; THE NEW ONE ASKS FOR A KEY INSTEAD OF A PER-SWAP FILE.
-      const wantsKey = request.recoveryKey !== undefined && request.recoveryKey !== null;
-      if (!wantsKey && typeof request.onRecoveryFile !== "function") throw new SdkError("bad-input", { field: "onRecoveryFile" });
+      // THE PER-SWAP FILE PATH IS GONE. One key covers every swap, and a per-swap file issued before funding cannot
+      // name the escrow (it does not exist yet), so `sweep.plan` could not read the revealed half from it.
+      if (request.recoveryKey === undefined || request.recoveryKey === null) {
+        throw new SdkError("bad-input", { field: "recoveryKey", why: "required" });
+      }
       if (!request.receiveTo || typeof request.receiveTo !== "string") throw new SdkError("bad-input", { field: "receiveTo" });
       // THE ORDER CONTEXT IS MANDATORY AND NOT INVENTED. It is assembled by the engine FROM THE VERY FIELDS the firm
       // quote's signature is bound to (orderContext.js, FIELDS), because the DLEQ proof proves a half FOR THESE TERMS.
@@ -797,7 +799,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       // number is reserved before the order is built, and it is retired only after the order exists on chain.
       // No per-swap file is assembled on this path.
       let recovery = null;
-      if (wantsKey) {
+      {
         const storage = engine.store.storage();
         const supplied = typeof request.recoveryKey === "string"
           ? request.recoveryKey
@@ -934,32 +936,10 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       record.swap.escrow = { ...(record.swap.escrow || {}), moneroRestoreHeight: measuredHeight };
       try { engine.swap.saveSwap(record.swap); } catch { throw new SdkError("storage-unavailable", { step: "save-restore-height" }); }
 
-      // 2a. THE KEY IS CONFIRMED ONCE; THE OLD PATH STILL ASSEMBLES A PER-SWAP FILE. On the key path there is
-      // no file per swap: the same twelve words cover every swap, and a person who already saved them is not
-      // asked again. A new key is shown before the money moves - no saved key, no funding.
-      let payload = null;
+      // 2a. THE KEY IS CONFIRMED ONCE. The same twelve words cover every swap, and a person who already saved them
+      // is not asked again. A new key is shown before the money moves - no saved key, no funding.
       let file = null;
-      let confirmed = true;
-      if (!recovery) {
-        // THE RECOVERY FILE IS ASSEMBLED AND CHECKED BEFORE THE PERSON. A file that will not open is worse than no
-        // file: the person will rely on it. So we check on our side, before the screen.
-        try {
-          payload = engine.recoveryFile.buildPayload({
-            swap: record.swap, swapWallet: record.swapWallet, escrow: record.escrow,
-            receiveAddress: record.receiveTo || request.receiveTo, restoreHeight: record.restoreHeight ?? null,
-          });
-          engine.recoveryFile.validatePayload(payload);
-        } catch { throw new SdkError("recovery-failed", { step: "build-payload" }); }
-
-        try {
-          file = { name: engine.recoveryFile.recoveryFileName(payload.swapId), contents: await engine.recoveryFile.createRecoveryFile(payload, passphrase) };
-        } catch { throw new SdkError("recovery-failed", { step: "encrypt" }); }
-
-        // 3. THE PERSON'S CONFIRMATION - THE GATE. No action that locks funds goes earlier: otherwise the lock would end
-        // up without a key if the browser is lost. "Did not answer" is a refusal, not consent.
-        confirmed = await request.onRecoveryFile(file);
-        if (confirmed !== true) throw new SdkError("recovery-declined", { swapId: payload.swapId });
-      } else if (recovery.newKey) {
+      if (recovery.newKey) {
         if (typeof request.onRecoveryKey !== "function") throw new SdkError("bad-input", { field: "onRecoveryKey" });
         try {
           file = {
@@ -967,7 +947,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
             contents: await createRecoveryKeyFile({ mnemonic: recovery.key.mnemonic, createdAt: recovery.key.createdAt, passphrase }),
           };
         } catch { throw new SdkError("recovery-failed", { step: "encrypt-key" }); }
-        confirmed = await request.onRecoveryKey(file);
+        const confirmed = await request.onRecoveryKey(file);
         if (confirmed !== true) throw new SdkError("recovery-declined", { key: recovery.key.fingerprint });
         // ONLY THE PERSON'S TRUE ANSWER MAKES THE KEY "BACKED UP". The record already exists for reservations;
         // this flag is what a later start reads. A failed write is a refusal before any funds move.
@@ -982,8 +962,8 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       // 4. LOCKING THE FUNDS. The wallet comes FROM OUTSIDE (an adapter with `send`/`receipt`): signing is possible only
       // in it, and the core keeps no path into the chain of its own. The absence of a wallet is a REFUSAL WITH A CODE,
       // not a substitution of something by default: a lock without a signature would either not happen or go out with
-      // the wrong key. The recovery file has by now been assembled and confirmed by the person - a lock without a file
-      // is not done.
+      // the wrong key. The recovery key has by now been shown and confirmed by the person - a lock without a saved
+      // key is not done.
       const wallet = request.wallet;
       if (!wallet || typeof wallet.send !== "function" || typeof wallet.receipt !== "function") {
         throw new SdkError("bad-input", { field: "wallet", missing: ["send", "receipt"], surface: "swaps.start", step: "lock" });

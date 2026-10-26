@@ -1,5 +1,8 @@
 ## Unreleased
 
+- The per-swap recovery file start path is gone. It was assembled before funding and could not carry the escrow
+  address, so `sweep.plan` on that file reported `revealed-half` missing. Every start now requires the one recovery
+  key; the key is shown and confirmed before the lock. `StartRequest.onRecoveryFile` is removed.
 - `moneroFeeEstimate` reads the daemon's real units: `fee` and `fees` are atomic units per byte, and
   `quantization_mask` is kept as `quantizationMask`. `feeForBytes` multiplies by the size instead of dividing by
   1024, so a 1024-byte transaction at 20000/byte is 20,480,000, not 20,000. The old `feePerKB`/`medianFeePerKB`
@@ -477,6 +480,9 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
 
 ## Unreleased
 
+- The per-swap recovery file start path is gone. It was assembled before funding and could not carry the escrow
+  address, so `sweep.plan` on that file reported `revealed-half` missing. Every start now requires the one recovery
+  key; the key is shown and confirmed before the lock. `StartRequest.onRecoveryFile` is removed.
 - `moneroFeeEstimate` reads the daemon's real units: `fee` and `fees` are atomic units per byte, and
   `quantization_mask` is kept as `quantizationMask`. `feeForBytes` multiplies by the size instead of dividing by
   1024, so a 1024-byte transaction at 20000/byte is 20,480,000, not 20,000. The old `feePerKB`/`medianFeePerKB`
