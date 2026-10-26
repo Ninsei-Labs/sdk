@@ -27,6 +27,9 @@ const halves = createHalves({ ed25519, secp256k1, keccak256, randomBytes });
 /** A BIP39 mnemonic with 128 bits of entropy: twelve words. */
 export const RECOVERY_KEY_VERSION = 1;
 export const RECOVERY_KEY_WORDS = 12;
+// The allocator's ceiling. Discovery must use the same range: a search that stops earlier can miss an order
+// whose number was skipped by an abandoned start or by a swap on another chain.
+export const RECOVERY_INDEX_MAX = 100000;
 export const RECOVERY_KEY_STORE = "ninsei.recovery.key.v1";
 export const RECOVERY_KEY_FILE_MAGIC = "NINSEI RECOVERY KEY";
 export const RECOVERY_KEY_DOMAIN = "ninsei-taker-v1";
@@ -121,8 +124,13 @@ export function recoveryBinding(chainId, index) {
  * package is a hex string, and a BigInt that reaches JSON.stringify fails the whole record.
  */
 export function takerHalves({ mnemonic, chainId, index }) {
+  return takerHalvesFromSeed(seedOf(mnemonic), chainId, index);
+}
+
+// Discovery derives thousands of numbers from one mnemonic. The BIP39 seed is the expensive part (PBKDF2), so it
+// is computed once by the caller and passed here; the per-number work is only HMAC and a curve point.
+function takerHalvesFromSeed(seed, chainId, index) {
   const binding = recoveryBinding(chainId, index);
-  const seed = seedOf(mnemonic);
   const spendHalf = halves.halfFromSeed(seed, binding, halves.HALF_DOMAIN);
   const viewHalf = halves.halfFromSeed(seed, binding, halves.VIEW_HALF_DOMAIN);
   // THE OTHER SIDE'S VIEW HALF. The same key, a third domain: the taker gives this number to the maker, so the
@@ -142,6 +150,14 @@ export function takerHalves({ mnemonic, chainId, index }) {
     makerViewPoint: makerView.ed,
     spendCommitment: halfCommitmentHex(spendHalf, secp256k1, keccak256),
   };
+}
+
+// DISCOVERY NEEDS ONE COMMITMENT, NOT THREE POINTS. The view and maker-view halves are not compared during a
+// search, and their Edwards points are the expensive part of `takerHalves`; deriving only the spend scalar keeps
+// a full-range scan practical.
+function spendCommitmentFromSeed(seed, chainId, index) {
+  const spendHalf = halves.halfFromSeed(seed, recoveryBinding(chainId, index), halves.HALF_DOMAIN);
+  return halfCommitmentHex(spendHalf, secp256k1, keccak256).toLowerCase();
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -321,7 +337,7 @@ export function reserveRecoveryIndex(storage, { chainId, swapId = null } = {}) {
       return i;
     }
   }
-  if (index >= 100000) throw failed("index-exhausted");
+  if (index >= RECOVERY_INDEX_MAX) throw failed("index-exhausted");
   reserved[index] = { chainId: chain, swapId, at: new Date().toISOString() };
   storage.set(RECOVERY_KEY_STORE, JSON.stringify({ ...key, nextIndex: index + 1, reserved, retired }));
   return index;
@@ -567,13 +583,16 @@ async function recoveredStartHeight(order, { evmBlockTime, moneroTip, moneroBloc
  * positions) and merges the answers. Without one, every OrderCreated of the factory is read and matched locally.
  */
 export async function findSwaps({ mnemonic, chainId, factory, address = null, evmLogs,
-  fromBlock = null, deploymentBlock = null, toBlock = "latest", gap = 5, maxIndex = 1000,
+  fromBlock = null, deploymentBlock = null, toBlock = "latest", gap = 5, maxIndex = RECOVERY_INDEX_MAX,
   evmBlockTime = null, evmCode = null, moneroTip = null, moneroBlockTimestamp = null,
   xmrNodes = null, moneroNetwork = null, fetchImpl = globalThis.fetch } = {}) {
   if (typeof factory !== "string" || !ADDRESS_RE.test(factory)) throw bad("factory");
   const chain = numberField(chainId, "chainId");
-  const max = numberField(maxIndex, "maxIndex") || 1000;
-  const missesAllowed = numberField(gap, "gap") || 5;
+  // `gap` is retained in the signature for callers of the old API, but it is deliberately NOT used: five empty
+  // numbers are ordinary when a start was abandoned or the key was used on another chain, and stopping there
+  // hides a funded order whose log is already in `logs`.
+  void gap;
+  const max = Math.min(numberField(maxIndex, "maxIndex") || RECOVERY_INDEX_MAX, RECOVERY_INDEX_MAX);
   // THE CHAIN SAYS WHERE ITS ORDERS CAN START. An explicit fromBlock wins; otherwise the caller can pass the
   // factory's deployment block (the SDK's chain registry exposes it as escrow.deploymentBlock). Zero remains the
   // last resort for a caller that knows the factory existed at genesis.
@@ -602,23 +621,35 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
     logs = await readLogs(evmLogs, { ...base, topics: [ORDER_CREATED_TOPICS] });
   }
   const orders = logs.map(decodeOrderLog).filter(Boolean);
-  const found = [];
-  let misses = 0;
-  let scanned = 0;
-  for (let index = 0; index < max && misses < missesAllowed; index += 1) {
-    scanned = index + 1;
-    const own = takerHalves({ mnemonic, chainId: chain, index });
-    const matches = orders.filter((order) =>
-      order.commitHalfLocker.toLowerCase() === own.spendCommitment.toLowerCase() ||
-      order.commitHalfClaimer.toLowerCase() === own.spendCommitment.toLowerCase()
-    );
-    if (matches.length === 0) {
-      misses += 1;
-      continue;
+  // MATCH BY COMMITMENT, NOT BY A DENSE INDEX RANGE. The logs are already in hand; the only cost of a missing
+  // index is one derivation. Building the map first also keeps each order from being compared against every
+  // index.
+  const byCommit = new Map();
+  for (const order of orders) {
+    const locker = order.commitHalfLocker.toLowerCase();
+    const claimer = order.commitHalfClaimer.toLowerCase();
+    if (locker) {
+      if (!byCommit.has(locker)) byCommit.set(locker, []);
+      byCommit.get(locker).push({ order, side: "locker" });
     }
-    misses = 0;
-    for (const order of matches) {
-      found.push({ ...order, index, side: order.commitHalfLocker.toLowerCase() === own.spendCommitment.toLowerCase() ? "locker" : "claimer" });
+    if (claimer && claimer !== locker) {
+      if (!byCommit.has(claimer)) byCommit.set(claimer, []);
+      byCommit.get(claimer).push({ order, side: "claimer" });
+    }
+  }
+  const seed = seedOf(mnemonic);
+  const found = [];
+  const foundKeys = new Set();
+  let scanned = 0;
+  for (let index = 0; index < max; index += 1) {
+    scanned = index + 1;
+    const commitment = spendCommitmentFromSeed(seed, chain, index);
+    const matches = byCommit.get(commitment) || [];
+    for (const { order, side } of matches) {
+      const key = `${order.transactionHash || ""}:${order.logIndex ?? ""}:${index}`;
+      if (foundKeys.has(key)) continue;
+      foundKeys.add(key);
+      found.push({ ...order, index, side });
     }
   }
   // EACH FOUND ORDER CARRIES THE MONERO HEIGHT ITS WITHDRAWAL MAY START FROM. The rule lives here, not in a
@@ -669,5 +700,13 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
     order.xmrAmount = read.value;
     order.xmrAmountReason = read.reason;
   }
-  return { swaps: found, scanned };
+  return {
+    swaps: found,
+    scanned,
+    // A CALLER MUST NOT READ "NO SWAPS" AS "THE WHOLE RANGE WAS SEARCHED". The allocator ceiling is the only
+    // complete range; a smaller caller-supplied bound says where the search stopped.
+    searchedUpTo: scanned ? scanned - 1 : null,
+    complete: max >= RECOVERY_INDEX_MAX,
+    ...(max >= RECOVERY_INDEX_MAX ? {} : { incompleteReason: "max-index" }),
+  };
 }

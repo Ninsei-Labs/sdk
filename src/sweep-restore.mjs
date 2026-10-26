@@ -62,6 +62,19 @@ const heightOf = async (driver, name) => {
   }
 };
 
+// AN INCOMPLETE SCAN IS A NAMED OUTCOME, NOT A ZERO BALANCE. The wallet library's sync is best-effort: a node
+// that refuses block downloads leaves a wallet at height 0, and a caller that only reads `unlocked` shows "no
+// XMR". The heights and the sync error decide the verdict here, so the page does not have to guess.
+const scanCompleteness = async (driver, { syncError = null } = {}) => {
+  const walletHeight = await heightOf(driver, "getHeight");
+  const nodeHeight = await heightOf(driver, "getDaemonHeight");
+  let reason = null;
+  if (syncError) reason = "sync-failed";
+  else if (walletHeight === null || nodeHeight === null) reason = "no-heights";
+  else if (walletHeight < nodeHeight) reason = "behind-node";
+  return { scanComplete: reason === null, ...(reason === null ? {} : { scanIncompleteReason: reason }), walletHeight, nodeHeight };
+};
+
 // THE BLOCK WINDOW AROUND THE LOCK. A full rescan of mainnet takes hours; the lock can only be in the blocks from
 // the order's start to just after its t1. The caller may pass the hashes, or a node URL and the SDK asks for them.
 export async function windowTxHashes({ nodeUrl, fromHeight, toHeight, fetchImpl = globalThis.fetch, sleep = defaultSleep, attempts = 3 } = {}) {
@@ -202,10 +215,11 @@ export async function restoreWallet(request = {}) {
     }
     windowReport.txs = hashes.length;
     if (hashes.length && typeof driver.scanTxs === "function") {
+      let windowSyncError = null;
       try {
         await step("setRestoreHeight", () => driver.setRestoreHeight(tipHeight));
         await step("scanTxs", () => driver.scanTxs(hashes));
-        try { await wallet.sync(); } catch { /* the balance below decides */ }
+        try { await wallet.sync(); } catch (error) { windowSyncError = error; }
         windowTotal = asAmount(await step("getBalance", () => driver.getBalance()), "balance");
         windowUnlocked = asAmount(await step("unlockedBalance", () => wallet.unlockedBalance()), "unlockedBalance");
         windowReport.used = true;
@@ -257,9 +271,10 @@ export async function restoreWallet(request = {}) {
       // A WINDOW WITH COINS IS THE ANSWER. A window with none falls through to the full scan unless the caller
       // explicitly turned the fallback off.
       if (windowReport.used && (windowTotal > 0n || windowUnlocked > 0n || requestWindow.fallback === false)) {
+        const completeness = await scanCompleteness(driver, { syncError: windowSyncError });
         return {
-          total: windowTotal.toString(), unlocked: windowUnlocked.toString(), scanHeight, walletHeight: await heightOf(driver, "getHeight"),
-          nodeHeight: await heightOf(driver, "getDaemonHeight"), passes: 1, lockedPass: false, window: windowReport,
+          total: windowTotal.toString(), unlocked: windowUnlocked.toString(), scanHeight,
+          ...completeness, passes: 1, lockedPass: false, window: windowReport,
         };
       }
     } else if (hashes.length) {
@@ -284,8 +299,9 @@ export async function restoreWallet(request = {}) {
 
   // A FAILED SYNC IS BEST-EFFORT, exactly as in the signing step: what blocks a withdrawal is the spendable
   // remainder, and it is read below. The library throws low-level while scanning a chain it cannot read; that must
-  // not pre-empt the verdict.
-  try { await wallet.sync(); } catch { /* the remainder decides */ }
+  // not pre-empt the verdict. The error is remembered and named in `scanIncompleteReason`.
+  let syncError = null;
+  try { await wallet.sync(); } catch (error) { syncError = error; }
 
   let total = asAmount(await step("getBalance", () => driver.getBalance()), "balance");
   let unlocked = asAmount(await step("unlockedBalance", () => wallet.unlockedBalance()), "unlockedBalance");
@@ -298,18 +314,18 @@ export async function restoreWallet(request = {}) {
   if (rescanWhenLocked && total > 0n && unlocked === 0n && typeof driver.rescanSpent === "function" && passes < PASSES) {
     lockedPass = true;
     await step("rescanSpent", () => driver.rescanSpent());
-    try { await wallet.sync(); } catch { /* as above */ }
+    try { await wallet.sync(); } catch (error) { syncError = error; }
     total = asAmount(await step("getBalance", () => driver.getBalance()), "balance");
     unlocked = asAmount(await step("unlockedBalance", () => wallet.unlockedBalance()), "unlockedBalance");
     passes += 1;
   }
 
+  const completeness = await scanCompleteness(driver, { syncError });
   return {
     total: total.toString(),
     unlocked: unlocked.toString(),
     scanHeight,
-    walletHeight: await heightOf(driver, "getHeight"),
-    nodeHeight: await heightOf(driver, "getDaemonHeight"),
+    ...completeness,
     passes,
     // Whether the second pass RAN - not whether it helped. A reader must be able to tell "nothing was locked" from
     // "it was locked and stayed locked".

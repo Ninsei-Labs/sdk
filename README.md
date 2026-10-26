@@ -177,7 +177,9 @@ range is not aligned: it is the provider's refusal, and it arrives as a code. In
 
 ## Found orders and the paying token
 
-`findSwaps` returns the orders whose commitment came from the recovery key. Each found order reports:
+`findSwaps` returns the orders whose commitment came from the recovery key. It does **not** stop after a run of
+empty numbers: the allocator's whole range is searched by default, and a smaller caller-supplied `maxIndex` returns
+`complete: false` with `searchedUpTo`, so a page can say where it stopped. Each found order reports:
 
 - `amount` — the escrow's **native** amount in wei;
 - `settlementToken: "native"` — what the escrow receives;
@@ -201,7 +203,9 @@ logs from the registry's deployment block.
 
 The withdrawal window retries a `429`, a timeout or a `5xx` before it gives up. If the window still cannot be read,
 `restoreWallet` falls back to the full scan and reports `window.fallback: true` with `fallbackWhy: "window-read"` and
-the node's status; a withdrawal is not refused because the node was busy.
+the node's status; a withdrawal is not refused because the node was busy. When the wallet cannot reach the node's
+height, the result says `scanComplete: false` with `scanIncompleteReason: "sync-failed"`, `"behind-node"` or
+`"no-heights"`; a zero balance in that state is not an empty wallet.
 
 ## Extending to other networks (Tron, Solana and beyond)
 
