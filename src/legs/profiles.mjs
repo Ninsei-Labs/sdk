@@ -36,10 +36,11 @@ export const VM_PROFILES = Object.freeze({
   }),
   // UTXO: no account and no escrow contract. Settlement is an HTLC/adaptor-script output, addressed by a script
   // or an address, and identified by a txid. A future Bitcoin-family chain uses the same shape with its own
-  // network parameters.
+  // network parameters. Taproot outputs (the likely shape of an adaptor-signature leg) are bech32m (BIP350), so
+  // that format is named here next to the legacy bech32 (v0) and base58check forms.
   bitcoin: Object.freeze({
     vm: "bitcoin",
-    addressFormat: "base58check-or-bech32",
+    addressFormat: "base58check-or-bech32-or-bech32m",
     settlementKind: "utxo-script",
     refKind: "script",
     txRef: "txid",

@@ -37,7 +37,7 @@ not a VM shape.
 | `evm` | `hex-20` | contract | address | yes |
 | `tron` | `base58check` | contract | address | profile only |
 | `solana` | `base58` | program | PDA | profile only |
-| `bitcoin` | `base58check-or-bech32` | UTXO script | script | profile only |
+| `bitcoin` | `base58check-or-bech32-or-bech32m` | UTXO script | script | profile only |
 
 The planned order is Tron, Solana, then Bitcoin. Dogecoin is not on that list and has no profile. A profile is not
 a driver: `LEGS` still holds only `evm`, so Tron, Solana and Bitcoin are refused by name until their own work lands.

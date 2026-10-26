@@ -17,7 +17,7 @@ export const settlementProfilesCheck = async () => {
     evm: ["hex-20", "contract", "address", "hash"],
     tron: ["base58check", "contract", "address", "hash"],
     solana: ["base58", "program", "pda", "signature"],
-    bitcoin: ["base58check-or-bech32", "utxo-script", "script", "txid"],
+    bitcoin: ["base58check-or-bech32-or-bech32m", "utxo-script", "script", "txid"],
   };
   const keys = Object.keys(VM_PROFILES).sort();
   check(JSON.stringify(keys) === JSON.stringify(Object.keys(expected).sort()), "profile keys are " + keys.join(", "));
