@@ -304,3 +304,11 @@ jobs:
       # names an unknown network" are different problems, and a preflight must agree with the wallet builder.
       - name: Check the node preflight (height, network, every failure named)
         run: pnpm run check:node-probe
+
+      # THE REGISTRY IS THE LIST. The named steps above keep failures readable, but a check that was added to
+      # `CHECKS` and not to this workflow used to run only in the release workflow: storage, scan-range,
+      # funding-receipt, sweep-window, sweep-order, sweep-adapter, claim-tip, claim-sender, quote-rank, provider,
+      # compose, entries, version and settlement-profiles were in that position. This last step runs every
+      # registered check, so a new entry is covered on the day it lands; the named steps stay for diagnosis.
+      - name: Run every registered SDK check (the release battery)
+        run: pnpm run check
