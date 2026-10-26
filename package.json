@@ -57,7 +57,9 @@
     "check:anvil-fork": "node tools/check-anvil-fork.mjs",
     "check:dex": "node tools/check.mjs --only=cow,cow-refusal,kyber,kyber-refusal,uniswapx,uniswapx-refusal,uniswap-relay,uniswap-relay-refusal",
     "check:anvil-uniswap": "node tools/check-anvil-uniswap.mjs",
-    "check:atomic-flow": "node tools/check-atomic-flow.mjs"
+    "check:atomic-flow": "node tools/check-atomic-flow.mjs",
+    "check:packed-consumer": "node tools/check-packed-consumer.mjs",
+    "check:quote-binding": "node tools/check-quote-binding.mjs"
   },
   "types": "./index.d.ts",
   "exports": {
