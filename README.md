@@ -209,6 +209,9 @@ a dead node, and a node on another network is not an absent reader. A page that 
 path can call `recoveryIndexTaken` from `./recovery` before using a number; it checks the factory's `OrderCreated`
 logs from the registry's deployment block.
 
+A revealed half published as `h + n` (the alias the escrow accepts) is reduced modulo the secp256k1 order before the
+sweep key check, so it rebuilds the same key and remains withdrawable.
+
 The per-swap recovery file start path is gone: a start requires the one recovery key, shown and confirmed before
 funding, and a file that could not name the escrow is no longer produced.
 

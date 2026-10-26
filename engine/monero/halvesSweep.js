@@ -15,7 +15,11 @@ export function spendKeysFromRevealedHalf({
   for (const [name, v] of Object.entries({ ownSpendHalf, ownViewHalf, otherSpendPoint, otherViewHalf, revealedHalf })) {
     if (v === undefined || v === null || v === "") throw new Error("not set: " + name);
   }
-  const sum = halves.combineHalves(BigInt(ownSpendHalf), BigInt(revealedHalf));
+  // THE CONTRACT ACCEPTS THE REAL HALF PLUS THE SECP256K1 ORDER. `claim` and `refund` do not reject `h + n` (the
+  // escrow only hashes the word), but adding n is not the same point on edwards25519. Reduce the public word by the
+  // secp order first: the small real half is unchanged, and the alias lands on the same scalar.
+  const revealed = BigInt(revealedHalf) % halves.SECP_ORDER;
+  const sum = halves.combineHalves(BigInt(ownSpendHalf), revealed);
   const sumPub = halves.publicHalves(sum).ed;
   // The expected spend key is built FROM OWN HALF AND THE COUNTERPARTY POINT (what was in the order).
   // The half from the file arrives as a string, so it must be converted - forgetting this crashed the XMR

@@ -12,6 +12,7 @@ import { pathToFileURL } from "node:url";
 import { createSweep } from "../src/sweep.mjs";
 import { revealedHalfWord } from "../src/sweep-half.mjs";
 import * as engine from "../src/engine.mjs";
+import { primitives } from "../src/primitives.mjs";
 
 const WORD = "0x0234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
 const ADDRESS = "59DnddZzVBCevVg9YB3zCs24DSRH4ByS2FMBafPpYxSEB6FMegQNEbtNzbLjrrEUPNAg9NhK5uMiiAZpENBS4D4mEPcRq";
@@ -54,5 +55,22 @@ writeFileSync(broken, readFileSync(join(process.cwd(), "src/sweep-half.mjs"), "u
   .replace('return "0x" + hex;', 'return "0x" + hex.slice(24);'));
 const mutated = await import(pathToFileURL(broken).href + "?run=" + Date.now());
 assert.notEqual(mutated.revealedHalfWord(WORD), WORD, "the old 20-byte truncation must redden this guard");
+
+// A HALF PLUS THE SECP256K1 ORDER IS THE SAME HALF ON THE CURVE THE CONTRACT USES. The escrow accepts h + n in
+// claim/refund; the sweep must reduce the word before adding it to our own half.
+{
+  const halves = engine.halves.createHalves(primitives);
+  const own = 123n;
+  const other = 456n;
+  const request = {
+    halves, ownSpendHalf: own, ownViewHalf: 789n,
+    otherSpendPoint: halves.publicHalves(other).ed, otherViewHalf: 999n,
+    revealedHalf: other,
+  };
+  const real = engine.halvesSweep.spendKeysFromRevealedHalf(request);
+  const alias = engine.halvesSweep.spendKeysFromRevealedHalf({ ...request, revealedHalf: other + halves.SECP_ORDER });
+  assert.equal(alias.privateSpendKey, real.privateSpendKey, "the contract's accepted alias h + n must rebuild the same spend key");
+  assert.equal(alias.privateViewKey, real.privateViewKey, "the alias changed the view key");
+}
 
 console.log("sweep-half: passed (full word, zero/short refused, plan uses the full word, breaking run red)");
