@@ -1,5 +1,8 @@
 ## Unreleased
 
+- `check-atomic-flow` calls `runAtomicOrder` itself with stand-in worker and funding seams: it proves the sequence
+  reaches funding once, carries the salt, both commitments and the view point, returns the stand-in half and joint
+  address, and refuses a rejected counterparty before funding.
 - Pull-request CI now runs the complete registered check battery, not only the individually named steps. Storage,
   scan-range, funding receipt, sweep window/order/adapter, claim-tip, claim-sender, quote-rank, provider, compose,
   entries, version and settlement-profiles were registered in `check.mjs` but ran only in the release workflow.
@@ -511,6 +514,9 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
 
 ## Unreleased
 
+- `check-atomic-flow` calls `runAtomicOrder` itself with stand-in worker and funding seams: it proves the sequence
+  reaches funding once, carries the salt, both commitments and the view point, returns the stand-in half and joint
+  address, and refuses a rejected counterparty before funding.
 - Pull-request CI now runs the complete registered check battery, not only the individually named steps. Storage,
   scan-range, funding receipt, sweep window/order/adapter, claim-tip, claim-sender, quote-rank, provider, compose,
   entries, version and settlement-profiles were registered in `check.mjs` but ran only in the release workflow.

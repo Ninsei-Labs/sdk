@@ -56,7 +56,8 @@
     "check:live-contract": "node tools/check-live-contract.mjs",
     "check:anvil-fork": "node tools/check-anvil-fork.mjs",
     "check:dex": "node tools/check.mjs --only=cow,cow-refusal,kyber,kyber-refusal,uniswapx,uniswapx-refusal,uniswap-relay,uniswap-relay-refusal",
-    "check:anvil-uniswap": "node tools/check-anvil-uniswap.mjs"
+    "check:anvil-uniswap": "node tools/check-anvil-uniswap.mjs",
+    "check:atomic-flow": "node tools/check-atomic-flow.mjs"
   },
   "types": "./index.d.ts",
   "exports": {

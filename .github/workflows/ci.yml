@@ -207,6 +207,12 @@ jobs:
       - name: Check contract vectors (commitments, event topic, selectors from cast)
         run: pnpm run check:contract-vectors
 
+      # THE SEQUENCE THE PAGE RUNS, NOT ONLY ITS calldata. `runAtomicOrder` is called with a stand-in worker and a
+      # stand-in funding call: the check proves the order of steps, the values passed across the boundary, and that
+      # a refused counterparty never reaches funding.
+      - name: Check the atomic order flow (build, verify, commit, fund)
+        run: pnpm run check:atomic-flow
+
       - name: Check recovery key paths (v1 index and v2 salt)
         run: pnpm run check:recovery-key
 
