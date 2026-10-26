@@ -213,7 +213,9 @@ Funding is reported from the receipt, not from the send. A status-0 receipt is `
 receipt, a receipt without `OrderCreated`, or an event from another factory is `funding-pending` with the transaction
 hash, and `swaps.start` does not save an escrow or retire a recovery number in that state.
 
-The withdrawal window retries a `429`, a timeout or a `5xx` before it gives up. If the window still cannot be read,
+The wallet adapter accepts the standard Monero network names (`mainnet`, `stagenet`, `testnet`, `fakechain`) and
+still checks the address shape, so a mainnet withdrawal is not refused because the demo registry lists only
+stagenet. The withdrawal window retries a `429`, a timeout or a `5xx` before it gives up. If the window still cannot be read,
 `restoreWallet` falls back to the full scan and reports `window.fallback: true` with `fallbackWhy: "window-read"` and
 the node's status; a withdrawal is not refused because the node was busy. When the wallet cannot reach the node's
 height, the result says `scanComplete: false` with `scanIncompleteReason: "sync-failed"`, `"behind-node"` or
