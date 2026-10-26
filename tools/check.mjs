@@ -2569,6 +2569,7 @@ const scanRangeCheck = () => runScriptCheck("check-scan-range.mjs", "scan range"
 const recoveryOpenCheck = () => runScriptCheck("check-recovery-open.mjs", "recovery open");
 const contractVectorsCheck = () => runScriptCheck("check-contract-vectors.mjs", "contract vectors");
 const atomicFlowCheck = () => runScriptCheck("check-atomic-flow.mjs", "atomic flow");
+const quoteBindingCheck = () => runScriptCheck("check-quote-binding.mjs", "quote binding");
 const CHECKS = {
   syntax: syntaxCheck,
   import: importCheck,
@@ -2612,6 +2613,7 @@ const CHECKS = {
   "recovery-open": recoveryOpenCheck,
   "contract-vectors": contractVectorsCheck,
   "atomic-flow": atomicFlowCheck,
+  "quote-binding": quoteBindingCheck,
 };
 
 export const runCheck = async (name) => {

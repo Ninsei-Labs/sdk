@@ -213,6 +213,16 @@ jobs:
       - name: Check the atomic order flow (build, verify, commit, fund)
         run: pnpm run check:atomic-flow
 
+      # EVERY SIGNED FIELD MUST BE IN THE DIGEST. A field can be in ORDER_QUOTE_FIELDS and still be skipped by the
+      # struct-hash loop; mutating one field at a time must change the digest, and deleting it must name it.
+      - name: Check quote field binding (every field changes the digest)
+        run: pnpm run check:quote-binding
+
+      # THE TARBALL, NOT THE WORKING TREE. Pack the package, install that tarball in an empty project and import
+      # every public subpath from it. This catches a missing asset or a subpath that only resolves from the repo.
+      - name: Check the packed consumer (pack, install, import every subpath)
+        run: pnpm run check:packed-consumer
+
       - name: Check recovery key paths (v1 index and v2 salt)
         run: pnpm run check:recovery-key
 

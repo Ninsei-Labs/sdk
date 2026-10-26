@@ -1,5 +1,10 @@
 ## Unreleased
 
+- `check-packed-consumer` packs the package, installs that tarball into an empty project and imports every public
+  subpath, then checks the engine's relative assets. It catches a package that reads as complete but fails at the
+  consumer's first import.
+- `check-quote-binding` mutates every signed quote field one at a time: each must change the EIP-712 digest, each
+  must be named when absent, and the signature bytes must stay outside the digest.
 - `check-anvil-fork` now covers the refund and decline paths, a claim by a relayer with a non-zero `claimTip`, a
   wrong half, `markReady` from a non-locker and a reused salt. The refund must publish the locker half; the decline
   must publish none.
@@ -517,6 +522,11 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
 
 ## Unreleased
 
+- `check-packed-consumer` packs the package, installs that tarball into an empty project and imports every public
+  subpath, then checks the engine's relative assets. It catches a package that reads as complete but fails at the
+  consumer's first import.
+- `check-quote-binding` mutates every signed quote field one at a time: each must change the EIP-712 digest, each
+  must be named when absent, and the signature bytes must stay outside the digest.
 - `check-anvil-fork` now covers the refund and decline paths, a claim by a relayer with a non-zero `claimTip`, a
   wrong half, `markReady` from a non-locker and a reused salt. The refund must publish the locker half; the decline
   must publish none.
