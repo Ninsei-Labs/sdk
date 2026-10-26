@@ -777,6 +777,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       // THE RECORD IS CREATED TOGETHER WITH OUR SIDE: the order terms go into it, and the side is built by the engine's
       // builder (with the DLEQ proof and the encryption key), not by the core's own arithmetic.
       let keySide = null;
+      let derivedViewHalf = null;
       const makeRecord = typeof createRecord === "function" ? createRecord
         : async (req) => recordModule.createRecord(recordInputOf(req), { order: req.order, side: keySide });
       const passphrase = typeof request.passphrase === "string" ? request.passphrase : "";
@@ -802,7 +803,9 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         }
         if (!saved && !supplied) throw new SdkError("bad-input", { field: "recoveryKey" });
         const key = saved || importRecoveryKey(supplied);
-        if (!saved) saveRecoveryKey(storage, key);
+        // THE KEY IS SAVED, BUT NOT YET BACKED UP. `backupConfirmed` is its own fact: a key in storage is not a
+        // key the person has saved. Saving it here is needed for index reservations; funding waits for the flag.
+        if (!saved) saveRecoveryKey(storage, { ...key, backupConfirmed: false });
         const chainId = request.order.chainId;
         const explicit = request.recoveryIndex !== undefined && request.recoveryIndex !== null;
         let index = explicit ? Number(request.recoveryIndex) : reserveRecoveryIndex(storage, { chainId });
@@ -832,7 +835,29 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         }
         const derived = takerHalves({ mnemonic: key.mnemonic, chainId, index });
         keySide = buildOwnSideFromHalves(request.order, { spendHalf: derived.spendHalf, viewHalf: derived.viewHalf }).side;
-        recovery = { storage, key, index, newKey: !saved };
+        // THE MAKER'S VIEW HALF IS DERIVED FROM THE KEY, NOT CHOSEN BY THE NODE. Without this binding a
+        // signed quote could carry another view half; the funded address would differ from the one the twelve
+        // words rebuild, and `sweep.fromOrder` would refuse after the funds were locked.
+        derivedViewHalf = { half: derived.makerViewHalf, point: derived.makerViewPoint };
+        recovery = { storage, key, index, newKey: !saved || saved.backupConfirmed !== true };
+      }
+
+      // THE KEY PATH BINDS THE VIEW HALF BEFORE THE ORDER IS BUILT. The quote must echo the half derived from
+      // the same words and number; a missing or different half is refused, never silently replaced.
+      if (derivedViewHalf) {
+        const cp = request.counterparty && typeof request.counterparty === "object" ? request.counterparty : null;
+        const suppliedHalf = cp ? (cp.viewHalfClaimer !== undefined && cp.viewHalfClaimer !== null ? cp.viewHalfClaimer
+          : (cp.viewHalf !== undefined && cp.viewHalf !== null ? cp.viewHalf : null)) : null;
+        if (suppliedHalf === null) throw new SdkError("quote-field-unbound", { step: "viewHalfClaimer", field: "viewHalfClaimer" });
+        let sameHalf = false;
+        try { sameHalf = BigInt(suppliedHalf) === BigInt(derivedViewHalf.half); } catch { sameHalf = false; }
+        if (!sameHalf) throw new SdkError("quote-refused", { step: "viewHalfClaimer", why: "not-the-derived-half" });
+        const suppliedPoint = cp.viewPoint !== undefined && cp.viewPoint !== null ? cp.viewPoint
+          : (cp.viewHalfClaimer !== undefined ? null : cp.viewPub);
+        if (suppliedPoint !== undefined && suppliedPoint !== null &&
+            String(suppliedPoint).replace(/^0x/, "").toLowerCase() !== String(derivedViewHalf.point).replace(/^0x/, "").toLowerCase()) {
+          throw new SdkError("quote-refused", { step: "viewHalfClaimer", why: "point-mismatch" });
+        }
       }
 
       let made = null;
@@ -920,6 +945,14 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         } catch { throw new SdkError("recovery-failed", { step: "encrypt-key" }); }
         confirmed = await request.onRecoveryKey(file);
         if (confirmed !== true) throw new SdkError("recovery-declined", { key: recovery.key.fingerprint });
+        // ONLY THE PERSON'S TRUE ANSWER MAKES THE KEY "BACKED UP". The record already exists for reservations;
+        // this flag is what a later start reads. A failed write is a refusal before any funds move.
+        try {
+          const stored = loadRecoveryKey(recovery.storage) || {};
+          saveRecoveryKey(recovery.storage, { ...recovery.key, nextIndex: stored.nextIndex,
+            reserved: stored.reserved, retired: stored.retired, backupConfirmed: true });
+          recovery.key = { ...recovery.key, backupConfirmed: true };
+        } catch { throw new SdkError("storage-unavailable", { step: "save-recovery-key" }); }
       }
 
       // 4. LOCKING THE FUNDS. The wallet comes FROM OUTSIDE (an adapter with `send`/`receipt`): signing is possible only
