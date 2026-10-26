@@ -1,0 +1,25 @@
+{
+  "source": "router-escrow-evm, generated with Foundry cast 1.8.5 on 2026-10-26. These values are an independent oracle: they come from cast, not from the SDK's own curve or hash code.",
+  "halfCommitments": [
+    {
+      "half": "0x0000000000000000000000000000000000000000000000000000000000000001",
+      "commit": "0xc0a6c424ac7157ae408398df7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+      "command": "cast wallet public-key --private-key 0x...01 | strip 0x | cast keccak"
+    },
+    {
+      "half": "0x0000000000000000000000000000000000000000000000000000000000000007",
+      "commit": "0x73f2a22d0902cd8d5c90937dd41c057fd1c78805aac12b0a94a405c0461a6fbb",
+      "command": "cast wallet public-key --private-key 0x...07 | strip 0x | cast keccak"
+    },
+    {
+      "half": "0x0234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+      "commit": "0x8565039db2331097196f6d66a639efe67f378686c789e6cb2f05e5b9c8c7e46d",
+      "command": "cast wallet public-key --private-key 0x0234... | strip 0x | cast keccak"
+    }
+  ],
+  "orderCreatedTopic": "0x09add13cca47b227c377447295bfaa00ef3169bfed0f5513d06f8be04af78aad",
+  "factoryMethods": {
+    "predict": "0x3e949279",
+    "createOrderAndFund": "0x3a504547"
+  }
+}

@@ -2567,6 +2567,7 @@ const fundingReceiptCheck = () => runScriptCheck("check-funding-receipt.mjs", "f
 const storageCheck = () => runScriptCheck("check-storage.mjs", "storage");
 const scanRangeCheck = () => runScriptCheck("check-scan-range.mjs", "scan range");
 const recoveryOpenCheck = () => runScriptCheck("check-recovery-open.mjs", "recovery open");
+const contractVectorsCheck = () => runScriptCheck("check-contract-vectors.mjs", "contract vectors");
 const CHECKS = {
   syntax: syntaxCheck,
   import: importCheck,
@@ -2608,6 +2609,7 @@ const CHECKS = {
   storage: storageCheck,
   "scan-range": scanRangeCheck,
   "recovery-open": recoveryOpenCheck,
+  "contract-vectors": contractVectorsCheck,
 };
 
 export const runCheck = async (name) => {
