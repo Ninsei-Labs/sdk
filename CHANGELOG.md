@@ -1,5 +1,8 @@
 ## Unreleased
 
+- A split sweep reports the SUM of every signed transaction's fee, not the first one. Both wallet adapters use one
+  helper; `sweep.sign` subtracts the total from the remainder, and `sweep.relay` already returns every txid. One
+  unreadable fee makes the total unknown (`null`), never a partial figure.
 - A failed settlement block-time read no longer drops every order already matched by `findSwaps`. The order is kept
   with `blockTime: null` and `startHeightReason: "block-time-read"`; the other orders keep their heights.
 - The retired backend no longer decides a swap. A service watch row is an observation only: `receivedXmr > 0` is
@@ -463,6 +466,9 @@ THE ENGINE MIRROR IS SYNCED AGAIN AFTER THE DEMO'S BUNDLE REBUILD.
 
 ## Unreleased
 
+- A split sweep reports the SUM of every signed transaction's fee, not the first one. Both wallet adapters use one
+  helper; `sweep.sign` subtracts the total from the remainder, and `sweep.relay` already returns every txid. One
+  unreadable fee makes the total unknown (`null`), never a partial figure.
 - A failed settlement block-time read no longer drops every order already matched by `findSwaps`. The order is kept
   with `blockTime: null` and `startHeightReason: "block-time-read"`; the other orders keep their heights.
 - The retired backend no longer decides a swap. A service watch row is an observation only: `receivedXmr > 0` is
