@@ -777,6 +777,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       // THE RECORD IS CREATED TOGETHER WITH OUR SIDE: the order terms go into it, and the side is built by the engine's
       // builder (with the DLEQ proof and the encryption key), not by the core's own arithmetic.
       let keySide = null;
+      let derivedViewHalf = null;
       const makeRecord = typeof createRecord === "function" ? createRecord
         : async (req) => recordModule.createRecord(recordInputOf(req), { order: req.order, side: keySide });
       const passphrase = typeof request.passphrase === "string" ? request.passphrase : "";
@@ -834,7 +835,29 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         }
         const derived = takerHalves({ mnemonic: key.mnemonic, chainId, index });
         keySide = buildOwnSideFromHalves(request.order, { spendHalf: derived.spendHalf, viewHalf: derived.viewHalf }).side;
+        // THE MAKER'S VIEW HALF IS DERIVED FROM THE KEY, NOT CHOSEN BY THE NODE. Without this binding a
+        // signed quote could carry another view half; the funded address would differ from the one the twelve
+        // words rebuild, and `sweep.fromOrder` would refuse after the funds were locked.
+        derivedViewHalf = { half: derived.makerViewHalf, point: derived.makerViewPoint };
         recovery = { storage, key, index, newKey: !saved || saved.backupConfirmed !== true };
+      }
+
+      // THE KEY PATH BINDS THE VIEW HALF BEFORE THE ORDER IS BUILT. The quote must echo the half derived from
+      // the same words and number; a missing or different half is refused, never silently replaced.
+      if (derivedViewHalf) {
+        const cp = request.counterparty && typeof request.counterparty === "object" ? request.counterparty : null;
+        const suppliedHalf = cp ? (cp.viewHalfClaimer !== undefined && cp.viewHalfClaimer !== null ? cp.viewHalfClaimer
+          : (cp.viewHalf !== undefined && cp.viewHalf !== null ? cp.viewHalf : null)) : null;
+        if (suppliedHalf === null) throw new SdkError("quote-field-unbound", { step: "viewHalfClaimer", field: "viewHalfClaimer" });
+        let sameHalf = false;
+        try { sameHalf = BigInt(suppliedHalf) === BigInt(derivedViewHalf.half); } catch { sameHalf = false; }
+        if (!sameHalf) throw new SdkError("quote-refused", { step: "viewHalfClaimer", why: "not-the-derived-half" });
+        const suppliedPoint = cp.viewPoint !== undefined && cp.viewPoint !== null ? cp.viewPoint
+          : (cp.viewHalfClaimer !== undefined ? null : cp.viewPub);
+        if (suppliedPoint !== undefined && suppliedPoint !== null &&
+            String(suppliedPoint).replace(/^0x/, "").toLowerCase() !== String(derivedViewHalf.point).replace(/^0x/, "").toLowerCase()) {
+          throw new SdkError("quote-refused", { step: "viewHalfClaimer", why: "point-mismatch" });
+        }
       }
 
       let made = null;

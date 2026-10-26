@@ -40,6 +40,7 @@
     "check:arrival-read": "node tools/check-arrival-read.mjs",
     "check:sale-auth": "node tools/check-sale-auth.mjs",
     "check:backup-confirmation": "node tools/check-backup-confirmation.mjs",
+    "check:key-view": "node tools/check-key-view.mjs",
     "check:daemon-address": "node tools/check-daemon-address.mjs",
     "check:ci-scripts": "node tools/check-ci-scripts.mjs",
     "check:factory-selectors": "node tools/check-factory-selectors.mjs",
