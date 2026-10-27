@@ -1,5 +1,9 @@
 ## Unreleased
 
+- The recovery-key store distinguishes "nothing stored" from "could not read": a throwing read is
+  `storage-unavailable { step: "read" }`, corrupt or unknown JSON is `storage-unavailable { step: "parse" }`, and a
+  failed write is `storage-unavailable { step: "write" }`. A corrupt record is no longer silently replaced by the
+  next start.
 - A new `swaps.start` uses a per-order salt by default: the order's own salt is the v2 recovery salt, and a missing
   salt is drawn before the order context is built. A v1 recovery index is used only when the caller names one
   explicitly, for restoring an old order.
