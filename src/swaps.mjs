@@ -16,6 +16,7 @@ import * as recordModule from "./record.mjs";
 import { buildOwnSideFromHalves, contextOf, normalizeCounterpartyView, orderStep } from "./order.mjs";
 // Locking the funds: sending goes through the already-finished step (`lock.send`), the wallet is an adapter from outside.
 import * as lock from "./lock.mjs";
+import { fundingReceiptVerdict } from "../engine/evm/funding.js";
 import { vmOfChain, legFor } from "./legs/index.mjs";
 // THE VIEW HALVES - from the core's primitives: the sum of two halves is the key the wallet sees incoming payments
 // with. There is no arithmetic of the core's own here either (see order.mjs) - we use the same halves builder.
@@ -381,6 +382,48 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
     const all = Object.values((state && state.swaps) || {}).filter((s) => s && s.id);
     return all.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
   };
+  // A START THAT ENDED WITH A SENT TRANSACTION AND NO RECEIPT IS RESUMED, NOT RESENT. The transaction hash and the
+  // predicted escrow are kept on the record; a retry of the same quote reads that receipt instead of building a
+  // second side and sending a second deposit.
+  const pendingFundingOf = (quoteId) => {
+    const id = String(quoteId || "");
+    if (!id) return null;
+    return records().find((swap) => String(swap.orderQuoteId || "") === id &&
+      (swap.fundingPending === true || (swap.escrow && swap.escrow.fundingPending === true))) || null;
+  };
+  async function resumePendingFunding(record, request) {
+    const swap = record.swap || record;
+    const escrowRecord = swap.escrow && typeof swap.escrow === "object" ? swap.escrow : {};
+    const txHash = escrowRecord.fundTx || swap.fundTx || null;
+    if (!txHash) {
+      return { id: swap.id || null, escrow: escrowRecord.address || null,
+        address: (record.swapWallet && record.swapWallet.address) || null,
+        step: "funding-pending", txHash: null, reason: "no-transaction-hash", next: "receipt" };
+    }
+    const wallet = request.wallet;
+    let receipt = null;
+    if (wallet && typeof wallet.receipt === "function") {
+      try { receipt = await wallet.receipt(txHash); } catch { receipt = null; }
+    }
+    const order = request.order && typeof request.order === "object" ? request.order : {};
+    const verdict = fundingReceiptVerdict(receipt, {
+      factory: order.factory || (request.orderQuote && request.orderQuote.factory) || null,
+      expectedEscrow: escrowRecord.address || null,
+    });
+    if (verdict.status === "reverted") throw new SdkError("contract-reverted", { step: "funding" });
+    if (verdict.status === "funded") {
+      swap.escrow = { ...escrowRecord, address: verdict.escrow, fundingPending: false,
+        evmBirthBlock: Number(verdict.birthBlock) > 0 ? Number(verdict.birthBlock) : (escrowRecord.evmBirthBlock ?? null) };
+      delete swap.fundingPending;
+      try { engine.swap.saveSwap(swap); } catch { throw new SdkError("storage-unavailable", { step: "save-escrow" }); }
+      return { id: swap.id || null, escrow: verdict.escrow,
+        address: (record.swapWallet && record.swapWallet.address) || null,
+        step: "xmr-incoming", server: null, watch: null, next: "watch" };
+    }
+    return { id: swap.id || null, escrow: escrowRecord.address || null,
+      address: (record.swapWallet && record.swapWallet.address) || null,
+      step: "funding-pending", txHash, reason: verdict.reason || "no-receipt", next: "receipt" };
+  }
 
   // THE GUARDS' DATA: what the core knows itself (the network, the order amount, the token allowance) plus the balance
   // read by THE SAME wallet the lock will be signed with. Here too - a refusal WITH A CODE where there is no data at
@@ -756,6 +799,11 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         throw new SdkError("bad-input", { field: "recoveryKey", why: "required" });
       }
       if (!request.receiveTo || typeof request.receiveTo !== "string") throw new SdkError("bad-input", { field: "receiveTo" });
+      // RESUME BEFORE ANY NEW SIDE OR SEND. The previous start may have sent the deposit and lost the receipt;
+      // reusing its hash is the only way to learn the escrow without a second payment.
+      const quoteForResume = (request.orderQuote && request.orderQuote.id) || (request.quote && request.quote.id) || null;
+      const pendingRecord = pendingFundingOf(quoteForResume);
+      if (pendingRecord) return await resumePendingFunding(pendingRecord, request);
       // A NEW START USES A PER-ORDER SALT, NOT A RECOVERY INDEX. A v1 index is the same at every factory and on
       // every device, so two devices can derive one half. When the caller brings no `recoverySalt`, the order's own
       // salt is the client salt; a missing salt is drawn here and written into the order before its context is built.
@@ -1037,11 +1085,20 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       // address is unknown and calling the step xmr-incoming would make the person wait for XMR at a guess. Keep
       // the swap pending: the transaction hash is the handle for a later receipt read.
       if (funded && funded.pending) {
-        throw new SdkError("funding-pending", {
-          txHash: funded.createHash || null,
-          reason: funded.pendingReason || "no-receipt",
-          predictedEscrow: funded.predictedEscrow || null,
-        });
+        // THE TRANSACTION IS SENT; ONLY THE RECEIPT IS LATE. Keep the hash and the predicted escrow on the record
+        // so this start and a later retry can read the receipt instead of building a second deposit.
+        const pendingTx = funded.createHash || null;
+        const predicted = funded.predictedEscrow || null;
+        const escrowRecord = record.swap.escrow && typeof record.swap.escrow === "object" ? record.swap.escrow : {};
+        record.swap.fundingPending = true;
+        record.swap.escrow = { ...escrowRecord, address: predicted || escrowRecord.address || null,
+          fundTx: pendingTx || escrowRecord.fundTx || null, fundingPending: true,
+          fundingReason: funded.pendingReason || "no-receipt" };
+        try { engine.swap.saveSwap(record.swap); } catch { throw new SdkError("storage-unavailable", { step: "save-pending" }); }
+        return { id: record.swap.id || null, escrow: record.swap.escrow.address || null,
+          address: (record.swapWallet && record.swapWallet.address) || null,
+          step: "funding-pending", txHash: pendingTx,
+          reason: funded.pendingReason || "no-receipt", predictedEscrow: predicted, next: "receipt" };
       }
       // THE ESCROW ADDRESS IS TAKEN FROM THE RECEIPT (lock.send does this), not from a prediction. It is also written
       // into the swap: otherwise the progress screen and the explorer link would show an address that is not on the

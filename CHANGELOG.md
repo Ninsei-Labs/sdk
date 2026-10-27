@@ -1,5 +1,8 @@
 ## Unreleased
 
+- A `funding-pending` start keeps the sent transaction hash and the predicted escrow on the swap record. A retry of
+  the same quote reads that receipt and continues to `xmr-incoming` when it is funded, or returns
+  `funding-pending` again; it never builds a second side or sends a second deposit.
 - `scanRange` treats a block without its decoded `json`, a BUSY block, a transaction body count below the wrapper
   count and an extra transaction as unreadable: the block is named in `missingHeights`, not counted as empty or as
   money. Transaction results are mapped back by requested hash, so a partial answer cannot pass as complete.
