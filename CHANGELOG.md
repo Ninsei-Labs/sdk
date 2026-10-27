@@ -1,5 +1,8 @@
 ## Unreleased
 
+- The counterparty's view material is normalised once for the guard and the builder: conflicting `viewHalf` /
+  `viewHalfClaimer` or `viewPoint` / `viewPub` aliases are refused, the point is derived from the half when only the
+  half is present, and a half whose derived point differs from the declared point is refused before funding.
 - `quotes.sale` reads the `{ request: {...} }` envelope as the request, so a claimer named inside it is bound to the
   signed quote. The requested XMR is compared with the signed `xmrAmount`, and a returned order is compared field by
   field with the signed terms instead of only with the derived `context`.

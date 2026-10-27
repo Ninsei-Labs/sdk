@@ -89,6 +89,43 @@ const sameFormAsPoint = (proof) => (proof && typeof proof === "object" && proof.
 // "no point", not "point in another form".
 const pointForm = (v) => (typeof v === "string" && v ? norm(v) : v);
 
+// THE COUNTERPARTY'S VIEW MATERIAL HAS TWO SPELLINGS, AND THEY MUST AGREE. A quote carries `viewHalfClaimer`
+// (and sometimes `viewHalf`), a point as `viewPoint` or `viewPub`. The guard and the builder used to prefer
+// different names: the guard took the half first and ignored the point, the builder took the point first. A
+// counterparty could then supply a half and a different point, the address was built from one and the recovery
+// words from the other. Normalise once, refuse conflicting aliases, and derive the point from the half when only
+// the half is present.
+export function normalizeCounterpartyView(counterparty) {
+  const cp = counterparty && typeof counterparty === "object" ? counterparty : {};
+  const halves = [cp.viewHalf, cp.viewHalfClaimer].filter((v) => v !== undefined && v !== null && v !== "");
+  let half = null;
+  if (halves.length) {
+    try { half = BigInt(String(halves[0])); } catch { throw new SdkError("bad-input", { field: "counterparty", why: "view-half" }); }
+    for (const other of halves.slice(1)) {
+      let n = null;
+      try { n = BigInt(String(other)); } catch { n = null; }
+      if (n === null || n !== half) throw new SdkError("bad-input", { field: "counterparty", why: "conflicting-view-half" });
+    }
+  }
+  const points = [cp.viewPoint, cp.viewPub].filter((v) => v !== undefined && v !== null && v !== "");
+  let point = null;
+  if (points.length) {
+    point = pointForm(points[0]);
+    if (!isPoint(point)) throw new SdkError("bad-input", { field: "counterparty", why: "view-point" });
+    for (const other of points.slice(1)) {
+      if (pointForm(other) !== point) throw new SdkError("bad-input", { field: "counterparty", why: "conflicting-view-point" });
+    }
+  }
+  if (half !== null) {
+    let derived = null;
+    try { derived = pointForm(builder().pointOf(half)); } catch { derived = null; }
+    if (!derived) throw new SdkError("bad-input", { field: "counterparty", why: "view-half" });
+    if (point !== null && point !== derived) throw new SdkError("bad-input", { field: "counterparty", why: "view-half-point-mismatch" });
+    point = derived;
+  }
+  return { half: half === null ? null : halves[0], point };
+}
+
 /**
  * Our side of the order. It is built by the engine's builder: two halves, their points, the DLEQ PROOF (it is
  * bound to the order terms and so is not computed without the context) and the side's encryption key.
@@ -139,11 +176,12 @@ export function acceptCounterparty({ context, side = null, counterparty = null, 
     // (rfq/orderQuote.mjs). While only `edPub`/`viewPub` were accepted, the facade's own side was NOT accepted:
     // start answered bad-input { field: "counterparty", missing: ["edPub"] } to its own answer. The engine knew
     // this mapping (sdk/src/swap-flow.mjs: edPub: quote.edPointClaimer). We accept BOTH names.
+    const view = normalizeCounterpartyView(counterparty);
     accepted = {
       proof: sameFormAsPoint(counterparty.proof),
       edPub: pointForm(counterparty.edPub || counterparty.edPoint || counterparty.edPointClaimer || pub.ed || null),
-      viewPoint: pointForm(counterparty.viewPoint || counterparty.viewPub || null),
-      viewHalf: counterparty.viewHalf || counterparty.viewHalfClaimer || null,
+      viewPoint: view.point,
+      viewHalf: view.half,
       // THE COUNTERPARTY'S SPEND HALF: HIS commitment (commitHalfClaimer) is computed from it where it did not
       // arrive ready-made. Without the half the commitment cannot be obtained - and that is named null, not invented.
       half: counterparty.half !== undefined ? counterparty.half : null,
