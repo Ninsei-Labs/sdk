@@ -40,7 +40,7 @@ const fails = [];
 const ok = (m) => { pass += 1; console.log("  ok    " + m); };
 const bad = (m) => { fails.push(m); console.log("  FAIL  " + m); };
 
-async function startWith(view, v2 = false, salt = order.salt, extra = {}) {
+async function startWith(view, v2 = false, salt = order.salt, extra = {}, autoSalt = false) {
   setStorage(memoryStorage());
   let sent = 0;
   const wallet = { address: async () => order.locker,
@@ -51,7 +51,7 @@ async function startWith(view, v2 = false, salt = order.salt, extra = {}) {
   if (view === "missing") delete counterparty.viewHalfClaimer;
   else counterparty.viewHalfClaimer = view;
   const request = { quote: { id: "q", chain: "arbitrum-sepolia", asset: "ETH", amount: 1, size: 1 }, order, orderQuote: quote,
-    counterparty, recoveryKey: WORDS, ...(v2 ? { recoverySalt: salt } : { recoveryIndex: 0 }),
+    counterparty, recoveryKey: WORDS, ...(autoSalt ? {} : (v2 ? { recoverySalt: salt } : { recoveryIndex: 0 })),
     receiveTo: "synthetic-xmr-destination", restoreHeight: 100, wallet, onRecoveryKey: async () => true };
   const result = await createSwaps({ mode: "live", xmrNetwork: "stagenet", logs: async () => [],
     call: async ({ data }) => (data.startsWith(FACTORY_METHODS.predict) ? "0x" + "0".repeat(24) + "88".repeat(20) : "0x"),
@@ -79,6 +79,13 @@ console.log("=== 1b) THE SALT-BASED KEY USES THE SAME CHECK ===");
   const { result, sent } = await startWith(derivedV2.makerViewHalf, true);
   if (result && result.code === "wallet-rejected" && sent === 1) ok("a v2 salt start reaches the wallet with its own derived half");
   else bad("v2 salt start: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
+}
+
+console.log("=== 1b2) A NEW START DEFAULTS TO THE ORDER SALT, NOT A V1 INDEX ===");
+{
+  const { result, sent } = await startWith(derivedV2.makerViewHalf, false, order.salt, {}, true);
+  if (result && result.code === "wallet-rejected" && sent === 1) ok("a start without recoverySalt derives the v2 half from the order salt");
+  else bad("default salt start: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
 }
 
 console.log("=== 1c) A SALT THE QUOTE DID NOT CARRY IS REFUSED ===");

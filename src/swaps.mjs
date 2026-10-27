@@ -29,7 +29,7 @@ import { createActions } from "./actions.mjs";
 import {
   commitRecoveryIndex, createRecoveryKeyFile, importRecoveryKey, loadRecoveryKey,
   recoveryIndexTaken, recoveryKeyFileName, recoverySaltOf, reserveRecoveryIndex, saveRecoveryKey,
-  takerHalves, takerHalvesV2,
+  newRecoverySalt, takerHalves, takerHalvesV2,
 } from "./recovery-key.mjs";
 // THE XMR ARRIVAL CHECK ON TWO NODES (issue #85) - IN THE CORE, from the same mirrored rule and block parser.
 import * as xmrArrival from "./xmr-arrival.mjs";
@@ -756,6 +756,18 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         throw new SdkError("bad-input", { field: "recoveryKey", why: "required" });
       }
       if (!request.receiveTo || typeof request.receiveTo !== "string") throw new SdkError("bad-input", { field: "receiveTo" });
+      // A NEW START USES A PER-ORDER SALT, NOT A RECOVERY INDEX. A v1 index is the same at every factory and on
+      // every device, so two devices can derive one half. When the caller brings no `recoverySalt`, the order's own
+      // salt is the client salt; a missing salt is drawn here and written into the order before its context is built.
+      // An explicit `recoveryIndex` keeps the legacy path for restoring an old order; it is not a new-start default.
+      const explicitRecoveryIndex = request.recoveryIndex !== undefined && request.recoveryIndex !== null;
+      if ((request.recoverySalt === undefined || request.recoverySalt === null) && !explicitRecoveryIndex) {
+        if (!request.order || typeof request.order !== "object") throw new SdkError("bad-input", { field: "order" });
+        if (request.order.salt === undefined || request.order.salt === null || request.order.salt === "") {
+          request.order = { ...request.order, salt: newRecoverySalt() };
+        }
+        request.recoverySalt = request.order.salt;
+      }
       // THE ORDER CONTEXT IS MANDATORY AND NOT INVENTED. It is assembled by the engine FROM THE VERY FIELDS the firm
       // quote's signature is bound to (orderContext.js, FIELDS), because the DLEQ proof proves a half FOR THESE TERMS.
       // Substituting an empty value here would mean issuing a key bound to nothing.

@@ -1,5 +1,8 @@
 ## Unreleased
 
+- A new `swaps.start` uses a per-order salt by default: the order's own salt is the v2 recovery salt, and a missing
+  salt is drawn before the order context is built. A v1 recovery index is used only when the caller names one
+  explicitly, for restoring an old order.
 - The counterparty's view material is normalised once for the guard and the builder: conflicting `viewHalf` /
   `viewHalfClaimer` or `viewPoint` / `viewPub` aliases are refused, the point is derived from the half when only the
   half is present, and a half whose derived point differs from the declared point is refused before funding.
