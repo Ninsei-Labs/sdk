@@ -266,7 +266,16 @@ export async function fetchBlock(daemonUrl, height, fetchImpl = globalThis.fetch
     body: JSON.stringify({ jsonrpc: "2.0", id: "block", method: "get_block", params: { height } }),
   });
   const j = await res.json();
+  // A BUSY ANSWER IS NOT AN EMPTY BLOCK. The daemon answers BUSY while it is still indexing; a reader that treats
+  // the missing `json` as "no transactions" reports a complete range with a smaller balance.
+  if (j && String(j.status || "").toUpperCase() === "BUSY") throw new Error(`block ${height}: daemon is BUSY`);
   if (!j.result) throw new Error(`block ${height} not received: ${j.error ? j.error.message : "empty answer"}`);
+  if (String(j.result.status || "").toUpperCase() === "BUSY") throw new Error(`block ${height}: daemon is BUSY`);
+  // THE BLOCK MUST CARRY ITS DECODED BODY. `json` is what scanRange walks; without it the block is unreadable, not
+  // empty. A result with only a blob or a header is refused by the same rule.
+  if (j.result.json === undefined || j.result.json === null || j.result.json === "") {
+    throw new Error(`block ${height}: no decoded body`);
+  }
   return j.result;
 }
 
@@ -285,15 +294,27 @@ export async function fetchTransactions(daemonUrl, hashes, fetchImpl = globalThi
   const wrappers = Array.isArray(j && j.txs) ? j.txs : [];
   const encoded = Array.isArray(j && j.txs_as_json) ? j.txs_as_json : [];
   // EVERY HASH WE ASKED FOR MUST COME BACK. A partial answer is a missing block, not a quiet "no transactions".
-  const returned = new Set(wrappers.map((w) => String((w && w.tx_hash) || "").replace(/^0x/, "").toLowerCase()).filter(Boolean));
-  const missing = hashes.map((h) => String(h).replace(/^0x/, "").toLowerCase()).filter((h) => !returned.has(h));
+  const requested = [...new Set(hashes.map((h) => String(h).replace(/^0x/, "").toLowerCase()))];
+  const byHash = new Map();
+  for (const wrapper of wrappers) {
+    const hash = String((wrapper && wrapper.tx_hash) || "").replace(/^0x/, "").toLowerCase();
+    if (!hash) continue;
+    if (byHash.has(hash)) throw new Error("transactions-duplicate: " + hash);
+    byHash.set(hash, wrapper);
+  }
+  const missing = requested.filter((h) => !byHash.has(h));
   if (missing.length) throw new Error("transactions-missing: " + missing.length);
-  if (!encoded.length && wrappers.length) throw new Error("transactions-undecoded");
+  // EXACTLY THE REQUESTED SET. An extra transaction is not money this range asked for, and it may belong to another
+  // block; counting it silently inflates the sum. A decoded body is required for every wrapper, one for one.
+  if (byHash.size !== requested.length) throw new Error("transactions-extra: " + (byHash.size - requested.length));
+  if (encoded.length !== wrappers.length) throw new Error("transactions-undecoded");
   // HASH AND HEIGHT LIVE IN THE WRAPPER, not in the parsed body: as_json omits them. Without this stitching a
   // "found transfer" would have neither hash nor height - useless to the caller, yet everything would look successful.
-  return encoded.map((s, i) => {
+  const indexOf = new Map(wrappers.map((w, i) => [String((w && w.tx_hash) || "").replace(/^0x/, "").toLowerCase(), i]));
+  return requested.map((hash) => {
+    const w = byHash.get(hash) || {};
+    const s = encoded[indexOf.get(hash)];
     const body = typeof s === "string" ? JSON.parse(s) : s;
-    const w = wrappers[i] || {};
     body.tx_hash = w.tx_hash || body.tx_hash || null;
     body.block_height = w.block_height ?? null;
     body.confirmations = w.confirmations ?? null;

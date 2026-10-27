@@ -11,21 +11,24 @@ const ok = (m) => { pass += 1; console.log("  ok    " + m); };
 const bad = (m) => { fails.push(m); console.log("  FAIL  " + m); };
 const reply = (body) => ({ ok: true, json: async () => body });
 
-function rpc({ failAt = null, busy = false, partial = false } = {}) {
+function rpc({ failAt = null, busy = false, partial = false, undecodedBlock = false, mismatchedTx = false, extraTx = false } = {}) {
   return async (url, init) => {
     const request = JSON.parse(init.body);
     if (url.endsWith("/json_rpc")) {
       const height = Number(request.params && request.params.height);
       if (height === failAt) return { ok: false, json: async () => ({ error: { message: "block busy" } }) };
+      if (height === 100 && undecodedBlock) return reply({ result: { status: "BUSY" } });
       return reply({ result: { json: JSON.stringify({ tx_hashes: height === 100 ? ["aa", "bb"] : [] }) } });
     }
     if (url.endsWith("/get_transactions")) {
       if (busy) return reply({ status: "BUSY", txs: [], txs_as_json: [] });
       const hashes = request.txs_hashes || [];
       const kept = partial ? hashes.slice(0, 1) : hashes;
+      const bodies = mismatchedTx ? kept.slice(0, 1) : kept;
+      if (extraTx) { kept.push("cc"); bodies.push("cc"); }
       return reply({
         txs: kept.map((hash) => ({ tx_hash: hash, block_height: 100 })),
-        txs_as_json: kept.map(() => JSON.stringify({ extra: [], vout: [] })),
+        txs_as_json: bodies.map(() => JSON.stringify({ extra: [], vout: [] })),
       });
     }
     throw new Error("unexpected route " + url);
@@ -58,7 +61,28 @@ console.log("=== 3) A BUSY TRANSACTION ANSWER IS NOT AN EMPTY BLOCK ===");
   else bad("BUSY -> " + JSON.stringify({ complete: result.complete, missing: result.missingHeights }));
 }
 
-console.log("=== 4) A PARTIAL TRANSACTION ANSWER IS NAMED ===");
+console.log("=== 4) A BLOCK WITH NO DECODED BODY IS NOT EMPTY ===");
+{
+  const result = await run({ undecodedBlock: true });
+  if (result.complete === false && result.missingHeights.includes(100)) ok("a BUSY block without json marks 100 missing");
+  else bad("undecoded block -> " + JSON.stringify({ complete: result.complete, missing: result.missingHeights }));
+}
+
+console.log("=== 5) TWO HASHES WITH ONE BODY ARE NOT COMPLETE ===");
+{
+  const result = await run({ mismatchedTx: true });
+  if (result.complete === false && result.missingHeights.includes(100)) ok("a body count below the wrapper count marks 100 missing");
+  else bad("mismatched body -> " + JSON.stringify({ complete: result.complete, missing: result.missingHeights }));
+}
+
+console.log("=== 6) AN EXTRA TRANSACTION IS REFUSED ===");
+{
+  const result = await run({ extraTx: true });
+  if (result.complete === false && result.missingHeights.includes(100)) ok("a transaction that was not requested marks 100 missing");
+  else bad("extra transaction -> " + JSON.stringify({ complete: result.complete, missing: result.missingHeights }));
+}
+
+console.log("=== 7) A PARTIAL TRANSACTION ANSWER IS NAMED ===");
 {
   const result = await run({ partial: true });
   if (result.complete === false && result.missingHeights.includes(100)) ok("a missing transaction marks its block missing");
