@@ -1,5 +1,8 @@
 ## Unreleased
 
+- `scanRange` treats a block without its decoded `json`, a BUSY block, a transaction body count below the wrapper
+  count and an extra transaction as unreadable: the block is named in `missingHeights`, not counted as empty or as
+  money. Transaction results are mapped back by requested hash, so a partial answer cannot pass as complete.
 - The recovery-key store distinguishes "nothing stored" from "could not read": a throwing read is
   `storage-unavailable { step: "read" }`, corrupt or unknown JSON is `storage-unavailable { step: "parse" }`, and a
   failed write is `storage-unavailable { step: "write" }`. A corrupt record is no longer silently replaced by the
