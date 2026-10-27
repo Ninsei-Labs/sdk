@@ -12,7 +12,7 @@ import { primitives } from "../src/primitives.mjs";
 import { quoteDigest, signQuoteDigest } from "../src/quoteEip712Spec.mjs";
 import { halfCommitmentHex } from "../engine/atomic/orderHalfCommit.js";
 import { memoryStorage, setStorage } from "../engine/core/store.js";
-import { FACTORY_METHODS } from "../engine/evm/factory.js";
+import { FACTORY_METHODS, ORDER_CREATED_TOPIC } from "../engine/evm/factory.js";
 import { takerHalves, takerHalvesV2 } from "../src/recovery-key.mjs";
 import { markBodyOf } from "../src/swaps.mjs";
 import { SDK_VERSION } from "../src/version.mjs";
@@ -96,12 +96,12 @@ console.log("=== 1c) A SALT THE QUOTE DID NOT CARRY IS REFUSED ===");
   else bad("salt mismatch: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
 }
 
-async function startPending() {
-  setStorage(memoryStorage());
+async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 } } = {}) {
+  if (fresh) setStorage(memoryStorage());
   let sent = 0;
   const wallet = { address: async () => order.locker,
     send: async () => { sent += 1; return "0x" + "99".repeat(32); },
-    receipt: async () => ({ status: "0x1", logs: [], blockNumber: 10 }) };
+    receipt: async () => receipt };
   const counterparty = { proof: maker.side.proof, edPointClaimer: maker.spendPoint,
     commitHalfClaimer: quote.commitHalfClaimer, viewHalfClaimer: derived.makerViewHalf };
   const request = { quote: { id: "q", chain: "arbitrum-sepolia", asset: "ETH", amount: 1, size: 1 }, order, orderQuote: quote,
@@ -116,9 +116,22 @@ async function startPending() {
 console.log("=== 1d) A RECEIPT WITHOUT THE EVENT IS NOT xmr-incoming ===");
 {
   const { result, sent } = await startPending();
-  if (result && result.code === "funding-pending" && result.params && result.params.txHash && sent === 1) {
+  if (result && result.step === "funding-pending" && result.txHash && result.escrow && sent === 1) {
     ok("a status-1 receipt with no OrderCreated is funding-pending, not a funded escrow");
-  } else bad("pending funding: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
+  } else bad("pending funding: " + JSON.stringify({ step: result && result.step, txHash: result && result.txHash, sent }));
+}
+
+console.log("=== 1d2) A RETRY READS THE SAME HASH AND DOES NOT SEND AGAIN ===");
+{
+  const first = await startPending();
+  const predicted = first.result && first.result.escrow;
+  const pad = (v) => "0x" + String(v).replace(/^0x/, "").toLowerCase().padStart(64, "0");
+  const created = { address: order.factory, topics: [ORDER_CREATED_TOPIC, pad(predicted), pad(order.locker), pad(order.claimer)],
+    data: "0x" + "00".repeat(12 * 32) };
+  const second = await startPending({ fresh: false, receipt: { status: "0x1", logs: [created], blockNumber: 11 } });
+  if (predicted && second.result && second.result.step === "xmr-incoming" && second.result.escrow === predicted && second.sent === 0) {
+    ok("the retry reads the pending hash, saves the escrow and sends nothing");
+  } else bad("pending retry: " + JSON.stringify({ ctor: second.result && second.result.constructor && second.result.constructor.name, keys: second.result && Object.keys(second.result), code: second.result && second.result.code, msg: second.result && second.result.message, sent: second.sent }));
 }
 
 console.log("=== 1e) THE MARK BODY NAMES THE SDK LINE ===");
