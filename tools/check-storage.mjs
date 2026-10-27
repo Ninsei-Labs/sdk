@@ -5,6 +5,7 @@
 // which the next write saved over. A second client with another adapter also replaced the process-wide store.
 import { memoryStorage, setStorage, bindStorage, loadState, saveState, reset } from "../engine/core/store.js";
 import { createNinsei } from "../src/index.mjs";
+import { RECOVERY_KEY_STORE, importRecoveryKey, loadRecoveryKey, saveRecoveryKey } from "../src/recovery-key.mjs";
 
 let pass = 0;
 const fails = [];
@@ -64,6 +65,35 @@ console.log("=== 5) A SECOND DIFFERENT STORE IS REFUSED ===");
   const rebound = codeOf(() => bindStorage(b));
   if (rebound === null) ok("setStorage releases the binding for a later instance");
   else bad("reset binding -> " + JSON.stringify(rebound));
+}
+
+console.log("=== 5b) THE RECOVERY-KEY STORE HAS THE SAME SPLIT ===");
+{
+  const words = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+  const key = importRecoveryKey(words);
+  const absent = memoryStorage();
+  if (loadRecoveryKey(absent) === null) ok("no recovery key stored is not an error");
+  else bad("absent recovery key did not return null");
+
+  const corrupt = memoryStorage(new Map([[RECOVERY_KEY_STORE, "{not json"]]));
+  const parse = codeOf(() => loadRecoveryKey(corrupt));
+  if (parse && parse.code === "storage-unavailable" && parse.params.step === "parse") ok("corrupt recovery key -> storage-unavailable parse");
+  else bad("corrupt recovery key -> " + JSON.stringify(parse));
+
+  const shape = memoryStorage(new Map([[RECOVERY_KEY_STORE, JSON.stringify({ version: 999, mnemonic: words })]]));
+  const wrongShape = codeOf(() => loadRecoveryKey(shape));
+  if (wrongShape && wrongShape.code === "storage-unavailable" && wrongShape.params.step === "parse") ok("an unknown recovery-key record -> storage-unavailable parse");
+  else bad("unknown recovery-key shape -> " + JSON.stringify(wrongShape));
+
+  const unreadable = { get() { throw new Error("denied"); }, set() {}, remove() {} };
+  const read = codeOf(() => loadRecoveryKey(unreadable));
+  if (read && read.code === "storage-unavailable" && read.params.step === "read") ok("a throwing recovery-key read -> storage-unavailable read");
+  else bad("throwing recovery-key read -> " + JSON.stringify(read));
+
+  const unwritable = { get() { return null; }, set() { throw new Error("quota"); }, remove() {} };
+  const write = codeOf(() => saveRecoveryKey(unwritable, key));
+  if (write && write.code === "storage-unavailable" && write.params.step === "write") ok("a throwing recovery-key write -> storage-unavailable write");
+  else bad("throwing recovery-key write -> " + JSON.stringify(write));
 }
 
 console.log("=== 6) A SECOND CLIENT CANNOT TAKE OVER THE FIRST ONE'S STORE ===");

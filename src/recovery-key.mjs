@@ -346,24 +346,31 @@ export async function openRecoveryKeyFile(contents, passphrase = "") {
 // RESERVATION
 // ---------------------------------------------------------------------------------------------------
 
+const storageFailure = (step) => new SdkError("storage-unavailable", { step });
 const readStore = (storage) => {
   if (!storage || typeof storage.get !== "function" || typeof storage.set !== "function" || typeof storage.remove !== "function") throw bad("storage");
-  const raw = storage.get(RECOVERY_KEY_STORE);
-  if (!raw) return null;
-  try {
-    const value = JSON.parse(raw);
-    if (!value || value.version !== RECOVERY_KEY_VERSION || typeof value.mnemonic !== "string") return null;
-    return value;
-  } catch {
-    return null;
-  }
+  let raw;
+  try { raw = storage.get(RECOVERY_KEY_STORE); } catch { throw storageFailure("read"); }
+  // NOTHING STORED IS NOT AN UNREADABLE STORE. `null`/absent means no key yet; a throwing read or a corrupt
+  // record must be named, because the next start would otherwise overwrite a key it could not read.
+  if (raw === undefined || raw === null || raw === "") return null;
+  let value;
+  try { value = JSON.parse(raw); } catch { throw storageFailure("parse"); }
+  if (!value || value.version !== RECOVERY_KEY_VERSION || typeof value.mnemonic !== "string") throw storageFailure("parse");
+  return value;
+};
+
+const writeStore = (storage, value) => {
+  let text;
+  try { text = JSON.stringify(value); } catch { throw storageFailure("serialize"); }
+  try { storage.set(RECOVERY_KEY_STORE, text); } catch { throw storageFailure("write"); }
 };
 
 /** Save the key next to the swap records. The words are the secret; the store is the caller's. */
 export function saveRecoveryKey(storage, key) {
   const checked = recoveryKeyOf(key && key.mnemonic, key && key.createdAt);
-  storage.set(RECOVERY_KEY_STORE, JSON.stringify({ ...checked, nextIndex: Number(key.nextIndex) || 0,
-    reserved: key.reserved || {}, retired: key.retired || {}, backupConfirmed: key.backupConfirmed === true }));
+  writeStore(storage, { ...checked, nextIndex: Number(key.nextIndex) || 0,
+    reserved: key.reserved || {}, retired: key.retired || {}, backupConfirmed: key.backupConfirmed === true });
   return checked;
 }
 
@@ -389,13 +396,13 @@ export function reserveRecoveryIndex(storage, { chainId, swapId = null } = {}) {
   for (let i = 0; i < index; i += 1) {
     if (!Object.prototype.hasOwnProperty.call(reserved, i) && !Object.prototype.hasOwnProperty.call(retired, i)) {
       reserved[i] = { chainId: chain, swapId, at: new Date().toISOString() };
-      storage.set(RECOVERY_KEY_STORE, JSON.stringify({ ...key, reserved, retired }));
+      writeStore(storage, { ...key, reserved, retired });
       return i;
     }
   }
   if (index >= RECOVERY_INDEX_MAX) throw failed("index-exhausted");
   reserved[index] = { chainId: chain, swapId, at: new Date().toISOString() };
-  storage.set(RECOVERY_KEY_STORE, JSON.stringify({ ...key, nextIndex: index + 1, reserved, retired }));
+  writeStore(storage, { ...key, nextIndex: index + 1, reserved, retired });
   return index;
 }
 
@@ -404,7 +411,7 @@ export function releaseRecoveryIndex(storage, index) {
   if (!key) throw failed("key-missing");
   const reserved = { ...(key.reserved || {}) };
   delete reserved[String(numberField(index, "index"))];
-  storage.set(RECOVERY_KEY_STORE, JSON.stringify({ ...key, reserved }));
+  writeStore(storage, { ...key, reserved });
 }
 
 /** Retire a number after its order exists on chain: it is never reused, so a later scan has no collision. */
@@ -416,7 +423,7 @@ export function commitRecoveryIndex(storage, index) {
   const n = numberField(index, "index");
   delete reserved[String(n)];
   retired[String(n)] = true;
-  storage.set(RECOVERY_KEY_STORE, JSON.stringify({ ...key, reserved, retired }));
+  writeStore(storage, { ...key, reserved, retired });
 }
 
 // ---------------------------------------------------------------------------------------------------
