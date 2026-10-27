@@ -1,5 +1,9 @@
 ## Unreleased
 
+- The order worker now compares the proven secp256k1 point with the quote's `commitHalfClaimer`, not only the DLEQ
+  equation and the ed25519 point. `fundOrder` also refuses a signed quote whose `commitHalfClaimer` or
+  `edPointClaimer` differs from the verified order terms, and `swaps.start` checks the same pair before the lock.
+  A proof for one half can no longer be funded beside a quote that commits to another.
 - The default stagenet node is `https://xmr-stagenet.ninsei.finance`, operated by Ninsei. The old
   `xmr.arrakisswap.trade` address is retired.
 - `sweep.fromOrder` keeps the order's XMR amount in the recovery file. A found order carries the amount the
