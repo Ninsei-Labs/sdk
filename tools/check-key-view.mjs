@@ -40,14 +40,14 @@ const fails = [];
 const ok = (m) => { pass += 1; console.log("  ok    " + m); };
 const bad = (m) => { fails.push(m); console.log("  FAIL  " + m); };
 
-async function startWith(view, v2 = false, salt = order.salt) {
+async function startWith(view, v2 = false, salt = order.salt, extra = {}) {
   setStorage(memoryStorage());
   let sent = 0;
   const wallet = { address: async () => order.locker,
     send: async () => { sent += 1; throw Object.assign(new Error("stop before broadcast"), { code: "wallet-rejected" }); },
     receipt: async () => null };
   const counterparty = { proof: maker.side.proof, edPointClaimer: maker.spendPoint,
-    commitHalfClaimer: quote.commitHalfClaimer };
+    commitHalfClaimer: quote.commitHalfClaimer, ...extra };
   if (view === "missing") delete counterparty.viewHalfClaimer;
   else counterparty.viewHalfClaimer = view;
   const request = { quote: { id: "q", chain: "arbitrum-sepolia", asset: "ETH", amount: 1, size: 1 }, order, orderQuote: quote,
@@ -119,6 +119,22 @@ console.log("=== 1e) THE MARK BODY NAMES THE SDK LINE ===");
   const mark = markBodyOf({ id: "x", network: "n", escrow: {} });
   if (mark.sdkVersion === SDK_VERSION) ok("the mark body carries the SDK version");
   else bad("mark body version: " + JSON.stringify(mark.sdkVersion));
+}
+
+console.log("=== 1f) A HALF AND A DIFFERENT POINT ARE REFUSED ===");
+{
+  const { result, sent } = await startWith(derived.makerViewHalf, false, order.salt, { viewPoint: maker.viewPoint });
+  if (result && result.code === "bad-input" && result.params && result.params.why === "view-half-point-mismatch" && sent === 0) {
+    ok("a point that is not the half's point is refused");
+  } else bad("half/point mismatch: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
+}
+
+console.log("=== 1g) CONFLICTING VIEW ALIASES ARE REFUSED ===");
+{
+  const { result, sent } = await startWith(derived.makerViewHalf, false, order.salt, { viewHalf: "0x05" });
+  if (result && result.code === "bad-input" && result.params && result.params.why === "conflicting-view-half" && sent === 0) {
+    ok("two different view halves are refused");
+  } else bad("conflicting halves: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
 }
 
 console.log("=== 2) ANOTHER VIEW HALF IS REFUSED BEFORE FUNDING ===");

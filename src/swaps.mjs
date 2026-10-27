@@ -13,7 +13,7 @@ import * as engine from "./engine.mjs";
 import * as recordModule from "./record.mjs";
 // The order: our own side is built by the engine's builder, the counterparty's side is verified and accepted, and
 // the joint address is assembled from the halves. There are no formulas of our own in the core - see order.mjs.
-import { buildOwnSideFromHalves, contextOf, orderStep } from "./order.mjs";
+import { buildOwnSideFromHalves, contextOf, normalizeCounterpartyView, orderStep } from "./order.mjs";
 // Locking the funds: sending goes through the already-finished step (`lock.send`), the wallet is an adapter from outside.
 import * as lock from "./lock.mjs";
 import { vmOfChain, legFor } from "./legs/index.mjs";
@@ -872,16 +872,15 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       // the same words and number; a missing or different half is refused, never silently replaced.
       if (derivedViewHalf) {
         const cp = request.counterparty && typeof request.counterparty === "object" ? request.counterparty : null;
-        const suppliedHalf = cp ? (cp.viewHalfClaimer !== undefined && cp.viewHalfClaimer !== null ? cp.viewHalfClaimer
-          : (cp.viewHalf !== undefined && cp.viewHalf !== null ? cp.viewHalf : null)) : null;
-        if (suppliedHalf === null) throw new SdkError("quote-field-unbound", { step: "viewHalfClaimer", field: "viewHalfClaimer" });
+        // ONE NORMALISATION FOR THE GUARD AND THE BUILDER. Conflicting aliases are a refusal here, not a choice
+        // between two values; the point is derived from the half when the quote names only the half.
+        const view = normalizeCounterpartyView(cp);
+        if (view.half === null) throw new SdkError("quote-field-unbound", { step: "viewHalfClaimer", field: "viewHalfClaimer" });
         let sameHalf = false;
-        try { sameHalf = BigInt(suppliedHalf) === BigInt(derivedViewHalf.half); } catch { sameHalf = false; }
+        try { sameHalf = BigInt(view.half) === BigInt(derivedViewHalf.half); } catch { sameHalf = false; }
         if (!sameHalf) throw new SdkError("quote-refused", { step: "viewHalfClaimer", why: "not-the-derived-half" });
-        const suppliedPoint = cp.viewPoint !== undefined && cp.viewPoint !== null ? cp.viewPoint
-          : (cp.viewHalfClaimer !== undefined ? null : cp.viewPub);
-        if (suppliedPoint !== undefined && suppliedPoint !== null &&
-            String(suppliedPoint).replace(/^0x/, "").toLowerCase() !== String(derivedViewHalf.point).replace(/^0x/, "").toLowerCase()) {
+        if (view.point !== null &&
+            String(view.point).replace(/^0x/, "").toLowerCase() !== String(derivedViewHalf.point).replace(/^0x/, "").toLowerCase()) {
           throw new SdkError("quote-refused", { step: "viewHalfClaimer", why: "point-mismatch" });
         }
       }
