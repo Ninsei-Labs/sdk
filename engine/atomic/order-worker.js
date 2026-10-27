@@ -13,6 +13,20 @@ import {
 
 const builder = createOrderBuilder({ ed25519, secp256k1, keccak256, sha3_512, randomBytes });
 
+// THE COMMITMENT THE CONTRACT WILL COMPARE, DERIVED FROM THE PROVEN POINT. The worker's vendored builder can check
+// the DLEQ equation, but its verifySide did not compare the proven secp256k1 point with the quote's commitment.
+// engine/atomic/order.js carries that comparison; this worker runs the prebuilt bundle, so the same comparison is
+// made here from the bundle's own secp256k1 and keccak256. A proof that is valid for another point must not build a
+// side that funding then signs.
+const commitmentOfPoint = (value) => {
+  try {
+    const point = secp256k1.Point.fromHex(String(value || "").replace(/^0x/i, ""));
+    const xy = point.toBytes(false).slice(1);
+    return "0x" + Array.from(keccak256(xy), (b) => b.toString(16).padStart(2, "0")).join("");
+  } catch { return null; }
+};
+const low160 = (value) => String(value || "").replace(/^0x/i, "").toLowerCase().slice(-40);
+
 // Ключи шифрования построенных сторон: приватный ключ по своему публичному. Наружу приватные не уходят -
 // вскрытие посылки происходит здесь.
 //
@@ -118,7 +132,20 @@ self.onmessage = async (event) => {
       if (sealedBytes && !openWith) {
         throw new Error("нет ключа, которым вскрывать посылку: не было шифрования в этом контексте ордера");
       }
-      const verdict = builder.verifySide(side, orderContext, sealedBytes || null, openWith);
+      let verdict = builder.verifySide(side, orderContext, sealedBytes || null, openWith);
+      // THE PROOF IS ABOUT THE COMMITMENT IN THE QUOTE, not only about two points that stand for one scalar. The
+      // contract pays against commitHalfClaimer; without this comparison a counterparty proves one point and funds
+      // another, and the half revealed at claim time does not open the joint address.
+      if (verdict && verdict.ok === true) {
+        if (!counterparty.commitHalfClaimer) {
+          verdict = { ok: false, reason: "the counterparty side carries no commitHalfClaimer" };
+        } else {
+          const proven = commitmentOfPoint(counterparty.proof && counterparty.proof.XA);
+          if (!proven || low160(proven) !== low160(counterparty.commitHalfClaimer)) {
+            verdict = { ok: false, reason: "the proven secp256k1 point does not match commitHalfClaimer: " + (proven || "unparsed") + " vs " + counterparty.commitHalfClaimer };
+          }
+        }
+      }
       self.postMessage({ id, kind: "done", result: verdict });
     } else {
       self.postMessage({ id, kind: "error", message: "неизвестный запрос воркеру: " + String(type) });

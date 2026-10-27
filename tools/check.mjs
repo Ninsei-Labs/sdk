@@ -2582,6 +2582,7 @@ const typesConsumerCheck = () => {
   return { note: problems.length ? "TypeScript consumer failed" : "TypeScript consumer compiles", problems, notes: [] };
 };
 const quoteBindingCheck = () => runScriptCheck("check-quote-binding.mjs", "quote binding");
+const orderWorkerCheck = () => runScriptCheck("check-order-worker.mjs", "order worker");
 const CHECKS = {
   syntax: syntaxCheck,
   import: importCheck,
@@ -2626,6 +2627,7 @@ const CHECKS = {
   "contract-vectors": contractVectorsCheck,
   "atomic-flow": atomicFlowCheck,
   "quote-binding": quoteBindingCheck,
+  "order-worker": orderWorkerCheck,
   "types-consumer": typesConsumerCheck,
 };
 

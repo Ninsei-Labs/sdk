@@ -1000,6 +1000,21 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       const lockRequest = { ...request.order, ...derived, amountWei: request.order.amount };
       // THE SIGNED QUOTE: the fee, the registry address and the provider live in IT, not in the factory
       // (decision #76). The caller brings it (the interface got it from the maker); without it the lock is not signed.
+      // THE QUOTE MUST NAME THE SAME COUNTERPARTY HALF THAT WAS VERIFIED. `orderStep` verifies
+      // `request.counterparty`, while funding encodes `request.orderQuote`; a caller that brings both can otherwise
+      // prove one point and fund another. The same comparison is repeated in funding.js, at the money boundary.
+      if (request.orderQuote && (builtSide || request.counterparty)) {
+        const norm = (v) => String(v === null || v === undefined ? "" : v).replace(/^0x/i, "").toLowerCase();
+        const verifiedCommit = builtSide ? builtSide.wallet.commitHalfClaimer
+          : (request.counterparty.commitHalfClaimer || null);
+        const verifiedPoint = builtSide ? builtSide.wallet.otherSpendPoint
+          : (request.counterparty.edPointClaimer || request.counterparty.edPub || null);
+        if (!verifiedCommit || !verifiedPoint ||
+            norm(request.orderQuote.commitHalfClaimer) !== norm(verifiedCommit) ||
+            norm(request.orderQuote.edPointClaimer) !== norm(verifiedPoint)) {
+          throw new SdkError("quote-refused", { step: "quote-binding", why: "counterparty-half" });
+        }
+      }
       lockRequest.quote = request.orderQuote || null;
       let funded = null;
       try { funded = await lock.send(lockRequest, wallet, { call: reader }); }

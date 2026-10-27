@@ -211,8 +211,13 @@ export async function fundOrder({ factory, locker, claimer, commitHalfLocker, co
   // THE DEPOSITOR'S FIELDS GO AS SEPARATE FACTORY ARGUMENTS (they are not in the signed set).
   const quoteEnc = { ...quote, commitHalfLocker: terms.commitHalfLocker, edPointLocker: terms.edPointLocker, edViewPointLocker: terms.edViewPointLocker };
   // QUOTE AND TERMS ARE ABOUT ONE THING: a divergence moves the escrow address and signs the wrong order.
-  for (const name of ["locker", "claimer", "amount", "readyBy", "t1", "salt"]) {
-    if (String(quote[name]).toLowerCase() !== String(terms[name]).toLowerCase()) {
+  // THE COUNTERPARTY'S SPEND HALF IS PART OF THAT ONE THING. The proof is checked against the counterparty side,
+  // while the factory encodes the signed quote; without comparing these two fields a quote that commits to one
+  // point can be funded beside a proof for another, and the claim reveals a half that does not open the address.
+  const sameValue = (a, b) => String(a === undefined || a === null ? "" : a).replace(/^0x/i, "").toLowerCase()
+    === String(b === undefined || b === null ? "" : b).replace(/^0x/i, "").toLowerCase();
+  for (const name of ["locker", "claimer", "amount", "readyBy", "t1", "salt", "commitHalfClaimer", "edPointClaimer"]) {
+    if (!sameValue(quote[name], terms[name])) {
       throw new Error("the quote and the order terms diverge on field " + name);
     }
   }
