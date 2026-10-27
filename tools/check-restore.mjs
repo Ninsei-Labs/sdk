@@ -38,13 +38,13 @@ const bad = (m) => { fails.push(m); console.log("  FAIL  " + m); };
 // THE STAND-IN: the driver surface the pass reads, and the wallet surface it calls. `locked` models coins that
 // exist but are not spendable until the spent status is re-checked.
 function standIn({ total = 0n, unlocked = 0n, unlockAfterRescan = null, syncThrows = false, balanceThrows = false,
-  rescanSpent = true, rescanBlockchain = true, heights = true, walletHeight = 2_232_400, nodeHeight = 2_232_400 } = {}) {
+  rescanSpent = true, rescanBlockchain = true, rescanThrows = false, heights = true, walletHeight = 2_232_400, nodeHeight = 2_232_400 } = {}) {
   const calls = { setRestoreHeight: [], rescanBlockchain: 0, rescanSpent: 0, sync: 0, getBalance: 0, unlocked: 0 };
   const driver = {
     async setRestoreHeight(h) { calls.setRestoreHeight.push(h); },
     async getBalance() { calls.getBalance += 1; if (balanceThrows) throw new Error("no balance"); return total; },
   };
-  if (rescanBlockchain) driver.rescanBlockchain = async () => { calls.rescanBlockchain += 1; };
+  if (rescanBlockchain) driver.rescanBlockchain = async () => { calls.rescanBlockchain += 1; if (rescanThrows) throw new Error("failed to get hashes"); };
   if (rescanSpent) {
     driver.rescanSpent = async () => {
       calls.rescanSpent += 1;
@@ -140,6 +140,15 @@ console.log("=== 3) A FAILING SYNC DOES NOT HIDE THE BALANCE ===");
   if (o.kind === "ok" && o.result.scanComplete === false && o.result.scanIncompleteReason === "sync-failed")
     ok("a failing sync is named as scan-incomplete, not reported as an empty wallet");
   else bad("a failing sync was not named: " + JSON.stringify(o.kind === "ok" ? { scanComplete: o.result.scanComplete, reason: o.result.scanIncompleteReason } : codeOf(o)));
+}
+
+console.log("=== 3a2) A FAILED RESCAN AT THE TIP IS NOT A COMPLETE SCAN ===");
+{
+  const wallet = standIn({ total: 5_000_000_000_000n, unlocked: 5_000_000_000_000n, rescanThrows: true });
+  const o = await outcome({ wallet, fromHeight: 2_232_000 });
+  if (o.kind === "ok" && o.result.scanComplete === false && o.result.scanIncompleteReason === "rescan-failed")
+    ok("a failed rescan is named even with equal heights");
+  else bad("failed rescan: " + JSON.stringify(o.kind === "ok" ? { complete: o.result.scanComplete, reason: o.result.scanIncompleteReason } : codeOf(o)));
 }
 
 console.log("=== 3b) A WALLET BEHIND THE NODE IS NOT A ZERO BALANCE ===");

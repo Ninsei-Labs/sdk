@@ -65,11 +65,15 @@ const heightOf = async (driver, name) => {
 // AN INCOMPLETE SCAN IS A NAMED OUTCOME, NOT A ZERO BALANCE. The wallet library's sync is best-effort: a node
 // that refuses block downloads leaves a wallet at height 0, and a caller that only reads `unlocked` shows "no
 // XMR". The heights and the sync error decide the verdict here, so the page does not have to guess.
-const scanCompleteness = async (driver, { syncError = null } = {}) => {
+const scanCompleteness = async (driver, { syncError = null, rescanError = null } = {}) => {
   const walletHeight = await heightOf(driver, "getHeight");
   const nodeHeight = await heightOf(driver, "getDaemonHeight");
   let reason = null;
-  if (syncError) reason = "sync-failed";
+  // A FAILED RESCAN IS NOT A COMPLETE SCAN even when the heights happen to be equal: the wallet was already at the
+  // tip, the rescan was the only operation that would have walked the restored range, and its failure leaves the
+  // old range unscanned. It outranks the sync error because it names why the sync was a no-op.
+  if (rescanError) reason = "rescan-failed";
+  else if (syncError) reason = "sync-failed";
   else if (walletHeight === null || nodeHeight === null) reason = "no-heights";
   else if (walletHeight < nodeHeight) reason = "behind-node";
   return { scanComplete: reason === null, ...(reason === null ? {} : { scanIncompleteReason: reason }), walletHeight, nodeHeight };
@@ -295,7 +299,8 @@ export async function restoreWallet(request = {}) {
   // A RESCAN IS BEST-EFFORT, LIKE THE SYNC BELOW. A wallet built from keys already carries the height it was opened
   // with, and a library that cannot rescan a chain (monero-ts against a regtest node answers "failed to get hashes")
   // would otherwise stop a withdrawal the sync can still serve. The balance below is the verdict, not the rescan.
-  try { await step("rescanBlockchain", () => driver.rescanBlockchain()); } catch { /* the balance decides */ }
+  let rescanError = null;
+  try { await step("rescanBlockchain", () => driver.rescanBlockchain()); } catch (error) { rescanError = error; }
 
   // A FAILED SYNC IS BEST-EFFORT, exactly as in the signing step: what blocks a withdrawal is the spendable
   // remainder, and it is read below. The library throws low-level while scanning a chain it cannot read; that must
@@ -320,7 +325,7 @@ export async function restoreWallet(request = {}) {
     passes += 1;
   }
 
-  const completeness = await scanCompleteness(driver, { syncError });
+  const completeness = await scanCompleteness(driver, { syncError, rescanError });
   return {
     total: total.toString(),
     unlocked: unlocked.toString(),

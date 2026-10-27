@@ -1,5 +1,8 @@
 ## Unreleased
 
+- A failed `rescanBlockchain` is no longer discarded: `sweep.restore` reports `scanComplete: false` with
+  `scanIncompleteReason: "rescan-failed"`, even when the wallet and node heights are equal. A wallet already at the
+  tip cannot turn a failed rescan into a successful no-op sync.
 - A `funding-pending` start keeps the sent transaction hash and the predicted escrow on the swap record. A retry of
   the same quote reads that receipt and continues to `xmr-incoming` when it is funded, or returns
   `funding-pending` again; it never builds a second side or sends a second deposit.
