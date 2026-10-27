@@ -35,8 +35,9 @@ function makeQuote(overrides = {}) {
   return quote;
 }
 
-async function callSale({ quote = makeQuote(), denylist = null, allowed = null } = {}) {
+async function callSale({ quote = makeQuote(), denylist = null, allowed = null, order = undefined, saleRequest = null } = {}) {
   const ticket = { ok: true, handoff: { quote }, claimTip: { wei: quote.claimTip, signed: true } };
+  if (order !== undefined) ticket.order = order;
   let reads = 0;
   const sdk = createQuotes({
     config: { route: () => "/order-sell" },
@@ -46,7 +47,7 @@ async function callSale({ quote = makeQuote(), denylist = null, allowed = null }
     denylist,
     providerAllowed: allowed,
   });
-  return sdk.sale({ claimer: quote.claimer, xmr: 1 });
+  return sdk.sale(saleRequest || { claimer: quote.claimer, xmr: 1 });
 }
 
 console.log("=== 1) A VALID SIGNED TICKET PASSES ===");
@@ -79,7 +80,39 @@ console.log("=== 4) A DENIED CLAIMER IS REFUSED ===");
   else bad("a denied claimer returned " + (got && (got.code || "a ticket")));
 }
 
-console.log("=== 5) A PROVIDER THE INTERFACE DOES NOT ADMIT IS REFUSED ===");
+console.log("=== 5) THE ENVELOPE IS THE REQUEST, NOT THE OUTER OBJECT ===");
+{
+  const quote = makeQuote();
+  const envelope = { request: { claimer: quote.claimer, xmr: 1 } };
+  const got = await callSale({ quote, saleRequest: envelope }).catch((e) => e);
+  if (got && got.ok === true) ok("a valid request inside the envelope is accepted");
+  else bad("a valid envelope was refused: " + (got && got.code));
+  const foreign = await callSale({ quote, saleRequest: { request: { claimer: addr("99"), xmr: 1 } } }).catch((e) => e);
+  if (foreign && foreign.code === "quote-refused" && foreign.params && foreign.params.why === "claimer-not-bound") ok("a claimer in the envelope is bound to the signed claimer");
+  else bad("a foreign claimer in the envelope returned " + (foreign && (foreign.code || "a ticket")));
+}
+
+console.log("=== 6) THE REQUESTED XMR MUST BE THE SIGNED XMR ===");
+{
+  const got = await callSale({ saleRequest: { claimer: makeQuote().claimer, xmr: 2 } }).catch((e) => e);
+  if (got && got.code === "quote-refused" && got.params && got.params.why === "xmr-amount") ok("a different requested XMR is refused");
+  else bad("a different requested XMR returned " + (got && (got.code || "a ticket")));
+}
+
+console.log("=== 7) THE RETURNED ORDER IS COMPARED WITH THE SIGNED FIELDS ===");
+{
+  const quote = makeQuote();
+  const order = { locker: quote.locker, claimer: quote.claimer, amount: quote.amount,
+    readyBy: quote.readyBy, t1: quote.t1, salt: quote.salt };
+  const good = await callSale({ quote, order }).catch((e) => e);
+  if (good && good.ok === true) ok("a returned order equal to the signed fields is accepted");
+  else bad("a matching returned order was refused: " + (good && good.code));
+  const wrong = await callSale({ quote, order: { ...order, amount: "2000000000000000000" } }).catch((e) => e);
+  if (wrong && wrong.code === "quote-refused" && wrong.params && wrong.params.why === "other-terms") ok("a returned order with another amount is refused");
+  else bad("a returned order with another amount returned " + (wrong && (wrong.code || "a ticket")));
+}
+
+console.log("=== 8) A PROVIDER THE INTERFACE DOES NOT ADMIT IS REFUSED ===");
 {
   const got = await callSale({ allowed: () => false }).catch((e) => e);
   if (got && got.code === "quote-provider-not-allowed") ok("the disallowed provider is refused");
