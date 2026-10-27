@@ -20,6 +20,7 @@ import { SDK_VERSION } from "./version.mjs";
 import * as engine from "./engine.mjs";
 import { orderQuoteMissingFields, recoverOrderQuoteKey } from "./quoteEip712.mjs";
 import { claimGasGiftWei } from "../engine/evm/claimGas.js";
+import { parseXmr } from "../engine/core/xmrAmount.js";
 // THE CHAIN READ NEEDED TO ASK THE REGISTRY WHO OWNS THE KEY. The selector is COMPUTED from the signature, not
 // remembered: a single wrong hex digit would call another function and return a zero address - and a zero
 // address is exactly the answer "nobody owns this key", which the caller would take as the truth.
@@ -401,6 +402,9 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
       if (!request || typeof request !== "object") fail("bad-input", { field: "request" });
       // THE NODE GATES THE THREE BROWSER BODY ROUTES ON THE CLIENT'S SDK LINE. The value is the package's own
       // baked-in version, not a caller field: a caller cannot claim a line it was not built from.
+      // THE ENVELOPE IS THE REQUEST. The node accepts both `{ request: {...} }` and a bare body; every check below
+      // must read the same object the node priced, not the outer envelope that carries only `sdkVersion`.
+      const saleRequest = request.request && typeof request.request === "object" ? request.request : request;
       const payload = { ...(request.request && typeof request.request === "object" ? request : { request }), sdkVersion: SDK_VERSION };
       let res = null;
       try {
@@ -526,18 +530,49 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
       }
       // THE PERSON SELLING IS THE CLAIMER. The interface's denylist is applied to that address, not to a
       // caller-chosen value: a ticket that names a denied claimer must not reach the funding step.
-      const saleClaimer = String((request && request.claimer) || quote.claimer || "").toLowerCase();
+      const saleClaimer = String((saleRequest && saleRequest.claimer) || quote.claimer || "").toLowerCase();
       if (saleClaimer && denylist && denylist.has(saleClaimer)) fail("address-denied", { step: "order-sell" });
-      if (request && request.claimer && quote.claimer && String(request.claimer).toLowerCase() !== String(quote.claimer).toLowerCase()) {
+      if (saleRequest && saleRequest.claimer && quote.claimer && String(saleRequest.claimer).toLowerCase() !== String(quote.claimer).toLowerCase()) {
         fail("quote-refused", { step: "order-sell", why: "claimer-not-bound" });
+      }
+      // THE XMR THE CALLER ASKED FOR IS THE XMR THE QUOTE SIGNED. A ticket is paid against the signed `xmrAmount`;
+      // accepting a different requested amount shows one figure and settles another.
+      const requestedXmr = saleRequest && (saleRequest.xmr !== undefined ? saleRequest.xmr
+        : (saleRequest.xmrAmount !== undefined ? saleRequest.xmrAmount : null));
+      if (requestedXmr !== null && requestedXmr !== undefined) {
+        let wanted = null;
+        try { wanted = BigInt(String(requestedXmr)); } catch { wanted = null; }
+        // A whole-XMR request (the public `xmr` field) is converted with the package's own parser; digits are
+        // already atomic. A value that cannot be read is a refusal, not a skipped check.
+        if (wanted === null || wanted < 10n ** 12n) {
+          try { wanted = parseXmr(String(requestedXmr)); } catch { wanted = null; }
+        }
+        let signedAtomic = null;
+        try { signedAtomic = quote.xmrAmount === undefined || quote.xmrAmount === null || quote.xmrAmount === ""
+          ? null : BigInt(String(quote.xmrAmount)); } catch { signedAtomic = null; }
+        if (signedAtomic === null || wanted === null || wanted !== signedAtomic) {
+          fail("quote-refused", { step: "order-sell", why: "xmr-amount" });
+        }
       }
       // THE CONTEXT WHEN THE TICKET CARRIES ITS ORDER. The signed quote binds the order terms; when the node
       // returns the order it priced, recompute the context with our own engine and refuse a mismatch.
-      if (ticket.order && typeof ticket.order === "object" && quote.context) {
-        let expectedSaleContext = null;
-        try { expectedSaleContext = engine.orderContext.orderContextString(ticket.order); } catch { expectedSaleContext = null; }
-        if (expectedSaleContext !== null && String(quote.context) !== expectedSaleContext) {
-          fail("quote-refused", { step: "order-sell", why: "other-terms" });
+      if (ticket.order && typeof ticket.order === "object") {
+        // THE RETURNED ORDER MUST BE THE SIGNED ONE FIELD BY FIELD. `quote.context` is a derived label, not a
+        // signed field; comparing only it lets a node return another amount with a matching relabelled context.
+        const sameValue = (a, b) => String(a === undefined || a === null ? "" : a).replace(/^0x/i, "").toLowerCase()
+          === String(b === undefined || b === null ? "" : b).replace(/^0x/i, "").toLowerCase();
+        for (const name of ["locker", "claimer", "amount", "readyBy", "t1", "salt"]) {
+          if (!sameValue(ticket.order[name], quote[name])) {
+            fail("quote-refused", { step: "order-sell", why: "other-terms", field: name });
+          }
+        }
+        // The context remains a useful cross-check when both sides carry it.
+        if (quote.context) {
+          let expectedSaleContext = null;
+          try { expectedSaleContext = engine.orderContext.orderContextString(ticket.order); } catch { expectedSaleContext = null; }
+          if (expectedSaleContext !== null && String(quote.context) !== expectedSaleContext) {
+            fail("quote-refused", { step: "order-sell", why: "other-terms", field: "context" });
+          }
         }
       }
       // THE TICKET'S TIP MUST BE THE SIGNED ONE. The node returns both the ticket's `claimTip` object and the quote it

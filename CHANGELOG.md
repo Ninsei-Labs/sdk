@@ -1,5 +1,8 @@
 ## Unreleased
 
+- `quotes.sale` reads the `{ request: {...} }` envelope as the request, so a claimer named inside it is bound to the
+  signed quote. The requested XMR is compared with the signed `xmrAmount`, and a returned order is compared field by
+  field with the signed terms instead of only with the derived `context`.
 - The order worker now compares the proven secp256k1 point with the quote's `commitHalfClaimer`, not only the DLEQ
   equation and the ed25519 point. `fundOrder` also refuses a signed quote whose `commitHalfClaimer` or
   `edPointClaimer` differs from the verified order terms, and `swaps.start` checks the same pair before the lock.
