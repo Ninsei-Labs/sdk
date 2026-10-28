@@ -41,7 +41,12 @@ const hexOf = (bytes) => {
   return out;
 };
 
-/** keccak256("Declined(address)") - the first (and only) topic of a decline's log. */
+/**
+ * keccak256("Declined(address)") - topic0 of a decline's log. The escrow indexes `claimer`, so a log emitted by the
+ * current contracts also carries it in topic1; the event signature (and therefore topic0) does not change. Logs from
+ * escrows deployed before the indexing carry the claimer in data instead, which is why this module matches only
+ * topic0 and does not assume a claimer position.
+ */
 export const DECLINED_TOPIC0 = hexOf(keccak256(DECLINE_EVENT_SIGNATURE()));
 
 // THE NODE'S OWN TWO FIELDS for a declined swap: `{ status: "declined", code: "compliance" }`. The code is the
