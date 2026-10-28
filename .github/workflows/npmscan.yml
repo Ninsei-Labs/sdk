@@ -1,0 +1,38 @@
+name: Dependency scan
+
+# A PULL REQUEST THAT CHANGES DEPENDENCIES IS THE ONE PLACE A HIJACKED PACKAGE CAN ENTER THE PUBLISHED SDK. The
+# check runs only for the files that can change the installed tree, so an ordinary source PR costs nothing. It
+# complements CI: the package is public, and a malicious release would reach consumers before any test could see it.
+on:
+  pull_request:
+    paths:
+      - package.json
+      - pnpm-lock.yaml
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  scan:
+    name: npmscan dependency check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # The scan reads files; it has no reason to keep a push credential in the work tree.
+          persist-credentials: false
+
+      # PINNED TO A RELEASE COMMIT, NOT A MOVING TAG: the action itself runs in this repository's CI.
+      # mode: warn on the first PRs, so the current tree's advisories are seen before a merge is blocked.
+      - name: Scan dependency changes
+        uses: npmscan/npmscan-action@83cb7d67204f8f2d1f76454ee9abf19c480dec26 # v1.4.0
+        with:
+          files: |
+            pnpm-lock.yaml
+            package.json
+          mode: warn
+          comment: on-findings
+          fail-on-error: false
