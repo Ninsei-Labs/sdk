@@ -6,7 +6,7 @@
     "registry": "https://registry.npmjs.org/"
   },
   "packageManager": "pnpm@12.11.2",
-  "description": "XMR <-> EVM swap engine: quotes, guards, order steps, recovery (no DOM, no user-facing strings) [scan probe]",
+  "description": "XMR <-> EVM swap engine: quotes, guards, order steps, recovery (no DOM, no user-facing strings)",
   "license": "MIT",
   "type": "module",
   "main": "src/index.mjs",
