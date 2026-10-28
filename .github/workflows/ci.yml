@@ -282,10 +282,31 @@ jobs:
       - name: Start mainnet anvil fork
         env:
           RPC_URL: https://ethereum-rpc.publicnode.com
+          FALLBACK_RPC_URL: https://eth.drpc.org
         run: |
-          # Same reason as the escrow fork: public mainnet RPCs are load balanced, and an account read by block
-          # hash can land on a node that does not have that block.
-          anvil --fork-url "$RPC_URL" --fork-url "https://eth.drpc.org" --fork-state-by-number --fork-retry-backoff 1000 --retries 10 --port 8546 --chain-id 1 > /tmp/anvil-uniswap.log 2>&1 &
+          # PIN A BLOCK EVERY ENDPOINT ALREADY HAS, BUT KEEP IT RECENT. A load-balanced endpoint can answer `latest`
+          # from one node and then serve account state from another that is a few blocks behind; the fork then fails
+          # while creating genesis with `block not found`. Forks far below the head are not a fix: public RPCs prune
+          # that state and ask for an archive token. Five blocks is behind the spread and still current state.
+          HEAD=""
+          for url in "$RPC_URL" "$FALLBACK_RPC_URL"; do
+            for i in $(seq 1 30); do
+              candidate=$(cast block-number --rpc-url "$url" 2>/dev/null | head -1 || true)
+              case "$candidate" in
+                ''|*[!0-9]*) sleep 2 ;;
+                *) HEAD="$candidate"; break ;;
+              esac
+            done
+            [ -n "$HEAD" ] && break
+          done
+          if [ -z "$HEAD" ]; then
+            echo "could not read a block number from any fork endpoint"
+            exit 1
+          fi
+          FORK_BLOCK=$((HEAD - 5))
+          if [ "$FORK_BLOCK" -lt 1 ]; then FORK_BLOCK=1; fi
+          echo "forking mainnet at block $FORK_BLOCK (head $HEAD)"
+          anvil --fork-url "$RPC_URL" --fork-url "$FALLBACK_RPC_URL" --fork-block-number "$FORK_BLOCK" --fork-state-by-number --fork-retry-backoff 1000 --retries 10 --port 8546 --chain-id 1 > /tmp/anvil-uniswap.log 2>&1 &
           echo $! > /tmp/anvil-uniswap.pid
           for i in $(seq 1 60); do
             if cast chain-id --rpc-url http://127.0.0.1:8546 >/dev/null 2>&1; then exit 0; fi
