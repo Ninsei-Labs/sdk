@@ -1,5 +1,7 @@
 ## Unreleased
 
+## 0.53.0 — 2026-10-28
+
 - A failed `rescanBlockchain` is no longer discarded: `sweep.restore` reports `scanComplete: false` with
   `scanIncompleteReason: "rescan-failed"`, even when the wallet and node heights are equal. A wallet already at the
   tip cannot turn a failed rescan into a successful no-op sync.
