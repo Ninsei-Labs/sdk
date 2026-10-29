@@ -143,7 +143,14 @@ function signRelay(answer) {
     + Buffer.from(sig.slice(33, 65)).toString("hex")
     + (27 + sig[0]).toString(16);
 }
-function makeAnswer(source, { validUntil = nowSec + 3600 } = {}) {
+function makeAnswer(source, {
+  validUntil = nowSec + 3600,
+  factory = source.terms.order.factory,
+  fee = "0",
+  relayId = "test-relay",
+  viewPointLocker = null,
+  viewPointClaimer = null,
+} = {}) {
   const nodeHalf = { commitHalf: "0x" + "77".repeat(32), edPoint: "0x" + "88".repeat(32), proof: { synthetic: true } };
   const ask = source.terms.side === "ask";
   const quote = {
@@ -161,13 +168,13 @@ function makeAnswer(source, { validUntil = nowSec + 3600 } = {}) {
     edPointClaimer: ask ? nodeHalf.edPoint : "0x" + "bb".repeat(32),
     chainId: source.terms.order.chainId,
     feeBps: "0",
-    fee: "0",
+    fee,
     feeRecipient: "0x" + "99".repeat(20),
     validUntil: String(validUntil),
     nonce: "1",
     xmrAmount: source.terms.xmrAmount,
     claimTip: source.terms.claimTip,
-    factory: source.terms.order.factory,
+    factory,
   };
   quote.quoteSignature = signQuoteDigest({
     crypto,
@@ -175,18 +182,18 @@ function makeAnswer(source, { validUntil = nowSec + 3600 } = {}) {
     privateKey: hex(quotePrivate),
   });
   const payload = {
-    factory: source.terms.order.factory,
+    factory,
     quoteVersion: 9,
     contextVersion: "ninsei-order-v3",
     context: engine.orderContext.orderContextString(source.terms.order),
     quote,
     quoteSignature: quote.quoteSignature,
     nodeHalf,
-    edViewPointLocker: ask ? source.edViewPointClient : source.edViewPointNode,
-    edViewPointClaimer: ask ? source.edViewPointNode : source.edViewPointClient,
+    edViewPointLocker: viewPointLocker || (ask ? source.edViewPointClient : source.edViewPointNode),
+    edViewPointClaimer: viewPointClaimer || (ask ? source.edViewPointNode : source.edViewPointClient),
   };
   const answer = {
-    type: "quote", version: 1, relayId: "test-relay", provider: source.terms.maker,
+    type: "quote", version: 1, relayId, provider: source.terms.maker,
     session: "0x" + "01".repeat(32), requestId: "0x" + "02".repeat(32), counter: "7",
     requestHash: "0x" + "03".repeat(32), payload: JSON.stringify(payload), time: nowSec,
   };
@@ -265,6 +272,15 @@ try {
   } else bad("the bid roles changed: " + JSON.stringify({ locker: result.quote.locker, claimer: result.quote.claimer }));
 } catch (error) { bad("valid bid answer refused: " + JSON.stringify(error && (error.code || error.message))); }
 
+console.log("=== 1c) HEX SPELLING DOES NOT CHANGE THE BINDING ===");
+const upperFactory = order.factory.toUpperCase().replace("0X", "0x");
+const uppercase = fakeFetch({ body: { version: 1, answer: makeAnswer(built, { factory: upperFactory }) } });
+try {
+  const result = await call({ fetchImpl: uppercase.fetchImpl });
+  if (result.quote.factory.toLowerCase() === order.factory.toLowerCase()) ok("an uppercase factory is accepted after normalisation");
+  else bad("the factory changed: " + result.quote.factory);
+} catch (error) { bad("uppercase factory refused: " + JSON.stringify(error && (error.code || error.message))); }
+
 console.log("=== 2) REFUSALS KEEP THEIR CODE ===");
 const refused = fakeFetch({ ok: false, status: 409, body: { code: "price_changed" } });
 try {
@@ -293,6 +309,20 @@ try {
   if (error && error.code === "quote-expired") ok("an expired quote is refused");
   else bad("wrong expiry code: " + JSON.stringify(error && (error.code || error.message)));
 }
+for (const [label, answer, why] of [
+  ["a foreign relay id", makeAnswer(built, { relayId: "other-relay" }), "relay"],
+  ["a fee that does not match the rate", makeAnswer(built, { fee: "1" }), "fee"],
+  ["a substituted locker view point", makeAnswer(built, { viewPointLocker: "0x" + "00".repeat(32) }), "view-points"],
+]) {
+  const fake = fakeFetch({ body: { version: 1, answer } });
+  try {
+    await call({ fetchImpl: fake.fetchImpl });
+    bad(label + " passed");
+  } catch (error) {
+    if (error && error.code === "quote-refused" && error.params && error.params.why === why) ok(label + " is refused");
+    else bad(label + " got " + JSON.stringify(error && (error.code || error.message)));
+  }
+}
 
 console.log("=== 4) A TRANSPORT FAILURE IS NOT A REFUSAL ===");
 const transport = fakeFetch({ error: new Error("connection reset") });
@@ -304,6 +334,27 @@ try {
     ok("a transport failure is server-unavailable");
   } else bad("wrong transport code: " + JSON.stringify(error && (error.code || error.message)));
 }
+
+console.log("=== 4b) A RETRY KEEPS THE SAME SALT ===");
+const retryCalls = [];
+let retryAttempt = 0;
+const retryFetch = async (url, init) => {
+  retryCalls.push(JSON.parse(init.body));
+  retryAttempt += 1;
+  if (retryAttempt === 1) throw new Error("timeout");
+  return { ok: true, status: 200, json: async () => ({ version: 1, answer: makeAnswer(built) }) };
+};
+try {
+  try { await call({ fetchImpl: retryFetch }); } catch (error) {
+    if (!error || error.code !== "server-unavailable") throw error;
+  }
+  const result = await call({ fetchImpl: retryFetch });
+  const salts = retryCalls.map((body) => JSON.parse(body.payload).terms.order.salt);
+  if (result.quote.salt.toLowerCase() === order.salt.toLowerCase()
+    && salts.length === 2 && salts.every((salt) => salt.toLowerCase() === order.salt.toLowerCase())) {
+    ok("a retry after a timeout sends the same salt");
+  } else bad("the retry changed the salt: " + JSON.stringify(salts));
+} catch (error) { bad("the same-salt retry failed: " + JSON.stringify(error && (error.code || error.message))); }
 
 console.log("=== 5) BREAKING RUN: A DROPPED REFUSAL CODE IS CAUGHT ===");
 {

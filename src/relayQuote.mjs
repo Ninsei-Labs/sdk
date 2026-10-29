@@ -135,8 +135,10 @@ function checkOrderQuote(quote, terms, nowSec) {
     throw new SdkError("quote-refused", { step: "answer", why: "fee-recipient" });
   }
   const bps = Number(quote.feeBps);
-  const fee = BigInt(String(quote.fee));
-  const amount = BigInt(String(order.amount));
+  let fee = null;
+  let amount = null;
+  try { fee = BigInt(String(quote.fee)); amount = BigInt(String(order.amount)); }
+  catch { throw new SdkError("quote-refused", { step: "answer", why: "fee" }); }
   if (!Number.isSafeInteger(bps) || bps < 0 || bps > 200) {
     throw new SdkError("quote-refused", { step: "answer", why: "fee" });
   }
@@ -154,6 +156,9 @@ function checkOrderQuote(quote, terms, nowSec) {
 export function verifyFirmAnswer({ answer, features, request, now = null } = {}) {
   if (!request || !request.terms) throw new SdkError("bad-input", { field: "request" });
   verifyRelayQuoteFrame(answer, features && features.quoteKey);
+  if (!answer.relayId || !same(answer.relayId, features && features.relayId)) {
+    throw new SdkError("quote-refused", { step: "answer", why: "relay" });
+  }
   let payload = null;
   try { payload = JSON.parse(answer.payload); } catch { throw new SdkError("quote-refused", { step: "answer", why: "payload" }); }
   if (!payload || typeof payload !== "object" || !payload.quote) {
@@ -162,13 +167,13 @@ export function verifyFirmAnswer({ answer, features, request, now = null } = {})
   if (payload.contextVersion !== "ninsei-order-v3" || Number(payload.quoteVersion) !== 9) {
     throw new SdkError("quote-refused", { step: "answer", why: "version" });
   }
-  if (payload.factory !== request.terms.order.factory) {
+  if (!same(payload.factory, request.terms.order.factory)) {
     throw new SdkError("quote-refused", { step: "answer", why: "factory" });
   }
   if (!same(answer.provider, request.terms.maker)) {
     throw new SdkError("quote-refused", { step: "answer", why: "provider" });
   }
-  const quote = { ...payload.quote, factory: payload.factory };
+  const quote = { ...payload.quote, factory: request.terms.order.factory };
   if (!quote.quoteSignature) quote.quoteSignature = payload.quoteSignature;
   let context = null;
   try { context = engine.orderContext.orderContextString(request.terms.order); } catch { context = null; }

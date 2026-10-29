@@ -24,7 +24,7 @@ const request = {
   edViewPointClient: fixture.request.edViewPointClient,
   edViewPointNode: fixture.request.edViewPointNode,
 };
-const features = { quoteKey };
+const features = { quoteKey, relayId: answer.relayId };
 
 let pass = 0;
 const fails = [];
