@@ -203,6 +203,21 @@ jobs:
       - name: Check the relay terms digest (type strings, vector, field binding)
         run: pnpm run check:relay-terms
 
+      # THE FEATURES ARE SIGNED BY THE QUOTE KEY. The vector is the relay's own; a wrong array order, a
+      # missing FirmWindow type or an unchecked capability must redden before a key is used.
+      - name: Check the relay features (signature, digest, request binding)
+        run: pnpm run check:relay-features
+
+      # THE REQUEST IS THE JOIN: signed features, a proved client half, both view points and one HPKE seal.
+      # The check opens the envelope for ask and bid, so the plaintext width and the context are exercised.
+      - name: Check the relay request (payload, ask/bid envelopes, refusals)
+        run: pnpm run check:relay-request
+
+      # THE ANSWER HAS TWO SIGNATURES: the outer relay frame and the inner OrderQuote. The vector is the
+      # relay's own; the check refuses a changed provider, signature, payload, amount or context.
+      - name: Check the relay answer (outer and inner signatures, terms, view points)
+        run: pnpm run check:relay-answer
+
       - name: Check arrival consensus (every witness agrees on the whole observation)
         run: pnpm run check:arrival-consensus
 
