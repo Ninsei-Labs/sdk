@@ -33,6 +33,7 @@ export {
   RECOVERY_KEY_VERSION,
   MAKER_VIEW_HALF_DOMAIN,
   RECOVERY_KEY_WORDS,
+  RECOVERY_SCAN_DEFAULT,
   commitRecoveryIndex,
   createRecoveryKey,
   createRecoveryKeyFile,

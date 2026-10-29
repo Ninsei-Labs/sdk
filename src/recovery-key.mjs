@@ -30,6 +30,13 @@ export const RECOVERY_KEY_WORDS = 12;
 // The allocator's ceiling. Discovery must use the same range: a search that stops earlier can miss an order
 // whose number was skipped by an abandoned start or by a swap on another chain.
 export const RECOVERY_INDEX_MAX = 100000;
+// A DISCOVERY SCAN IS BOUNDED BY DEFAULT. The allocator can reach 100,000, but deriving a secp256k1 point for
+// every number on a phone is not a page-open cost. One thousand indices keeps the common case inside a short
+// call and, more importantly, the result NAMES that it stopped: the caller can continue from `nextIndex`.
+export const RECOVERY_SCAN_DEFAULT = 1000;
+// The scan yields to the event loop between chunks. A page must be able to paint and answer a cancel click even
+// when a caller explicitly asks for a large range; a synchronous loop of 100,000 derivations froze the page.
+export const RECOVERY_SCAN_YIELD_EVERY = 64;
 export const RECOVERY_KEY_STORE = "ninsei.recovery.key.v1";
 export const RECOVERY_KEY_FILE_MAGIC = "NINSEI RECOVERY KEY";
 export const RECOVERY_KEY_DOMAIN = "ninsei-taker-v1";
@@ -650,7 +657,8 @@ async function recoveredStartHeight(order, { evmBlockTime, moneroTip, moneroBloc
  * positions) and merges the answers. Without one, every OrderCreated of the factory is read and matched locally.
  */
 export async function findSwaps({ mnemonic, chainId, factory, address = null, evmLogs,
-  fromBlock = null, deploymentBlock = null, toBlock = "latest", gap = 5, maxIndex = RECOVERY_INDEX_MAX,
+  fromBlock = null, deploymentBlock = null, toBlock = "latest", gap = 5,
+  fromIndex = 0, maxIndex = RECOVERY_SCAN_DEFAULT,
   evmBlockTime = null, evmCode = null, moneroTip = null, moneroBlockTimestamp = null,
   xmrNodes = null, moneroNetwork = null, fetchImpl = globalThis.fetch } = {}) {
   if (typeof factory !== "string" || !ADDRESS_RE.test(factory)) throw bad("factory");
@@ -659,7 +667,10 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
   // numbers are ordinary when a start was abandoned or the key was used on another chain, and stopping there
   // hides a funded order whose log is already in `logs`.
   void gap;
-  const max = Math.min(numberField(maxIndex, "maxIndex") || RECOVERY_INDEX_MAX, RECOVERY_INDEX_MAX);
+  const startIndex = numberField(fromIndex, "fromIndex");
+  if (startIndex < 0 || startIndex >= RECOVERY_INDEX_MAX) throw bad("fromIndex");
+  const asked = numberField(maxIndex, "maxIndex");
+  const max = Math.min(asked, RECOVERY_INDEX_MAX - startIndex);
   // THE CHAIN SAYS WHERE ITS ORDERS CAN START. An explicit fromBlock wins; otherwise the caller can pass the
   // factory's deployment block (the SDK's chain registry exposes it as escrow.deploymentBlock). Zero remains the
   // last resort for a caller that knows the factory existed at genesis.
@@ -733,18 +744,31 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
       byCommit.get(claimer).push({ order, side: "claimer" });
     }
   }
-  const v1Needed = orders.some((order) => !v2Matched.has(orderKey(order)));
+  const v1Keys = orders.filter((order) => !v2Matched.has(orderKey(order))).map(orderKey);
+  const v1Needed = v1Keys.length > 0;
+  const remaining = new Set(v1Keys);
   let scanned = 0;
   if (v1Needed) {
-    for (let index = 0; index < max; index += 1) {
-      scanned = index + 1;
+    for (let offset = 0; offset < max; offset += 1) {
+      const index = startIndex + offset;
+      scanned = offset + 1;
       const commitment = spendCommitmentFromSeed(seed, chain, index);
       const matches = byCommit.get(commitment) || [];
       for (const { order, side } of matches) {
         const key = orderKey(order);
         if (foundKeys.has(key)) continue;
         foundKeys.add(key);
+        remaining.delete(key);
         found.push({ ...order, index, derivation: "index-v1", side });
+      }
+      // EVERY MATCHED ORDER ENDS ITS OWN SEARCH. A key with only its own orders in the logs does not pay for
+      // the rest of the bound once the last one is found. A shared factory keeps the unrelated logs, so the
+      // scan continues to the requested bound and reports that it stopped there.
+      if (remaining.size === 0) break;
+      // A LARGE CALLER-SUPPLIED BOUND MUST NOT OWN THE MAIN THREAD. The scan yields between chunks so the page
+      // can paint, and a later call can continue from `nextIndex`.
+      if (scanned % RECOVERY_SCAN_YIELD_EVERY === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
     }
   }
@@ -796,15 +820,17 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
     order.xmrAmount = read.value;
     order.xmrAmountReason = read.reason;
   }
-  const complete = !v1Needed || max >= RECOVERY_INDEX_MAX;
+  const searchedUpTo = scanned ? startIndex + scanned - 1 : null;
+  const complete = !v1Needed || remaining.size === 0 || startIndex + scanned >= RECOVERY_INDEX_MAX;
+  const nextIndex = complete ? null : startIndex + scanned;
   return {
     swaps: found,
     scanned,
     // A CALLER MUST NOT READ "NO SWAPS" AS "THE WHOLE RANGE WAS SEARCHED". The allocator ceiling is the only
     // complete range; a smaller caller-supplied bound says where the search stopped. A result made only of v2
     // orders has no range to search and is complete by construction.
-    searchedUpTo: scanned ? scanned - 1 : null,
+    searchedUpTo,
     complete,
-    ...(complete ? {} : { incompleteReason: "max-index" }),
+    ...(complete ? {} : { incompleteReason: "max-index", nextIndex }),
   };
 }
