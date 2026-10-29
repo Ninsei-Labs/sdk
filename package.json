@@ -46,6 +46,7 @@
     "check:relay-features": "node tools/check-relay-features.mjs",
     "check:relay-request": "node tools/check-relay-request.mjs",
     "check:relay-answer": "node tools/check-relay-answer.mjs",
+    "check:relay-http": "node tools/check-relay-http.mjs",
     "check:arrival-consensus": "node tools/check-arrival-consensus.mjs",
     "check:arrival-real": "node tools/check-arrival-real.mjs",
     "check:order-proof": "node tools/check-order-proof.mjs",

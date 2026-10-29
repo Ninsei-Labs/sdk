@@ -10,7 +10,11 @@
   index. The SDK creates no worker: a caller can run the same call in one.
 - The relay firm client has its signed-features check and request builder: a `NodeFeatures` digest with the
   `FirmWindow` array, signature recovery, request binding, a normalised client half, and one HPKE envelope per
-  request. Ask carries one view scalar; bid carries two. The HTTP call and the signed answer checks follow.
+  request. Ask carries one view scalar; bid carries two.
+- The relay firm client's HTTP hop is `requestFirmQuote`: it posts the exact payload once, keeps a relay refusal
+  code (`price_changed`, `no_liquidity`, `size`, `unavailable`), maps a transport failure to `server-unavailable`,
+  and verifies the outer frame and the inner `OrderQuote` before returning. The signed answer checks and the
+  malformed/expired cases are covered by the relay guards.
 
 ## 0.53.0 — 2026-10-28
 
