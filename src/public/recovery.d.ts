@@ -437,6 +437,11 @@ export declare function findSwaps(request: {
   fromIndex?: number;
   /** How many indices this call may try. Defaults to `RECOVERY_SCAN_DEFAULT` (1000), not the allocator ceiling. */
   maxIndex?: number;
+  /** Stop the scan between chunks. An aborted scan returns `complete: false`, `incompleteReason: "aborted"` and
+   * the `nextIndex` to resume from. */
+  signal?: { readonly aborted: boolean } | null;
+  /** Called after every chunk and after the last index, with the count and the index just scanned. */
+  onProgress?: ((value: { readonly scanned: number; readonly index: number }) => void) | null;
   /** Reads the settlement block timestamp, in seconds: (blockNumber) -> seconds. */
   evmBlockTime?: (blockNumber: number) => Promise<number>;
   /** Reads contract code: (address) -> 0x-hex. Used to read the XMR amount from an order clone. */
@@ -459,7 +464,7 @@ export declare function findSwaps(request: {
   searchedUpTo: number | null;
   /** True when every order in the logs was matched, or when the allocator range was searched to its end. */
   complete: boolean;
-  /** `max-index` when a bound stopped the search before every order was matched. */
+  /** `max-index` or `aborted` when a bound or the caller stopped the search before every order was matched. */
   incompleteReason?: string;
   /** The next index to pass as `fromIndex`; absent when the search is complete. */
   nextIndex?: number;

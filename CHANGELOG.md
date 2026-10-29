@@ -5,6 +5,9 @@
   `complete: false` and `incompleteReason: "max-index"` when it stopped. A caller continues from `nextIndex`; a search
   that matched every order in the logs is complete without scanning the rest. `maxIndex` is the number of indices for
   this call.
+- `findSwaps` accepts an AbortSignal-like `signal` and an `onProgress` callback. An aborted scan returns
+  `incompleteReason: "aborted"` with the same `nextIndex`; progress is reported after every chunk and after the final
+  index. The SDK creates no worker: a caller can run the same call in one.
 
 ## 0.53.0 — 2026-10-28
 
