@@ -218,6 +218,11 @@ jobs:
       - name: Check the relay answer (outer and inner signatures, terms, view points)
         run: pnpm run check:relay-answer
 
+      # THE HTTP HOP: build the exact payload, POST it once, keep a refusal code and verify the answer
+      # before returning it. A transport failure is not a refusal.
+      - name: Check the relay HTTP hop (success, refusal, expiry, transport)
+        run: pnpm run check:relay-http
+
       - name: Check arrival consensus (every witness agrees on the whole observation)
         run: pnpm run check:arrival-consensus
 
