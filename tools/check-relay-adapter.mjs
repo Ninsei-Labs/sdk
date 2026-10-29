@@ -33,6 +33,7 @@ const provider = "0x" + "a1".repeat(20);
 const registry = "0x" + "c3".repeat(20);
 const user = "0x" + "b2".repeat(20);
 const factory = "0x" + "11".repeat(20);
+const predictedEscrow = "0x" + "dd".repeat(20);
 const nowSec = Math.floor(Date.now() / 1000);
 const mnemonic = createRecoveryKey().mnemonic;
 const hex = (bytes) => "0x" + Buffer.from(bytes).toString("hex");
@@ -167,6 +168,7 @@ function makeQuotes({ providerWord = provider, factoryWord = factory } = {}) {
     evmCall: async ({ data }) => {
       if (data.startsWith(providerSelector)) return word(providerWord);
       if (data.startsWith(factorySelector)) return word(factoryWord);
+      if (data.startsWith(engine.evm.FACTORY_METHODS.predict)) return word(predictedEscrow);
       throw new Error("unexpected chain call");
     },
     evmBlock: async () => ({ baseFeePerGas: "0" }),
@@ -212,6 +214,8 @@ try {
   if (typeof result.jointAddress === "string" && result.jointAddress.length >= 95) {
     ok("the one-time XMR address is assembled from both sides");
   } else bad("the one-time XMR address is missing or short: " + JSON.stringify(result.jointAddress));
+  if (result.escrow === predictedEscrow) ok("the escrow address comes from the signed quote");
+  else bad("the escrow address is not the predicted one: " + JSON.stringify(result.escrow));
 } catch (error) { bad("valid adapter call failed: " + JSON.stringify(error && (error.code || error.message)) + " " + JSON.stringify(error && error.params)); }
 
 console.log("=== 2) THE BID SIDE KEEPS THE PROVIDER AS LOCKER ===");
