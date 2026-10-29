@@ -209,6 +209,9 @@ try {
     && result.counterparty.viewHalfClaimer === derived.makerViewHalf) {
     ok("the counterparty shape carries the proof and the maker view half");
   } else bad("the counterparty shape is incomplete");
+  if (typeof result.jointAddress === "string" && result.jointAddress.length >= 95) {
+    ok("the one-time XMR address is assembled from both sides");
+  } else bad("the one-time XMR address is missing or short: " + JSON.stringify(result.jointAddress));
 } catch (error) { bad("valid adapter call failed: " + JSON.stringify(error && (error.code || error.message)) + " " + JSON.stringify(error && error.params)); }
 
 console.log("=== 2) THE BID SIDE KEEPS THE PROVIDER AS LOCKER ===");
