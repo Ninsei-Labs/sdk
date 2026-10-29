@@ -1,0 +1,45 @@
+{
+  "about": "NodeFeatures vector from the relay wire tests.",
+  "features": {
+    "type": "node_features",
+    "version": 1,
+    "relayId": "ninsei-1",
+    "provider": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+    "quoteKey": "0x2c012b84ecc618cf2678674d7e3eb7a5519cd235",
+    "registry": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+    "capabilities": [
+      "firm/1",
+      "future/7"
+    ],
+    "hpkeKey": "0x0808080808080808080808080808080808080808080808080808080808080808",
+    "firmWindows": [
+      {
+        "market": "42161:ETH",
+        "side": "ask",
+        "xmrNetwork": "stagenet",
+        "readyMinSeconds": 1200,
+        "readyMaxSeconds": 1800,
+        "settlementMinSeconds": 3600,
+        "settlementMaxSeconds": 7200,
+        "quoteTtlSeconds": 30
+      },
+      {
+        "market": "42161:ETH",
+        "side": "bid",
+        "xmrNetwork": "stagenet",
+        "readyMinSeconds": 1500,
+        "readyMaxSeconds": 2100,
+        "settlementMinSeconds": 4000,
+        "settlementMaxSeconds": 8000,
+        "quoteTtlSeconds": 60
+      }
+    ],
+    "time": 1791187035,
+    "nonce": "0x0707070707070707070707070707070707070707070707070707070707070707",
+    "signature": "0xd704172f032d8ae407e1e8d16a43ff808089f6d9539c769bff17c7e7f4b5b4500808d2785e3b92873187937bc41f27e0ff70c3c8363a3c2ccf590c31276b0ae51b"
+  },
+  "typeString": "NodeFeatures(string relayId,address provider,address quoteKey,address registry,string[] capabilities,bytes32 hpkeKey,FirmWindow[] firmWindows,uint64 time,bytes32 nonce)FirmWindow(string market,string side,string xmrNetwork,uint32 readyMinSeconds,uint32 readyMaxSeconds,uint32 settlementMinSeconds,uint32 settlementMaxSeconds,uint32 quoteTtlSeconds)",
+  "typeHash": "0x3dbe1f00a71b2296e4444b4d6294e8807912a61765d57efb4c6c9751fe87dd27",
+  "structHash": "0xa2465cce8f461797f2c30b845214c764e721f22b12a8c2872490d9e5180765bd",
+  "digest": "0x686655f3665a75ab7f12d8305af859100f9f2a793a1fadf4594271304f3ee424"
+}

@@ -8,6 +8,9 @@
 - `findSwaps` accepts an AbortSignal-like `signal` and an `onProgress` callback. An aborted scan returns
   `incompleteReason: "aborted"` with the same `nextIndex`; progress is reported after every chunk and after the final
   index. The SDK creates no worker: a caller can run the same call in one.
+- The relay firm client has its signed-features check and request builder: a `NodeFeatures` digest with the
+  `FirmWindow` array, signature recovery, request binding, a normalised client half, and one HPKE envelope per
+  request. Ask carries one view scalar; bid carries two. The HTTP call and the signed answer checks follow.
 
 ## 0.53.0 — 2026-10-28
 
