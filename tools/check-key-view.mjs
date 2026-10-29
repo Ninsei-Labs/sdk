@@ -59,6 +59,15 @@ async function startWith(view, v2 = false, salt = order.salt, extra = {}, autoSa
   return { result, sent };
 }
 
+console.log("=== 0) A SELL START IS REFUSED BEFORE ANY WALLET ===");
+{
+  const result = await createSwaps({}).start({ side: "sell" }).catch((error) => error);
+  if (result && result.code === "bad-input" && result.params && result.params.field === "side" &&
+      result.params.why === "sell-not-supported") {
+    ok("a sell start is refused by its side");
+  } else bad("sell start -> " + JSON.stringify(result && (result.code || result)));
+}
+
 console.log("=== 0) THE PER-SWAP FILE PATH IS GONE ===");
 {
   const result = await createSwaps({}).start({ quote: {}, order: {}, receiveTo: "synthetic-xmr-destination" }).catch((error) => error);

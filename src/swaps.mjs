@@ -792,6 +792,13 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
 
     async start(request) {
       if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
+      // SELL IS NOT A BUY WITH ANOTHER LABEL. The lock step sends the settlement deposit from the caller; on a sell
+      // the caller is the claimer and the node is the locker, so this path would ask the wallet to sign the wrong
+      // transaction. Refuse before the recovery key, the wallet or any network read; the sell client has its own
+      // flow and must not be simulated by this one.
+      if (request.side === "sell") {
+        throw new SdkError("bad-input", { field: "side", why: "sell-not-supported", surface: "swaps.start" });
+      }
       if (!request.quote || typeof request.quote !== "object") throw new SdkError("bad-input", { field: "quote" });
       // THE PER-SWAP FILE PATH IS GONE. One key covers every swap, and a per-swap file issued before funding cannot
       // name the escrow (it does not exist yet), so `sweep.plan` could not read the revealed half from it.
