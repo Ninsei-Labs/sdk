@@ -707,6 +707,8 @@ export interface FirmRelayAnswer {
   readonly context: string;
   readonly viewHalfClaimer: string;
   readonly viewHalfPoint: string;
+  /** The one-time Monero address assembled from the recovery key and the answer's points. */
+  readonly jointAddress: string;
   readonly recovery: { readonly kind: "salt-v2"; readonly salt: string }
     | { readonly kind: "index-v1"; readonly index: number };
   readonly relay: string | null;

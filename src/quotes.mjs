@@ -22,7 +22,7 @@ import { orderQuoteMissingFields, recoverOrderQuoteKey } from "./quoteEip712.mjs
 import { claimGasGiftWei } from "../engine/evm/claimGas.js";
 import { parseXmr } from "../engine/core/xmrAmount.js";
 import { takerHalves, takerHalvesV2, recoverySaltOf } from "./recovery-key.mjs";
-import { buildOwnSideFromHalves, acceptCounterparty } from "./order.mjs";
+import { acceptCounterparty, buildOwnSideFromHalves, jointAddress } from "./order.mjs";
 import { requestFirmQuote } from "./relayFirmClient.mjs";
 // THE CHAIN READ NEEDED TO ASK THE REGISTRY WHO OWNS THE KEY. The selector is COMPUTED from the signature, not
 // remembered: a single wrong hex digit would call another function and return a zero address - and a zero
@@ -948,6 +948,18 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
               viewHalf: derived.makerViewHalf,
             },
       });
+      // THE ONE-TIME XMR ADDRESS IS DERIVED, NOT TAKEN FROM THE RELAY. Both sides must assemble it from the same
+      // points: our spend/view halves from the recovery key, the node's spend point and view point from the answer.
+      // For ask we are the locker and the node is the claimer; for bid the roles are swapped.
+      const nodeSpendPoint = side === "ask" ? quote.edPointClaimer : nodeHalf.edPoint;
+      const nodeViewPoint = side === "ask" ? result.edViewPointClaimer : result.edViewPointLocker;
+      const oneTimeAddress = jointAddress({
+        ownSpendHalf: derived.spendHalf,
+        ownViewHalf: derived.viewHalf,
+        otherSpendPoint: nodeSpendPoint,
+        otherViewPoint: nodeViewPoint,
+        network: xmrNetwork,
+      });
       if (providerAllowed && providerAllowed(maker) !== true) {
         fail("quote-provider-not-allowed", { step: "policy", provider: maker });
       }
@@ -1023,6 +1035,7 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
         },
         viewHalfClaimer: derived.makerViewHalf,
         viewHalfPoint: derived.makerViewPoint,
+        jointAddress: oneTimeAddress.address,
         recovery: derivation,
       };
     },
