@@ -228,6 +228,11 @@ jobs:
       - name: Check the recovery-key relay adapter (ask, bid, refusals)
         run: pnpm run check:relay-adapter
 
+      # THE SELL WAIT READS THE ESCROW ITSELF: funded/ready, claimed and refunded are chain facts, and a wait
+      # that expires is a named refusal rather than a silent stop.
+      - name: Check the sell wait (ready, claimed, refunded, timeout)
+        run: pnpm run check:sell-watch
+
       - name: Check arrival consensus (every witness agrees on the whole observation)
         run: pnpm run check:arrival-consensus
 

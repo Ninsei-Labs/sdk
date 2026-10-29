@@ -827,6 +827,12 @@ export interface SwapsApi {
    */
   watch(request: SwapWatchRequest): Promise<SwapWatch | SwapDeclinedWatch>;
   /**
+   * WAIT FOR THE NODE'S SIDE ON A SELL. The escrow is the one predicted by `quotes.firmRelay`; the client sends
+   * XMR to the joint address, and this reads the escrow itself until the locker marks it ready, claims it or
+   * refunds it. No backend watcher is involved. A wait that expires is `sell-timeout`.
+   */
+  sellWatch(request: SellWatchRequest): Promise<SellWatchResult>;
+  /**
    * THE XMR ARRIVAL CHECK WITHOUT THE WATCH LOOP (issue #85). The client reads the chain itself with its own view
    * key and `ready` opens only when at least two nodes of DIFFERENT operators see the transaction IN THE SAME BLOCK
    * (the block hash matches) with the required confirmations. Refusals come as CODES: `xmr-nodes-disagree` (a synced
@@ -1071,6 +1077,25 @@ export interface SwapStart {
   };
   /** The named next step: wait for the arrival. */
   readonly next: "watch";
+}
+
+export interface SellWatchRequest {
+  /** The escrow predicted by the relay adapter. */
+  readonly escrow: string;
+  readonly timeoutMs?: number;
+  readonly pollMs?: number;
+}
+
+export interface SellWatchResult {
+  readonly escrow: string;
+  readonly state: "ready" | "claimed" | "refunded";
+  readonly funded: boolean;
+  readonly claimed: boolean;
+  readonly refunded: boolean;
+  /** `null` for a terminal claim/refund: the ready mark is not part of that answer. */
+  readonly ready: boolean | null;
+  readonly balanceWei: string;
+  readonly waitedMs: number;
 }
 
 export interface SwapWatchRequest {

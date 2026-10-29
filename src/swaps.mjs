@@ -16,6 +16,7 @@ import * as recordModule from "./record.mjs";
 import { buildOwnSideFromHalves, contextOf, normalizeCounterpartyView, orderStep } from "./order.mjs";
 // Locking the funds: sending goes through the already-finished step (`lock.send`), the wallet is an adapter from outside.
 import * as lock from "./lock.mjs";
+import * as flow from "./swap-flow.mjs";
 import { fundingReceiptVerdict } from "../engine/evm/funding.js";
 import { vmOfChain, legFor } from "./legs/index.mjs";
 // THE VIEW HALVES - from the core's primitives: the sum of two halves is the key the wallet sees incoming payments
@@ -1337,6 +1338,50 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
           throw new SdkError("xmr-timeout", { id, address: last.address, expectedXmr: last.expectedXmr,
             receivedXmr: last.receivedXmr, confirmations: last.confirmations, waitedMs: Date.now() - started,
             timeoutMs, pollMs });
+        }
+        await new Promise((resolve) => setTimeout(resolve, pollMs));
+      }
+    },
+
+    /**
+     * WAIT FOR THE NODE'S SIDE ON A SELL. The client sends XMR to the one-time joint address; the node (the
+     * locker) must mark the order ready before the claimer can take the ETH. This reads the escrow itself - no
+     * backend watcher - and returns as soon as the chain says ready, claimed or refunded.
+     */
+    async sellWatch(request) {
+      if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
+      const escrow = String(request.escrow || "").trim();
+      if (!escrow) throw new SdkError("bad-input", { field: "escrow" });
+      const timeoutMs = Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0
+        ? Number(request.timeoutMs) : limitOf("watchTimeoutMs", 1_200_000);
+      const pollMs = Number.isFinite(Number(request.pollMs)) && Number(request.pollMs) > 0
+        ? Number(request.pollMs) : limitOf("watchPollMs", 6_000);
+      const started = Date.now();
+      let lastStatus = null;
+      let lastError = null;
+      for (;;) {
+        try { lastStatus = await flow.orderStatus(escrow, { call: reader }); }
+        catch (error) { lastError = (error && error.code) || "status-unread"; lastStatus = null; }
+        if (lastStatus && (lastStatus.isClaimed || lastStatus.isRefunded)) {
+          return { escrow, state: lastStatus.isClaimed ? "claimed" : "refunded",
+            funded: lastStatus.isFunded, claimed: lastStatus.isClaimed, refunded: lastStatus.isRefunded,
+            ready: null, balanceWei: String(lastStatus.balance), waitedMs: Date.now() - started };
+        }
+        if (lastStatus && lastStatus.isFunded) {
+          let ready = null;
+          try {
+            const raw = await reader({ to: escrow, data: engine.evm.encodeRead("ready") });
+            const hex = String(raw || "").replace(/^0x/, "");
+            ready = hex.length > 0 && BigInt("0x" + hex) !== 0n;
+          } catch (error) { lastError = (error && error.code) || "ready-unread"; }
+          if (ready === true) {
+            return { escrow, state: "ready", funded: true, claimed: false, refunded: false,
+              ready: true, balanceWei: String(lastStatus.balance), waitedMs: Date.now() - started };
+          }
+        }
+        if (Date.now() - started >= timeoutMs) {
+          throw new SdkError("sell-timeout", { escrow, waitedMs: Date.now() - started, timeoutMs,
+            status: lastStatus, error: lastError });
         }
         await new Promise((resolve) => setTimeout(resolve, pollMs));
       }
