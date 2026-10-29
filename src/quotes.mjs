@@ -1040,6 +1040,7 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
       return {
         ...result,
         quote: { ...quote, viewHalfClaimer: derived.makerViewHalf },
+        order,
         // THE SHAPE `swaps.start` TAKES: the proof and the claimer commitment travel with the view half, so a
         // caller can pass this object as `counterparty` without rebuilding the relay fields.
         counterparty: {

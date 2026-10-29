@@ -699,6 +699,8 @@ export interface FirmRelayOffer {
 export interface FirmRelayAnswer {
   readonly quote: Readonly<Record<string, unknown>>;
   readonly orderQuote: Readonly<Record<string, unknown>>;
+  /** The exact order terms the quote is bound to. */
+  readonly order: Readonly<Record<string, unknown>>;
   readonly nodeHalf: Readonly<Record<string, unknown>>;
   /** Ready to pass as `swaps.start({ counterparty })`: proof, claimer commitment and maker view half. */
   readonly counterparty: Readonly<Record<string, unknown>>;
@@ -810,6 +812,13 @@ export interface SwapsApi {
    * the swap with if the browser is lost.
    */
   start(request: StartRequest): Promise<SwapStart>;
+  /**
+   * START A SELL from a verified relay offer. It records the one-time address, the escrow, our half and the
+   * order expectations; it sends nothing. The same offer retried yields the same record (`resumed: true`).
+   */
+  startSell(request: SellStartRequest): Promise<SellStart>;
+  /** CLAIM THE ETH on a sell from the record: the half and the expectations are the ones stored by `startSell`. */
+  sellClaim(request: SellClaimRequest, wallet: WalletAdapter): Promise<unknown>;
   /**
    * WAIT FOR THE XMR TO ARRIVE at the order's joint address. The polling uses the same request as the page's
    * (GET /swaps/{id}), the rate and the timeout - from `config.limits` and overridable here.
@@ -1077,6 +1086,34 @@ export interface SwapStart {
   };
   /** The named next step: wait for the arrival. */
   readonly next: "watch";
+}
+
+export interface SellStartRequest {
+  /** The verified `quotes.firmRelay` answer for the bid side. */
+  readonly offer: FirmRelayAnswer;
+  /** The twelve-word key; required only when no key is stored yet. */
+  readonly recoveryKey?: string | { readonly mnemonic: string };
+}
+
+export interface SellStart {
+  readonly id: string;
+  readonly side: "sell";
+  readonly escrow: string;
+  /** The one-time Monero address the client sends XMR to. */
+  readonly address: string;
+  readonly xmrAmount: string;
+  readonly claimTip: string | null;
+  readonly orderQuote: Readonly<Record<string, unknown>> | null;
+  readonly resumed: boolean;
+  readonly next: "send-xmr";
+}
+
+export interface SellClaimRequest {
+  readonly id: string;
+  readonly escrow?: string;
+  readonly halfClaimer?: string;
+  readonly expect?: Readonly<Record<string, unknown>>;
+  readonly onStep?: (step: unknown) => void;
 }
 
 export interface SellWatchRequest {

@@ -233,6 +233,11 @@ jobs:
       - name: Check the sell wait (ready, claimed, refunded, timeout)
         run: pnpm run check:sell-watch
 
+      # THE SELL RECORD CARRIES THE ONE-TIME ADDRESS AND THE HALF. A retry of the same offer resumes the same
+      # record; a changed commitment or point is refused before XMR is sent.
+      - name: Check the sell record (address, half, retry, changed offer)
+        run: pnpm run check:sell-start
+
       - name: Check arrival consensus (every witness agrees on the whole observation)
         run: pnpm run check:arrival-consensus
 

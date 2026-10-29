@@ -23,6 +23,9 @@
   view half. `FirmOffer` now matches the direct `firm` call (`providerId`, `order`, optional `viewHalfClaimer`).
 - `swaps.sellWatch` is the client-side sell wait: it reads the escrow itself and returns `ready`,
   `claimed` or `refunded` (or `sell-timeout`), with no backend watcher and no signature.
+- `swaps.startSell` records a sell from a verified relay offer: the one-time address, escrow, our half and the
+  order expectations survive a reload; the same offer resumes the same record. `swaps.sellClaim` claims from
+  that record, from the claimer's own wallet.
 
 ## 0.53.0 — 2026-10-28
 
