@@ -204,6 +204,45 @@ export const recoveryKeyCheck = async () => {
     `the default bound is ${defaulted.scanned}, complete=${defaulted.complete}, next=${defaulted.nextIndex}`);
   check(yielded, "the scan did not yield to the event loop");
   check(elapsed < 5000, `the default scan took ${elapsed} ms`);
+  // THE PROGRESS CALLBACK SEES THE LAST INDEX EVEN WHEN IT IS NOT A CHUNK BOUNDARY, and an abort from that
+  // callback stops the scan before the next index.
+  const progress = [];
+  const controller = new AbortController();
+  const aborted = await recovery.findSwaps({
+    mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
+    evmLogs: async () => [foreign], maxIndex: 200, signal: controller.signal,
+    onProgress: ({ scanned, index }) => { progress.push({ scanned, index }); if (scanned === 64) controller.abort(); },
+  });
+  check(progress.length === 1 && progress[0].scanned === 64 && progress[0].index === 63,
+    `progress reported ${JSON.stringify(progress)}`);
+  check(aborted.scanned === 64 && aborted.complete === false && aborted.incompleteReason === "aborted" &&
+    aborted.nextIndex === 64,
+    `an aborted scan did not name its stop: ${JSON.stringify({ scanned: aborted.scanned, complete: aborted.complete, reason: aborted.incompleteReason, next: aborted.nextIndex })}`);
+  const already = new AbortController();
+  already.abort();
+  const beforeStart = await recovery.findSwaps({
+    mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
+    evmLogs: async () => [foreign], maxIndex: 200, signal: already.signal,
+  });
+  check(beforeStart.scanned === 0 && beforeStart.complete === false && beforeStart.incompleteReason === "aborted" &&
+    beforeStart.nextIndex === 0 && beforeStart.searchedUpTo === null,
+    `an already-aborted scan did not stop before derivation: ${JSON.stringify(beforeStart)}`);
+  const finalProgress = [];
+  const final = await recovery.findSwaps({
+    mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
+    evmLogs: async () => [foreign], maxIndex: 4,
+    onProgress: (value) => finalProgress.push(value),
+  });
+  check(finalProgress.length === 1 && finalProgress[0].scanned === 4 && finalProgress[0].index === 3,
+    `the final partial chunk was not reported: ${JSON.stringify(finalProgress)}`);
+  let refusedProgress = false;
+  try {
+    await recovery.findSwaps({
+      mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
+      evmLogs: async () => [foreign], maxIndex: 1, onProgress: "not-a-function",
+    });
+  } catch (error) { refusedProgress = error && error.code === "bad-input"; }
+  check(refusedProgress, "a non-function progress callback was accepted");
   // A CALLER CAN CONTINUE FROM THE RETURNED nextIndex. The order at 100 is outside the first 10, and the
   // second call finds it without rescanning the first range.
   const lateHalves = recovery.takerHalves({ mnemonic: WORDS, chainId: CHAIN, index: 100 });

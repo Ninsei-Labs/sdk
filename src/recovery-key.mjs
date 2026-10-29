@@ -659,6 +659,7 @@ async function recoveredStartHeight(order, { evmBlockTime, moneroTip, moneroBloc
 export async function findSwaps({ mnemonic, chainId, factory, address = null, evmLogs,
   fromBlock = null, deploymentBlock = null, toBlock = "latest", gap = 5,
   fromIndex = 0, maxIndex = RECOVERY_SCAN_DEFAULT,
+  signal = null, onProgress = null,
   evmBlockTime = null, evmCode = null, moneroTip = null, moneroBlockTimestamp = null,
   xmrNodes = null, moneroNetwork = null, fetchImpl = globalThis.fetch } = {}) {
   if (typeof factory !== "string" || !ADDRESS_RE.test(factory)) throw bad("factory");
@@ -748,7 +749,10 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
   const v1Needed = v1Keys.length > 0;
   const remaining = new Set(v1Keys);
   let scanned = 0;
-  if (v1Needed) {
+  let stoppedBy = null;
+  if (onProgress !== null && typeof onProgress !== "function") throw bad("onProgress");
+  if (v1Needed && signal && signal.aborted === true) stoppedBy = "aborted";
+  if (v1Needed && stoppedBy === null) {
     for (let offset = 0; offset < max; offset += 1) {
       const index = startIndex + offset;
       scanned = offset + 1;
@@ -764,6 +768,16 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
       // EVERY MATCHED ORDER ENDS ITS OWN SEARCH. A key with only its own orders in the logs does not pay for
       // the rest of the bound once the last one is found. A shared factory keeps the unrelated logs, so the
       // scan continues to the requested bound and reports that it stopped there.
+      const final = remaining.size === 0 || offset === max - 1;
+      if (final || scanned % RECOVERY_SCAN_YIELD_EVERY === 0) {
+        // Progress is advisory: a page callback that throws must not turn a completed scan into a failed one.
+        if (typeof onProgress === "function") {
+          try { onProgress({ scanned, index }); } catch { /* progress is not the result */ }
+        }
+      }
+      // A CALLER CAN CANCEL. The check is after the progress callback, so a worker that aborts from its
+      // progress handler stops at this chunk instead of finishing the requested range.
+      if (signal && signal.aborted === true) { stoppedBy = "aborted"; break; }
       if (remaining.size === 0) break;
       // A LARGE CALLER-SUPPLIED BOUND MUST NOT OWN THE MAIN THREAD. The scan yields between chunks so the page
       // can paint, and a later call can continue from `nextIndex`.
@@ -831,6 +845,6 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
     // orders has no range to search and is complete by construction.
     searchedUpTo,
     complete,
-    ...(complete ? {} : { incompleteReason: "max-index", nextIndex }),
+    ...(complete ? {} : { incompleteReason: stoppedBy || "max-index", nextIndex }),
   };
 }
