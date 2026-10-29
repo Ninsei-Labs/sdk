@@ -269,6 +269,8 @@ export declare function recoveryFileName(swapId?: string | null): string;
 export declare const RECOVERY_KEY_VERSION: number;
 /** Twelve words, by the BIP39 rules. */
 export declare const RECOVERY_KEY_WORDS: number;
+/** The default number of v1 indices one `findSwaps` call scans. */
+export declare const RECOVERY_SCAN_DEFAULT: number;
 /** The store key a browser adapter keeps the key under. */
 export declare const RECOVERY_KEY_STORE: string;
 /** The first line of a plain backup file. */
@@ -431,7 +433,9 @@ export declare function findSwaps(request: {
   toBlock?: number | string;
   /** Deprecated and ignored: discovery no longer stops after a run of empty numbers. */
   gap?: number;
-  /** The last index to try. Defaults to the allocator's ceiling; a smaller value returns `complete: false`. */
+  /** The first index to try. Defaults to 0; a continuation passes the previous `nextIndex`. */
+  fromIndex?: number;
+  /** How many indices this call may try. Defaults to `RECOVERY_SCAN_DEFAULT` (1000), not the allocator ceiling. */
   maxIndex?: number;
   /** Reads the settlement block timestamp, in seconds: (blockNumber) -> seconds. */
   evmBlockTime?: (blockNumber: number) => Promise<number>;
@@ -453,8 +457,10 @@ export declare function findSwaps(request: {
   scanned: number;
   /** The last index tried, or null when no index was scanned. */
   searchedUpTo: number | null;
-  /** True only when the whole allocator range was searched. */
+  /** True when every order in the logs was matched, or when the allocator range was searched to its end. */
   complete: boolean;
-  /** `max-index` when a smaller caller-supplied bound stopped the search. */
+  /** `max-index` when a bound stopped the search before every order was matched. */
   incompleteReason?: string;
+  /** The next index to pass as `fromIndex`; absent when the search is complete. */
+  nextIndex?: number;
 }>;

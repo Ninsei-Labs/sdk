@@ -1,5 +1,11 @@
 ## Unreleased
 
+- `findSwaps` no longer walks the allocator's 100,000 v1 indices in one synchronous call. One call scans at most
+  `RECOVERY_SCAN_DEFAULT` (1000) indices, yields to the event loop between chunks, and returns `nextIndex` with
+  `complete: false` and `incompleteReason: "max-index"` when it stopped. A caller continues from `nextIndex`; a search
+  that matched every order in the logs is complete without scanning the rest. `maxIndex` is the number of indices for
+  this call.
+
 ## 0.53.0 — 2026-10-28
 
 - A failed `rescanBlockchain` is no longer discarded: `sweep.restore` reports `scanComplete: false` with

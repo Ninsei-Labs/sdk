@@ -182,8 +182,10 @@ public `salt` in its own `OrderCreated`: the binding is `ninsei-taker-v2|<chain>
 words on another device or at another factory produce a different half and no number is reserved. The result says
 `derivation: "salt-v2"` and leaves `index` null. Existing v1 orders stay on `ninsei-taker-v1|<chain>|<index>` and are
 still found by the index path; a v2 result needs no range scan. For a v1 fallback, discovery does **not** stop after a
-run of empty numbers: the allocator's whole range is searched by default, a smaller caller-supplied `maxIndex` returns
-`complete: false` with `searchedUpTo`, and `gap` is ignored. Each found order reports:
+run of empty numbers. One call scans at most `RECOVERY_SCAN_DEFAULT` (1000) indices; that keeps a shared factory from
+freezing the page. The result names where it stopped: `complete: false`, `searchedUpTo`, `incompleteReason: "max-index"`
+and `nextIndex`. A caller that needs more passes `nextIndex` back as `fromIndex`; the scan yields between chunks so the
+page stays responsive. `maxIndex` is the number of indices for this call, and `gap` is ignored.
 
 - `amount` — the escrow's **native** amount in wei;
 - `settlementToken: "native"` — what the escrow receives;

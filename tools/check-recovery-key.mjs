@@ -165,8 +165,9 @@ export const recoveryKeyCheck = async () => {
   check(calls.every((call) => !call.topics.some((topic) => String(topic).toLowerCase().includes(halves.spendHalf.slice(2, 10)))), "a half was put into the log filter");
   check(found.swaps[0].xmrAmount === null && found.swaps[0].xmrAmountReason === "no-code-reader",
     `a search without a code reader answered ${found.swaps[0].xmrAmount}/${found.swaps[0].xmrAmountReason}`);
-  // A RUN OF EMPTY NUMBERS IS NOT A STOP. The number before this order (5) is empty; an old gap rule of 2 would
-  // have returned no swaps while the matching log was already in hand.
+  // A RUN OF EMPTY NUMBERS IS NOT A STOP. The number before this order (5) is empty; a gap rule of 2 would
+  // have returned no swaps while the matching log was already in hand. The scan is bounded, and this order is
+  // the only unmatched log, so finding it also ends the search.
   const gappedHalves = recovery.takerHalves({ mnemonic: WORDS, chainId: CHAIN, index: 5 });
   const gappedOrder = logFor({ commitment: gappedHalves.spendCommitment, locker: address("bb"), claimer: address("cc"), index: 5 });
   const gapped = await recovery.findSwaps({
@@ -175,9 +176,52 @@ export const recoveryKeyCheck = async () => {
   });
   check(gapped.swaps.length === 1 && gapped.swaps[0].index === 5,
     `a gap of two hid the order at number 5: found ${gapped.swaps.length}`);
-  check(gapped.complete === false && gapped.incompleteReason === "max-index" && gapped.searchedUpTo === 5,
-    `a bounded search did not name its bound: ${JSON.stringify({ complete: gapped.complete, reason: gapped.incompleteReason, searchedUpTo: gapped.searchedUpTo })}`);
-  notes.push("discovery scans past empty numbers and names a caller-supplied bound");
+  check(gapped.complete === true && gapped.searchedUpTo === 5 && gapped.nextIndex === undefined,
+    `a found-and-complete search named its bound wrongly: ${JSON.stringify({ complete: gapped.complete, searchedUpTo: gapped.searchedUpTo, nextIndex: gapped.nextIndex })}`);
+  // A SHARED FACTORY KEEPS UNRELATED LOGS. The scan cannot finish early, so it stops at the bound and names
+  // the next index instead of pretending the range was complete.
+  const foreign = logFor({ commitment: "0x" + "99".repeat(32), locker: address("bb"), claimer: address("cc"), index: 1 });
+  const bounded = await recovery.findSwaps({
+    mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
+    evmLogs: async () => [foreign], maxIndex: 4,
+  });
+  check(bounded.swaps.length === 0 && bounded.scanned === 4 && bounded.searchedUpTo === 3 &&
+    bounded.complete === false && bounded.incompleteReason === "max-index" && bounded.nextIndex === 4,
+    `a bounded search did not name its bound: ${JSON.stringify(bounded)}`);
+  // THE DEFAULT BOUND IS SMALL AND THE SCAN YIELDS. A zero-delay timer must run before the call returns, and
+  // the default must not walk the allocator's 100,000 numbers on a page open.
+  let yielded = false;
+  const timer = setTimeout(() => { yielded = true; }, 0);
+  const started = Date.now();
+  const defaulted = await recovery.findSwaps({
+    mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
+    evmLogs: async () => [foreign],
+  });
+  clearTimeout(timer);
+  const elapsed = Date.now() - started;
+  check(defaulted.scanned === recovery.RECOVERY_SCAN_DEFAULT && defaulted.complete === false &&
+    defaulted.nextIndex === recovery.RECOVERY_SCAN_DEFAULT,
+    `the default bound is ${defaulted.scanned}, complete=${defaulted.complete}, next=${defaulted.nextIndex}`);
+  check(yielded, "the scan did not yield to the event loop");
+  check(elapsed < 5000, `the default scan took ${elapsed} ms`);
+  // A CALLER CAN CONTINUE FROM THE RETURNED nextIndex. The order at 100 is outside the first 10, and the
+  // second call finds it without rescanning the first range.
+  const lateHalves = recovery.takerHalves({ mnemonic: WORDS, chainId: CHAIN, index: 100 });
+  const lateOrder = logFor({ commitment: lateHalves.spendCommitment, locker: address("bb"), claimer: address("cc"), index: 100 });
+  const firstPart = await recovery.findSwaps({
+    mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
+    evmLogs: async () => [lateOrder], maxIndex: 10,
+  });
+  check(firstPart.swaps.length === 0 && firstPart.complete === false && firstPart.nextIndex === 10,
+    `the first part did not stop at 10: ${JSON.stringify(firstPart)}`);
+  const secondPart = await recovery.findSwaps({
+    mnemonic: WORDS, chainId: CHAIN, factory: address("dd"), address: address("bb"),
+    evmLogs: async () => [lateOrder], fromIndex: firstPart.nextIndex, maxIndex: 100,
+  });
+  check(secondPart.swaps.length === 1 && secondPart.swaps[0].index === 100 && secondPart.complete === true &&
+    secondPart.searchedUpTo === 100,
+    `the continuation did not find the order at 100: ${JSON.stringify(secondPart)}`);
+  notes.push("discovery scans past empty numbers, yields, and names the next index when bounded");
   const v2Log = logFor({ commitment: halvesV2.spendCommitment, locker: address("bb"), claimer: address("cc"), index: 0, salt: saltV2 });
   const v2Found = await recovery.findSwaps({
     mnemonic: WORDS, chainId: CHAIN, factory: factoryV2, address: address("bb"),
