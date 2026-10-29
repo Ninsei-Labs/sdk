@@ -55,6 +55,7 @@
     "check:order-proof": "node tools/check-order-proof.mjs",
     "check:daemon-address": "node tools/check-daemon-address.mjs",
     "check:ci-scripts": "node tools/check-ci-scripts.mjs",
+    "check:licenses": "node tools/check-licenses.mjs",
     "check:factory-selectors": "node tools/check-factory-selectors.mjs",
     "check:fee-estimate": "node tools/check-fee-estimate.mjs",
     "check:deadline-scale": "node tools/check-deadline-scale.mjs",
@@ -118,7 +119,8 @@
     "index.d.ts",
     "README.md",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "LICENSE-POLICY.md"
   ],
   "engines": {
     "node": ">=24.22.1"

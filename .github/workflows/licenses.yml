@@ -1,0 +1,47 @@
+name: License Compliance
+
+# THE PUBLISHED PACKAGE'S LICENSE IS A PRODUCT DECISION, NOT A LOCKFILE DETAIL. Every production dependency,
+# direct or transitive, must be on the permissive allowlist in tools/check-licenses.mjs; a copyleft, source-available,
+# unknown or missing license reddens the check instead of reaching consumers in a release.
+#
+# The tree is read through pnpm itself (`pnpm licenses list --prod --json`), so no extra licence tool is installed.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: licenses-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  licenses:
+    name: Production dependency licenses
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm (from packageManager)
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24.22.1'
+          cache: pnpm
+
+      # The checker reads package manifests, not built artifacts. Ignoring lifecycle scripts keeps an unfamiliar
+      # dependency from running on the runner merely to answer a license question.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Check production dependency licenses
+        run: pnpm run check:licenses

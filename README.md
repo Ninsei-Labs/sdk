@@ -316,7 +316,10 @@ trigger where those exist; on another VM they simply do not appear, rather than 
 5. **Workers and WASM are separate files** from `assetsBase`, so the interface's bundler (Astro/Vite) does not
    touch them: `atomic/order-worker.js`, the Monero bundles.
 6. **Strict CSP.** The package is designed for a policy without `eval` and inline.
-7. **Zero dependencies.**
+7. **Few dependencies, all permissive.** Every production dependency is checked in CI against an allowlist: MIT, MIT-0,
+   ISC, Apache-2.0, BSD-2-Clause, BSD-3-Clause, Unlicense, 0BSD, CC0-1.0 and BlueOak-1.0.0. Copyleft,
+   source-available, unknown or missing licences fail `pnpm run check:licenses`; the policy is in
+   [LICENSE-POLICY.md](LICENSE-POLICY.md).
 
 ## Releases and prereleases
 
