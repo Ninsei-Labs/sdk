@@ -318,8 +318,8 @@ trigger where those exist; on another VM they simply do not appear, rather than 
 6. **Strict CSP.** The package is designed for a policy without `eval` and inline.
 7. **Few dependencies, all permissive.** Every production dependency is checked in CI against an allowlist: MIT, MIT-0,
    ISC, Apache-2.0, BSD-2-Clause, BSD-3-Clause, Unlicense, 0BSD, CC0-1.0 and BlueOak-1.0.0. Copyleft,
-   source-available, unknown or missing licences fail `pnpm run check:licenses`; the policy is in
-   [LICENSE-POLICY.md](LICENSE-POLICY.md).
+   source-available, unknown or missing licences fail `pnpm run check:licenses`; the licence texts travel in
+   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), and the policy is in [LICENSE-POLICY.md](LICENSE-POLICY.md).
 
 ## Releases and prereleases
 

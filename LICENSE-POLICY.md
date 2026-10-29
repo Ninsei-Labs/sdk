@@ -36,4 +36,11 @@ pnpm run check:licenses
 The command prints the packages grouped by licence. If any package is outside the allowlist, it prints each
 package and its licence, then exits non-zero.
 
-Development dependencies are not part of the published package and are not covered by this check.
+## Notices travel with the package
+
+`pnpm run notices` regenerates `THIRD_PARTY_NOTICES.md` from the production tree, including the licence text and
+the `NOTICE` files each package ships. The file is published with the package and the same CI workflow checks that
+it is current. A dependency change that edits the lockfile but not the notices fails the check; run `pnpm run
+notices` and review the result with the dependency change.
+
+Development dependencies are not part of the published package and are not covered by these checks.

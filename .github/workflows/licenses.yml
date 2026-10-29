@@ -45,3 +45,8 @@ jobs:
 
       - name: Check production dependency licenses
         run: pnpm run check:licenses
+
+      # The licence texts travel with the package. A dependency change that edits the lockfile but not the
+      # generated notices reddens here; the fix is `pnpm run notices`, reviewed with the dependency change.
+      - name: Check third-party notices are current
+        run: pnpm run check:notices
