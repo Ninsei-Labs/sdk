@@ -82,6 +82,9 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm run check
+          # A release must not ship a licence or notice state that the pull request did not verify.
+          pnpm run check:licenses
+          pnpm run check:notices
 
       # The tag the publish rides on is a decision, so it is exercised before it is taken.
       - name: The dist-tag derivation agrees with its own cases
