@@ -13,7 +13,7 @@ import * as engine from "./engine.mjs";
 import * as recordModule from "./record.mjs";
 // The order: our own side is built by the engine's builder, the counterparty's side is verified and accepted, and
 // the joint address is assembled from the halves. There are no formulas of our own in the core - see order.mjs.
-import { buildOwnSideFromHalves, contextOf, normalizeCounterpartyView, orderStep } from "./order.mjs";
+import { buildOwnSideFromHalves, contextOf, halfHex, norm, normalizeCounterpartyView, orderStep } from "./order.mjs";
 // Locking the funds: sending goes through the already-finished step (`lock.send`), the wallet is an adapter from outside.
 import * as lock from "./lock.mjs";
 import * as flow from "./swap-flow.mjs";
@@ -21,7 +21,7 @@ import { fundingReceiptVerdict } from "../engine/evm/funding.js";
 import { vmOfChain, legFor } from "./legs/index.mjs";
 // THE VIEW HALVES - from the core's primitives: the sum of two halves is the key the wallet sees incoming payments
 // with. There is no arithmetic of the core's own here either (see order.mjs) - we use the same halves builder.
-import { primitives } from "./primitives.mjs";
+import { keccak256, primitives, secp256k1 } from "./primitives.mjs";
 import { probeMoneroNode } from "./probes.mjs";
 // MARKING READY - A FINISHED STEP, NOT A SECOND IMPLEMENTATION OF IT: it requires the order expectations and checks
 // the slots against the chain BEFORE signing (actions.markReady). The watch must call exactly it, otherwise "we saw
@@ -1341,6 +1341,151 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         }
         await new Promise((resolve) => setTimeout(resolve, pollMs));
       }
+    },
+
+    /**
+     * START A SELL FROM A VERIFIED RELAY OFFER. The offer is the result of `quotes.firmRelay` for the bid side;
+     * the record keeps the one-time address, the escrow, our half and the order expectations, so a reload can
+     * continue with `get` + `sellWatch` + `sellClaim`. This method sends nothing.
+     */
+    async startSell(request) {
+      if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
+      const offer = request.offer && typeof request.offer === "object" ? request.offer : null;
+      if (!offer) throw new SdkError("bad-input", { field: "offer" });
+      const order = offer.order && typeof offer.order === "object" ? offer.order : null;
+      const quote = offer.quote && typeof offer.quote === "object" ? offer.quote : null;
+      if (!order || !quote) throw new SdkError("bad-input", { field: "offer", missing: ["order", "quote"] });
+      if (typeof offer.jointAddress !== "string" || !offer.jointAddress) throw new SdkError("bad-input", { field: "offer.jointAddress" });
+      if (typeof offer.escrow !== "string" || !offer.escrow) throw new SdkError("bad-input", { field: "offer.escrow" });
+      // THE RECORD'S ROLE IS THE BID ROLE. The node is the locker and the person is the claimer; a quote whose
+      // addresses or factory disagree with the order is not the offer this record describes.
+      const sameValue = (a, b) => String(a || "").replace(/^0x/, "").toLowerCase() === String(b || "").replace(/^0x/, "").toLowerCase();
+      if (!sameValue(quote.locker, order.locker) || !sameValue(quote.claimer, order.claimer)
+        || !sameValue(quote.provider, order.locker)
+        || !sameValue(quote.factory, order.factory) || Number(quote.chainId) !== Number(order.chainId)) {
+        throw new SdkError("quote-refused", { step: "sell-record", why: "terms" });
+      }
+      // THE RECORD IS FOUND BEFORE A SECOND ONE IS MADE. The same offer retried after a reload yields the same
+      // one-time address and escrow; a second record would be a second promise about one deal.
+      const quoteId = quote.id || quote.nonce || null;
+      const existing = records().find((swap) => swap.side === "sell" &&
+        ((swap.escrow && String(swap.escrow.address || "").toLowerCase() === String(offer.escrow).toLowerCase()) ||
+          (quoteId !== null && String(swap.orderQuoteId || "") === String(quoteId))));
+      if (existing) {
+        // A RETRY IS THE SAME OFFER, NOT A NEW ONE THAT HAPPENS TO NAME THE SAME ESCROW. The stored fields are
+        // the commitment the first call verified; a changed point or commitment is refused before it is resumed.
+        const stored = existing.quote && typeof existing.quote === "object" ? existing.quote : {};
+        const same = (a, b) => String(a || "").replace(/^0x/, "").toLowerCase() === String(b || "").replace(/^0x/, "").toLowerCase();
+        if (!same(stored.commitHalfClaimer, quote.commitHalfClaimer)
+          || !same(stored.edPointClaimer, quote.edPointClaimer)
+          || !same(existing.escrow && existing.escrow.moneroAddress, offer.jointAddress)) {
+          throw new SdkError("quote-refused", { step: "sell-record", why: "offer-changed" });
+        }
+        return { id: existing.id, side: "sell", escrow: (existing.escrow && existing.escrow.address) || offer.escrow,
+          address: (existing.escrow && existing.escrow.moneroAddress) || offer.jointAddress,
+          xmrAmount: (existing.escrow && existing.escrow.xmrAmount) || quote.xmrAmount,
+          claimTip: existing.claimTip || quote.claimTip, orderQuote: existing.orderQuote || offer.orderQuote,
+          resumed: true, next: "send-xmr" };
+      }
+      const storage = engine.store.storage();
+      const supplied = typeof request.recoveryKey === "string"
+        ? request.recoveryKey
+        : request.recoveryKey && typeof request.recoveryKey.mnemonic === "string" ? request.recoveryKey.mnemonic : null;
+      const saved = loadRecoveryKey(storage);
+      if (saved && supplied && saved.mnemonic !== supplied) throw new SdkError("bad-input", { field: "recoveryKey", why: "different-key" });
+      if (!saved && !supplied) throw new SdkError("bad-input", { field: "recoveryKey" });
+      const key = saved || importRecoveryKey(supplied);
+      if (!saved) saveRecoveryKey(storage, { ...key, backupConfirmed: false });
+      const chainId = Number(order.chainId);
+      if (!Number.isSafeInteger(chainId) || chainId <= 0) throw new SdkError("bad-input", { field: "order.chainId" });
+      if (!order.factory || order.salt === undefined || order.salt === null) throw new SdkError("bad-input", { field: "order" });
+      let derived = null;
+      if (offer.recovery && offer.recovery.kind === "index-v1") {
+        const index = Number(offer.recovery.index);
+        if (!Number.isSafeInteger(index) || index < 0) throw new SdkError("bad-input", { field: "offer.recovery" });
+        derived = takerHalves({ mnemonic: key.mnemonic, chainId, index });
+      } else {
+        let salt = null;
+        try { salt = recoverySaltOf(offer.recovery && offer.recovery.salt ? offer.recovery.salt : order.salt); }
+        catch { throw new SdkError("bad-input", { field: "offer.recovery" }); }
+        derived = takerHalvesV2({ mnemonic: key.mnemonic, chainId, factory: order.factory, salt });
+      }
+      const own = buildOwnSideFromHalves(order, { spendHalf: derived.spendHalf, viewHalf: derived.viewHalf });
+      // THE OFFER MUST NAME THE HALF THIS KEY ACTUALLY PRODUCES. The relay already checked the proof; the record
+      // needs the same point and commitment, otherwise a later claim would reveal a half the escrow rejects.
+      const ownCommit = (() => {
+        try {
+          const point = secp256k1.Point.fromHex(own.side.proof.XA);
+          return "0x" + Array.from(keccak256(point.toBytes(false).slice(1)), (b) => b.toString(16).padStart(2, "0")).join("");
+        } catch { return null; }
+      })();
+      const low160 = (v) => String(v || "").replace(/^0x/, "").toLowerCase().slice(-40);
+      if (!ownCommit || low160(ownCommit) !== low160(quote.commitHalfClaimer)) {
+        throw new SdkError("quote-refused", { step: "sell-record", why: "commitment" });
+      }
+      if (String(own.spendPoint).toLowerCase() !== String(quote.edPointClaimer || "").toLowerCase()) {
+        throw new SdkError("quote-refused", { step: "sell-record", why: "spend-point" });
+      }
+      if (offer.edViewPointClaimer && String(own.viewPoint).toLowerCase() !== String(offer.edViewPointClaimer).toLowerCase()) {
+        throw new SdkError("quote-refused", { step: "sell-record", why: "view-point" });
+      }
+      const made = recordModule.createRecord({
+        side: "sell", network: String(order.chainId),
+        payToken: order.asset || quote.asset || undefined,
+        payAmount: quote.amount, xmrAmount: Number(quote.xmrAmount) / 1e12,
+        orderQuoteId: quoteId || undefined,
+        receiveAddress: order.claimer,
+        makerId: quote.provider || null,
+      }, { order, side: own.side });
+      const swap = made.swap;
+      swap.side = "sell";
+      swap.order = order;
+      swap.orderQuote = offer.orderQuote || null;
+      swap.quote = quote;
+      swap.claimTip = quote.claimTip || null;
+      swap.expect = {
+        chainId, factory: order.factory, locker: order.locker, claimer: order.claimer, amount: String(order.amount),
+        readyBy: order.readyBy, t1: order.t1, salt: order.salt,
+        commitHalfLocker: (offer.nodeHalf && offer.nodeHalf.commitHalf) || null,
+        edPointLocker: (offer.nodeHalf && offer.nodeHalf.edPoint) || null,
+        edViewPointLocker: offer.edViewPointLocker || null,
+        commitHalfClaimer: quote.commitHalfClaimer || null,
+        edPointClaimer: quote.edPointClaimer || null,
+      };
+      swap.escrow = { ...(swap.escrow || {}),
+        address: offer.escrow, moneroAddress: offer.jointAddress,
+        half: halfHex(own.side.half), viewHalf: halfHex(own.side.viewHalf),
+        edPointClaimer: own.spendPoint, edViewPointClaimer: norm(own.side.viewPub),
+        commitHalfClaimer: quote.commitHalfClaimer,
+        edPointLocker: (offer.nodeHalf && offer.nodeHalf.edPoint) || null,
+        edViewPointLocker: offer.edViewPointLocker || null,
+        commitHalfLocker: (offer.nodeHalf && offer.nodeHalf.commitHalf) || null,
+        orderContext: offer.context || null, xmrAmount: quote.xmrAmount || null,
+      };
+      try { engine.swap.saveSwap(swap); } catch { throw new SdkError("storage-unavailable", { step: "save-swap" }); }
+      return { id: swap.id, side: "sell", escrow: offer.escrow, address: offer.jointAddress,
+        xmrAmount: quote.xmrAmount, claimTip: quote.claimTip || null, orderQuote: offer.orderQuote || null,
+        resumed: false, next: "send-xmr" };
+    },
+
+    /**
+     * CLAIM THE ETH ON A SELL. The half and the expectations are in the record made by `startSell`; the sender
+     * must be the claimer's own wallet.
+     */
+    async sellClaim(request, wallet) {
+      if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
+      const id = String(request.id || "").trim();
+      if (!id) throw new SdkError("bad-input", { field: "id" });
+      let swap = null;
+      try { swap = engine.swap.getSwap(id); } catch { swap = null; }
+      if (!swap || swap.side !== "sell") throw new SdkError("bad-input", { field: "id", why: "sell-not-found" });
+      const escrow = request.escrow || (swap.escrow && swap.escrow.address) || null;
+      const halfClaimer = request.halfClaimer || (swap.escrow && swap.escrow.half) || null;
+      if (!escrow || !halfClaimer) throw new SdkError("bad-input", { field: "escrow", missing: ["escrow", "halfClaimer"] });
+      const expect = request.expect || swap.expect || null;
+      if (!expect) throw new SdkError("bad-input", { field: "expect", why: "not-in-record" });
+      return actions.claim({ escrow, halfClaimer, claimer: swap.order && swap.order.claimer,
+        expect, onStep: request.onStep }, wallet);
     },
 
     /**
