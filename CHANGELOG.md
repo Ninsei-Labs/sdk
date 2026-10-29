@@ -1,4 +1,4 @@
-## Unreleased
+## 0.54.0 — 2026-10-29
 
 - `findSwaps` no longer walks the allocator's 100,000 v1 indices in one synchronous call. One call scans at most
   `RECOVERY_SCAN_DEFAULT` (1000) indices, yields to the event loop between chunks, and returns `nextIndex` with
