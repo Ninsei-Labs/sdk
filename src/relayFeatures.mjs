@@ -11,7 +11,6 @@ import { SdkError } from "./errors.mjs";
 import { keccak256, secp256k1 } from "./primitives.mjs";
 
 export const RELAY_FEATURES_TYPE_NAME = "NodeFeatures";
-export const RELAY_FIRM_CAPABILITY = "firm/1";
 export const RELAY_DOMAIN_NAME = "Ninsei Relay";
 export const RELAY_DOMAIN_VERSION = "1";
 
@@ -19,7 +18,7 @@ const DOMAIN_TYPE = "EIP712Domain(string name,string version)";
 export const FIRM_WINDOW_TYPE =
   "FirmWindow(string market,string side,string xmrNetwork,uint32 readyMinSeconds,uint32 readyMaxSeconds,uint32 settlementMinSeconds,uint32 settlementMaxSeconds,uint32 quoteTtlSeconds)";
 export const NODE_FEATURES_TYPE =
-  "NodeFeatures(string relayId,address provider,address quoteKey,address registry,string[] capabilities,bytes32 hpkeKey,FirmWindow[] firmWindows,uint64 time,bytes32 nonce)" +
+  "NodeFeatures(string relayId,address provider,address quoteKey,address registry,bytes32 hpkeKey,FirmWindow[] firmWindows,uint64 time,bytes32 nonce)" +
   FIRM_WINDOW_TYPE;
 
 export const FIRM_WINDOW_FIELDS = [
@@ -37,7 +36,6 @@ export const NODE_FEATURES_FIELDS = [
   ["provider", "address"],
   ["quoteKey", "address"],
   ["registry", "address"],
-  ["capabilities", "string[]"],
   ["hpkeKey", "bytes32"],
   ["firmWindows", "FirmWindow[]"],
   ["time", "uint64"],
@@ -144,8 +142,8 @@ function recoverAddress(digest, signature) {
 
 /**
  * Verify the signed public features. `terms` optionally binds the features to one request: the provider, the
- * registry, the market, the side and the Monero network must agree. A missing `firm/1`, a zero key, a missing
- * window for the requested market and side, or a signature from another key is a refusal.
+ * registry, the market, the side and the Monero network must agree. A zero key, a short key, a missing or empty
+ * window list, or a signature from another key is a refusal.
  */
 export function verifyNodeFeatures({ features, terms = null } = {}) {
   if (!features || typeof features !== "object") throw new SdkError("bad-input", { field: "features" });
@@ -158,15 +156,11 @@ export function verifyNodeFeatures({ features, terms = null } = {}) {
   if (recovered === null || recovered !== quoteKey) {
     throw new SdkError("quote-refused", { step: "features", why: "signature" });
   }
-  const capabilities = Array.isArray(features.capabilities) ? features.capabilities : [];
-  if (!capabilities.includes(RELAY_FIRM_CAPABILITY)) {
-    throw new SdkError("quote-refused", { step: "features", why: "firm" });
-  }
   const hpkeKey = String(features.hpkeKey || "").replace(/^0x/, "").toLowerCase();
   if (!/^[0-9a-f]{64}$/.test(hpkeKey) || /^0+$/.test(hpkeKey)) {
     throw new SdkError("quote-refused", { step: "features", why: "hpke-key" });
   }
-  if (!Array.isArray(features.firmWindows)) {
+  if (!Array.isArray(features.firmWindows) || features.firmWindows.length === 0) {
     throw new SdkError("quote-refused", { step: "features", why: "windows" });
   }
   if (terms) {

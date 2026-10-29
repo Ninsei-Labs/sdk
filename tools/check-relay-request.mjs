@@ -55,7 +55,6 @@ const baseFeatures = {
   provider,
   quoteKey,
   registry,
-  capabilities: ["firm/1"],
   hpkeKey: hpkePublic,
   firmWindows: [window("ask"), window("bid")],
   time: 1_800_000_000,

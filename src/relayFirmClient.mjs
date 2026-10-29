@@ -8,7 +8,16 @@ import { createHttp } from "./http.mjs";
 import { buildFirmRequest } from "./relayRequest.mjs";
 import { verifyFirmAnswer } from "./relayQuote.mjs";
 
-const REFUSAL_CODES = new Set(["price_changed", "no_liquidity", "size", "unavailable"]);
+const REFUSAL_CODES = new Set([
+  "compliance",
+  "no_liquidity",
+  "size",
+  "paused",
+  "unavailable",
+  "bad_request",
+  "price_changed",
+]);
+const sameRelay = (a, b) => String(a === undefined || a === null ? "" : a) === String(b === undefined || b === null ? "" : b);
 
 /**
  * Request a firm quote from a relay.
@@ -53,6 +62,13 @@ export async function requestFirmQuote({
   const answer = response.body && response.body.answer;
   if (!response.body || Number(response.body.version) !== 1 || !answer) {
     throw new SdkError("quote-refused", { step: "answer", why: "envelope" });
+  }
+  if (typeof response.body.relay !== "string" || !response.body.relay
+    || !response.body.forwarded || response.body.forwarded.relayId !== response.body.relay) {
+    throw new SdkError("quote-refused", { step: "answer", why: "relay" });
+  }
+  if (!sameRelay(answer.relayId, response.body.relay)) {
+    throw new SdkError("quote-refused", { step: "answer", why: "relay" });
   }
 
   const verified = verifyFirmAnswer({

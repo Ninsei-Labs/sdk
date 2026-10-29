@@ -51,7 +51,7 @@ const window = (side) => ({
 });
 const baseFeatures = {
   type: "node_features", version: 1, relayId: "test-relay", provider, quoteKey, registry,
-  capabilities: ["firm/1"], hpkeKey: hpkePublic, firmWindows: [window("ask"), window("bid")],
+  hpkeKey: hpkePublic, firmWindows: [window("ask"), window("bid")],
   time: nowSec - 10, nonce: "0x" + "07".repeat(32),
 };
 function signedFeatures() {
@@ -201,6 +201,10 @@ function makeAnswer(source, {
   return answer;
 }
 
+function relayBody(answer) {
+  return { version: 1, relay: "test-relay", offered: 1, forwarded: { relayId: "test-relay" }, answer };
+}
+
 function fakeFetch({ ok = true, status = 200, body = null, error = null } = {}) {
   const calls = [];
   return {
@@ -234,7 +238,7 @@ const call = (overrides = {}) => requestFirmQuote({
 });
 
 console.log("=== 1) A SIGNED ANSWER GOES THROUGH THE WIRE ===");
-const success = fakeFetch({ body: { version: 1, relay: "test-relay", offered: true, forwarded: true, answer: makeAnswer(built) } });
+const success = fakeFetch({ body: relayBody(makeAnswer(built)) });
 try {
   const result = await call({ fetchImpl: success.fetchImpl });
   if (result.quote.amount === built.terms.order.amount && result.answer.type === "quote") ok("the answer is verified and returned");
@@ -253,7 +257,7 @@ try {
 } catch (error) { bad("valid answer refused: " + JSON.stringify(error && (error.code || error.message))); }
 
 console.log("=== 1b) A BID ANSWER PLACES THE NODE AS LOCKER ===");
-const bidSuccess = fakeFetch({ body: { version: 1, answer: makeAnswer(bidBuilt) } });
+const bidSuccess = fakeFetch({ body: relayBody(makeAnswer(bidBuilt)) });
 try {
   const result = await requestFirmQuote({
     relayUrl: "https://relay.example",
@@ -274,7 +278,7 @@ try {
 
 console.log("=== 1c) HEX SPELLING DOES NOT CHANGE THE BINDING ===");
 const upperFactory = order.factory.toUpperCase().replace("0X", "0x");
-const uppercase = fakeFetch({ body: { version: 1, answer: makeAnswer(built, { factory: upperFactory }) } });
+const uppercase = fakeFetch({ body: relayBody(makeAnswer(built, { factory: upperFactory })) });
 try {
   const result = await call({ fetchImpl: uppercase.fetchImpl });
   if (result.quote.factory.toLowerCase() === order.factory.toLowerCase()) ok("an uppercase factory is accepted after normalisation");
@@ -301,7 +305,7 @@ try {
   if (error && error.code === "quote-refused" && error.params && error.params.why === "envelope") ok("a missing answer is refused");
   else bad("wrong malformed-envelope code: " + JSON.stringify(error && (error.code || error.message)));
 }
-const expired = fakeFetch({ body: { version: 1, answer: makeAnswer(built, { validUntil: nowSec - 1 }) } });
+const expired = fakeFetch({ body: relayBody(makeAnswer(built, { validUntil: nowSec - 1 })) });
 try {
   await call({ fetchImpl: expired.fetchImpl });
   bad("an expired quote passed");
@@ -314,7 +318,7 @@ for (const [label, answer, why] of [
   ["a fee that does not match the rate", makeAnswer(built, { fee: "1" }), "fee"],
   ["a substituted locker view point", makeAnswer(built, { viewPointLocker: "0x" + "00".repeat(32) }), "view-points"],
 ]) {
-  const fake = fakeFetch({ body: { version: 1, answer } });
+  const fake = fakeFetch({ body: relayBody(answer) });
   try {
     await call({ fetchImpl: fake.fetchImpl });
     bad(label + " passed");
@@ -322,6 +326,16 @@ for (const [label, answer, why] of [
     if (error && error.code === "quote-refused" && error.params && error.params.why === why) ok(label + " is refused");
     else bad(label + " got " + JSON.stringify(error && (error.code || error.message)));
   }
+}
+const forwardedMismatch = relayBody(makeAnswer(built));
+forwardedMismatch.forwarded = { relayId: "other-relay" };
+const wrongForwarded = fakeFetch({ body: forwardedMismatch });
+try {
+  await call({ fetchImpl: wrongForwarded.fetchImpl });
+  bad("a forwarded relay mismatch passed");
+} catch (error) {
+  if (error && error.code === "quote-refused" && error.params && error.params.why === "relay") ok("a forwarded relay mismatch is refused");
+  else bad("wrong forwarded relay code: " + JSON.stringify(error && (error.code || error.message)));
 }
 
 console.log("=== 4) A TRANSPORT FAILURE IS NOT A REFUSAL ===");
@@ -342,7 +356,7 @@ const retryFetch = async (url, init) => {
   retryCalls.push(JSON.parse(init.body));
   retryAttempt += 1;
   if (retryAttempt === 1) throw new Error("timeout");
-  return { ok: true, status: 200, json: async () => ({ version: 1, answer: makeAnswer(built) }) };
+  return { ok: true, status: 200, json: async () => relayBody(makeAnswer(built)) };
 };
 try {
   try { await call({ fetchImpl: retryFetch }); } catch (error) {
