@@ -17,7 +17,8 @@ machine). The wallet arrives as an EIP-1193 provider, storage as an adapter, and
 | `recovery.open` — parsing the recovery file | works |
 | `sim` — sandbox scenarios and time | works (applying to a swap — stage 2) |
 | `quotes.watch` | works: live indicative quotes, its own client; a snapshot carries the display fields (sides, networks, `why`, signature, age, maturity), and the size can be NAMED (`size`) |
-| `quotes.firm` | answers `not-implemented` (stage 2: signing with a key and the order protocol) |
+| `quotes.firm` | works: a signed, binding quote with a TTL; a refusal is a named code |
+| `quotes.firmRelay` | works: a firm quote through a relay, built from one recovery key; the node half is DLEQ-checked |
 | `swaps.list` / `swaps.get` | read state from storage (and after a page reload) |
 | `swaps.start` | holds the order: guards → recovery file and the person's confirmation → order → locking funds → **recording with us and watching the Monero address**; returns the named state `step: "xmr-incoming"` |
 | `swaps.watch` | waits for XMR to arrive at the joint address with the same request as the page (`GET /swaps/{id}`): arrived — returns the fact (amount, confirmations, txid); did not wait — a refusal with the code `xmr-timeout`; already on the address but barred by `unlock_time` — a refusal with the code `xmr-locked` (the boundary is in `params.until`), and NO ready mark; the maker DECLINED the order — returns `SwapDeclinedWatch` (`declined: true`, `terminal: "declined"`, the node's own `code`), with every action off; with expectations and a wallet, places the ready mark after the arrival |
@@ -173,7 +174,7 @@ signature, the age (`ageMs`) and the maturity level (`finality`) — display fie
 The price does not depend on volume: the volume is needed by the provider to say whether it takes such a size. So
 the size is computed from the person's amount and is snapped to the node's grid **down**, and a size outside the
 range is not aligned: it is the provider's refusal, and it arrives as a code. Indicative quotes commit to nothing;
-`quotes.firm` commits (stage 2).
+`quotes.firm` and `quotes.firmRelay` commit, and the relay path carries the maker's signed terms and its view half.
 
 ## Found orders and the paying token
 

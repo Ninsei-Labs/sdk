@@ -455,6 +455,11 @@ export interface QuotesApi {
   /** A binding quote with a TTL. A refusal comes as a code, not text. */
   firm(offer: FirmOffer): Promise<Quote>;
   /**
+   * A firm quote through a relay, built from one recovery key. The relay answer is verified against the
+   * requested terms and the on-chain registry/factory binding before it is returned.
+   */
+  firmRelay(request: FirmRelayOffer): Promise<FirmRelayAnswer>;
+  /**
    * A reverse-mode ticket: the maker sells XMR. The request is the node's `request` object; the answer carries the
    * signed order quote and its claim tip, which is checked against the gas price before it is returned.
    */
@@ -660,11 +665,54 @@ export interface QuoteReference {
 }
 
 export interface FirmOffer {
-  readonly direction: "buy" | "sell";
-  readonly token: string;
-  readonly amount: number;
-  readonly receiveTo: string;
-  readonly providerId?: string;
+  /** Who gives the quote. Without it there is no one to ask. */
+  readonly providerId: string;
+  /** The order terms the signature is bound to. */
+  readonly order: Readonly<Record<string, unknown>>;
+  /** The taker's maker view half when the order was built from a recovery key. */
+  readonly viewHalfClaimer?: string;
+}
+
+export interface FirmRelayOffer {
+  /** Relay origin, without the `/v1/quote` path. */
+  readonly relayUrl: string;
+  /** The signed public features the relay forwarded; they are verified before anything is sent. */
+  readonly features: Readonly<Record<string, unknown>>;
+  readonly order: Readonly<Record<string, unknown>>;
+  readonly side: "ask" | "bid";
+  /** The twelve-word recovery key or an object carrying it. */
+  readonly recoveryKey: string | { readonly mnemonic: string };
+  /** A fresh salt the client owns; it must equal `order.salt`. Defaults to `order.salt`. */
+  readonly recoverySalt?: string;
+  /** The v1 index; it is mutually exclusive with `recoverySalt`. */
+  readonly recoveryIndex?: number;
+  /** The market's chain and asset, for example `421614:ETH`. Derived when exactly one window matches. */
+  readonly market?: string;
+  readonly xmrNetwork?: string;
+  readonly xmrAmount: string | number;
+  readonly claimTip?: string | number;
+  readonly partner?: string;
+  readonly fetchImpl?: typeof fetch;
+  readonly timeoutMs?: number;
+}
+
+export interface FirmRelayAnswer {
+  readonly quote: Readonly<Record<string, unknown>>;
+  readonly orderQuote: Readonly<Record<string, unknown>>;
+  readonly nodeHalf: Readonly<Record<string, unknown>>;
+  /** Ready to pass as `swaps.start({ counterparty })`: proof, claimer commitment and maker view half. */
+  readonly counterparty: Readonly<Record<string, unknown>>;
+  readonly edViewPointLocker: string;
+  readonly edViewPointClaimer: string;
+  readonly context: string;
+  readonly viewHalfClaimer: string;
+  readonly viewHalfPoint: string;
+  readonly recovery: { readonly kind: "salt-v2"; readonly salt: string }
+    | { readonly kind: "index-v1"; readonly index: number };
+  readonly relay: string | null;
+  readonly offered: number | null;
+  readonly forwarded: Readonly<Record<string, unknown>> | null;
+  readonly answer: Readonly<Record<string, unknown>>;
 }
 
 /**

@@ -223,6 +223,11 @@ jobs:
       - name: Check the relay HTTP hop (success, refusal, expiry, transport)
         run: pnpm run check:relay-http
 
+      # THE ADAPTER STARTS FROM ONE RECOVERY KEY: derives the client half and both view points, builds the
+      # request, and verifies the answer against the registry and factory before returning it.
+      - name: Check the recovery-key relay adapter (ask, bid, refusals)
+        run: pnpm run check:relay-adapter
+
       - name: Check arrival consensus (every witness agrees on the whole observation)
         run: pnpm run check:arrival-consensus
 

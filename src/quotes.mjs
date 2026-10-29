@@ -21,10 +21,13 @@ import * as engine from "./engine.mjs";
 import { orderQuoteMissingFields, recoverOrderQuoteKey } from "./quoteEip712.mjs";
 import { claimGasGiftWei } from "../engine/evm/claimGas.js";
 import { parseXmr } from "../engine/core/xmrAmount.js";
+import { takerHalves, takerHalvesV2, recoverySaltOf } from "./recovery-key.mjs";
+import { buildOwnSideFromHalves, acceptCounterparty } from "./order.mjs";
+import { requestFirmQuote } from "./relayFirmClient.mjs";
 // THE CHAIN READ NEEDED TO ASK THE REGISTRY WHO OWNS THE KEY. The selector is COMPUTED from the signature, not
 // remembered: a single wrong hex digit would call another function and return a zero address - and a zero
 // address is exactly the answer "nobody owns this key", which the caller would take as the truth.
-import { keccak256 } from "./primitives.mjs";
+import { keccak256, secp256k1 } from "./primitives.mjs";
 
 const utf8 = (value) => new TextEncoder().encode(String(value));
 const bytesToHexQ = (bytes) => { let out = "0x"; for (const b of bytes) out += b.toString(16).padStart(2, "0"); return out; };
@@ -42,6 +45,8 @@ const hexToBytesQ = (hex) => {
   return out;
 };
 const ZERO_ADDRESS = "0x" + "00".repeat(20);
+const sameText = (a, b) => String(a === undefined || a === null ? "" : a).toLowerCase()
+  === String(b === undefined || b === null ? "" : b).toLowerCase();
 const addressFromWord = (raw) => {
   const h = String(raw == null ? "" : raw).replace(/^0x/, "");
   return h.length >= 40 ? "0x" + h.slice(-40).toLowerCase() : null;
@@ -812,6 +817,214 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
         if (!verdict.ok) fail(verdict.code, { step: "claimTip", ...verdict });
       }
       return quote;
+    },
+
+    /**
+     * A firm quote through the relay, starting from the one recovery key.
+     *
+     * The caller gives the signed features, the order terms and the recovery key; this method derives the
+     * client half and both view points, sends one relay request and verifies the relay answer plus the
+     * on-chain registry/factory binding. It returns the signed `orderQuote` and a `quote` carrying the maker's
+     * view half, so `swaps.start` does not have to map relay fields by hand.
+     */
+    async firmRelay(request) {
+      if (!request || typeof request !== "object") fail("bad-input", { field: "request" });
+      const features = request.features;
+      const order = request.order && typeof request.order === "object" ? { ...request.order } : null;
+      if (!features || typeof features !== "object") fail("bad-input", { field: "features" });
+      if (!order) fail("bad-input", { field: "order" });
+      const side = String(request.side || "");
+      if (side !== "ask" && side !== "bid") fail("bad-input", { field: "side" });
+      const maker = String(features.provider || "").toLowerCase();
+      const registry = String(features.registry || "").toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(maker) || maker === ZERO_ADDRESS) fail("bad-input", { field: "features.provider" });
+      if (!/^0x[0-9a-f]{40}$/.test(registry) || registry === ZERO_ADDRESS) fail("bad-input", { field: "features.registry" });
+      if (denylist && typeof order.locker === "string" && denylist.has(order.locker.toLowerCase())) {
+        fail("address-denied", { step: "order-quote" });
+      }
+      // THE PROVIDER'S ROLE IS PART OF THE SIDE. A caller that names another claimer/locker is not asking
+      // for this side; a caller that omits it gets the only value the wire allows.
+      if (side === "ask") {
+        if (order.claimer && !sameText(order.claimer, maker)) fail("bad-input", { field: "order.claimer" });
+        order.claimer = maker;
+      } else {
+        if (order.locker && !sameText(order.locker, maker)) fail("bad-input", { field: "order.locker" });
+        order.locker = maker;
+      }
+      const chainId = Number(order.chainId);
+      if (!Number.isSafeInteger(chainId) || chainId <= 0) fail("bad-input", { field: "order.chainId" });
+      const windows = Array.isArray(features.firmWindows)
+        ? features.firmWindows.filter((entry) => entry && entry.side === side)
+        : [];
+      const markets = [...new Set(windows.map((entry) => entry.market).filter((value) => typeof value === "string" && value))];
+      const market = request.market !== undefined ? String(request.market) : (markets.length === 1 ? markets[0] : null);
+      if (!market) fail("bad-input", { field: "market" });
+      const window = windows.find((entry) => entry.market === market) || null;
+      if (!window) fail("quote-refused", { step: "features", why: "window" });
+      const xmrNetwork = request.xmrNetwork !== undefined ? String(request.xmrNetwork) : window.xmrNetwork;
+      if (!xmrNetwork) fail("bad-input", { field: "xmrNetwork" });
+      if (request.xmrAmount === undefined || request.xmrAmount === null || request.xmrAmount === "") {
+        fail("bad-input", { field: "xmrAmount" });
+      }
+      const claimTip = request.claimTip === undefined || request.claimTip === null ? "0" : String(request.claimTip);
+      const mnemonic = typeof request.recoveryKey === "string"
+        ? request.recoveryKey
+        : request.recoveryKey && typeof request.recoveryKey.mnemonic === "string" ? request.recoveryKey.mnemonic : null;
+      if (!mnemonic) fail("bad-input", { field: "recoveryKey" });
+      const saltRequested = request.recoverySalt !== undefined && request.recoverySalt !== null;
+      const indexRequested = request.recoveryIndex !== undefined && request.recoveryIndex !== null;
+      if (saltRequested && indexRequested) fail("bad-input", { field: "recoverySalt", why: "with-recovery-index" });
+      let derived = null;
+      let derivation = null;
+      if (indexRequested) {
+        const index = Number(request.recoveryIndex);
+        if (!Number.isSafeInteger(index) || index < 0) fail("bad-input", { field: "recoveryIndex" });
+        derived = takerHalves({ mnemonic, chainId, index });
+        derivation = { kind: "index-v1", index };
+      } else {
+        if (!order.factory || !/^0x[0-9a-f]{40}$/i.test(String(order.factory))) fail("bad-input", { field: "order.factory" });
+        let salt = null;
+        try { salt = recoverySaltOf(saltRequested ? request.recoverySalt : order.salt); }
+        catch { fail("bad-input", { field: "recoverySalt" }); }
+        if (saltRequested) {
+          let orderSalt = null;
+          try { orderSalt = recoverySaltOf(order.salt); } catch { fail("bad-input", { field: "recoverySalt", why: "order-salt" }); }
+          if (salt !== orderSalt) fail("bad-input", { field: "recoverySalt", why: "order-salt" });
+        }
+        derived = takerHalvesV2({ mnemonic, chainId, factory: order.factory, salt });
+        derivation = { kind: "salt-v2", salt };
+      }
+      const own = buildOwnSideFromHalves(order, { spendHalf: derived.spendHalf, viewHalf: derived.viewHalf });
+      const xa = secp256k1.Point.fromHex(own.side.proof.XA);
+      const clientHalf = {
+        commitHalf: bytesToHexQ(keccak256(xa.toBytes(false).slice(1))),
+        edPoint: own.side.pub.ed,
+        proof: own.side.proof,
+      };
+      const result = await requestFirmQuote({
+        relayUrl: request.relayUrl,
+        partner: request.partner,
+        fetchImpl: request.fetchImpl,
+        timeoutMs: request.timeoutMs,
+        features,
+        terms: {
+          market,
+          side,
+          maker,
+          registry,
+          xmrNetwork,
+          order,
+          xmrAmount: String(request.xmrAmount),
+          claimTip,
+        },
+        clientHalf,
+        edViewPointClient: own.side.viewPub,
+        edViewPointNode: derived.makerViewPoint,
+        nodeViewScalar: derived.makerViewHalf,
+        clientViewScalar: side === "bid" ? derived.viewHalf : null,
+        side,
+      });
+      const quote = result.quote;
+      // THE NODE HALF IS NOT A DECORATION. The answer's proof must stand in THIS order's context and the proven
+      // point must be the one the quote commits to. For ask that is the claimer's commitment; for bid the node
+      // half is the locker's and carries its own commitment. This is the same engine check the swap path uses.
+      const nodeHalf = result.nodeHalf;
+      acceptCounterparty({
+        context: own.context,
+        side: own.side,
+        counterparty: side === "ask"
+          ? {
+              proof: nodeHalf.proof,
+              edPub: quote.edPointClaimer,
+              commitHalfClaimer: quote.commitHalfClaimer,
+              viewPoint: result.edViewPointClaimer,
+              viewHalf: derived.makerViewHalf,
+            }
+          : {
+              proof: nodeHalf.proof,
+              edPub: nodeHalf.edPoint,
+              commitHalfClaimer: nodeHalf.commitHalf,
+              viewPoint: result.edViewPointLocker,
+              viewHalf: derived.makerViewHalf,
+            },
+      });
+      if (providerAllowed && providerAllowed(maker) !== true) {
+        fail("quote-provider-not-allowed", { step: "policy", provider: maker });
+      }
+      if (typeof evmCall !== "function") fail("quote-registry-unchecked", { step: "registry", why: "no-chain-read" });
+      let mappedProvider = null;
+      try {
+        mappedProvider = addressFromWord(await evmCall({ to: registry, data: providerOfData(quote.quoteKey) }));
+      } catch { fail("quote-registry-unchecked", { step: "registry", why: "read-failed", registry }); }
+      if (mappedProvider === null || mappedProvider === ZERO_ADDRESS) fail("quote-key-unknown", { step: "registry", registry, quoteKey: quote.quoteKey });
+      if (!sameText(mappedProvider, quote.provider)) {
+        fail("quote-provider-mismatch", { step: "registry", got: mappedProvider, want: quote.provider });
+      }
+      let recordedFactory = null;
+      try {
+        recordedFactory = addressFromWord(await evmCall({ to: registry, data: factoryOfData(quote.provider) }));
+      } catch { fail("quote-factory-unchecked", { step: "factory", why: "read-failed", registry }); }
+      if (recordedFactory === null || recordedFactory === ZERO_ADDRESS) {
+        fail("quote-factory-unknown", { step: "factory", registry, provider: quote.provider });
+      }
+      if (!sameText(recordedFactory, quote.factory)) {
+        fail("quote-factory-mismatch", { step: "factory", got: quote.factory, want: recordedFactory });
+      }
+      if (factoryPolicy) {
+        if (typeof evmCode !== "function") fail("quote-factory-unchecked", { step: "factory", why: "no-code-read" });
+        let codeHex = null;
+        try { codeHex = await evmCode(quote.factory); } catch { fail("quote-factory-unchecked", { step: "factory", why: "code-read-failed", factory: quote.factory }); }
+        const codeHash = bytesToHexQ(keccak256(hexToBytesQ(codeHex) || new Uint8Array(0)));
+        if (!factoryPolicy.includes(codeHash)) fail("quote-factory-code-unknown", { step: "factory", factory: quote.factory, codeHash });
+      }
+      if (implementationPolicy) {
+        if (typeof evmCall !== "function") fail("quote-factory-unchecked", { step: "factory", why: "no-chain-read" });
+        if (typeof evmCode !== "function") fail("quote-factory-unchecked", { step: "factory", why: "no-code-read" });
+        const verdict = await engine.evm.verifyFactoryImplementationOnChain({
+          factory: quote.factory,
+          read: evmCall,
+          code: (address) => evmCode(address),
+          policy: implementationPolicy,
+          hashCode: (codeHex) => bytesToHexQ(keccak256(hexToBytesQ(codeHex) || new Uint8Array(0))),
+        });
+        if (!verdict.ok) {
+          const unknown = verdict.why === "implementation-code-unknown" ||
+            verdict.why === "implementation-code-mismatch" || verdict.why === "implementation-has-no-code";
+          fail(unknown ? "quote-factory-code-unknown" : "quote-factory-unchecked",
+            { step: "factory", why: verdict.why, factory: quote.factory, implementation: verdict.implementation || null });
+        }
+      }
+      const tipCheck = (() => {
+        try { return claimTipVerdict({ claimTipWei: quote.claimTip }); }
+        catch { return { ok: true, tipWei: "0" }; }
+      })();
+      if (!tipCheck.ok && tipCheck.code === "quote-tip-unreadable") {
+        fail("quote-field-unbound", { step: "claimTip", field: "claimTip" });
+      }
+      if (tipCheck.tipWei !== "0") {
+        if (typeof evmBlock !== "function") fail("quote-tip-unchecked", { step: "claimTip", why: "no-block-read" });
+        let block = null;
+        try { block = await evmBlock("latest"); } catch { fail("quote-tip-unchecked", { step: "claimTip", why: "block-read-failed" }); }
+        const baseFeeWei = block && (block.baseFeePerGas !== undefined ? block.baseFeePerGas : block.baseFeeWei);
+        const verdict = claimTipVerdict({ claimTipWei: quote.claimTip, baseFeeWei });
+        if (!verdict.ok) fail(verdict.code, { step: "claimTip", ...verdict });
+      }
+      return {
+        ...result,
+        quote: { ...quote, viewHalfClaimer: derived.makerViewHalf },
+        // THE SHAPE `swaps.start` TAKES: the proof and the claimer commitment travel with the view half, so a
+        // caller can pass this object as `counterparty` without rebuilding the relay fields.
+        counterparty: {
+          proof: nodeHalf.proof,
+          edPointClaimer: side === "ask" ? quote.edPointClaimer : nodeHalf.edPoint,
+          commitHalfClaimer: side === "ask" ? quote.commitHalfClaimer : nodeHalf.commitHalf,
+          viewHalfClaimer: derived.makerViewHalf,
+          viewPoint: side === "ask" ? result.edViewPointClaimer : result.edViewPointLocker,
+        },
+        viewHalfClaimer: derived.makerViewHalf,
+        viewHalfPoint: derived.makerViewPoint,
+        recovery: derivation,
+      };
     },
   };
 }
