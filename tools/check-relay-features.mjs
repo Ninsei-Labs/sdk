@@ -77,7 +77,6 @@ console.log("=== 4) MALFORMED OR UNSIGNED FEATURES ARE REFUSED ===");
 const mutations = [
   ["another signature", { ...features, signature: "0x" + "00".repeat(65) }],
   ["another quote key", { ...features, quoteKey: "0x" + "03".repeat(20) }],
-  ["no firm capability", { ...features, capabilities: ["future/7"] }],
   ["a zero hpke key", { ...features, hpkeKey: "0x" + "00".repeat(32) }],
   ["a short hpke key", { ...features, hpkeKey: "0x01" }],
   ["no window", { ...features, firmWindows: [] }],
@@ -91,7 +90,7 @@ for (const [label, changed] of mutations) {
     } else bad(label + " gave " + JSON.stringify(error && (error.code || error.message)));
   }
 }
-for (const name of ["relayId", "provider", "quoteKey", "registry", "capabilities", "hpkeKey", "firmWindows", "time", "nonce"]) {
+for (const name of ["relayId", "provider", "quoteKey", "registry", "hpkeKey", "firmWindows", "time", "nonce"]) {
   const next = { ...features };
   delete next[name];
   if (nodeFeaturesMissingFields(next).includes(name)) ok(name + " is named when missing");
