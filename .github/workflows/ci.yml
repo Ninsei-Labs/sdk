@@ -192,6 +192,12 @@ jobs:
       - name: Check the one-key view half (the funded address matches the words)
         run: pnpm run check:key-view
 
+      # THE HPKE PROFILE A RELAY REQUEST USES. The module is not exported yet, but its suite, context and
+      # plaintext widths are wire agreements: a changed algorithm or word order must redden here rather than
+      # fail only when a quote is encrypted for a real maker.
+      - name: Check the relay view envelope (suite, context, widths)
+        run: pnpm run check:relay-view
+
       - name: Check arrival consensus (every witness agrees on the whole observation)
         run: pnpm run check:arrival-consensus
 

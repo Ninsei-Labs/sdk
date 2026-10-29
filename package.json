@@ -41,6 +41,7 @@
     "check:sale-auth": "node tools/check-sale-auth.mjs",
     "check:backup-confirmation": "node tools/check-backup-confirmation.mjs",
     "check:key-view": "node tools/check-key-view.mjs",
+    "check:relay-view": "node tools/check-relay-view.mjs",
     "check:arrival-consensus": "node tools/check-arrival-consensus.mjs",
     "check:arrival-real": "node tools/check-arrival-real.mjs",
     "check:order-proof": "node tools/check-order-proof.mjs",
