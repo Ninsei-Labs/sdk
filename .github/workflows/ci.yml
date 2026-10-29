@@ -198,6 +198,11 @@ jobs:
       - name: Check the relay view envelope (suite, context, widths)
         run: pnpm run check:relay-view
 
+      # THE TERMS DIGEST IS THE HPKE CONTEXT AND THE REQUEST'S IDENTITY. The vector is recomputed in Go from
+      # the relay wire spec, so a wrong type string, field order or nested struct hash cannot agree with it.
+      - name: Check the relay terms digest (type strings, vector, field binding)
+        run: pnpm run check:relay-terms
+
       - name: Check arrival consensus (every witness agrees on the whole observation)
         run: pnpm run check:arrival-consensus
 

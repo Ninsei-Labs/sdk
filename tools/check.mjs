@@ -2561,6 +2561,7 @@ const saleAuthCheck = () => runScriptCheck("check-sale-auth.mjs", "sale auth");
 const backupConfirmationCheck = () => runScriptCheck("check-backup-confirmation.mjs", "backup confirmation");
 const keyViewCheck = () => runScriptCheck("check-key-view.mjs", "key view");
 const relayViewCheck = () => runScriptCheck("check-relay-view.mjs", "relay view");
+const relayTermsCheck = () => runScriptCheck("check-relay-terms.mjs", "relay terms");
 const arrivalConsensusCheck = () => runScriptCheck("check-arrival-consensus.mjs", "arrival consensus");
 const arrivalRealCheck = () => runScriptCheck("check-arrival-real.mjs", "real arrival");
 const orderProofCheck = () => runScriptCheck("check-order-proof.mjs", "order proof");
@@ -2612,6 +2613,7 @@ const CHECKS = {
   "backup-confirmation": backupConfirmationCheck,
   "key-view": keyViewCheck,
   "relay-view": relayViewCheck,
+  "relay-terms": relayTermsCheck,
   "arrival-consensus": arrivalConsensusCheck,
   "arrival-real": arrivalRealCheck,
   "order-proof": orderProofCheck,

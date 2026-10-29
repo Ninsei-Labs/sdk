@@ -1,0 +1,27 @@
+{
+  "about": "FirmTerms typed-data vector computed independently in Go from the relay wire spec. The terms are the ask case from the relay firm vectors.",
+  "terms": {
+    "market": "42161:ETH",
+    "side": "ask",
+    "maker": "0x00000000000000000000000000000000000000a1",
+    "registry": "0x00000000000000000000000000000000000000c3",
+    "featuresHash": "0x0000000000000000000000000000000000000000000000000000000000000099",
+    "xmrNetwork": "stagenet",
+    "order": {
+      "chainId": "42161",
+      "factory": "0x0000000000000000000000000000000000000011",
+      "locker": "0x00000000000000000000000000000000000000b2",
+      "claimer": "0x00000000000000000000000000000000000000a1",
+      "amount": "152330000000000007",
+      "readyBy": 1791188235,
+      "t1": 1791191835,
+      "salt": "0x0000000000000000000000000000000000000000000000000000000000000044"
+    },
+    "xmrAmount": "1000000000000",
+    "claimTip": "0"
+  },
+  "domain": "0xe9967aed8a3d31768d885758bacd7f491acd78e976f9d659416e9c0ae07935fc",
+  "orderHash": "0xff87ec6c614912911ca125d218a7a244c2fb002d1cd0b1dd84b6185247657c28",
+  "termsHash": "0x298377bea0a6dc53c9fc8f49720d5fd013c95ce47f1f3856d7a51368b00c6e58",
+  "digest": "0x34c63604356052e1ddfefe118774c3202ef47560d712c11bba4849631aeceb6a"
+}
