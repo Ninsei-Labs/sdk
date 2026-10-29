@@ -700,6 +700,8 @@ export interface FirmRelayAnswer {
   readonly quote: Readonly<Record<string, unknown>>;
   readonly orderQuote: Readonly<Record<string, unknown>>;
   readonly nodeHalf: Readonly<Record<string, unknown>>;
+  /** Ready to pass as `swaps.start({ counterparty })`: proof, claimer commitment and maker view half. */
+  readonly counterparty: Readonly<Record<string, unknown>>;
   readonly edViewPointLocker: string;
   readonly edViewPointClaimer: string;
   readonly context: string;

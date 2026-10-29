@@ -19,8 +19,8 @@
 - `quotes.firmRelay` is the recovery-key adapter: it derives the client half and both view points from one
   key, fills the provider's role for ask or bid, verifies the node half's DLEQ proof and commitment, sends one
   relay request, and checks the registry provider and factory against the answer before returning the signed
-  `orderQuote` and the maker view half. `FirmOffer` now matches the direct `firm` call (`providerId`, `order`,
-  optional `viewHalfClaimer`).
+  `orderQuote`, a `counterparty` object ready for `swaps.start`, and the maker view half. `FirmOffer` now matches
+  the direct `firm` call (`providerId`, `order`, optional `viewHalfClaimer`).
 
 ## 0.53.0 — 2026-10-28
 

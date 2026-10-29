@@ -204,6 +204,11 @@ try {
   if (result.recovery && result.recovery.kind === "salt-v2" && result.recovery.salt === order.salt) {
     ok("the adapter reports the salt-v2 derivation");
   } else bad("the derivation was not returned");
+  if (result.counterparty.proof === result.nodeHalf.proof
+    && result.counterparty.commitHalfClaimer === result.quote.commitHalfClaimer
+    && result.counterparty.viewHalfClaimer === derived.makerViewHalf) {
+    ok("the counterparty shape carries the proof and the maker view half");
+  } else bad("the counterparty shape is incomplete");
 } catch (error) { bad("valid adapter call failed: " + JSON.stringify(error && (error.code || error.message)) + " " + JSON.stringify(error && error.params)); }
 
 console.log("=== 2) THE BID SIDE KEEPS THE PROVIDER AS LOCKER ===");
