@@ -960,6 +960,22 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
         otherViewPoint: nodeViewPoint,
         network: xmrNetwork,
       });
+      // THE ESCROW ADDRESS IS A READ, NOT A GUESS. predict() is a free call and uses the same signed quote the
+      // factory will receive; the locker fields are the side that deposits ETH. A read failure is a named refusal,
+      // because a client that cannot name the escrow cannot watch it.
+      const lockerHalf = side === "ask"
+        ? { commitHalfLocker: clientHalf.commitHalf, edPointLocker: own.side.pub.ed, edViewPointLocker: own.side.viewPub }
+        : { commitHalfLocker: nodeHalf.commitHalf, edPointLocker: nodeHalf.edPoint, edViewPointLocker: result.edViewPointLocker };
+      let escrow = null;
+      try {
+        const predicted = await evmCall({
+          to: quote.factory,
+          data: engine.evm.encodePredict({ ...result.orderQuote, ...lockerHalf, signature: result.orderQuote.signature }),
+        });
+        escrow = engine.evm.decodeAddress(predicted);
+      } catch {
+        fail("quote-escrow-unchecked", { step: "factory", why: "predict-failed", factory: quote.factory });
+      }
       if (providerAllowed && providerAllowed(maker) !== true) {
         fail("quote-provider-not-allowed", { step: "policy", provider: maker });
       }
@@ -1036,6 +1052,7 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
         viewHalfClaimer: derived.makerViewHalf,
         viewHalfPoint: derived.makerViewPoint,
         jointAddress: oneTimeAddress.address,
+        escrow,
         recovery: derivation,
       };
     },
