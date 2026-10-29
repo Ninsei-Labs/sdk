@@ -21,6 +21,8 @@
   relay request, and checks the registry provider and factory against the answer before returning the signed
   `orderQuote`, the one-time joint XMR address, a `counterparty` object ready for `swaps.start`, and the maker
   view half. `FirmOffer` now matches the direct `firm` call (`providerId`, `order`, optional `viewHalfClaimer`).
+- `swaps.sellWatch` is the client-side sell wait: it reads the escrow itself and returns `ready`,
+  `claimed` or `refunded` (or `sell-timeout`), with no backend watcher and no signature.
 
 ## 0.53.0 — 2026-10-28
 
