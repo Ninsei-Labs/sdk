@@ -75,7 +75,8 @@
     "check:types-consumer": "node node_modules/typescript/bin/tsc -p tools/ts-consumer/tsconfig.json",
     "check:monero-live": "node tools/check-monero-live.mjs",
     "check:native-amount": "node tools/check-native-amount.mjs",
-    "check:ci-boundary": "node tools/check-ci-boundary.mjs"
+    "check:ci-boundary": "node tools/check-ci-boundary.mjs",
+    "check:contracts-release": "node tools/check-contracts-release.mjs"
   },
   "types": "./index.d.ts",
   "exports": {
