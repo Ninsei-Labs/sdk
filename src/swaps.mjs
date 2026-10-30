@@ -297,8 +297,12 @@ const recordInputOf = (request) => {
     xmrAmount: quote.size !== undefined ? quote.size : undefined,
     // THE SIGNED INTEGER, NOT THE DISPLAY NUMBER. `quote.size` is a rounded view of the XMR amount; the signed
     // order's `xmrAmount` is the exact atomic value the maker will pay, and the arrival check compares that one.
+    // THE SIGNED FIGURE, NEVER A DISPLAY ONE. The firm path puts the quote's signed `xmrAmount` on the order it
+    // returns; a bare `quote.size` is a rounded screen number and must not reach the arrival check.
     expectedAtomic: request.order && request.order.xmrAmount !== undefined && request.order.xmrAmount !== null
-      ? request.order.xmrAmount : undefined,
+      ? String(request.order.xmrAmount)
+      : (request.orderQuote && request.orderQuote.xmrAmount !== undefined && request.orderQuote.xmrAmount !== null
+        ? String(request.orderQuote.xmrAmount) : undefined),
     // THE ORDER-QUOTE ID IS PART OF THE RECORD, NOT A DETAIL OF THE SCREEN (a defect found): our service uses it to
     // tie the created escrow to the provider node's record, and without it the node cannot take the ETH
     // (sdk/src/swap-flow.mjs: quoteId: quote.id -> swap.orderQuoteId; markBodyOf reads exactly this field).

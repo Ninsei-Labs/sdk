@@ -197,6 +197,10 @@ try {
   const result = await call(makeQuotes(), { fetchImpl: wire.fetchImpl });
   if (result.quote.claimer === provider && result.orderQuote.factory === factory) ok("the ask quote carries the provider as claimer");
   else bad("unexpected roles: " + JSON.stringify({ claimer: result.quote.claimer, factory: result.orderQuote.factory }));
+  // THE RECORD TAKES THE SIGNED AMOUNT FROM THE ORDER TERMS, NOT FROM A DISPLAY SIZE.
+  if (result.order.xmrAmount === baseRequest.xmrAmount && result.quote.xmrAmount === baseRequest.xmrAmount) {
+    ok("the signed XMR amount travels with the order terms");
+  } else bad("the signed XMR amount did not reach the order: " + JSON.stringify({ order: result.order, quote: result.quote }));
   if (result.viewHalfClaimer === derived.makerViewHalf && result.viewHalfPoint === derived.makerViewPoint) {
     ok("the maker view half is derived from the same recovery key");
   } else bad("the maker view half is not the derived one");
