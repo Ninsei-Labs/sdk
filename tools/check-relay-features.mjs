@@ -5,7 +5,8 @@
 // encoder would not catch a wrong array order or a missing FirmWindow type.
 //
 // Run: node tools/check-relay-features.mjs
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { keccak256 } from "../src/primitives.mjs";
@@ -21,6 +22,39 @@ import {
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = JSON.parse(readFileSync(join(here, "fixtures", "relay-features.json"), "utf8"));
 const features = fixture.features;
+
+// THE FIXTURE IS A COPY; THE DEPLOYED REPOSITORY IS THE SOURCE. When a relay checkout is available, read the
+// vector from its origin/main instead of trusting the copy. This is the check that catches a stale local clone:
+// a test that signs and verifies with this SDK alone proves only that the SDK agrees with itself.
+function upstreamVector() {
+  // CI DOWNLOADS ONLY THE VECTOR, NEVER THE RELAY TREE. The relay is private, and a job that needs one JSON
+  // file must not check out the whole repository into a public workflow. The file is fetched by the job with
+  // the cross-repo token and handed here by path; this module never sees relay source.
+  const file = process.env.RELAY_VECTOR_FILE || null;
+  if (file) {
+    try {
+      const doc = JSON.parse(readFileSync(file, "utf8"));
+      return doc.vectors.find((entry) => entry.name === "public features, two sides") || null;
+    } catch (error) {
+      return { error: "RELAY_VECTOR_FILE could not be read: " + String((error && error.message) || error).slice(0, 160) };
+    }
+  }
+  // LOCAL CHECK ONLY. A developer may point at a checkout; the fetch and `git show` read one file. No
+  // RELAY_REPO means the upstream claim is a named skip, never a silent sibling checkout.
+  const repo = process.env.RELAY_REPO || null;
+  if (!repo) return null;
+  if (!existsSync(join(repo, ".git"))) return { error: "RELAY_REPO does not name a git checkout: " + repo };
+  const git = process.env.GIT_BIN || (process.platform === "win32" ? "C:/Program Files/Git/cmd/git.exe" : "git");
+  try {
+    execFileSync(git, ["-C", repo, "fetch", "origin", "main"], { stdio: "ignore", timeout: 30_000 });
+    const raw = execFileSync(git, ["-C", repo, "show", "origin/main:internal/wire/testdata/vectors.json"], { encoding: "utf8", timeout: 30_000 });
+    const doc = JSON.parse(raw);
+    return doc.vectors.find((entry) => entry.name === "public features, two sides") || null;
+  } catch (error) {
+    return { error: String((error && error.message) || error).slice(0, 200) };
+  }
+}
+const upstream = upstreamVector();
 const hex = (bytes) => "0x" + Buffer.from(bytes).toString("hex");
 const terms = {
   market: "42161:ETH",
@@ -34,6 +68,19 @@ let pass = 0;
 const fails = [];
 const ok = (message) => { pass += 1; console.log("  ok    " + message); };
 const bad = (message) => { fails.push(message); console.log("  FAIL  " + message); };
+
+console.log("=== 0) THE COPY AGREES WITH THE RELAY REPOSITORY ===");
+if (upstream && upstream.error) bad("the relay checkout could not be read: " + upstream.error);
+else if (upstream) {
+  const same = upstream.typeString === fixture.typeString
+    && upstream.structHash === fixture.structHash
+    && upstream.digest === fixture.digest
+    && JSON.stringify(upstream.frame) === JSON.stringify(fixture.features);
+  if (same) ok("the fixture matches relay origin/main");
+  else bad("the fixture is not the current relay origin/main vector");
+} else {
+  console.log("  --    no upstream vector (RELAY_VECTOR_FILE/RELAY_REPO not set); the fixture names " + String(fixture.source && fixture.source.commit || "an unknown commit"));
+}
 
 console.log("=== 1) THE TYPE STRING INCLUDES THE WINDOW STRUCT ===");
 if (fixture.source && fixture.source.repo && fixture.source.commit && fixture.source.path) {
