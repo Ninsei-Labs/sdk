@@ -126,6 +126,7 @@ export function markBodyOf(swap, escrow, order = null) {
     }
     return null;
   };
+
   return {
     id: swap.id || null,
     network: swap.network || swap.chain || null,
@@ -590,6 +591,37 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       });
     }
     return answer.body;
+  }
+
+  // A SELL SENDS XMR ONLY INTO AN ESCROW THE CHAIN ALREADY HOLDS.
+    // A SELL SENDS XMR ONLY INTO AN ESCROW THE CHAIN ALREADY HOLDS. The relay answer proves the maker signed the
+    // terms; it does not prove that the maker funded them. Read the escrow itself (code, status, slots and
+    // deadlines), compare the slots with the halves this offer verified, and refuse before `send-xmr`.
+  async function sellEscrowGate(escrow, expect) {
+      if (!escrow || !expect) throw new SdkError("bad-input", { field: "escrow" });
+      let status = null;
+      try { status = await flow.orderStatus(escrow, { call: reader }); }
+      catch (e) { throw new SdkError("quote-refused", { step: "send-xmr", why: "escrow-unreadable" }); }
+      if (!status || status.isFunded !== true || status.isClaimed === true || status.isRefunded === true) {
+        throw new SdkError("quote-refused", { step: "send-xmr", why: "escrow-not-open" });
+      }
+      let deadlines = null;
+      try { deadlines = await flow.orderDeadlines(escrow, { call: reader }); }
+      catch (e) { throw new SdkError("quote-refused", { step: "send-xmr", why: "deadline-unreadable" }); }
+      if (Number(deadlines.readyBy) !== Number(expect.readyBy) || Number(deadlines.t1) !== Number(expect.t1)) {
+        throw new SdkError("quote-refused", { step: "send-xmr", why: "terms-mismatch" });
+      }
+      // Leave time for the XMR to be sent and confirmed before the maker's ready mark closes. The lead is a
+      // node setting (`limits.sellReadyLeadSec`), not a second protocol constant.
+      const leadSec = Number(limitOf("sellReadyLeadSec", 600));
+      if (Math.floor(Date.now() / 1000) + leadSec >= Number(deadlines.readyBy)) {
+        throw new SdkError("quote-refused", { step: "send-xmr", why: "deadline-too-close" });
+      }
+      try { await flow.assertOrderSlots(escrow, expect, "send-xmr", { call: reader }); }
+      catch (e) {
+        if (e && e.code === "contract-reverted") throw e;
+        throw new SdkError("quote-refused", { step: "send-xmr", why: "slots-unreadable" });
+      }
   }
 
   return {
@@ -1398,6 +1430,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
           || !same(existing.escrow && existing.escrow.moneroAddress, offer.jointAddress)) {
           throw new SdkError("quote-refused", { step: "sell-record", why: "offer-changed" });
         }
+        await sellEscrowGate((existing.escrow && existing.escrow.address) || offer.escrow, existing.expect || null);
         return { id: existing.id, side: "sell", escrow: (existing.escrow && existing.escrow.address) || offer.escrow,
           address: (existing.escrow && existing.escrow.moneroAddress) || offer.jointAddress,
           xmrAmount: (existing.escrow && existing.escrow.xmrAmount) || quote.xmrAmount,
@@ -1479,6 +1512,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         commitHalfLocker: (offer.nodeHalf && offer.nodeHalf.commitHalf) || null,
         orderContext: offer.context || null, xmrAmount: quote.xmrAmount || null,
       };
+      await sellEscrowGate(offer.escrow, swap.expect);
       try { engine.swap.saveSwap(swap); } catch { throw new SdkError("storage-unavailable", { step: "save-swap" }); }
       return { id: swap.id, side: "sell", escrow: offer.escrow, address: offer.jointAddress,
         xmrAmount: quote.xmrAmount, claimTip: quote.claimTip || null, orderQuote: offer.orderQuote || null,

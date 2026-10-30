@@ -8,6 +8,7 @@ import { createRecoveryKey, takerHalvesV2 } from "../src/recovery-key.mjs";
 import { buildOwnSideFromHalves } from "../src/order.mjs";
 import { keccak256, secp256k1 } from "../src/primitives.mjs";
 import { createSwaps } from "../src/swaps.mjs";
+import { encodeRead, encodeStatus } from "../engine/evm/escrow.js";
 
 const order = {
   chainId: 421614,
@@ -47,7 +48,25 @@ const offer = {
 const problems = [];
 const check = (condition, message) => { if (condition) console.log("  ok    " + message); else problems.push(message); };
 
-const swaps = createSwaps({ config: {} });
+const word = (value) => BigInt(value).toString(16).padStart(64, "0");
+const bytes = (value) => String(value).replace(/^0x/, "").padStart(64, "0");
+const slotReads = {
+  [encodeRead("t1")]: word(order.t1),
+  [encodeRead("readyBy")]: word(order.readyBy),
+  [encodeRead("termsHash")]: "00".repeat(32),
+  [encodeRead("edPointLocker")]: bytes(offer.nodeHalf.edPoint),
+  [encodeRead("edPointClaimer")]: bytes(quote.edPointClaimer),
+  [encodeRead("edViewPointLocker")]: bytes(offer.edViewPointLocker),
+  [encodeRead("commitHalfLocker")]: bytes(offer.nodeHalf.commitHalf),
+  [encodeRead("commitHalfClaimer")]: bytes(quote.commitHalfClaimer),
+  [encodeStatus()]: word(1) + word(0) + word(0) + word(1_000_000_000_000_000_000n),
+};
+const read = async ({ data }) => {
+  const answer = slotReads[data];
+  if (!answer) throw new Error("unexpected chain read " + data);
+  return "0x" + answer;
+};
+const swaps = createSwaps({ config: {}, call: read });
 try {
   const first = await swaps.startSell({ offer, recoveryKey: mnemonic });
   check(first.side === "sell" && first.escrow === escrow && first.address === offer.jointAddress,
@@ -75,6 +94,34 @@ try {
 } catch (error) {
   check(error && error.code === "quote-refused" && error.params && error.params.why === "commitment",
     "a foreign commitment is refused");
+}
+
+// A RELAY ANSWER IS NOT A FUNDED ESCROW: the gate must refuse before the person sees "send-xmr".
+const gateRead = (statusWord, slotOverride = {}) => async ({ data }) => {
+  if (data === encodeStatus()) return "0x" + word(statusWord) + word(0) + word(0) + word(0);
+  const answer = slotOverride[data] || slotReads[data];
+  if (!answer) throw new Error("unexpected chain read " + data);
+  return "0x" + answer;
+};
+const gateOffer = { ...offer, escrow: "0x" + "ef".repeat(20), quote: { ...quote, id: "oq_gate" },
+  jointAddress: "5" + "B".repeat(94) };
+try {
+  const unfunded = createSwaps({ config: {}, call: gateRead(0) });
+  await unfunded.startSell({ offer: gateOffer, recoveryKey: mnemonic });
+  check(false, "an unfunded escrow passed the send gate");
+} catch (error) {
+  check(error && error.code === "quote-refused" && error.params && error.params.why === "escrow-not-open",
+    "an unfunded escrow is refused before send-xmr");
+}
+try {
+  const slotsRead = gateRead(1, { [encodeRead("commitHalfLocker")]: bytes("0x" + "00".repeat(32)) });
+  const wrongSlots = createSwaps({ config: {}, call: slotsRead });
+  await wrongSlots.startSell({ offer: { ...gateOffer, escrow: "0x" + "fa".repeat(20),
+    quote: { ...gateOffer.quote, id: "oq_gate_slots" }, jointAddress: "5" + "C".repeat(94) }, recoveryKey: mnemonic });
+  check(false, "a foreign locker commitment passed the send gate");
+} catch (error) {
+  check(error && error.code === "contract-reverted" && error.params && error.params.step === "send-xmr",
+    "a mismatch between escrow slots and the verified offer is refused");
 }
 
 if (problems.length) {

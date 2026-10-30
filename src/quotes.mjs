@@ -839,6 +839,23 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
       const registry = String(features.registry || "").toLowerCase();
       if (!/^0x[0-9a-f]{40}$/.test(maker) || maker === ZERO_ADDRESS) fail("bad-input", { field: "features.provider" });
       if (!/^0x[0-9a-f]{40}$/.test(registry) || registry === ZERO_ADDRESS) fail("bad-input", { field: "features.registry" });
+      // THE FEATURES' HPKE KEY AND FRAME KEY BELONG TO THE REGISTERED MAKER. Check the registry mapping BEFORE
+      // sealing any view material to the HPKE key: a dishonest relay could otherwise hand us its own key, read both
+      // view halves and swap in its own node half. The answer's registry check later is not a substitute for this
+      // one - by then the view material has already been sealed.
+      if (!/^0x[0-9a-f]{40}$/.test(String(features.quoteKey || "").toLowerCase()) || String(features.quoteKey).toLowerCase() === ZERO_ADDRESS) {
+        fail("bad-input", { field: "features.quoteKey" });
+      }
+      if (typeof evmCall !== "function") fail("quote-registry-unchecked", { step: "features", why: "no-chain-read", registry });
+      let featureProvider = null;
+      try { featureProvider = addressFromWord(await evmCall({ to: registry, data: providerOfData(features.quoteKey) })); }
+      catch { fail("quote-registry-unchecked", { step: "features", why: "read-failed", registry }); }
+      if (featureProvider === null || featureProvider === ZERO_ADDRESS) {
+        fail("quote-key-unknown", { step: "registry", registry, quoteKey: features.quoteKey });
+      }
+      if (!sameText(featureProvider, features.provider)) {
+        fail("quote-provider-mismatch", { step: "registry", got: featureProvider, want: features.provider });
+      }
       if (denylist && typeof order.locker === "string" && denylist.has(order.locker.toLowerCase())) {
         fail("address-denied", { step: "order-quote" });
       }
