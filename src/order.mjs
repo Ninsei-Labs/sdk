@@ -272,9 +272,9 @@ export function orderStep({ order, side = null, counterparty = null, standIn = f
       // computation here. The other's half may not arrive (the order brings it) - then the counterparty's
       // commitment is taken ready-made or stays null, not invented.
       commitHalfLocker: norm(builder().halfCommitment(own.side.half)),
-      commitHalfClaimer: other.half !== undefined && other.half !== null
-        ? norm(builder().halfCommitment(other.half))
-        : (other.commitHalfClaimer || null),
+      // THE COMMITMENT IS THE ONE THE PROOF WAS VERIFIED AGAINST. A `half` in the counterparty object is not a
+      // second source: taking it here would fund a commitment nobody proved and leave the proven half unopened.
+      commitHalfClaimer: other.commitHalfClaimer || null,
       network: network || null,
     },
   };
