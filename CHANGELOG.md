@@ -1,3 +1,9 @@
+## 0.55.2 — 2026-10-30
+
+- `quotes.firmRelay` now carries the signed `orderQuote.xmrAmount` on the order terms it returns, and
+  `swaps.start` refuses a start without that exact integer (`expectedAtomic: signed-amount-missing`).
+  A relay buy no longer records a swap with no arrival amount or falls back to a rounded display size.
+
 ## 0.55.1 — 2026-10-30
 
 - Restore the relay wire revision 13 public features type: it has no `capabilities` field. 0.55.0 added the
