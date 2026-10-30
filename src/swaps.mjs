@@ -286,7 +286,9 @@ const MIN_PASSPHRASE = 12;
 // knew neither the withdrawal address nor the maker, and exporting the recovery file from that screen went out with an
 // empty address. The record fields stay the same as the engine's (core/swap.js, createSwap): the field name is
 // `receiveAddress`.
-const recordInputOf = (request) => {
+// Exported for the relay/record seam check: the function is the only place that decides which amount reaches
+// the arrival check, and a unit test of createRecord alone cannot see that decision.
+export const recordInputOf = (request) => {
   const quote = request && request.quote && typeof request.quote === "object" ? request.quote : {};
   const pass = (v) => (v === undefined || v === null || v === "" ? undefined : v);
   return {
