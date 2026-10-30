@@ -7,10 +7,6 @@
     "provider": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
     "quoteKey": "0x2c012b84ecc618cf2678674d7e3eb7a5519cd235",
     "registry": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
-    "capabilities": [
-      "firm/1",
-      "future/7"
-    ],
     "hpkeKey": "0x0808080808080808080808080808080808080808080808080808080808080808",
     "firmWindows": [
       {
@@ -36,10 +32,10 @@
     ],
     "time": 1791187035,
     "nonce": "0x0707070707070707070707070707070707070707070707070707070707070707",
-    "signature": "0xd704172f032d8ae407e1e8d16a43ff808089f6d9539c769bff17c7e7f4b5b4500808d2785e3b92873187937bc41f27e0ff70c3c8363a3c2ccf590c31276b0ae51b"
+    "signature": "0x1d1bf6de6baba81b18dfd6ec85af027d419bbd22180c4f2a7fe646eb91a27fb8050615e3325d8d20322ea640057cd1918e651dd15ff634aff360ae147d97d9fd1c"
   },
-  "typeString": "NodeFeatures(string relayId,address provider,address quoteKey,address registry,string[] capabilities,bytes32 hpkeKey,FirmWindow[] firmWindows,uint64 time,bytes32 nonce)FirmWindow(string market,string side,string xmrNetwork,uint32 readyMinSeconds,uint32 readyMaxSeconds,uint32 settlementMinSeconds,uint32 settlementMaxSeconds,uint32 quoteTtlSeconds)",
-  "typeHash": "0x3dbe1f00a71b2296e4444b4d6294e8807912a61765d57efb4c6c9751fe87dd27",
-  "structHash": "0xa2465cce8f461797f2c30b845214c764e721f22b12a8c2872490d9e5180765bd",
-  "digest": "0x686655f3665a75ab7f12d8305af859100f9f2a793a1fadf4594271304f3ee424"
+  "typeString": "NodeFeatures(string relayId,address provider,address quoteKey,address registry,bytes32 hpkeKey,FirmWindow[] firmWindows,uint64 time,bytes32 nonce)FirmWindow(string market,string side,string xmrNetwork,uint32 readyMinSeconds,uint32 readyMaxSeconds,uint32 settlementMinSeconds,uint32 settlementMaxSeconds,uint32 quoteTtlSeconds)",
+  "typeHash": "0x8fa51781d08df77aaca6c04038d38d9a4039cdb222a7f138b0fda400bd91f91b",
+  "structHash": "0xd8b90c33d8c39feb8cc33cf58e7b08625e7a472b26f8c99493c5a58620cda732",
+  "digest": "0xf9a33082a68360aa1047038379057c98838ebdc382d1db4a3022017c70d75c59"
 }
