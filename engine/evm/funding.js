@@ -99,6 +99,43 @@ export function toWei(human, decimals = 18) {
   return BigInt(intPart || "0") * 10n ** BigInt(decimals) + BigInt(frac || "0");
 }
 
+// THE ONE NATIVE AMOUNT OF A TOKEN-FUNDED ORDER.
+//
+// The escrow holds the network's NATIVE coin; a quote paid in USDC/USDT carries a different number in the token.
+// The native figure is the quote's own `payNative`, in the network's native decimals. A quote without that figure
+// is a NAMED refusal, never a fallback to the payment amount: rescaling the payment amount is a known wrong answer
+// (10^12 on a 6-decimal token), not a smaller error. This is the rule both the intent target and the escrow order
+// read, so the two cannot diverge.
+export function escrowNativeWei({ quote = null, nativeDecimals = 18 } = {}) {
+  const raw = quote ? quote.payNative : null;
+  if (raw === null || raw === undefined || raw === "") {
+    return { ok: false, code: "native-amount-unread", reason: "the quote carries no native amount" };
+  }
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    return { ok: false, code: "native-amount-unread", reason: "the quote's native amount is not a positive number" };
+  }
+  const dec = Number(nativeDecimals);
+  if (!Number.isInteger(dec) || dec < 0) {
+    return { ok: false, code: "native-amount-unread", reason: "the native decimals are not a whole number" };
+  }
+  // THE QUOTE'S OWN DIGITS, NOT A RE-ROUNDED COPY. An exponent form falls back to toFixed(18), as the rest of the
+  // page does; everything else keeps exactly the digits it was typed with.
+  const text = /e/i.test(String(raw)) ? n.toFixed(18) : String(raw);
+  // DECIMAL DIGITS ONLY. BigInt accepts "0x10", and a native amount read as a hex literal would silently become
+  // sixteen times the token amount; a quote carries decimal text.
+  if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(text)) {
+    return { ok: false, code: "native-amount-unread", reason: "the native amount is not a decimal number" };
+  }
+  let wei;
+  try { wei = toWei(text, dec); }
+  catch { return { ok: false, code: "native-amount-unread", reason: "the native amount is not a decimal number" }; }
+  if (wei <= 0n) {
+    return { ok: false, code: "native-amount-unread", reason: "the native amount rounds to zero wei" };
+  }
+  return { ok: true, wei: wei.toString(), source: "native" };
+}
+
 // WE SET THE GAS OURSELVES, WITH A MARGIN - A CURE FOR A REAL BUG, NOT CAUTION.
 // createOrderAndFund goes as ONE transaction, but the wallet estimates it at an address where the escrow does NOT
 // exist yet: instead of cloning and recording the deposit it counts a plain transfer (21000 plus data). The wallet

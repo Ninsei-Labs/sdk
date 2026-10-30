@@ -54,6 +54,16 @@ export function createRecord(input, { order = null, side: knownSide = null } = {
     // both the slot check against the chain and the address check read them.
     half: halfHex(side.half), viewHalf: halfHex(side.viewHalf),
     edPointLocker: norm(side.pub.ed), edViewPointLocker: norm(side.viewPub) };
+  // THE XMR AMOUNT THE PROVIDER SIGNED, IN ATOMIC UNITS. The record's `xmrAmount` is a display number rounded
+  // from the quote; the signed order carries the exact integer. The arrival check compares against the signed
+  // figure, so it must survive the record and the recovery file unchanged (never re-derived from the display
+  // number). A malformed value is a refusal before anything is saved.
+  if (input.expectedAtomic !== undefined && input.expectedAtomic !== null) {
+    let atomic;
+    try { atomic = BigInt(String(input.expectedAtomic)); } catch { throw new SdkError("bad-input", { field: "expectedAtomic" }); }
+    if (atomic <= 0n) throw new SdkError("bad-input", { field: "expectedAtomic" });
+    escrow.expectedAtomic = atomic.toString();
+  }
   // THE SIDE'S ENCRYPTION KEY - only the public one: the private one stays with the side and never enters the record.
   if (side.enc && side.enc.pub) escrow.encPub = norm(side.enc.pub);
   const record = { ...swap, escrow };

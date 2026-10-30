@@ -85,7 +85,16 @@ const payloadFromOrder = async (request) => {
     ownSpendHalf: halves.spendHalf, ownViewHalf: halves.viewHalf,
     otherSpendPoint, otherViewPoint, network: moneroNetwork,
   });
-  const escrow = { address: order.escrow, readyBy: order.readyBy, t1: order.t1 };
+  // THE SIGNED XMR AMOUNT TRAVELS WITH THE ESCROW. A recovery file rebuilt from the chain must compare the
+  // arrival against the exact integer the order carries, not against the rounded display number.
+  const signedAtomic = (() => {
+    try {
+      const atomic = BigInt(String(order.xmrAmount));
+      return atomic > 0n ? atomic.toString() : null;
+    } catch { return null; }
+  })();
+  const escrow = { address: order.escrow, readyBy: order.readyBy, t1: order.t1,
+    ...(signedAtomic ? { expectedAtomic: signedAtomic } : {}) };
   const payload = engine.recoveryFile.buildPayload({
     swap: {
       id: order.escrow, side, network, moneroNetwork,
