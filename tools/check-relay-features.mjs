@@ -36,6 +36,9 @@ const ok = (message) => { pass += 1; console.log("  ok    " + message); };
 const bad = (message) => { fails.push(message); console.log("  FAIL  " + message); };
 
 console.log("=== 1) THE TYPE STRING INCLUDES THE WINDOW STRUCT ===");
+if (fixture.source && fixture.source.repo && fixture.source.commit && fixture.source.path) {
+  ok("the vector names the deployed relay revision it came from");
+} else bad("the vector does not name its relay revision");
 if (NODE_FEATURES_TYPE === fixture.typeString) ok("the features type matches the relay vector");
 else bad("features type: " + NODE_FEATURES_TYPE);
 if (FIRM_WINDOW_TYPE === "FirmWindow(string market,string side,string xmrNetwork,uint32 readyMinSeconds,uint32 readyMaxSeconds,uint32 settlementMinSeconds,uint32 settlementMaxSeconds,uint32 quoteTtlSeconds)") {

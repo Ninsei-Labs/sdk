@@ -37,5 +37,11 @@
   "typeString": "NodeFeatures(string relayId,address provider,address quoteKey,address registry,bytes32 hpkeKey,FirmWindow[] firmWindows,uint64 time,bytes32 nonce)FirmWindow(string market,string side,string xmrNetwork,uint32 readyMinSeconds,uint32 readyMaxSeconds,uint32 settlementMinSeconds,uint32 settlementMaxSeconds,uint32 quoteTtlSeconds)",
   "typeHash": "0x8fa51781d08df77aaca6c04038d38d9a4039cdb222a7f138b0fda400bd91f91b",
   "structHash": "0xd8b90c33d8c39feb8cc33cf58e7b08625e7a472b26f8c99493c5a58620cda732",
-  "digest": "0xf9a33082a68360aa1047038379057c98838ebdc382d1db4a3022017c70d75c59"
+  "digest": "0xf9a33082a68360aa1047038379057c98838ebdc382d1db4a3022017c70d75c59",
+  "source": {
+    "repo": "https://github.com/Ninsei-Labs/relay",
+    "commit": "ac2bfd6",
+    "path": "internal/wire/testdata/vectors.json",
+    "name": "public features, two sides"
+  }
 }
