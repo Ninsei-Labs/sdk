@@ -1,3 +1,10 @@
+## 0.55.1 — 2026-10-30
+
+- Restore the relay wire revision 13 public features type: it has no `capabilities` field. 0.55.0 added the
+  old revision 12 list back, so `verifyNodeFeatures` refused every features string the deployed relay serves.
+  The fixture is the relay's own revision 13 vector.
+- `@ninsei-labs/sdk/relay` keeps the digests, the verifier, the firm terms digest and the HPKE envelope.
+
 ## 0.55.0 — 2026-10-30
 
 - `order.escrowNativeWei` reads the quote's own native amount (`payNative`) for a token-funded order and returns

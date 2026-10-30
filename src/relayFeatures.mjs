@@ -18,7 +18,7 @@ const DOMAIN_TYPE = "EIP712Domain(string name,string version)";
 export const FIRM_WINDOW_TYPE =
   "FirmWindow(string market,string side,string xmrNetwork,uint32 readyMinSeconds,uint32 readyMaxSeconds,uint32 settlementMinSeconds,uint32 settlementMaxSeconds,uint32 quoteTtlSeconds)";
 export const NODE_FEATURES_TYPE =
-  "NodeFeatures(string relayId,address provider,address quoteKey,address registry,string[] capabilities,bytes32 hpkeKey,FirmWindow[] firmWindows,uint64 time,bytes32 nonce)" +
+  "NodeFeatures(string relayId,address provider,address quoteKey,address registry,bytes32 hpkeKey,FirmWindow[] firmWindows,uint64 time,bytes32 nonce)" +
   FIRM_WINDOW_TYPE;
 
 export const FIRM_WINDOW_FIELDS = [
@@ -36,7 +36,6 @@ export const NODE_FEATURES_FIELDS = [
   ["provider", "address"],
   ["quoteKey", "address"],
   ["registry", "address"],
-  ["capabilities", "string[]"],
   ["hpkeKey", "bytes32"],
   ["firmWindows", "FirmWindow[]"],
   ["time", "uint64"],
@@ -158,24 +157,10 @@ export function verifyNodeFeatures({ features, terms = null } = {}) {
     throw new SdkError("quote-refused", { step: "features", why: "signature" });
   }
   const hpkeKey = String(features.hpkeKey || "").replace(/^0x/, "").toLowerCase();
-  if (!Array.isArray(features.capabilities) || features.capabilities.length === 0
-    || features.capabilities.length > 16
-    || new Set(features.capabilities).size !== features.capabilities.length
-    || features.capabilities.some((name) => typeof name !== "string" || name === ""
-      || name.length > 32 || !/^[ -~]+$/.test(name))) {
-    throw new SdkError("quote-refused", { step: "features", why: "capabilities" });
-  }
-  const firm = features.capabilities.includes("firm/1");
-  if (firm && (!/^[0-9a-f]{64}$/.test(hpkeKey) || /^0+$/.test(hpkeKey))) {
+  if (!/^[0-9a-f]{64}$/.test(hpkeKey) || /^0+$/.test(hpkeKey)) {
     throw new SdkError("quote-refused", { step: "features", why: "hpke-key" });
   }
-  if (firm && (!Array.isArray(features.firmWindows) || features.firmWindows.length === 0)) {
-    throw new SdkError("quote-refused", { step: "features", why: "windows" });
-  }
-  if (!firm && hpkeKey !== "0".repeat(64)) {
-    throw new SdkError("quote-refused", { step: "features", why: "hpke-key" });
-  }
-  if (!firm && Array.isArray(features.firmWindows) && features.firmWindows.length !== 0) {
+  if (!Array.isArray(features.firmWindows) || features.firmWindows.length === 0) {
     throw new SdkError("quote-refused", { step: "features", why: "windows" });
   }
   if (terms) {

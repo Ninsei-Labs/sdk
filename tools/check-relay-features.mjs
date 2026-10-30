@@ -36,6 +36,9 @@ const ok = (message) => { pass += 1; console.log("  ok    " + message); };
 const bad = (message) => { fails.push(message); console.log("  FAIL  " + message); };
 
 console.log("=== 1) THE TYPE STRING INCLUDES THE WINDOW STRUCT ===");
+if (fixture.source && fixture.source.repo && fixture.source.commit && fixture.source.path) {
+  ok("the vector names the deployed relay revision it came from");
+} else bad("the vector does not name its relay revision");
 if (NODE_FEATURES_TYPE === fixture.typeString) ok("the features type matches the relay vector");
 else bad("features type: " + NODE_FEATURES_TYPE);
 if (FIRM_WINDOW_TYPE === "FirmWindow(string market,string side,string xmrNetwork,uint32 readyMinSeconds,uint32 readyMaxSeconds,uint32 settlementMinSeconds,uint32 settlementMaxSeconds,uint32 quoteTtlSeconds)") {
@@ -80,8 +83,7 @@ const mutations = [
   ["a zero hpke key", { ...features, hpkeKey: "0x" + "00".repeat(32) }],
   ["a short hpke key", { ...features, hpkeKey: "0x01" }],
   ["no window", { ...features, firmWindows: [] }],
-  ["no capabilities", { ...features, capabilities: [] }],
-  ["a duplicate capability", { ...features, capabilities: ["firm/1", "firm/1"] }],
+
   ["another type", { ...features, type: "features" }],
 ];
 for (const [label, changed] of mutations) {
@@ -92,7 +94,7 @@ for (const [label, changed] of mutations) {
     } else bad(label + " gave " + JSON.stringify(error && (error.code || error.message)));
   }
 }
-for (const name of ["relayId", "provider", "quoteKey", "registry", "capabilities", "hpkeKey", "firmWindows", "time", "nonce"]) {
+for (const name of ["relayId", "provider", "quoteKey", "registry", "hpkeKey", "firmWindows", "time", "nonce"]) {
   const next = { ...features };
   delete next[name];
   if (nodeFeaturesMissingFields(next).includes(name)) ok(name + " is named when missing");
