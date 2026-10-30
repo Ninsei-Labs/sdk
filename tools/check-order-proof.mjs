@@ -84,6 +84,12 @@ console.log("=== 4) THE ORDER STEP ASKS THE SAME BINDING BEFORE FUNDING ===");
     ok("the order step accepts the proven half and carries its commitment");
   } else bad("order step control: " + JSON.stringify(good.ok ? good.step.wallet : good));
 
+  // A RAW ANSWER WITH A `half` FIELD MUST NOT REPLACE THE COMMITMENT THE PROOF NAMED.
+  const disguisedHalf = run("half", { half: other.half + 1n });
+  if (disguisedHalf.ok && disguisedHalf.step.wallet.commitHalfClaimer === counterparty.commitHalfClaimer) {
+    ok("a foreign half field does not replace the proven commitment");
+  } else bad("a half field replaced the proven commitment: " + JSON.stringify(disguisedHalf.ok ? disguisedHalf.step.wallet : disguisedHalf));
+
   const wrongCommit = run("commit", { commitHalfClaimer: builder.halfCommitment(other.half + 1n) });
   if (!wrongCommit.ok && wrongCommit.code === "quote-refused" && wrongCommit.params && wrongCommit.params.step === "proof") {
     ok("a commitment from another half is refused by the order step");
