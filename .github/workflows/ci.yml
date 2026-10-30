@@ -100,6 +100,12 @@ jobs:
       - name: Break the refusals guard (RED, then restored)
         run: pnpm run check:refusals-teeth
 
+      # THE AMOUNTS OF A TOKEN-FUNDED BUY. The escrow holds native coin, while the quote's token amount is a
+      # different number; a quote without a native figure is a named refusal, never a rescale. The signed XMR
+      # integer, not the rounded display number, is what the arrival check and the recovery file compare.
+      - name: Check the native amount and the signed XMR atomic
+        run: pnpm run check:native-amount
+
       # THE MAKER'S DECLINE IS A STATE OF ITS OWN (issue #40): it is told apart from an ordinary refund by the
       # escrow's `Declined` event or by the node's `declined` + `compliance` status, it stops the wait for XMR at
       # once, it offers no recovery file and no manual refund - and it carries NO reason, category or provider.
