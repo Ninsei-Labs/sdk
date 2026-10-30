@@ -43,7 +43,7 @@ const bad = (m) => { fails.push(m); console.log("  FAIL  " + m); };
 async function startWith(view, v2 = false, salt = order.salt, extra = {}, autoSalt = false) {
   setStorage(memoryStorage());
   let sent = 0;
-  const wallet = { address: async () => order.locker,
+  const wallet = { chainId: async () => order.chainId, address: async () => order.locker,
     send: async () => { sent += 1; throw Object.assign(new Error("stop before broadcast"), { code: "wallet-rejected" }); },
     receipt: async () => null };
   const counterparty = { proof: maker.side.proof, edPointClaimer: maker.spendPoint,
@@ -108,7 +108,7 @@ console.log("=== 1c) A SALT THE QUOTE DID NOT CARRY IS REFUSED ===");
 async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 } } = {}) {
   if (fresh) setStorage(memoryStorage());
   let sent = 0;
-  const wallet = { address: async () => order.locker,
+  const wallet = { chainId: async () => order.chainId, address: async () => order.locker,
     send: async () => { sent += 1; return "0x" + "99".repeat(32); },
     receipt: async () => receipt };
   const counterparty = { proof: maker.side.proof, edPointClaimer: maker.spendPoint,

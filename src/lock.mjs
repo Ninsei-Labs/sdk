@@ -13,6 +13,7 @@ import * as engine from "./engine.mjs";
 // THE DEAL FLOW IS A PACKAGE MODULE NOW (#32, wave 3): the registry address is read through it, exactly as
 // the actions read the order flow.
 import * as flow from "./swap-flow.mjs";
+import { assertWalletChain } from "./chainGuard.mjs";
 
 // THE ORDER'S WORD-ADDRESSES ARE BROUGHT TO 0x HERE, AT THE BOUNDARY, NOT AT EVERY CALLER.
 //
@@ -88,6 +89,7 @@ export async function send(request, wallet, deps = {}) {
   const canonical = canonicalTerms(request);
   terms({ ...canonical, amount: canonical.amountWei });
   const evm = engine.evm;
+  await assertWalletChain(wallet, canonical.chainId, "fund-order");
   // WHAT READS THE CHAIN IS ALSO A SEAM (as in actions.mjs): by default it is the engine's read, but the caller
   // can substitute its own. Without this capability the lock step could not be checked beyond predicting the
   // address - and then "the address from the receipt" would remain an argument on trust, not a verified property.

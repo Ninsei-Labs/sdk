@@ -14,6 +14,7 @@ import * as engine from "./engine.mjs";
 // sdk/src/swap-flow.mjs. The actions therefore call the module directly instead of reaching it through the
 // mirror - there is exactly one implementation, and it lives here.
 import * as flow from "./swap-flow.mjs";
+import { assertWalletChain } from "./chainGuard.mjs";
 
 const missingFields = (object, fields) =>
   fields.filter((k) => object[k] === undefined || object[k] === null || object[k] === "");
@@ -64,6 +65,7 @@ export function createActions({ call = null } = {}) {
       requestOrFail(request, []);
       walletOrFail(wallet);
       const { escrow, expect, onStep } = request;
+      await assertWalletChain(wallet, expect.chainId, "mark-ready");
       return await withCodes("mark-ready", () => flow.markReadyOrder({ escrow, expect, onStep, deps: deps(wallet) }));
     },
     /** Claiming: it reveals your own half, so expectations are mandatory. */
@@ -74,6 +76,7 @@ export function createActions({ call = null } = {}) {
       const sender = typeof wallet.address === "function" ? await wallet.address() : null;
       const verdict = claimSenderVerdict({ sender, claimer: request.claimer || (expect && expect.claimer) });
       if (!verdict.ok) throw new SdkError(verdict.code, { field: verdict.field, why: verdict.why, surface: "actions.claim" });
+      await assertWalletChain(wallet, expect.chainId, "claim");
       return await withCodes("claim", () => flow.claimOrder({ escrow, halfClaimer, expect, onStep, deps: deps(wallet) }));
     },
     /** Refunding: it also reveals a half. The core passes the expectations ALWAYS, though the engine does not require them. */
@@ -81,6 +84,7 @@ export function createActions({ call = null } = {}) {
       requestOrFail(request, ["halfLocker"]);
       walletOrFail(wallet);
       const { escrow, halfLocker, expect, onStep } = request;
+      await assertWalletChain(wallet, expect.chainId, "refund");
       return await withCodes("refund", () => flow.refundOrder({ escrow, halfLocker, expect, onStep, deps: deps(wallet) }));
     },
   };
