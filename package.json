@@ -113,6 +113,10 @@
     "./provider": {
       "types": "./src/public/provider.d.ts",
       "default": "./src/public/provider.mjs"
+    },
+    "./relay": {
+      "types": "./src/public/relay.d.ts",
+      "default": "./src/public/relay.mjs"
     }
   },
   "files": [
