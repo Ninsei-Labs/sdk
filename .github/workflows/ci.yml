@@ -40,7 +40,7 @@ jobs:
       - name: Set up Foundry (anvil and cast, pinned)
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: v1.8.6
+          version: v1.8.7
 
       # --frozen-lockfile: the lock file is the input, not something CI may rewrite.
       - name: Install dependencies
