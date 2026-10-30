@@ -817,6 +817,13 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         throw new SdkError("bad-input", { field: "recoveryKey", why: "required" });
       }
       if (!request.receiveTo || typeof request.receiveTo !== "string") throw new SdkError("bad-input", { field: "receiveTo" });
+      // A START WITHOUT THE SIGNED XMR AMOUNT IS NOT A START. `quote.size` is a rounded display value and the relay
+      // answer does not carry it; the arrival check needs the exact integer the order quote signed. Refuse here, before
+      // a wallet or a funding send, instead of recording an incomplete swap that later reads "no amount".
+      if (!recordInputOf(request).expectedAtomic) {
+        throw new SdkError("bad-input", { field: "expectedAtomic", why: "signed-amount-missing" });
+      }
+
       // RESUME BEFORE ANY NEW SIDE OR SEND. The previous start may have sent the deposit and lost the receipt;
       // reusing its hash is the only way to learn the escrow without a second payment.
       const quoteForResume = (request.orderQuote && request.orderQuote.id) || (request.quote && request.quote.id) || null;
