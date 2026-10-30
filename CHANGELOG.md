@@ -1,3 +1,16 @@
+## 0.55.0 — 2026-10-30
+
+- `order.escrowNativeWei` reads the quote's own native amount (`payNative`) for a token-funded order and returns
+  its wei value. A quote without that figure is refused by name (`native-amount-unread`) instead of rescaling the
+  payment-token amount.
+- Relay public features now carry the `capabilities` list from relay wire revision 13, so a maker's signed
+  `node_features` has the type the relay verifies. A node without `firm/1` carries no HPKE key and no windows.
+- `@ninsei-labs/sdk/relay` exposes the relay digests, the node features verifier, the firm terms digest and the
+  HPKE view envelope for a node that embeds the SDK.
+- `swaps.start` keeps the exact atomic XMR amount from the signed order in the record's `escrow.expectedAtomic`.
+  The arrival check and a recovery file rebuilt from the chain compare that integer instead of the rounded
+  display number. A malformed or non-positive value is refused before the record is saved.
+
 ## 0.54.0 — 2026-10-29
 
 - `findSwaps` no longer walks the allocator's 100,000 v1 indices in one synchronous call. One call scans at most

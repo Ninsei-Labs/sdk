@@ -56,7 +56,7 @@ const window = (side) => ({
 const features = (() => {
   const base = {
     type: "node_features", version: 1, relayId: "test-relay", provider, quoteKey, registry,
-    hpkeKey: hpkePublic, firmWindows: [window("ask"), window("bid")],
+    capabilities: ["firm/1"], hpkeKey: hpkePublic, firmWindows: [window("ask"), window("bid")],
     time: nowSec - 10, nonce: "0x" + "07".repeat(32),
   };
   const sig = secp256k1.sign(nodeFeaturesDigest(base), quotePrivate, { format: "recovered", prehash: false });

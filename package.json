@@ -1,6 +1,6 @@
 {
   "name": "@ninsei-labs/sdk",
-  "version": "0.54.0",
+  "version": "0.55.0",
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
@@ -113,6 +113,10 @@
     "./provider": {
       "types": "./src/public/provider.d.ts",
       "default": "./src/public/provider.mjs"
+    },
+    "./relay": {
+      "types": "./src/public/relay.d.ts",
+      "default": "./src/public/relay.mjs"
     }
   },
   "files": [
