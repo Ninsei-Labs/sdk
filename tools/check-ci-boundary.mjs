@@ -29,6 +29,9 @@ for (const name of readdirSync(workflows)) {
   }
   // The local convenience path must not appear in CI: CI passes RELAY_VECTOR_FILE after downloading one file.
   if (/RELAY_REPO\s*:/i.test(text)) problems.push(name + ": sets RELAY_REPO; CI must pass RELAY_VECTOR_FILE only");
+  if (/CROSS_REPO_TOKEN|RELAY_VECTOR_TOKEN|secrets\.CROSS_/i.test(text)) {
+    problems.push(name + ": reads a cross-repository token; the public SDK must not hold one");
+  }
 }
 
 if (problems.length) {
