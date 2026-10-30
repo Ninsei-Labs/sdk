@@ -259,6 +259,9 @@ jobs:
       - name: Check contract vectors (commitments, event topic, selectors from cast)
         run: pnpm run check:contract-vectors
 
+      - name: Check the CI boundary (no private repository checkout)
+        run: pnpm run check:ci-boundary
+
       # THE SEQUENCE THE PAGE RUNS, NOT ONLY ITS calldata. `runAtomicOrder` is called with a stand-in worker and a
       # stand-in funding call: the check proves the order of steps, the values passed across the boundary, and that
       # a refused counterparty never reaches funding.
