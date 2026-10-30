@@ -27,9 +27,21 @@ const features = fixture.features;
 // vector from its origin/main instead of trusting the copy. This is the check that catches a stale local clone:
 // a test that signs and verifies with this SDK alone proves only that the SDK agrees with itself.
 function upstreamVector() {
+  // CI DOWNLOADS ONLY THE VECTOR, NEVER THE RELAY TREE. The relay is private, and a job that needs one JSON
+  // file must not check out the whole repository into a public workflow. The file is fetched by the job with
+  // the cross-repo token and handed here by path; this module never sees relay source.
+  const file = process.env.RELAY_VECTOR_FILE || null;
+  if (file) {
+    try {
+      const doc = JSON.parse(readFileSync(file, "utf8"));
+      return doc.vectors.find((entry) => entry.name === "public features, two sides") || null;
+    } catch (error) {
+      return { error: "RELAY_VECTOR_FILE could not be read: " + String((error && error.message) || error).slice(0, 160) };
+    }
+  }
+  // LOCAL CHECK ONLY. A developer may point at a checkout; the fetch and `git show` read one file. No
+  // RELAY_REPO means the upstream claim is a named skip, never a silent sibling checkout.
   const repo = process.env.RELAY_REPO || null;
-  // THE CROSS-REPO RUN IS EXPLICIT. A silent fallback to a sibling checkout would recreate the stale-copy
-  // problem this check exists to catch; no RELAY_REPO means no upstream claim.
   if (!repo) return null;
   if (!existsSync(join(repo, ".git"))) return { error: "RELAY_REPO does not name a git checkout: " + repo };
   const git = process.env.GIT_BIN || (process.platform === "win32" ? "C:/Program Files/Git/cmd/git.exe" : "git");
@@ -67,7 +79,7 @@ else if (upstream) {
   if (same) ok("the fixture matches relay origin/main");
   else bad("the fixture is not the current relay origin/main vector");
 } else {
-  console.log("  --    RELAY_REPO is not set; the fixture names " + String(fixture.source && fixture.source.commit || "an unknown commit"));
+  console.log("  --    no upstream vector (RELAY_VECTOR_FILE/RELAY_REPO not set); the fixture names " + String(fixture.source && fixture.source.commit || "an unknown commit"));
 }
 
 console.log("=== 1) THE TYPE STRING INCLUDES THE WINDOW STRUCT ===");
