@@ -36,7 +36,7 @@ quote.signature = signQuoteDigest({ crypto: primitives, digest: quoteDigest({ cr
 setStorage(memoryStorage());
 let asked = 0;
 const sent = [];
-const wallet = { address: async () => order.locker,
+const wallet = { chainId: async () => order.chainId, address: async () => order.locker,
   send: async (tx) => { sent.push(tx); throw Object.assign(new Error("stop before broadcast"), { code: "wallet-rejected" }); },
   receipt: async () => null };
 const deps = { mode: "live", xmrNetwork: "stagenet", logs: async () => [],

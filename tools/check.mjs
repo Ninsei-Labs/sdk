@@ -34,6 +34,7 @@ import { sweepFromOrderCheck } from "./check-sweep-order.mjs";
 import { sweepAdapterCheck } from "./check-sweep-adapter.mjs";
 import { claimTipCheck } from "./check-claim-tip.mjs";
 import { claimSenderCheck } from "./check-claim-sender.mjs";
+import { chainGuardCheck } from "./check-chain-guard.mjs";
 import { quoteRankCheck } from "./check-quote-rank.mjs";
 import { settlementProfilesCheck } from "./check-settlement-profiles.mjs";
 
@@ -2636,6 +2637,7 @@ const CHECKS = {
   "sweep-adapter": sweepAdapterCheck,
   "claim-tip": claimTipCheck,
   "claim-sender": claimSenderCheck,
+  "chain-guard": chainGuardCheck,
   "quote-rank": quoteRankCheck,
   "settlement-profiles": settlementProfilesCheck,
   "funding-receipt": fundingReceiptCheck,
