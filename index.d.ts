@@ -1699,7 +1699,11 @@ export interface SweepRunResult {
 
 // --- Recovery// --- Recovery ------------------------------------------------------------------------------
 
-/** Order checks. Both are BEFORE the signature: after it there is nothing to fix. */
+/** Order checks and pure order helpers. Checks are BEFORE the signature: after it there is nothing to fix. */
+export type EscrowNativeAmount =
+  | { readonly ok: true; readonly wei: string; readonly source: "native" }
+  | { readonly ok: false; readonly code: "native-amount-unread"; readonly reason: string };
+
 export interface OrderApi {
   /** The order context string the proof and the quote signature are bound to. */
   context(terms: Readonly<Record<string, unknown>>): string;
@@ -1707,6 +1711,13 @@ export interface OrderApi {
   verifyCounterparty(request: { readonly side: unknown; readonly order: Readonly<Record<string, unknown>>; readonly sealed?: unknown; readonly ownEncPriv?: unknown }): unknown;
   /** The joint Monero address from your own spend half and the other's point. */
   jointAddress(request: { readonly ownSpendHalf: string; readonly ownViewHalf: string; readonly otherSpendPoint: string; readonly otherViewPoint: string; readonly network?: string }): unknown;
+  /**
+   * The ONE native amount of a token-funded order: the quote's `payNative` in the network's native decimals.
+   * The escrow holds native coin, so the token amount is never used as the escrow amount (a 6-decimal token
+   * would be off by 10^12). A quote without a native figure answers `{ ok: false, code: "native-amount-unread" }`;
+   * it is never replaced by the payment amount.
+   */
+  escrowNativeWei(request?: { readonly quote?: Readonly<Record<string, unknown>> | null; readonly nativeDecimals?: number }): EscrowNativeAmount;
   /**
    * The order state, READ FROM THE CHAIN (escrow status()): which of the four states the order is in. The state is
    * read by a call, not guessed from logs. It is read by the same chain-read seam as the actions (`evmCall`), so

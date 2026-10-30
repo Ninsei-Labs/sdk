@@ -249,6 +249,10 @@ export function createNinsei(options) {
       context: (terms) => contextOf(terms),
       verifyCounterparty: (request) => verifyCounterparty(request),
       jointAddress: (request) => jointAddress(request),
+      // THE ONE NATIVE AMOUNT OF A TOKEN-FUNDED ORDER. The escrow holds native coin, while a stablecoin quote
+      // carries a different number in the token; this reads the quote's native figure. A quote without it is a
+      // named refusal (`native-amount-unread`), never a rescale of the payment amount.
+      escrowNativeWei: (request) => engine.evm.escrowNativeWei(request),
       // ORDER STATE FROM THE CHAIN (escrow slot 3): which of the four states the order is in. Read, not guessed
       // from logs - the very call the engine used to make from www/js/core/swap-flow.js.
       status: (escrow) => orderFlow.orderStatus(escrow, orderDeps),
