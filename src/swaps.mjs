@@ -286,7 +286,9 @@ const MIN_PASSPHRASE = 12;
 // knew neither the withdrawal address nor the maker, and exporting the recovery file from that screen went out with an
 // empty address. The record fields stay the same as the engine's (core/swap.js, createSwap): the field name is
 // `receiveAddress`.
-const recordInputOf = (request) => {
+// Exported for the relay/record seam check: the function is the only place that decides which amount reaches
+// the arrival check, and a unit test of createRecord alone cannot see that decision.
+export const recordInputOf = (request) => {
   const quote = request && request.quote && typeof request.quote === "object" ? request.quote : {};
   const pass = (v) => (v === undefined || v === null || v === "" ? undefined : v);
   return {
@@ -297,8 +299,12 @@ const recordInputOf = (request) => {
     xmrAmount: quote.size !== undefined ? quote.size : undefined,
     // THE SIGNED INTEGER, NOT THE DISPLAY NUMBER. `quote.size` is a rounded view of the XMR amount; the signed
     // order's `xmrAmount` is the exact atomic value the maker will pay, and the arrival check compares that one.
+    // THE SIGNED FIGURE, NEVER A DISPLAY ONE. The firm path puts the quote's signed `xmrAmount` on the order it
+    // returns; a bare `quote.size` is a rounded screen number and must not reach the arrival check.
     expectedAtomic: request.order && request.order.xmrAmount !== undefined && request.order.xmrAmount !== null
-      ? request.order.xmrAmount : undefined,
+      ? String(request.order.xmrAmount)
+      : (request.orderQuote && request.orderQuote.xmrAmount !== undefined && request.orderQuote.xmrAmount !== null
+        ? String(request.orderQuote.xmrAmount) : undefined),
     // THE ORDER-QUOTE ID IS PART OF THE RECORD, NOT A DETAIL OF THE SCREEN (a defect found): our service uses it to
     // tie the created escrow to the provider node's record, and without it the node cannot take the ETH
     // (sdk/src/swap-flow.mjs: quoteId: quote.id -> swap.orderQuoteId; markBodyOf reads exactly this field).
@@ -811,6 +817,13 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         throw new SdkError("bad-input", { field: "recoveryKey", why: "required" });
       }
       if (!request.receiveTo || typeof request.receiveTo !== "string") throw new SdkError("bad-input", { field: "receiveTo" });
+      // A START WITHOUT THE SIGNED XMR AMOUNT IS NOT A START. `quote.size` is a rounded display value and the relay
+      // answer does not carry it; the arrival check needs the exact integer the order quote signed. Refuse here, before
+      // a wallet or a funding send, instead of recording an incomplete swap that later reads "no amount".
+      if (!recordInputOf(request).expectedAtomic) {
+        throw new SdkError("bad-input", { field: "expectedAtomic", why: "signed-amount-missing" });
+      }
+
       // RESUME BEFORE ANY NEW SIDE OR SEND. The previous start may have sent the deposit and lost the receipt;
       // reusing its hash is the only way to learn the escrow without a second payment.
       const quoteForResume = (request.orderQuote && request.orderQuote.id) || (request.quote && request.quote.id) || null;

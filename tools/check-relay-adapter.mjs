@@ -13,6 +13,7 @@ import { nodeFeaturesDigest } from "../src/relayFeatures.mjs";
 import { relayQuoteDigest } from "../src/relayQuote.mjs";
 import { quoteDigest, signQuoteDigest } from "../src/quoteEip712Spec.mjs";
 import { createQuotes } from "../src/quotes.mjs";
+import { recordInputOf } from "../src/swaps.mjs";
 import * as engine from "../src/engine.mjs";
 import { buildOwnSideFromHalves } from "../src/order.mjs";
 import { createRecoveryKey, takerHalvesV2 } from "../src/recovery-key.mjs";
@@ -197,6 +198,15 @@ try {
   const result = await call(makeQuotes(), { fetchImpl: wire.fetchImpl });
   if (result.quote.claimer === provider && result.orderQuote.factory === factory) ok("the ask quote carries the provider as claimer");
   else bad("unexpected roles: " + JSON.stringify({ claimer: result.quote.claimer, factory: result.orderQuote.factory }));
+  // THE RECORD TAKES THE SIGNED AMOUNT FROM THE ORDER TERMS, NOT FROM A DISPLAY SIZE.
+  if (result.order.xmrAmount === baseRequest.xmrAmount && result.quote.xmrAmount === baseRequest.xmrAmount) {
+    ok("the signed XMR amount travels with the order terms");
+  } else bad("the signed XMR amount did not reach the order: " + JSON.stringify({ order: result.order, quote: result.quote }));
+  // THE SEAM THE PARTNER'S PROBE FOUND: the record must take the signed figure from exactly the object `swaps.start`
+  // receives, not from a rounded display size and not from a field the relay answer never carries.
+  const recordInput = recordInputOf({ side: "buy", quote: result.quote, order: result.order, orderQuote: result.orderQuote });
+  if (recordInput.expectedAtomic === baseRequest.xmrAmount) ok("the record input keeps the signed XMR amount");
+  else bad("the record input lost the signed XMR amount: " + JSON.stringify(recordInput.expectedAtomic));
   if (result.viewHalfClaimer === derived.makerViewHalf && result.viewHalfPoint === derived.makerViewPoint) {
     ok("the maker view half is derived from the same recovery key");
   } else bad("the maker view half is not the derived one");

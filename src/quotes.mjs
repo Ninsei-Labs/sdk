@@ -1037,10 +1037,16 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
         const verdict = claimTipVerdict({ claimTipWei: quote.claimTip, baseFeeWei });
         if (!verdict.ok) fail(verdict.code, { step: "claimTip", ...verdict });
       }
+      // THE SIGNED XMR AMOUNT TRAVELS WITH THE ORDER TERMS. `swaps.start` records its order as given, and the
+      // arrival check must compare the exact amount signed in the quote - not the display size, which the relay
+      // answer does not carry at all.
+      const signedAtomic = result.orderQuote && result.orderQuote.xmrAmount !== undefined && result.orderQuote.xmrAmount !== null
+        ? String(result.orderQuote.xmrAmount) : null;
+      if (!signedAtomic) fail("quote-field-unbound", { step: "xmrAmount", field: "orderQuote.xmrAmount" });
       return {
         ...result,
-        quote: { ...quote, viewHalfClaimer: derived.makerViewHalf },
-        order,
+        quote: { ...quote, viewHalfClaimer: derived.makerViewHalf, xmrAmount: signedAtomic },
+        order: { ...order, xmrAmount: signedAtomic },
         // THE SHAPE `swaps.start` TAKES: the proof and the claimer commitment travel with the view half, so a
         // caller can pass this object as `counterparty` without rebuilding the relay fields.
         counterparty: {
