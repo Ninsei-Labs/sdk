@@ -938,7 +938,7 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
         edViewPointClient: own.side.viewPub,
         edViewPointNode: derived.makerViewPoint,
         nodeViewScalar: derived.makerViewHalf,
-        clientViewScalar: side === "bid" ? derived.viewHalf : null,
+        clientViewScalar: derived.viewHalf,
         side,
       });
       const quote = result.quote;

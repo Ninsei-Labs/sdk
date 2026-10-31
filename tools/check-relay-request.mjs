@@ -132,8 +132,9 @@ function open(payload, featuresDigest) {
   });
 }
 
-console.log("=== 1) ASK: ONE VIEW SCALAR ===");
+console.log("=== 1) ASK: BOTH VIEW SCALARS ===");
 const askFeatures = signedFeatures();
+const askClientViewHex = "0x" + askSide.side.viewHalf.toString(16).padStart(64, "0");
 const askRequest = await buildFirmRequest({
   features: askFeatures.features,
   terms: baseTerms("ask", askFeatures.digest),
@@ -141,6 +142,7 @@ const askRequest = await buildFirmRequest({
   edViewPointClient: askSide.side.viewPub,
   edViewPointNode: halves.makerViewPoint,
   nodeViewScalar: halves.makerViewHalf,
+  clientViewScalar: askClientViewHex,
   side: "ask",
 });
 if (askRequest.payload.length > 2 && JSON.parse(askRequest.payload).terms.featuresHash === askFeatures.digest) {
@@ -148,7 +150,8 @@ if (askRequest.payload.length > 2 && JSON.parse(askRequest.payload).terms.featur
 } else bad("ask payload: " + askRequest.payload.slice(0, 200));
 try {
   const opened = await open(JSON.parse(askRequest.payload), askFeatures.digest);
-  if (opened.length === 32 && hex(opened) === halves.makerViewHalf.toLowerCase()) ok("the ask envelope opens to the node's view scalar");
+  const want = Buffer.from(halves.makerViewHalf.replace(/^0x/, "") + askClientViewHex.replace(/^0x/, ""), "hex");
+  if (opened.length === 64 && Buffer.from(opened).equals(want)) ok("the ask envelope opens to both view scalars");
   else bad("ask plaintext: " + hex(opened));
 } catch (error) { bad("ask envelope: " + JSON.stringify(error && (error.code || error.message))); }
 
@@ -177,30 +180,30 @@ for (const [label, request] of [
   ["a view point not derived from its scalar", () => buildFirmRequest({
     features: askFeatures.features, terms: baseTerms("ask", askFeatures.digest), clientHalf: askSide.clientHalf,
     edViewPointClient: askSide.side.viewPub, edViewPointNode: "0x" + "00".repeat(32),
-    nodeViewScalar: halves.makerViewHalf, side: "ask",
+    nodeViewScalar: halves.makerViewHalf, clientViewScalar: askClientViewHex, side: "ask",
   })],
   ["a features signature from another key", () => buildFirmRequest({
     features: { ...askFeatures.features, quoteKey: "0x" + "03".repeat(20) },
     terms: baseTerms("ask", askFeatures.digest), clientHalf: askSide.clientHalf,
     edViewPointClient: askSide.side.viewPub, edViewPointNode: halves.makerViewPoint,
-    nodeViewScalar: halves.makerViewHalf, side: "ask",
+    nodeViewScalar: halves.makerViewHalf, clientViewScalar: askClientViewHex, side: "ask",
   })],
   ["a features hash that does not match", () => buildFirmRequest({
     features: askFeatures.features, terms: baseTerms("ask", "0x" + "00".repeat(32)), clientHalf: askSide.clientHalf,
     edViewPointClient: askSide.side.viewPub, edViewPointNode: halves.makerViewPoint,
-    nodeViewScalar: halves.makerViewHalf, side: "ask",
+    nodeViewScalar: halves.makerViewHalf, clientViewScalar: askClientViewHex, side: "ask",
   })],
   ["a half whose point is not its proof", () => buildFirmRequest({
     features: askFeatures.features, terms: baseTerms("ask", askFeatures.digest),
     clientHalf: { ...askSide.clientHalf, edPoint: "0x" + "00".repeat(32) },
     edViewPointClient: askSide.side.viewPub, edViewPointNode: halves.makerViewPoint,
-    nodeViewScalar: halves.makerViewHalf, side: "ask",
+    nodeViewScalar: halves.makerViewHalf, clientViewScalar: askClientViewHex, side: "ask",
   })],
   ["an ask whose claimer is not the maker", () => buildFirmRequest({
     features: askFeatures.features,
     terms: { ...baseTerms("ask", askFeatures.digest), order: { ...baseTerms("ask", askFeatures.digest).order, claimer: order.claimer } },
     clientHalf: askSide.clientHalf, edViewPointClient: askSide.side.viewPub,
-    edViewPointNode: halves.makerViewPoint, nodeViewScalar: halves.makerViewHalf, side: "ask",
+    edViewPointNode: halves.makerViewPoint, nodeViewScalar: halves.makerViewHalf, clientViewScalar: askClientViewHex, side: "ask",
   })],
   ["a bid whose locker is not the maker", () => buildFirmRequest({
     features: bidFeatures.features,
@@ -213,7 +216,7 @@ for (const [label, request] of [
     features: askFeatures.features,
     terms: { ...baseTerms("ask", askFeatures.digest), claimTip: "1" },
     clientHalf: askSide.clientHalf, edViewPointClient: askSide.side.viewPub,
-    edViewPointNode: halves.makerViewPoint, nodeViewScalar: halves.makerViewHalf, side: "ask",
+    edViewPointNode: halves.makerViewPoint, nodeViewScalar: halves.makerViewHalf, clientViewScalar: askClientViewHex, side: "ask",
   })],
 ]) {
   try { await request(); bad(label + " was accepted"); }
