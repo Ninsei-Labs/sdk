@@ -1,3 +1,12 @@
+## 0.55.4 — 2026-11-01
+
+- `createNinsei` now defaults the factory and escrow-implementation pins from the settlement network; a caller's
+  explicit list still wins. A browser caller with default options no longer funds whatever factory the maker's
+  registry names. An unknown network keeps no implementation policy instead of inheriting the default chain's pin.
+- `verifyArrival` classifies a browser `TimeoutError` as `timeout` (not `network`) and a body cut by the same
+  timeout as `timeout` (not `bad-answer`); every answered witness carries its height, and `xmr-locked`,
+  `xmr-underpaid` and the observation disagreement carry the failed nodes.
+
 ## 0.55.3 — 2026-10-31
 
 - Relay ask carries both view scalars: 64 bytes of plaintext and an 80-byte ciphertext, the same shape as bid.

@@ -15,5 +15,10 @@ export function factoryCodesForChain({ chain, knownFactoryCodes } = {}) {
 
 export function implementationCodesForChain({ chain, knownImplementationCodes } = {}) {
   if (knownImplementationCodes !== undefined && knownImplementationCodes !== null) return knownImplementationCodes;
+  // `knownImplementationCodesFor` falls back to the default chain for an unknown id; a policy from another
+  // network must not be applied here. Only an exact network record gets its pin.
+  const id = typeof chain === "string" ? chain : chain && chain.id;
+  const record = id ? engine.config.chainById(id) : null;
+  if (!record || String(record.id) !== String(id)) return null;
   return engine.config.knownImplementationCodesFor(chain);
 }

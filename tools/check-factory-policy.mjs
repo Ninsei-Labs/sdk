@@ -40,6 +40,9 @@ check("the default implementation policy comes from the same network", () => {
   assert.deepEqual(implementationCodesForChain({ chain: DEFAULT_CHAIN, knownImplementationCodes: null }),
     knownImplementationCodesFor(DEFAULT_CHAIN));
 });
+check("an unknown network does not inherit the default implementation pin", () => {
+  assert.equal(implementationCodesForChain({ chain: "no-such-network", knownImplementationCodes: null }), null);
+});
 check("createNinsei uses the policy helper", () => {
   const source = readFileSync(new URL("../src/index.mjs", import.meta.url), "utf8");
   assert.match(source, /factoryCodesForChain\(\{ chain: config\.settlement\.chain/);
