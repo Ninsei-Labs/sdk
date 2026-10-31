@@ -1,3 +1,12 @@
+## 0.55.3 — 2026-10-31
+
+- Relay ask carries both view scalars: 64 bytes of plaintext and an 80-byte ciphertext, the same shape as bid.
+  A maker can rebuild the joint view key after a taker refunds an ask.
+- The default `arbitrum-sepolia` factory is pinned by code hash (`0x4d51…615c`), measured from the deployed
+  `contracts-testnet-2026.10.26` build. A quote through an unknown factory is refused before signing.
+- `verifyArrival` reports why each Monero node failed (`timeout`, `network`, `http` with status, `bad-answer`)
+  and keeps a completed walk pending when another node was unreachable.
+
 ## 0.55.2 — 2026-10-30
 
 - `quotes.firmRelay` now carries the signed `orderQuote.xmrAmount` on the order terms it returns, and
