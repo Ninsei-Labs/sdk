@@ -82,7 +82,8 @@ function normaliseProof(proof) {
  * `features` is the signed public object the relay forwarded; `terms` is the client's request terms (its
  * `featuresHash` may be omitted and is filled from the verified features). `clientHalf` is
  * `{commitHalf, edPoint, proof}`; `nodeViewScalar` and `clientViewScalar` are the two view halves the client
- * chose. On ask only the node scalar is sent; on bid both.
+ * chose. Both are sent on both sides: after a taker refund on an ask the maker needs the taker's view scalar to
+ * rebuild the joint view key.
  */
 export async function buildFirmRequest({
   features, terms, clientHalf, edViewPointClient, edViewPointNode,
@@ -130,12 +131,9 @@ export async function buildFirmRequest({
   if (pointOf(nodeViewScalar, "nodeViewScalar").toLowerCase() !== nodeViewPoint.toLowerCase()) {
     throw new SdkError("bad-input", { field: "edViewPointNode" });
   }
-  let clientScalar = null;
-  if (requestSide === "bid") {
-    clientScalar = scalarBytes(clientViewScalar, "clientViewScalar");
-    if (pointOf(clientViewScalar, "clientViewScalar").toLowerCase() !== clientViewPoint.toLowerCase()) {
-      throw new SdkError("bad-input", { field: "edViewPointClient" });
-    }
+  const clientScalar = scalarBytes(clientViewScalar, "clientViewScalar");
+  if (pointOf(clientViewScalar, "clientViewScalar").toLowerCase() !== clientViewPoint.toLowerCase()) {
+    throw new SdkError("bad-input", { field: "edViewPointClient" });
   }
   const requestTerms = {
     market: String(terms.market),
@@ -167,9 +165,9 @@ export async function buildFirmRequest({
     edViewPointClient: clientViewPoint,
     edViewPointNode: nodeViewPoint,
   });
-  const plaintext = new Uint8Array(requestSide === "ask" ? 32 : 64);
+  const plaintext = new Uint8Array(64);
   plaintext.set(nodeScalar, 0);
-  if (requestSide === "bid") plaintext.set(clientScalar, 32);
+  plaintext.set(clientScalar, 32);
   const viewEnvelope = await sealViewEnvelope({ hpkeKey: verdict.hpkeKey, info, plaintext });
   const payload = JSON.stringify({
     terms: requestTerms,

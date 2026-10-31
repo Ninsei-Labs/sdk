@@ -2,8 +2,8 @@
 // THE HPKE PROFILE FOR RELAY VIEW MATERIAL.
 //
 // This check exercises the exact suite and context the relay spec fixes: DHKEM(X25519, HKDF-SHA256),
-// HKDF-SHA256, ChaCha20-Poly1305, base mode. It also proves the two plaintext widths: 32 bytes on ask and
-// 64 bytes on bid, with the ciphertext carrying a 16-byte tag.
+// HKDF-SHA256, ChaCha20-Poly1305, base mode. Revision 19 carries both view scalars on both sides: 64 bytes of
+// plaintext and an 80-byte ciphertext with the 16-byte tag.
 //
 // Run: node tools/check-relay-view.mjs
 import { CipherSuite, DhkemX25519HkdfSha256, HkdfSha256 } from "@hpke/core";
@@ -49,17 +49,17 @@ for (const field of ["termsDigest", "commitHalf", "edPoint", "edViewPointClient"
   else bad(field + " is not bound by the context");
 }
 
-console.log("=== 2) ASK CARRIES ONE 32-BYTE SCALAR ===");
-const askPlain = Uint8Array.from({ length: 32 }, (_, i) => i + 1);
+console.log("=== 2) ASK CARRIES BOTH 32-BYTE SCALARS ===");
+const askPlain = Uint8Array.from({ length: 64 }, (_, i) => i + 1);
 let ask = null;
 try {
   ask = await sealViewEnvelope({ hpkeKey, info, plaintext: askPlain });
   const opened = await openViewEnvelope({ privateKey, enc: ask.enc, ciphertext: ask.ciphertext, info });
   if (ask.enc.length === 66) ok("enc is one 32-byte X25519 point");
   else bad("enc is " + ask.enc.length + " hex characters");
-  if (ask.ciphertext.length === 2 + 2 * 48) ok("ciphertext is 32 bytes plus a 16-byte tag");
+  if (ask.ciphertext.length === 2 + 2 * 80) ok("ciphertext is 64 bytes plus a 16-byte tag");
   else bad("ask ciphertext is " + ask.ciphertext.length + " hex characters");
-  if (Buffer.from(opened).equals(Buffer.from(askPlain))) ok("the recipient opens the ask scalar");
+  if (Buffer.from(opened).equals(Buffer.from(askPlain))) ok("the recipient opens both ask scalars");
   else bad("the recipient opened different bytes");
 } catch (error) {
   bad("ask seal/open: " + String(error.message || error));
