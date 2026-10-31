@@ -108,6 +108,7 @@ const built = await buildFirmRequest({
   edViewPointClient: askSide.side.viewPub,
   edViewPointNode: halves.makerViewPoint,
   nodeViewScalar: halves.makerViewHalf,
+  clientViewScalar: askSide.side.viewHalf.toString(),
   side: "ask",
 });
 
@@ -228,6 +229,7 @@ const requestBase = {
   edViewPointClient: askSide.side.viewPub,
   edViewPointNode: halves.makerViewPoint,
   nodeViewScalar: halves.makerViewHalf,
+  clientViewScalar: askSide.side.viewHalf.toString(),
   side: "ask",
 };
 const call = (overrides = {}) => requestFirmQuote({
