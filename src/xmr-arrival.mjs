@@ -34,6 +34,22 @@ const intOf = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.tru
 const txidOf = (v) => (isStr(v) ? v.trim().replace(/^0x/, "").toLowerCase() : null);
 const hostOf = (url) => { try { return new URL(url).host; } catch { throw new SdkError("bad-input", { field: "nodes.url", unknown: url }); } };
 
+// ONE FAILED REQUEST, IN THE SHAPE THE CALLER CAN SHOW. A node that did not answer is not evidence about the
+// transaction; it is a visible reason: a timeout, a transport failure, an HTTP status or a bad answer. The list
+// travels beside `checked`, so a pending or arrived verdict never hides a node that failed.
+const failureOf = (error, node) => {
+  const params = (error && error.params) || {};
+  let code = "network";
+  const why = params.why === undefined || params.why === null ? "" : String(params.why);
+  if (params.status !== undefined && params.status !== null) code = "http";
+  else if (why === "bad-json" || why === "no-height" || why === "no-block") code = "bad-answer";
+  else if (/timeout|abort/i.test(why) || /timeout|abort/i.test(String((error && error.name) || ""))) code = "timeout";
+  const out = { url: node.url, operator: node.operator, code };
+  if (params.status !== undefined && params.status !== null) out.status = params.status;
+  if (why) out.why = why;
+  return out;
+};
+
 // A NODE LIST IS A LIST OF {url, operator}. The operator is what makes two nodes two witnesses: two nodes of one
 // operator are one opinion. A plain string is accepted and its operator is the host - a user who adds their own
 // node is the operator of it.
@@ -167,11 +183,12 @@ export async function verifyArrival(request) {
 
   // 1. THE TIP, and with it the first proof that ANY node answers. All nodes down is a named refusal, not silence.
   const live = [];
+  const failed = [];
   for (const node of nodes) {
     try { const info = await getInfo(node, fetchImpl, timeoutMs); live.push({ node, info }); }
-    catch { /* a failed node does not count and blocks nothing */ }
+    catch (error) { failed.push(failureOf(error, node)); /* a failed node does not count and blocks nothing */ }
   }
-  if (!live.length) throw new SdkError("xmr-no-nodes", { tried: nodes.map((n) => n.url) });
+  if (!live.length) throw new SdkError("xmr-no-nodes", { tried: nodes.map((n) => n.url), nodes: failed });
   const tip = Math.max(...live.map((l) => l.info.height));
   // THE REPORTED HEIGHT IS THE NEXT BLOCK, NOT A REACHABLE ONE. monerod's get_info returns height = "the block that
   // will be mined next", so get_block(height) refuses with "greater than current top block". The backend already
@@ -182,15 +199,22 @@ export async function verifyArrival(request) {
 
   // 2. LOCATE: from the birth height, by whole blocks. The first reachable node does the walk.
   let located = null;
-  let walkError = null;
+  let completedWalk = false;
   for (const { node } of live) {
-    try { located = await locate(node, { txid: txidHint, address: request.address, viewSecret: request.viewSecret, spendPub: request.spendPub, fromHeight: request.fromHeight, toHeight: top, nowSec, fetchImpl, timeoutMs }); }
-    catch (error) { walkError = error; located = null; }
+    try {
+      located = await locate(node, { txid: txidHint, address: request.address, viewSecret: request.viewSecret, spendPub: request.spendPub, fromHeight: request.fromHeight, toHeight: top, nowSec, fetchImpl, timeoutMs });
+      completedWalk = true;
+    } catch (error) {
+      failed.push(failureOf(error, node));
+      located = null;
+    }
     if (located) break;
   }
   if (!located) {
-    if (walkError && walkError.code === "xmr-no-nodes") throw walkError;
-    return { seen: false, state: "pending", txid: txidHint, tip, checked: live.map((l) => ({ url: l.node.url, operator: l.node.operator, height: l.info.height })) };
+    // ONE NODE FINISHED THE WALK AND FOUND NOTHING: that is a complete answer, even when another node failed.
+    // Only when NO node finished the walk is every node unreachable.
+    if (!completedWalk) throw new SdkError("xmr-no-nodes", { tried: nodes.map((n) => n.url), nodes: failed });
+    return { seen: false, state: "pending", txid: txidHint, tip, checked: live.map((l) => ({ url: l.node.url, operator: l.node.operator, height: l.info.height })), failed };
   }
 
   // 3. VERIFY ON EVERY NODE: the SAME block hash, the SAME transaction inside it, the confirmations and the money.
@@ -199,18 +223,18 @@ export async function verifyArrival(request) {
     const record = { url: node.url, operator: node.operator };
     let info;
     try { info = await getInfo(node, fetchImpl, timeoutMs); }
-    catch { record.state = "down"; seen.push(record); continue; }
+    catch (error) { record.state = "down"; record.failure = failureOf(error, node); failed.push(record.failure); seen.push(record); continue; }
     // A LAGGING NODE IS NOT A WITNESS and is not a disagreement: it simply cannot see the block yet.
     if (!info.synced || info.height < located.height) { record.state = "stale"; record.height = info.height; seen.push(record); continue; }
     let block;
     try { block = await getBlock(node, located.height, fetchImpl, timeoutMs); }
-    catch { record.state = "down"; seen.push(record); continue; }
+    catch (error) { record.state = "down"; record.failure = failureOf(error, node); failed.push(record.failure); seen.push(record); continue; }
     record.blockHash = block.hash;
     // A SYNCED NODE WITHOUT THIS TRANSACTION IN THAT BLOCK IS A DISAGREEMENT (it may hold a different block hash).
     if (!block.hash || !block.txHashes.includes(located.txid)) { record.state = "no-tx"; seen.push(record); continue; }
     let body = null;
     try { body = (await getBlockTxs(node, block.txHashes, fetchImpl, timeoutMs)).find((t) => t.tx_hash === located.txid) || null; }
-    catch { record.state = "down"; seen.push(record); continue; }
+    catch (error) { record.state = "down"; record.failure = failureOf(error, node); failed.push(record.failure); seen.push(record); continue; }
     if (!body) { record.state = "no-tx"; seen.push(record); continue; }
     // THE LOCK IS JUDGED AT THE WITNESS'S TIP, NOT AT THE BLOCK THAT MINED THE TRANSFER. `located.height` stays for
     // confirmations; a height lock that has matured is no longer `xmr-locked`.
@@ -258,11 +282,12 @@ export async function verifyArrival(request) {
       txid: located.txid, height: located.height,
       nodes: disagreeing.map((r) => ({ url: r.url, operator: r.operator, blockHash: r.blockHash || null, why: r.state, outputs: r.outputs || null })),
       agreed: seen.filter((r) => r.state === "ok").map((r) => ({ url: r.url, operator: r.operator, blockHash: r.blockHash })),
+      failed,
     });
   }
 
   const okay = seen.filter((r) => r.state === "ok");
-  if (!okay.length) return { seen: false, state: "pending", txid: located.txid, height: located.height, checked: seen };
+  if (!okay.length) return { seen: false, state: "pending", txid: located.txid, height: located.height, checked: seen, failed };
 
   // THE OBSERVATIONS MUST BE IDENTICAL. Grouping by the whole observation (not just the block hash) means a
   // node that reports a different amount, output key or unlock state does not count as agreeing with anyone.
@@ -304,15 +329,15 @@ export async function verifyArrival(request) {
 
   if (best.operators.size < 2) {
     return { seen: false, state: "one-node", txid: located.txid, height: located.height, blockHash: best.observation.blockHash,
-      amountAtomic: amountAtomic.toString(), confirmations, operators: [...best.operators], agreedBy, checked: seen };
+      amountAtomic: amountAtomic.toString(), confirmations, operators: [...best.operators], agreedBy, checked: seen, failed };
   }
   if (confirmations < minConfirmations) {
     return { seen: false, state: "pending", why: "confirmations", txid: located.txid, height: located.height, blockHash: best.observation.blockHash,
-      amountAtomic: amountAtomic.toString(), confirmations, needConfirmations: minConfirmations, agreedBy, checked: seen };
+      amountAtomic: amountAtomic.toString(), confirmations, needConfirmations: minConfirmations, agreedBy, checked: seen, failed };
   }
   return { seen: true, state: "arrived", txid: located.txid, height: located.height, blockHash: best.observation.blockHash,
     amountAtomic: amountAtomic.toString(), confirmations, needConfirmations: minConfirmations,
-    operators: [...best.operators], agreedBy, checked: seen };
+    operators: [...best.operators], agreedBy, checked: seen, failed };
 }
 
 /**
