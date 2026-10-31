@@ -1,5 +1,6 @@
 // THE SDK ENTRY POINT. Assembles the facades and holds rules common to all: no DOM, no texts, no windows.
 import { buildConfig } from "./config.mjs";
+import { factoryCodesForChain, implementationCodesForChain } from "./factoryPolicy.mjs";
 import { createHttp } from "./http.mjs";
 import { createQuotes } from "./quotes.mjs";
 import { createPreflight } from "./preflight.mjs";
@@ -185,6 +186,10 @@ export function createNinsei(options) {
   nodes: o.nodes,
   addNodes: o.addNodes,
 });
+  // THE NETWORK'S PINS REACH THE CORE. The bridge passed them explicitly; a caller with default options did not,
+  // so the factory policy was null and the quote could name any factory. An explicit caller list still wins.
+  const knownFactoryCodes = factoryCodesForChain({ chain: config.settlement.chain, knownFactoryCodes: o.knownFactoryCodes });
+  const knownImplementationCodes = implementationCodesForChain({ chain: config.settlement.chain, knownImplementationCodes: o.knownImplementationCodes });
   const leg = legFor(config.settlement.vm);
   const wallet = createWallet({ settlement: config.settlement.chain, leg });
   // THE GUARDS READ THE NETWORK UNDER THE NAME evmNetwork, WHILE THE CONFIGURATION BUILDER RETURNS IT AS
@@ -221,7 +226,7 @@ export function createNinsei(options) {
     : null;
   const quotes = createQuotes({ config, http, now: o.now || (() => Date.now()), evmCall: o.evmCall || null,
     evmCode: o.evmCode || null, evmBlock: o.evmBlock || null,
-    providerAllowed, knownFactoryCodes: o.knownFactoryCodes, knownImplementationCodes: o.knownImplementationCodes,
+    providerAllowed, knownFactoryCodes, knownImplementationCodes,
     denylist });
   // THE SAME CHAIN-READ SEAM AS THE LOCK AND THE CORE: checking the slots and signing must go one way, otherwise
   // part of the check goes past the wallet and part does not.

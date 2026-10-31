@@ -134,6 +134,8 @@ console.log("=== 1) TWO HONEST NODES AGREE ===");
   else bad("arrived amount: " + verdict.amountAtomic);
   if (verdict.confirmations >= 10) ok("confirmations are reported");
   else bad("confirmations: " + verdict.confirmations);
+  if (verdict.checked && verdict.checked.length === 2 && verdict.checked.every((r) => Number(r.height) > 0)) ok("an answered witness carries its height");
+  else bad("checked heights: " + (verdict.checked || []).map((r) => r.height).join(","));
 }
 
 console.log("=== 1a) A FAILED NODE IS NAMED, AND ONE COMPLETE WALK IS STILL PENDING ===");
@@ -183,6 +185,41 @@ console.log("=== 1a) A FAILED NODE IS NAMED, AND ONE COMPLETE WALK IS STILL PEND
   else bad("bad answer: " + JSON.stringify(badVerdict.failed));
 }
 
+console.log("=== 1a2) A BROWSER TIMEOUT IS NAMED A TIMEOUT ===");
+{
+  const emptyBlock = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (body.method === "get_info") return { ok: true, json: async () => ({ result: { height: 121, synchronized: true } }) };
+    if (body.method === "get_block") return { ok: true, json: async () => ({ result: { block_header: { hash: "c".repeat(64) }, tx_hashes: [] } }) };
+    return { ok: true, json: async () => ({ txs: [], txs_as_json: [] }) };
+  };
+  const timeoutFetch = async (url, init) => {
+    if (url.startsWith("https://timeout.example")) {
+      const error = new Error("signal timed out");
+      error.name = "TimeoutError";
+      throw error;
+    }
+    if (url.startsWith("https://body.example")) {
+      return { ok: true, json: async () => { const error = new Error("signal timed out"); error.name = "TimeoutError"; throw error; } };
+    }
+    return emptyBlock(url, init);
+  };
+  const verdict = await verifyArrival({
+    nodes: [{ url: "https://timeout.example", operator: "A" }, { url: "https://empty.example", operator: "B" }],
+    address, viewSecret: VIEW, spendPub, expectedAtomic: AMOUNT, minConfirmations: 10,
+    fromHeight: 100, txid: TXID, fetch: timeoutFetch,
+  });
+  if (verdict.failed && verdict.failed[0].code === "timeout") ok("a browser TimeoutError is timeout, not network");
+  else bad("browser timeout: " + JSON.stringify(verdict.failed));
+  const body = await verifyArrival({
+    nodes: [{ url: "https://body.example", operator: "A" }, { url: "https://empty.example", operator: "B" }],
+    address, viewSecret: VIEW, spendPub, expectedAtomic: AMOUNT, minConfirmations: 10,
+    fromHeight: 100, txid: TXID, fetch: timeoutFetch,
+  });
+  if (body.failed && body.failed[0].code === "timeout") ok("a body cut by the timeout is timeout, not bad-answer");
+  else bad("body timeout: " + JSON.stringify(body.failed));
+}
+
 console.log("=== 1b) A HEIGHT LOCK IS JUDGED AT THE WITNESS'S TIP ===");
 {
   // Mined at 100 with unlock_time 101; both witnesses are at 121 (top 120). The lock has matured, so this is an
@@ -203,6 +240,15 @@ console.log("=== 1b) A HEIGHT LOCK IS JUDGED AT THE WITNESS'S TIP ===");
   } catch (error) { stillLocked = error; }
   if (stillLocked && stillLocked.code === "xmr-locked") ok("a future height lock is still xmr-locked");
   else bad("a future height lock returned " + (stillLocked ? stillLocked.code : "a verdict"));
+  if (stillLocked && Array.isArray(stillLocked.params && stillLocked.params.failed)) ok("the lock carries the failed nodes");
+  else bad("the lock does not carry failed: " + JSON.stringify(stillLocked && (stillLocked.params || stillLocked.message)));
+  let underpaid = null;
+  try {
+    await run({ nodes: [{ url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" }],
+      txByHost: { default: fixture() }, expectedAtomic: AMOUNT + 1n });
+  } catch (error) { underpaid = error; }
+  if (underpaid && underpaid.code === "xmr-underpaid" && Array.isArray(underpaid.params && underpaid.params.failed)) ok("the shortfall carries the failed nodes");
+  else bad("underpaid: " + JSON.stringify(underpaid && (underpaid.params || underpaid.message)));
 }
 
 console.log("=== 2) ONE ALTERED AMOUNT DEFEATS THE OLD MAXIMUM ===");
