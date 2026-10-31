@@ -136,6 +136,53 @@ console.log("=== 1) TWO HONEST NODES AGREE ===");
   else bad("confirmations: " + verdict.confirmations);
 }
 
+console.log("=== 1a) A FAILED NODE IS NAMED, AND ONE COMPLETE WALK IS STILL PENDING ===");
+{
+  const emptyBlock = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (body.method === "get_info") return { ok: true, json: async () => ({ result: { height: 121, synchronized: true } }) };
+    if (body.method === "get_block") return { ok: true, json: async () => ({ result: { block_header: { hash: "c".repeat(64) }, tx_hashes: [] } }) };
+    return { ok: true, json: async () => ({ txs: [], txs_as_json: [] }) };
+  };
+  const fetchOneDown = async (url, init) => {
+    if (url.startsWith("https://down.example")) throw new TypeError("fetch failed");
+    return emptyBlock(url, init);
+  };
+  const verdict = await verifyArrival({
+    nodes: [{ url: "https://down.example", operator: "A" }, { url: "https://empty.example", operator: "B" }],
+    address, viewSecret: VIEW, spendPub, expectedAtomic: AMOUNT, minConfirmations: 10,
+    fromHeight: 100, txid: TXID, fetch: fetchOneDown,
+  });
+  if (verdict.state === "pending") ok("one complete walk with nothing found is pending, not xmr-no-nodes");
+  else bad("one complete walk returned " + JSON.stringify(verdict));
+  if (verdict.failed && verdict.failed.length === 1 && verdict.failed[0].code === "network") ok("the failed node is named with its code");
+  else bad("failed list: " + JSON.stringify(verdict.failed));
+  const fetchBothDown = async () => { throw new TypeError("fetch failed"); };
+  let allDown = null;
+  try {
+    await verifyArrival({ nodes: [{ url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" }],
+      address, viewSecret: VIEW, spendPub, expectedAtomic: AMOUNT, minConfirmations: 10, fromHeight: 100, txid: TXID, fetch: fetchBothDown });
+  } catch (error) { allDown = error; }
+  if (allDown && allDown.code === "xmr-no-nodes" && Array.isArray(allDown.params.nodes) && allDown.params.nodes.length === 2) ok("an unreachable list names every node");
+  else bad("all down: " + JSON.stringify(allDown && (allDown.params || allDown.message)));
+  const fetchHttp = async (url, init) => {
+    if (url.startsWith("https://http.example")) return { ok: false, status: 503 };
+    return emptyBlock(url, init);
+  };
+  const httpVerdict = await verifyArrival({ nodes: [{ url: "https://http.example", operator: "A" }, { url: "https://empty.example", operator: "B" }],
+    address, viewSecret: VIEW, spendPub, expectedAtomic: AMOUNT, minConfirmations: 10, fromHeight: 100, txid: TXID, fetch: fetchHttp });
+  if (httpVerdict.failed && httpVerdict.failed[0].code === "http" && httpVerdict.failed[0].status === 503) ok("an HTTP failure carries its status");
+  else bad("http failure: " + JSON.stringify(httpVerdict.failed));
+  const fetchBadJson = async (url, init) => {
+    if (url.startsWith("https://bad.example")) return { ok: true, json: async () => { throw new Error("bad json"); } };
+    return emptyBlock(url, init);
+  };
+  const badVerdict = await verifyArrival({ nodes: [{ url: "https://bad.example", operator: "A" }, { url: "https://empty.example", operator: "B" }],
+    address, viewSecret: VIEW, spendPub, expectedAtomic: AMOUNT, minConfirmations: 10, fromHeight: 100, txid: TXID, fetch: fetchBadJson });
+  if (badVerdict.failed && badVerdict.failed[0].code === "bad-answer" && badVerdict.failed[0].why === "bad-json") ok("a bad answer is bad-answer");
+  else bad("bad answer: " + JSON.stringify(badVerdict.failed));
+}
+
 console.log("=== 1b) A HEIGHT LOCK IS JUDGED AT THE WITNESS'S TIP ===");
 {
   // Mined at 100 with unlock_time 101; both witnesses are at 121 (top 120). The lock has matured, so this is an
