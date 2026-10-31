@@ -797,7 +797,11 @@ export function allowedProvidersFor(chainOrId) {
 // record, and its code is compared against this list. Empty for a network = no policy (the factory must still be
 // named by the record and match the signed quote). Filled at deploy: the factory has no immutables, so one build
 // gives the same hash to anyone who deployed it - a provider's own factory lands in the same list.
-export const KNOWN_FACTORY_CODES = {};
+export const KNOWN_FACTORY_CODES = {
+  // contracts-testnet-2026.10.26, factory deployed at 0x69b5a6878b542960af4d239ecc60ad1c9e3e6932.
+  // The factory has no immutables; this hash is reproducible from that release's source.
+  "arbitrum-sepolia": ["0x4d51e943b7786be7d3f9e2c44ad0b54f82932dba12ac6fa34be5088500d6615c"],
+};
 
 export function knownFactoryCodesFor(chainOrId) {
   const id = typeof chainOrId === "string" ? chainOrId : chainOrId && chainOrId.id;

@@ -2563,6 +2563,7 @@ const backupConfirmationCheck = () => runScriptCheck("check-backup-confirmation.
 const keyViewCheck = () => runScriptCheck("check-key-view.mjs", "key view");
 const relayViewCheck = () => runScriptCheck("check-relay-view.mjs", "relay view");
 const relayTermsCheck = () => runScriptCheck("check-relay-terms.mjs", "relay terms");
+const factoryPolicyCheck = () => runScriptCheck("check-factory-policy.mjs", "factory policy");
 const relayFeaturesCheck = () => runScriptCheck("check-relay-features.mjs", "relay features");
 const relayRequestCheck = () => runScriptCheck("check-relay-request.mjs", "relay request");
 const relayAnswerCheck = () => runScriptCheck("check-relay-answer.mjs", "relay answer");
@@ -2622,6 +2623,7 @@ const CHECKS = {
   "key-view": keyViewCheck,
   "relay-view": relayViewCheck,
   "relay-terms": relayTermsCheck,
+  "factory-policy": factoryPolicyCheck,
   "relay-features": relayFeaturesCheck,
   "relay-request": relayRequestCheck,
   "relay-answer": relayAnswerCheck,
