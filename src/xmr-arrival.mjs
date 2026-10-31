@@ -41,9 +41,13 @@ const failureOf = (error, node) => {
   const params = (error && error.params) || {};
   let code = "network";
   const why = params.why === undefined || params.why === null ? "" : String(params.why);
+  // A BROWSER NAMES A TIMEOUT BY THE ERROR'S NAME, NOT ITS MESSAGE. Chromium says "signal timed out" where Node
+  // says "The operation was aborted due to timeout"; the name is the one stable word. Check it before rewrapping
+  // the answer as a bad one.
+  const name = String(params.name || (error && error.name) || "");
   if (params.status !== undefined && params.status !== null) code = "http";
+  else if (/^(TimeoutError|AbortError)$/.test(name) || /timeout|abort/i.test(why) || /timeout|abort/i.test(name)) code = "timeout";
   else if (why === "bad-json" || why === "no-height" || why === "no-block") code = "bad-answer";
-  else if (/timeout|abort/i.test(why) || /timeout|abort/i.test(String((error && error.name) || ""))) code = "timeout";
   const out = { url: node.url, operator: node.operator, code };
   if (params.status !== undefined && params.status !== null) out.status = params.status;
   if (why) out.why = why;
@@ -83,10 +87,19 @@ async function call(node, path, body, fetchImpl, timeoutMs) {
       signal: typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined,
     });
   } catch (error) {
-    throw new SdkError("xmr-no-nodes", { node: node.url, why: String((error && error.message) || error).slice(0, 120) });
+    // KEEP THE NAME: `AbortSignal.timeout` is "TimeoutError" in a browser and "AbortError" in Node; the message
+    // alone is not portable, and the arrival report has to say timeout rather than network.
+    throw new SdkError("xmr-no-nodes", { node: node.url, name: String((error && error.name) || ""),
+      why: String((error && error.message) || error).slice(0, 120) });
   }
   if (!res || res.ok !== true) throw new SdkError("xmr-no-nodes", { node: node.url, status: res ? res.status : null });
-  try { return await res.json(); } catch { throw new SdkError("xmr-no-nodes", { node: node.url, why: "bad-json" }); }
+  try { return await res.json(); } catch (error) {
+    // A BODY CUT BY THE TIMEOUT IS STILL A TIMEOUT. `res.json()` rejects after the signal fired; in Node and in
+    // browsers that is a TimeoutError/AbortError, not a malformed answer.
+    const name = String((error && error.name) || "");
+    const timedOut = /^(TimeoutError|AbortError)$/.test(name) || /timeout|abort/i.test(name);
+    throw new SdkError("xmr-no-nodes", { node: node.url, name, why: timedOut ? "timeout" : "bad-json" });
+  }
 }
 
 async function getInfo(node, fetchImpl, timeoutMs) {
@@ -226,6 +239,9 @@ export async function verifyArrival(request) {
     catch (error) { record.state = "down"; record.failure = failureOf(error, node); failed.push(record.failure); seen.push(record); continue; }
     // A LAGGING NODE IS NOT A WITNESS and is not a disagreement: it simply cannot see the block yet.
     if (!info.synced || info.height < located.height) { record.state = "stale"; record.height = info.height; seen.push(record); continue; }
+    // A WITNESS THAT ANSWERED HAS A HEIGHT, whether it is still confirming or already arrived; the caller can say
+    // "answered, height N" without inferring it from the block only when the state is stale.
+    record.height = info.height;
     let block;
     try { block = await getBlock(node, located.height, fetchImpl, timeoutMs); }
     catch (error) { record.state = "down"; record.failure = failureOf(error, node); failed.push(record.failure); seen.push(record); continue; }
@@ -303,7 +319,7 @@ export async function verifyArrival(request) {
     throw new SdkError("xmr-nodes-disagree", {
       txid: located.txid, height: located.height,
       nodes: okay.map((r) => ({ url: r.url, operator: r.operator, blockHash: r.blockHash || null, outputs: r.outputs, why: "observation" })),
-      agreed: [],
+      agreed: [], failed,
     });
   }
   const best = [...byObservation.values()][0];
@@ -318,13 +334,13 @@ export async function verifyArrival(request) {
   if (locked) {
     const until = locked.unlock;
     throw new SdkError("xmr-locked", { txid: located.txid, height: located.height, address: request.address,
-      untilHeight: until.untilHeight ?? null, untilTime: until.untilTime ?? null });
+      untilHeight: until.untilHeight ?? null, untilTime: until.untilTime ?? null, failed });
   }
 
   // THE AMOUNT IS NOT LESS THAN EXPECTED. A shortfall is named rather than shown as a completed swap. The figure
   // comes from the agreed observation, never from the largest answer of one node: that maximum was the defect.
   if (amountAtomic < expectedAtomic) {
-    throw new SdkError("xmr-underpaid", { txid: located.txid, height: located.height, got: amountAtomic.toString(), want: expectedAtomic.toString() });
+    throw new SdkError("xmr-underpaid", { txid: located.txid, height: located.height, got: amountAtomic.toString(), want: expectedAtomic.toString(), failed });
   }
 
   if (best.operators.size < 2) {

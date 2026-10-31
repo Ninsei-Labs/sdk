@@ -6,6 +6,14 @@
   `contracts-testnet-2026.10.26` build. A quote through an unknown factory is refused before signing.
 - `verifyArrival` reports why each Monero node failed (`timeout`, `network`, `http` with status, `bad-answer`)
   and keeps a completed walk pending when another node was unreachable.
+- `swaps.startSell` reads the funded escrow before it returns `send-xmr`: code at the predicted address, an open
+  `funded` status, the slots matching the verified halves, and the deadlines by chain time. A missing or late
+  escrow is refused instead of handing out the XMR address.
+- The registry read happens before view material is sealed to the features' HPKE key, and the quote's factory is
+  checked against the network's pinned build. A relay cannot substitute its own keys or factory.
+- `order.fund` builds the commitment from the verified proof, not from a counterparty-provided `half` field.
+- The wallet's chain is read before funding, claim and refund. **Breaking:** `actions.refund` now requires
+  `expect.chainId` and refuses with `bad-input {field: "chainId"}` without it.
 
 ## 0.55.2 — 2026-10-30
 
