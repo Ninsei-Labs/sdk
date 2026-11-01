@@ -337,6 +337,10 @@ demo pin the **exact** version (`"@ninsei-labs/sdk": "0.40.0-develop.1"`) rather
 move, so `npm install @ninsei-labs/sdk` keeps serving the last real release. Shipping a release is then its own
 decision: a plain `X.Y.Z`, the only shape that publishes under `latest`.
 
+Every publish, a prerelease too, comes from a commit on `main` whose CI run on the push to `main` passed. The release
+workflow checks both before it builds, for a tag and for a manual run that publishes, and refuses any other commit; a
+CI run still going is waited for, at most 20 minutes. A dry run builds any branch.
+
 The tag is passed to `npm publish` explicitly (`--tag <tag>`), and `tools/npm-tag.mjs` refuses the two ways this
 can go wrong **by name** - a prerelease that would take `latest`, and a plain version that would slide into a
 channel someone else owns. A manual run of the release workflow may override the tag with an input; when it does,
