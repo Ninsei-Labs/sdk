@@ -7,7 +7,7 @@
 //
 // Run: node tools/check-packed-consumer.mjs
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -49,12 +49,22 @@ try {
     }
 
     console.log("=== 2) EVERY PUBLIC SUBPATH IMPORTS FROM THE INSTALLED TREE ===");
+    // THE LIST IS THE PACKAGE CONTRACT, NOT A SECOND HAND-WRITTEN COPY. Adding an export without adding it here
+    // used to leave the new subpath untested; ./adapters and ./relay were exactly that gap.
+    let suffixes = [];
+    try {
+      const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+      suffixes = Object.keys(pkg.exports || {});
+    } catch (error) {
+      bad("package.json exports: " + String(error.message || error));
+    }
     const code = `
-      const names = ["", "/xmr", "/recovery", "/evm", "/networks", "/order", "/core", "/provider"];
-      const seen = [];
+      const root = await import("@ninsei-labs/sdk");
+      const seen = [[".", Object.keys(root).length]];
+      const names = ${JSON.stringify(suffixes.filter((suffix) => suffix.startsWith("./")))};
       for (const suffix of names) {
-        const mod = await import("@ninsei-labs/sdk" + suffix);
-        seen.push([suffix || ".", Object.keys(mod).length]);
+        const mod = await import("@ninsei-labs/sdk" + suffix.slice(1));
+        seen.push([suffix, Object.keys(mod).length]);
       }
       console.log(JSON.stringify(seen));
     `;
