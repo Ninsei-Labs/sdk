@@ -121,7 +121,7 @@ function modeOf(chain) {
 function optionsFor(chain) {
   return {
     settlement: { chain: chain.id },
-    xmrNetwork: MONERO.networkType,
+    xmrNetwork: (chain.monero && chain.monero.networkType) || MONERO.networkType,
     // NO BACKEND BY DEFAULT: a page that needs one passes its base explicitly.
     assetsBase: "/",
     mode: modeOf(chain),
