@@ -7,6 +7,12 @@ agreement: there is nothing to lay out here, and nothing to compute there.
 The package **knows nothing about the DOM**: neither `document`, nor `window`, nor `localStorage` (checked by
 machine). The wallet arrives as an EIP-1193 provider, storage as an adapter, and the interface opens the windows.
 
+## Security
+
+Report suspected vulnerabilities through GitHub's private **Report a vulnerability** flow, not a public issue.
+The supported versions, scope, response targets, safe-harbor rules and disclosure process are in
+[`SECURITY.md`](SECURITY.md).
+
 ## State (0.1.0)
 
 | Surface | State |
