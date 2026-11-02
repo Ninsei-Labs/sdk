@@ -104,6 +104,42 @@ if (first) {
   if (again) ok(false, "restart resume failed: " + JSON.stringify(again));
 }
 
+// THE SELL START READS THE ESCROW AND SLOTS IT WILL RELY ON. A golden trace makes the read set explicit: a
+// dropped slot read is a guard that no longer checks the order.
+{
+  setStorage(memoryStorage());
+  const trace = [];
+  const tracedRead = async ({ data }) => { trace.push(data); return read({ data }); };
+  const traced = createSwaps({ config: {}, call: tracedRead });
+  try {
+    await traced.startSell({ offer, recoveryKey: mnemonic });
+    const required = [encodeStatus(), encodeRead("t1"), encodeRead("readyBy"), encodeRead("termsHash"),
+      encodeRead("edPointLocker"), encodeRead("edPointClaimer"), encodeRead("edViewPointLocker"),
+      encodeRead("commitHalfLocker"), encodeRead("commitHalfClaimer")];
+    const missing = required.filter((data) => !trace.includes(data));
+    ok(missing.length === 0, "the sell start reads the status, deadlines and every expected slot");
+  } catch (error) {
+    ok(false, "traced sell start failed: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
+  }
+}
+
+// A FAILURE IN THE ESCROW READ IS A REFUSAL BEFORE THE RECORD IS PERSISTED. The person must not see a saved
+// send-xmr record for an order the SDK could not check.
+{
+  setStorage(memoryStorage());
+  const failingRead = async ({ data }) => {
+    if (data === encodeStatus()) throw new Error("rpc unavailable");
+    return read({ data });
+  };
+  const failed = createSwaps({ config: {}, call: failingRead });
+  const got = await codeOf(() => failed.startSell({ offer, recoveryKey: mnemonic }));
+  ok(got && got.code === "quote-refused" && got.params && got.params.why === "escrow-unreadable",
+    "an unreadable escrow is a named refusal");
+  const list = await failed.list();
+  ok(list.length === 0, "an unreadable escrow did not leave a send-xmr record");
+  setStorage(memoryStorage());
+}
+
 // A changed commitment in the same offer is not a retry: it must be refused, not silently resumed.
 if (first) {
   setStorage(originalStore);
