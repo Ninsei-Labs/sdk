@@ -19,6 +19,8 @@
     "check:pack": "node tools/check.mjs --only=pack",
     "check:pack-teeth": "node tools/check-pack-teeth.mjs",
     "check:secrets": "node tools/check.mjs --only=secrets",
+    "check:vendor-bundles": "node tools/check.mjs --only=vendor-bundles",
+    "check:vendor-bundles-teeth": "node tools/check-vendor-bundles-teeth.mjs",
     "check:types": "node tools/check.mjs --only=types",
     "check:types-teeth": "node tools/check-types-teeth.mjs",
     "check:refusals": "node tools/check.mjs --only=refusals",
@@ -169,5 +171,8 @@
   "sideEffects": false,
   "devDependencies": {
     "typescript": "7.0.2"
+  },
+  "allowScripts": {
+    "keccak": true
   }
 }
