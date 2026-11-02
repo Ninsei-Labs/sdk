@@ -33,7 +33,6 @@ export const actionStateCheck = async () => {
   for (const [name, state, ready, expected] of [
     ["claim on a refunded order", closed, 1, "closed"],
     ["claim on an unfunded address", unfunded, 1, "closed"],
-    ["claim before ready", status(1, 0, 0), 0, "not-ready"],
   ]) {
     const f = fake({ state, ready });
     const got = await why(() => claimOrder({ escrow: "0x" + "aa".repeat(20), halfClaimer: slot, expect, deps: f.deps }));
@@ -41,9 +40,12 @@ export const actionStateCheck = async () => {
     if (f.sent.length) problems.push(`${name} sent a transaction`);
   }
 
-  const claimFake = fake();
+  // THE READY RULE IS TIME-DEPENDENT AND STAYS ON CHAIN. After `readyBy` the contract allows a claim without the
+  // mark; before it, the same transaction reverts with NotReady. The SDK must not turn the time rule into a blanket
+  // "not-ready" refusal.
+  const claimFake = fake({ ready: 0 });
   const claimed = await claimOrder({ escrow: "0x" + "aa".repeat(20), halfClaimer: slot, expect, deps: claimFake.deps });
-  if (claimFake.sent.length !== 1 || !claimed.hash) problems.push("an open claim did not send exactly one transaction");
+  if (claimFake.sent.length !== 1 || !claimed.hash) problems.push("an open claim without the mark did not send; the time rule belongs to the contract");
 
   const refundClosed = fake({ state: closed });
   const refundWhy = await why(() => refundOrder({ escrow: "0x" + "aa".repeat(20), halfLocker: slot, expect, deps: refundClosed.deps }));
@@ -60,6 +62,6 @@ export const actionStateCheck = async () => {
   const mark = await markReadyOrder({ escrow: "0x" + "aa".repeat(20), expect, deps: markFake.deps });
   if (markFake.sent.length !== 1 || !mark.hash) problems.push("an open ready mark did not send exactly one transaction");
 
-  return { note: "claim, refund and mark-ready refuse a closed order and a claim without the ready mark",
-    problems, notes: problems.length ? [] : ["state and ready are read before the half is signed"] };
+  return { note: "claim, refund and mark-ready refuse a closed order; the claim time rule stays on chain",
+    problems, notes: problems.length ? [] : ["state is read before the half is signed; mark-ready checks ready"] };
 };
