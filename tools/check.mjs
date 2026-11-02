@@ -30,6 +30,7 @@ import keccakPkg from "keccak256";
 // THE RECOVERY KEY CHECK (sdk#79): one key, its backup file and the salt-based on-chain search.
 import { recoveryKeyCheck } from "./check-recovery-key.mjs";
 import { actionStateCheck } from "./check-action-state.mjs";
+import { vendorBundlesCheck } from "./check-vendor-bundles.mjs";
 import { refundWindowCheck } from "./check-refund-window.mjs";
 import { sweepWindowCheck } from "./check-sweep-window.mjs";
 import { sweepFromOrderCheck } from "./check-sweep-order.mjs";
@@ -2621,6 +2622,7 @@ const CHECKS = {
   provider: providerCheck,
   "recovery-key": recoveryKeyCheck,
   "action-state": actionStateCheck,
+  "vendor-bundles": vendorBundlesCheck,
   "refund-window": refundWindowCheck,
   "sale-auth": saleAuthCheck,
   "backup-confirmation": backupConfirmationCheck,

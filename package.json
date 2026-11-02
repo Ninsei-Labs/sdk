@@ -169,5 +169,8 @@
   "sideEffects": false,
   "devDependencies": {
     "typescript": "7.0.2"
+  },
+  "allowScripts": {
+    "keccak": true
   }
 }
