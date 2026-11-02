@@ -9,7 +9,6 @@
 // claiming it is revealing your own half (irreversible), for refunding the same reveal. The transaction still
 // looks successful.
 import { SdkError } from "./errors.mjs";
-import * as engine from "./engine.mjs";
 // THE DEAL FLOW IS NOW A PACKAGE MODULE, NOT AN ENGINE FILE (#32, wave 3): www/js/core/swap-flow.js moved to
 // sdk/src/swap-flow.mjs. The actions therefore call the module directly instead of reaching it through the
 // mirror - there is exactly one implementation, and it lives here.
@@ -56,14 +55,33 @@ const withCodes = async (step, work) => {
 
 export function createActions({ call = null, blockTime = null } = {}) {
   // WHAT READS THE CHAIN IS ALSO A SEAM, and not only for the checks: the slot check and the signature must go
-  // ONE way, otherwise part of the check goes past the wallet and part does not. By default - the engine's read.
-  const reader = call || engine.evm.readContract;
+  // ONE way, otherwise part of the check goes past the wallet and part does not. The caller's seam wins; otherwise
+  // the action reads through the provider of THE WALLET IT WAS GIVEN, never through the process-wide engine
+  // provider of another client.
+  const providerOf = (wallet) => {
+    try { return wallet && typeof wallet.driver === "function" ? wallet.driver() : null; }
+    catch { return null; }
+  };
+  const readerFor = (wallet) => {
+    if (typeof call === "function") return call;
+    const provider = providerOf(wallet);
+    if (!provider || typeof provider.request !== "function") {
+      return async () => { throw new SdkError("wallet-not-connected", { surface: "actions.read" }); };
+    }
+    return async ({ to, data }) => {
+      const result = await provider.request({ method: "eth_call", params: [{ to, data }, "latest"] });
+      if (typeof result !== "string" || !result.startsWith("0x")) {
+        throw new SdkError("contract-reverted", { surface: "actions.read" });
+      }
+      return result;
+    };
+  };
   // THE LATEST BLOCK TIMESTAMP IS THE CLOCK THE CONTRACT USES. It comes from the same provider as the contract
   // reads; an absent provider or an unreadable block leaves it null, and the time rule is skipped rather than
-  // guessed from the device clock.
-  const clock = typeof blockTime === "function" ? blockTime : async () => {
+  // guessed from the device clock or from another instance's provider.
+  const clockFor = (wallet) => typeof blockTime === "function" ? blockTime : async () => {
     try {
-      const provider = engine.evm.currentProvider();
+      const provider = providerOf(wallet);
       if (!provider || typeof provider.request !== "function") return null;
       const block = await provider.request({ method: "eth_getBlockByNumber", params: ["latest", false] });
       const at = Number(block && block.timestamp);
@@ -78,7 +96,7 @@ export function createActions({ call = null, blockTime = null } = {}) {
     if (typeof sender !== "string" || !sender.trim()) throw new SdkError("bad-input", { field: "wallet.address", step });
     return sender;
   };
-  const deps = (wallet, chainId, from) => ({ call: reader, send: (tx) => wallet.send({ ...tx, chainId, from }), receipt: (h) => wallet.receipt(h), blockTime: clock });
+  const deps = (wallet, chainId, from) => ({ call: readerFor(wallet), send: (tx) => wallet.send({ ...tx, chainId, from }), receipt: (h) => wallet.receipt(h), blockTime: clockFor(wallet) });
   return {
     /** Marking "I saw the XMR on the shared address". Without it, claiming is forbidden by the contract. */
     async markReady(request, wallet) {

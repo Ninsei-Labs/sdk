@@ -1542,10 +1542,9 @@ export const entriesCheck = async () => {
 //     re-exports. A subpath WITHOUT a `types` target is invisible to a TypeScript consumer: it resolves to
 //     nothing at all, which is how the entry a node needs ends up as `any` in someone's editor.
 //
-// NO COMPILER IS AVAILABLE HERE. This package has three runtime dependencies, no devDependencies and no
-// TypeScript, so "parses" is a STRUCTURAL read of the declarations - balanced blocks, every `export` naming a
-// declaration, no name twice - the instrument the `surface` check already applies to index.d.ts. A real
-// compiler run belongs to the consumer's project, not to a zero-dependency battery.
+// THIS CHECK IS STRUCTURAL. It reads balanced blocks, every `export` naming a declaration and no name twice; it
+// does not invoke a compiler. The separate `types-consumer` check runs tsc with the TypeScript devDependency, so a
+// consumer-level error still reddens CI.
 // ---------------------------------------------------------------------------------------------------
 
 /**
@@ -1553,9 +1552,7 @@ export const entriesCheck = async () => {
  * subpath that carries an import/default target and carries no `types` is a problem unless it is named here, so
  * a new entry cannot slip in untyped.
  */
-export const NO_TYPES = {
-  "./adapters": "re-exports the environment adapters the interface wires in itself (a wallet over EIP-1193, a storage, a Monero wallet library) - the entry surface a node needs is src/public/**, and declarations for the adapters are a separate piece of work",
-};
+export const NO_TYPES = {};
 
 /** The NAMED re-exports of a barrel, plus what cannot be enumerated: a star re-export and a default export. */
 export const barrelExports = (source) => {
