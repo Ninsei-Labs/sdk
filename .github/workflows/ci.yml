@@ -78,6 +78,11 @@ jobs:
       - name: Check for secrets
         run: pnpm run check:secrets
 
+      # A HASH GUARD MUST BE SEEN TO FAIL. This breaks the temporary manifest and requires both mutations (an
+      # unlisted bundle and a changed hash) to come back red with the file named.
+      - name: Break the vendor-bundle guard (RED, then named)
+        run: pnpm run check:vendor-bundles-teeth
+
       # Every published subpath must carry declarations: a subpath without a `types` target resolves to
       # nothing in a TypeScript consumer, and the entry a node needs then shows up as `any`. The check reads
       # the exports map, the declarations and the barrels - it needs no compiler.
