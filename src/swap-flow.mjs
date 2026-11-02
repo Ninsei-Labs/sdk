@@ -454,6 +454,24 @@ export async function assertOrderSlots(escrow, expect, what = "signature", deps 
   return verdict;
 }
 
+// THE ORDER MUST STILL BE OPEN BEFORE A HALF IS REVEALED. A closed order (claimed or refunded) and an
+// unfunded address have no action to take; the slot check alone cannot see that. `ready: false` is used by a mark
+// (a second mark is refused); a claim passes no ready expectation because the contract's rule depends on time. The
+// deadline rule is separate: this guard answers the state question, not the clock.
+async function assertOrderOpen(escrow, what, deps, { ready = null } = {}) {
+  const state = await orderStatus(escrow, deps);
+  if (!state.isFunded || state.isClaimed || state.isRefunded) {
+    throw new SdkError("contract-reverted", { step: what, why: "closed" });
+  }
+  if (ready !== null) {
+    const call = deps.call || readContract;
+    const raw = await call({ to: escrow, data: encodeRead("ready") });
+    const marked = BigInt(raw) !== 0n;
+    if (ready && !marked) throw new SdkError("contract-reverted", { step: what, why: "not-ready" });
+    if (!ready && marked) throw new SdkError("contract-reverted", { step: what, why: "already-ready" });
+  }
+}
+
 // Claim the ETH by the CLAIMER'S half. The field name in the contract is halfClaimer (:213); the former word
 // "secret" is a synonym of the same value (the half serves as the preimage of the commitment), while "hashlock"
 // lied here: the current contract has NO hashlock field. Instead it has two half commitments -
@@ -463,8 +481,11 @@ export async function assertOrderSlots(escrow, expect, what = "signature", deps 
 export async function claimOrder({ escrow, halfClaimer, expect, onStep, deps = {} }) {
   if (!escrow) throw new SdkError("bad-input", { field: "escrow" });
   if (!halfClaimer) throw new SdkError("bad-input", { field: "halfClaimer" });
-  // SLOT CHECK BEFORE SIGNING: a claim reveals the half, and it must be revealed in the VERY order whose
-  // commitments we know. Beyond this point the decision cannot be undone.
+  // STATE AND SLOTS BEFORE SIGNING: a claim reveals the half, and it must be revealed in the VERY order whose
+  // commitments we know, while that order is open. The contract's ready rule is TIME-DEPENDENT: before `readyBy`
+  // it requires the mark, after `readyBy` it allows a claim without it. Without a block-time read here we do not
+  // invent one: this guard covers the state, and the chain names `NotReady` if the submit is too early.
+  await assertOrderOpen(escrow, "claim", deps);
   await assertOrderSlots(escrow, expect, "claim", deps);
   onStep?.("confirm-claim");
   // THE CLAIM GAS LIMIT COMES FROM THE SHARED MODULE, NOT A LITERAL HERE (issue #127): the node lays exactly
@@ -484,29 +505,29 @@ export async function claimOrder({ escrow, halfClaimer, expect, onStep, deps = {
 export async function refundOrder({ escrow, halfLocker, onStep, expect = null, deps = {} }) {
   if (!escrow) throw new SdkError("bad-input", { field: "escrow" });
   if (!halfLocker) throw new SdkError("bad-input", { field: "halfLocker" });
-  onStep?.("confirm-refund");
+  // A CLOSED ORDER IS NOT A REFUND. The state is read before the half is signed; the deadline itself stays with
+  // the caller and the contract (there is one boundary, t1).
+  await assertOrderOpen(escrow, "refund", deps);
   // THE SLOT CHECK HERE TOO, WHEN EXPECTATIONS ARE GIVEN. A refund REVEALS the half - that is, it is as
   // irreversible as a claim, and signing it under an order whose commitments we have not checked is forbidden
   // for the same reason. Expectations are optional for compatibility with previous calls (the page calls without
   // them); the core always passes them.
   if (expect) await assertOrderSlots(escrow, expect, "refund", deps);
+  onStep?.("confirm-refund");
   const hash = await (deps.send || sendTransaction)({ to: escrow, data: encodeRefund(halfLocker), gas: 250_000n });
   return { hash };
 }
 
-// Readiness: "I saw the XMR on the shared address, claiming is allowed". Without it the contract FORBIDS
-// claiming (:215) - and this is protection, not a formality: the contract does not see Monero and would pay on
-// the deadline alone to someone who sent nothing. The party that deposited the ETH sets it, and only after it
-// has itself seen the XMR lock. THE MARK WINDOW IS LIMITED, and this matters for the moment of the call: only on
-// a funded order, only before readyBy and only once (:200-204). After readyBy without the mark the order closes
-// by a refund (decision 30.09.2026): the claim window did not open, so claim is forbidden while refund opens
-// immediately. There used to be a dead zone here: neither claim (needs ready) nor refund (needs the deadline)
-// would go through.
+// Readiness: "I saw the XMR on the shared address". Before `readyBy` the contract requires it for a claim and
+// refuses a refund; after `readyBy` a claim is allowed even without it, while a refund opens only at `t1`
+// (the mark itself can no longer be set). The party that deposited the ETH sets it, and only after it has itself
+// seen the XMR lock. THE MARK WINDOW IS LIMITED: only on a funded order, only before readyBy and only once.
 export async function markReadyOrder({ escrow, expect, onStep, deps = {} }) {
   if (!escrow) throw new SdkError("bad-input", { field: "escrow" });
-  // SLOT CHECK BEFORE SIGNING: ready() grants the claimer settlement at its own address, and the grant is given
-  // to the VERY order whose points and commitments we have checked. A mark on a foreign order is a signature
-  // under what we did not assemble.
+  // A MARK ON A CLOSED OR ALREADY MARKED ORDER IS REFUSED. Then the slot check: ready() grants the claimer
+  // settlement at its own address, and the grant is given to the VERY order whose points and commitments we have
+  // checked. A mark on a foreign order is a signature under what we did not assemble.
+  await assertOrderOpen(escrow, "mark-ready", deps, { ready: false });
   await assertOrderSlots(escrow, expect, "mark-ready", deps);
   onStep?.("confirm-mark-ready");
   const hash = await (deps.send || sendTransaction)({ to: escrow, data: encodeMarkReady(), gas: 120_000n });

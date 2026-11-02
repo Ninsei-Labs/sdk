@@ -103,7 +103,7 @@ jobs:
       # publishing floor (11.12.1), and an old npm cannot do the OIDC exchange.
       - name: Ensure npm supports trusted publishing
         run: |
-          npm install -g npm@11.19.1
+          npm install -g npm@11.19.1 --min-release-age=0
           npm --version
 
       # pnpm is this repository's package manager, so the lock file is pnpm's.
