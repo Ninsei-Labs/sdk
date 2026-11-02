@@ -50,8 +50,8 @@ export const TERMINAL = {
   refunded_eth: { phase: "refunded_eth", label: "ETH refunded" },
 };
 
-export function createSwap(input) {
-  const s = loadState();
+export function createSwap(input, store = null) {
+  const s = store ? store.loadState() : loadState();
   const now = Date.now();
   const swap = {
     id: shortId(),
@@ -121,7 +121,7 @@ export function createSwap(input) {
 
   s.swaps[swap.id] = swap;
   s.activeSwapId = swap.id;
-  saveState(s);
+  if (store) store.saveState(s); else saveState(s);
   return swap;
 }
 
@@ -235,16 +235,16 @@ export function halvesWalletOf(swap) {
   };
 }
 
-export function forgetSwap(id) {
-  const s = loadState();
+export function forgetSwap(id, store = null) {
+  const s = store ? store.loadState() : loadState();
   if (!s.swaps[id]) return false;
   delete s.swaps[id];
-  saveState(s);
+  if (store) store.saveState(s); else saveState(s);
   return true;
 }
 
-export function getSwap(id) {
-  return loadState().swaps[id] || null;
+export function getSwap(id, store = null) {
+  return (store ? store.loadState() : loadState()).swaps[id] || null;
 }
 
 export function allSwaps() {
@@ -289,9 +289,9 @@ export function serverRowToSwap(row) {
 
 // Add server records the browser lacks. Returns the number added: the caller decides from it whether to redraw
 // the list, rather than guessing.
-export function addServerSwaps(rows) {
+export function addServerSwaps(rows, store = null) {
   if (!Array.isArray(rows) || rows.length === 0) return 0;
-  const s = loadState();
+  const s = store ? store.loadState() : loadState();
   let added = 0;
   for (const row of rows) {
     if (!row || !row.id || !row.escrow) continue;
@@ -299,7 +299,7 @@ export function addServerSwaps(rows) {
     s.swaps[row.id] = serverRowToSwap(row);
     added += 1;
   }
-  if (added) saveState(s);
+  if (added) { if (store) store.saveState(s); else saveState(s); }
   return added;
 }
 
@@ -313,14 +313,14 @@ export function activeSwaps() {
 // fields - escrow address, salt, deadlines, secret - and did NOT save it: the edits lived in memory and vanished
 // with the tab, while the progress screen read the OLD record from storage. That is exactly why the interface
 // showed an address not on chain even when funding had succeeded.
-export function saveSwap(swap) {
-  return persist(swap);
+export function saveSwap(swap, store = null) {
+  return persist(swap, store);
 }
 
-function persist(swap) {
-  const s = loadState();
+function persist(swap, store = null) {
+  const s = store ? store.loadState() : loadState();
   s.swaps[swap.id] = swap;
-  saveState(s);
+  if (store) store.saveState(s); else saveState(s);
   return swap;
 }
 
@@ -337,8 +337,8 @@ function findEvent(swap, type) {
 // User actions
 // ---------------------------------------------------------------------------
 
-export function confirmReady(id) {
-  const swap = getSwap(id);
+export function confirmReady(id, store = null) {
+  const swap = getSwap(id, store);
   if (!swap || swap.settlement) return swap;
   const view = derive(swap);
   if (!view.can.ready) throw new Error("ready() is not available in this phase");
@@ -346,7 +346,7 @@ export function confirmReady(id) {
   event(swap, "ready", atSim);
   pushLog(swap, atSim, "ready() called by you", "maker may now claim the ETH escrow");
   if (!findEvent(swap, "funded_note")) event(swap, "funded_note", 0);
-  return persist(swap);
+  return persist(swap, store);
 }
 
 // THE COUNTERPARTY'S SPEND HALF - THE ONE PLACE THAT SHOWS WHETHER THERE IS ANYTHING TO ASSEMBLE. The Monero
@@ -363,8 +363,8 @@ export function refundHalfRevealed(swap) {
 // stayed on the swap's one-time address, and the contract revealed the DEPOSITOR's half on refund. Then the same
 // sweep takes our coins back, and the settlement is marked recovered: the money returned to the user rather
 // than leaving through the swap.
-export function sweepNow(id) {
-  const swap = getSwap(id);
+export function sweepNow(id, store = null) {
+  const swap = getSwap(id, store);
   if (!swap) return swap;
   // The deal already settled: no second sweep - EXCEPT a reverse-flow refund, which is how our own XMR are taken
   // back.
@@ -379,11 +379,11 @@ export function sweepNow(id) {
   swap.settlement = { kind: "success", phase: TERMINAL.success.phase, atSim, txid: tx.txid, by: "you",
     ...(fromRefund ? { recovered: true } : {}) };
   pushLog(swap, atSim, "XMR swept to your address", tx.txid);
-  return persist(swap);
+  return persist(swap, store);
 }
 
-export function refundEth(id, by = "you") {
-  const swap = getSwap(id);
+export function refundEth(id, by = "you", store = null) {
+  const swap = getSwap(id, store);
   if (!swap || swap.settlement) return swap;
   const view = derive(swap);
   if (!view.can.refund) throw new Error("refund is not available in this phase");
@@ -391,7 +391,7 @@ export function refundEth(id, by = "you") {
   const tx = chain.refundEscrow({ swapId: swap.id, by });
   swap.settlement = { kind: "refund_eth", phase: TERMINAL.refunded_eth.phase, atSim, txHash: tx.txHash, by };
   pushLog(swap, atSim, `ETH refunded to your wallet (${by})`, tx.txHash);
-  return persist(swap);
+  return persist(swap, store);
 }
 
 // ---------------------------------------------------------------------------

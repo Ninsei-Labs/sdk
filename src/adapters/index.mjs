@@ -13,9 +13,3 @@ export { moneroWallet } from "./monero.mjs";
 // withdrawal role (open/sync/sweepUnlocked/relay); `moneroWalletAdapter` plays the SDK wallet role (vm/connect/
 // address/chainId/unlockedBalance/subscribe/driver). One file for two roles would mix their surfaces.
 export { moneroWalletAdapter } from "./monero-wallet.mjs";
-// A TOOL OF THE TEST CONTOUR - SEPARATE FROM THE PAGE'S WALLET. It signs with its own key (the key comes only
-// from the environment or a file) and refuses to sign on a production network by the engine's marker, so it is
-// only good for local runs. A separate line here also because every file in the directory must be reachable
-// through the package's map: otherwise the adapter exists but cannot be imported.
-export { nodeTestEvmWallet, evmRpcReader, evmRpcProvider, testPrivateKeyFromEnv, isProductionChain, addressOfPrivateKey }
-  from "./node-test-evm-wallet.mjs";

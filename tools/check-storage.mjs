@@ -2,8 +2,10 @@
 // STORAGE IS A REFUSAL, NOT A SILENT EMPTY STATE (sdk#113, item 10).
 //
 // A failed write used to return the record and log a warning; a failed or corrupt read became an empty state,
-// which the next write saved over. A second client with another adapter also replaced the process-wide store.
-import { memoryStorage, setStorage, bindStorage, loadState, saveState, reset } from "../engine/core/store.js";
+// which the next write saved over. The SDK facade now gives every client its own store, so two clients with
+// different adapters coexist; the legacy module-wide binding is still exercised separately.
+import { memoryStorage, setStorage, bindStorage, createStore, loadState, saveState, reset } from "../engine/core/store.js";
+import * as engine from "../src/engine.mjs";
 import { createNinsei } from "../src/index.mjs";
 import { RECOVERY_KEY_STORE, importRecoveryKey, loadRecoveryKey, saveRecoveryKey } from "../src/recovery-key.mjs";
 
@@ -96,27 +98,40 @@ console.log("=== 5b) THE RECOVERY-KEY STORE HAS THE SAME SPLIT ===");
   else bad("throwing recovery-key write -> " + JSON.stringify(write));
 }
 
-console.log("=== 6) A SECOND CLIENT CANNOT TAKE OVER THE FIRST ONE'S STORE ===");
+console.log("=== 6) TWO CLIENTS WITH DIFFERENT STORES ARE ISOLATED ===");
 {
-  setStorage(memoryStorage());
+  const a = memoryStorage();
+  const b = memoryStorage();
   const config = { settlement: { chain: "arbitrum-sepolia" }, xmrNetwork: "stagenet", mode: "sim" };
-  const first = createNinsei({ ...config, storage: memoryStorage() });
-  const got = codeOf(() => createNinsei({ ...config, storage: memoryStorage() }));
-  if (first && got && got.code === "storage-unavailable" && got.params && got.params.step === "conflict") {
-    ok("a second client with another store is refused");
-  } else bad("second client -> " + JSON.stringify(got));
-  setStorage(memoryStorage());
+  const first = createNinsei({ ...config, storage: a });
+  const second = createNinsei({ ...config, storage: b });
+  const aStore = createStore(a);
+  const bStore = createStore(b);
+  const input = { side: "buy", chainMode: "mock", xmrSource: "mock", payToken: "usdc", payAmount: 1, xmrAmount: 1, rate: 1, fee: 0 };
+  const aSwap = engine.swap.createSwap(input, aStore);
+  const bSwap = engine.swap.createSwap(input, bStore);
+  const aList = await first.swaps.list();
+  const bList = await second.swaps.list();
+  if (aList.length === 1 && aList[0].id === aSwap.id && bList.length === 1 && bList[0].id === bSwap.id) {
+    ok("each client lists only its own record");
+  } else bad("client isolation -> " + JSON.stringify({ a: aList.map((x) => x.id), b: bList.map((x) => x.id) }));
+  if ((await first.swaps.get(bSwap.id)) === null && (await second.swaps.get(aSwap.id)) === null) {
+    ok("a record of another client is not visible");
+  } else bad("cross-client get leaked a record");
+  await first.swaps.forget(aSwap.id);
+  if ((await first.swaps.get(aSwap.id)) === null && (await second.swaps.get(bSwap.id)) !== null) {
+    ok("forget removes only the caller's record");
+  } else bad("forget crossed the client boundary");
 }
 
-console.log("=== 7) A LATER EXPLICIT STORE CANNOT TAKE OVER A DEFAULT CLIENT ===");
+console.log("=== 7) A SECOND CLIENT DOES NOT NEED THE FIRST ONE'S ADAPTER ===");
 {
-  setStorage(memoryStorage());
   const config = { settlement: { chain: "arbitrum-sepolia" }, xmrNetwork: "stagenet", mode: "sim" };
-  const first = createNinsei(config);
-  const got = codeOf(() => createNinsei({ ...config, storage: memoryStorage() }));
-  if (first && got && got.code === "storage-unavailable" && got.params && got.params.step === "conflict") {
-    ok("a default-store client keeps its store when a later client brings another");
-  } else bad("default-store takeover -> " + JSON.stringify(got));
+  setStorage(memoryStorage());
+  const first = createNinsei({ ...config });
+  const second = createNinsei({ ...config, storage: memoryStorage() });
+  if (first && second) ok("a default-store client and an explicit-store client coexist");
+  else bad("second client was refused");
   setStorage(memoryStorage());
 }
 

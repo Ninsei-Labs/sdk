@@ -87,10 +87,10 @@ export function bindStorage(next) {
 /** What is used right now: this is visible from outside, and by this the checks tell memory from a browser. */
 export const storage = () => adapter;
 
-export function loadState() {
+function loadStateFrom(source) {
   let raw;
   try {
-    raw = adapter.get(APP.storageKey);
+    raw = source.get(APP.storageKey);
   } catch (error) {
     throw storageFailure("read", error);
   }
@@ -107,12 +107,16 @@ export function loadState() {
   return { ...structuredClone(EMPTY), ...parsed, settings: { ...EMPTY.settings, ...(parsed.settings || {}) } };
 }
 
+export function loadState() {
+  return loadStateFrom(adapter);
+}
+
 // BigInt IS NOT SERIALISED IN JSON - and the key halves are BigInt. JSON.stringify FAILS on them
 // ("Do not know how to serialize a BigInt", bigintSafe), and the failure looks silent: the swap record is
 // simply not saved, the recovery file is not issued, and the screen shows an address that is not on chain.
 // We turn BigInt into a hex string: the same meaning, but serialisable, and the secret is not lost.
 const bigintSafe = (key, value) => (typeof value === "bigint" ? "0x" + value.toString(16) : value);
-export function saveState(state) {
+function saveStateTo(source, state) {
   let text;
   try {
     text = JSON.stringify(state, bigintSafe);
@@ -120,11 +124,28 @@ export function saveState(state) {
     throw storageFailure("serialize", error);
   }
   try {
-    adapter.set(APP.storageKey, text);
+    source.set(APP.storageKey, text);
   } catch (error) {
     throw storageFailure("write", error);
   }
   return state;
+}
+
+export function saveState(state) {
+  return saveStateTo(adapter, state);
+}
+
+/**
+ * A store bound to one adapter, without changing the module-wide one. The SDK facade uses this for each client:
+ * two clients with different storages must not share records, and one client must not refuse the other.
+ */
+export function createStore(next) {
+  checkAdapter(next);
+  return {
+    loadState: () => loadStateFrom(next),
+    saveState: (state) => saveStateTo(next, state),
+    storage: () => next,
+  };
 }
 
 export function update(mutator) {
