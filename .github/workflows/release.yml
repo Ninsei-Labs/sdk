@@ -52,12 +52,47 @@ on:
 permissions:
   contents: read
   id-token: write # the OIDC exchange - required by npm trusted publishing
+  actions: read # the CI run of the commit, read before a publish
 
 jobs:
   publish:
     runs-on: ubuntu-latest # cloud-hosted only: npm accepts OIDC from these, not from self-hosted
     steps:
       - uses: actions/checkout@v7
+
+      # A VERSION IS PUBLISHED ONLY FROM A COMMIT ON MAIN WHOSE CI PASSED. The run read is CI's run of the push to
+      # main for this exact commit. A tag is often pushed while that run still goes, so a queued or running run is
+      # read again every 30 s for at most 20 minutes; then anything but success (cancelled, failed, missing, still
+      # running) refuses before anything is built. Every run that publishes is checked, a manual one too; a dry run
+      # publishes nothing and may build any branch.
+      - name: The commit is on main and its CI passed
+        if: ${{ github.event_name == 'push' || inputs.dry-run == false }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          git fetch --no-tags --quiet origin main
+          if ! git merge-base --is-ancestor "$sha" FETCH_HEAD; then
+            echo "$GITHUB_REF_NAME is not on main" >&2
+            exit 1
+          fi
+          runs="repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$sha&event=push&branch=main"
+          deadline=$((SECONDS + 1200))
+          while :; do
+            state=$(gh api "$runs" --jq '.workflow_runs[0] | .conclusion // .status // "missing"')
+            case $state in
+              queued | waiting | pending | requested | in_progress) ;;
+              *) break ;;
+            esac
+            [ $((SECONDS + 30)) -le "$deadline" ] || break
+            echo "CI for $sha is $state; reading it again in 30 s"
+            sleep 30
+          done
+          if [ "$state" != success ]; then
+            echo "CI has not passed for $sha ($state)" >&2
+            exit 1
+          fi
 
       - uses: actions/setup-node@v7
         with:
