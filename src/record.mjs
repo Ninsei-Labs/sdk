@@ -44,11 +44,11 @@ export function ownSide(order = null, known = null) {
  * edPointLocker, edViewPointLocker). The counterparty's half cannot and need not be put in: it will come from
  * the order.
  */
-export function createRecord(input, { order = null, side: knownSide = null } = {}) {
+export function createRecord(input, { order = null, side: knownSide = null, store = null } = {}) {
   if (!input || typeof input !== "object") throw new SdkError("bad-input", { field: "input" });
   const side = knownSide || ownSide(order);
   let swap = null;
-  try { swap = engine.swap.createSwap(input); } catch { throw new SdkError("bad-input", { field: "input" }); }
+  try { swap = engine.swap.createSwap(input, store); } catch { throw new SdkError("bad-input", { field: "input" }); }
   const escrow = { ...(swap.escrow || {}),
     // THE HALVES ARE A HEX STRING (a BigInt does not survive JSON), the points are in canonical form: that is how
     // both the slot check against the chain and the address check read them.
@@ -74,6 +74,6 @@ export function createRecord(input, { order = null, side: knownSide = null } = {
   // (www/js/ui/views/confirm.js: swap.orderQuoteId = flow.quoteId).
   const quoteId = input && input.orderQuoteId;
   if (quoteId !== undefined && quoteId !== null && quoteId !== "") record.orderQuoteId = quoteId;
-  try { engine.swap.saveSwap(record); } catch { throw new SdkError("storage-unavailable", { step: "save-swap" }); }
+  try { engine.swap.saveSwap(record, store); } catch { throw new SdkError("storage-unavailable", { step: "save-swap" }); }
   return { swap: record, side, missing: ["counterparty-half"], nextStep: "order" };
 }

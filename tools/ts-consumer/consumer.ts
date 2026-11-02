@@ -11,6 +11,16 @@ import {
 } from "@ninsei-labs/sdk";
 import { moneroFeeEstimate, type FeeEstimateOk, type FeeEstimateRefusal } from "@ninsei-labs/sdk/xmr";
 import { createRecoveryKey, type RecoveryKey } from "@ninsei-labs/sdk/recovery";
+import {
+  evmWallet,
+  localStorageAdapter,
+  memoryAdapter,
+  moneroWallet,
+  moneroWalletAdapter,
+  type EvmWalletOptions,
+  type MoneroWalletAdapterOptions,
+} from "@ninsei-labs/sdk/adapters";
+import type { Eip1193Provider, StorageAdapter, WalletAdapter } from "@ninsei-labs/sdk";
 
 const options: NinseiOptions = {
   settlement: { chain: "arbitrum-sepolia" },
@@ -30,3 +40,12 @@ export async function fee(url: string): Promise<FeeEstimateOk | FeeEstimateRefus
 export function recoveryKey(): RecoveryKey {
   return createRecoveryKey({ createdAt: "2026-10-26" });
 }
+
+const provider: Eip1193Provider = { request: async () => null };
+const walletOptions: EvmWalletOptions = { id: "typed-consumer" };
+export const evm: WalletAdapter = evmWallet(provider, walletOptions);
+export const browserStorage: StorageAdapter = localStorageAdapter("typed");
+export const testStorage: StorageAdapter = memoryAdapter();
+export const withdrawal = moneroWallet({ networkType: "stagenet", serverUri: "http://127.0.0.1:38081" });
+const moneroOptions: MoneroWalletAdapterOptions = { network: null, serverUri: null };
+export const monero: WalletAdapter = moneroWalletAdapter(moneroOptions);
