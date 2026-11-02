@@ -125,6 +125,33 @@ export const chainGuardCheck = async () => {
     } catch (error) { check(false, "markReady sender seam failed: " + (error && error.code)); }
   }
 
+  // THE ACTION READS THROUGH ITS OWN WALLET, NOT THE PROCESS-WIDE ENGINE PROVIDER. No `call` seam is passed:
+  // the only allowed source is wallet.driver(). The provider must see the reads.
+  {
+    const slot = "0x" + "11".repeat(32);
+    let reads = 0;
+    const provider = {
+      request: async (request) => {
+        if (request.method === "eth_call") { reads += 1; return "0x" + "00".repeat(32); }
+        if (request.method === "eth_getBlockByNumber") return { timestamp: "0x3e8" };
+        throw new Error("unexpected " + request.method);
+      },
+    };
+    const wallet = {
+      address: async () => "0x" + "55".repeat(20),
+      chainId: async () => 1,
+      driver: () => provider,
+      send: async () => "0x" + "ab".repeat(32),
+      receipt: async () => ({}),
+    };
+    const expect = { chainId: 1, edPointLocker: slot, edPointClaimer: slot, edViewPointLocker: slot,
+      commitHalfLocker: slot, commitHalfClaimer: slot };
+    try {
+      await createActions({}).markReady({ escrow: "0x" + "aa".repeat(20), expect }, wallet);
+    } catch { /* the zeroed chain answer is refused after the reads; the provider is the assertion */ }
+    check(reads > 0, "markReady did not read through the wallet adapter's driver()");
+  }
+
   notes.push("funding, markReady, claim and refund read the wallet chain before signing");
   notes.push("the EVM adapter reads eth_chainId again at the send boundary and puts chainId into the transaction");
   notes.push("the EVM adapter reads eth_accounts at the send boundary and refuses an account other than the action's sender");
