@@ -4,6 +4,10 @@
 packages:
   - "."
 
+# HOLD NEW RELEASES FOR THREE DAYS (pnpm counts minutes): a malicious or broken
+# version is usually caught and pulled before this window ends.
+minimumReleaseAge: 4320
+
 # Flat node_modules, the way npm lays it out: bundlers and the checks expect it.
 nodeLinker: hoisted
 
