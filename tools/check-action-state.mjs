@@ -11,14 +11,18 @@ const slot = "0x" + "11".repeat(32);
 const word = (value) => BigInt(value).toString(16).padStart(64, "0");
 const status = (funded, claimed, refunded) => "0x" + [funded, claimed, refunded, 0].map(word).join("");
 const expect = { edPointLocker: slot, edPointClaimer: slot, edViewPointLocker: slot, commitHalfLocker: slot, commitHalfClaimer: slot };
-const fake = ({ state = status(1, 0, 0), ready = 1 } = {}) => {
+const fake = ({ state = status(1, 0, 0), ready = 1, now = 1000, readyBy = 2000, t1 = 3000 } = {}) => {
   const sent = [];
   const call = async ({ data }) => {
     if (data === encodeStatus()) return state;
     if (data === encodeRead("ready")) return "0x" + word(ready);
+    if (data === encodeRead("readyBy")) return "0x" + word(readyBy);
+    if (data === engine.escrow.encodeT1()) return "0x" + word(t1);
+    if (data === engine.escrow.encodeTermsHash()) return slot;
     return slot;
   };
-  return { sent, call, deps: { call, send: async (tx) => { sent.push(tx); return "0x" + "ab".repeat(32); } } };
+  return { sent, call, deps: { call, blockTime: async () => now,
+    send: async (tx) => { sent.push(tx); return "0x" + "ab".repeat(32); } } };
 };
 const why = async (work) => {
   try { await work(); return null; }
@@ -43,17 +47,26 @@ export const actionStateCheck = async () => {
   // THE READY RULE IS TIME-DEPENDENT AND STAYS ON CHAIN. After `readyBy` the contract allows a claim without the
   // mark; before it, the same transaction reverts with NotReady. The SDK must not turn the time rule into a blanket
   // "not-ready" refusal.
-  const claimFake = fake({ ready: 0 });
+  const claimFake = fake({ ready: 1 });
   const claimed = await claimOrder({ escrow: "0x" + "aa".repeat(20), halfClaimer: slot, expect, deps: claimFake.deps });
-  if (claimFake.sent.length !== 1 || !claimed.hash) problems.push("an open claim without the mark did not send; the time rule belongs to the contract");
+  if (claimFake.sent.length !== 1 || !claimed.hash) problems.push("an open claim after readyBy did not send");
+  const tooEarly = fake({ ready: 0, now: 1500, readyBy: 2000, t1: 3000 });
+  const tooEarlyWhy = await why(() => claimOrder({ escrow: "0x" + "aa".repeat(20), halfClaimer: slot, expect, deps: tooEarly.deps }));
+  if (tooEarlyWhy !== "not-ready" || tooEarly.sent.length) problems.push(`a claim before readyBy without the mark answered ${JSON.stringify(tooEarlyWhy)}`);
+  const afterT1 = fake({ ready: 1, now: 3000, readyBy: 2000, t1: 3000 });
+  const afterT1Why = await why(() => claimOrder({ escrow: "0x" + "aa".repeat(20), halfClaimer: slot, expect, deps: afterT1.deps }));
+  if (afterT1Why !== "window-closed" || afterT1.sent.length) problems.push(`a claim at t1 answered ${JSON.stringify(afterT1Why)}`);
 
   const refundClosed = fake({ state: closed });
   const refundWhy = await why(() => refundOrder({ escrow: "0x" + "aa".repeat(20), halfLocker: slot, expect, deps: refundClosed.deps }));
   if (refundWhy !== "closed" || refundClosed.sent.length) problems.push(`a refund on a closed order answered ${JSON.stringify(refundWhy)}`);
 
-  const refundFake = fake();
+  const refundFake = fake({ ready: 0 });
   const refunded = await refundOrder({ escrow: "0x" + "aa".repeat(20), halfLocker: slot, expect, deps: refundFake.deps });
   if (refundFake.sent.length !== 1 || !refunded.hash) problems.push("an open refund did not send exactly one transaction");
+  const deadZone = fake({ ready: 0, now: 2500, readyBy: 2000, t1: 3000 });
+  const deadWhy = await why(() => refundOrder({ escrow: "0x" + "aa".repeat(20), halfLocker: slot, expect, deps: deadZone.deps }));
+  if (deadWhy !== "too-early" || deadZone.sent.length) problems.push(`a refund between readyBy and t1 answered ${JSON.stringify(deadWhy)}`);
 
   const marked = fake({ ready: 1 });
   const markWhy = await why(() => markReadyOrder({ escrow: "0x" + "aa".repeat(20), expect, deps: marked.deps }));
@@ -61,7 +74,10 @@ export const actionStateCheck = async () => {
   const markFake = fake({ ready: 0 });
   const mark = await markReadyOrder({ escrow: "0x" + "aa".repeat(20), expect, deps: markFake.deps });
   if (markFake.sent.length !== 1 || !mark.hash) problems.push("an open ready mark did not send exactly one transaction");
+  const lateMark = fake({ ready: 0, now: 2000, readyBy: 2000, t1: 3000 });
+  const lateWhy = await why(() => markReadyOrder({ escrow: "0x" + "aa".repeat(20), expect, deps: lateMark.deps }));
+  if (lateWhy !== "ready-window-closed" || lateMark.sent.length) problems.push(`a mark at readyBy answered ${JSON.stringify(lateWhy)}`);
 
-  return { note: "claim, refund and mark-ready refuse a closed order; the claim time rule stays on chain",
-    problems, notes: problems.length ? [] : ["state is read before the half is signed; mark-ready checks ready"] };
+  return { note: "claim, refund and mark-ready check the order and the chain clock before signing",
+    problems, notes: problems.length ? [] : ["closed, ready and deadline states are read before the half is signed"] };
 };
