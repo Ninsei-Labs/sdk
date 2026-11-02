@@ -6,6 +6,8 @@
 - A withdrawal window whose spent status could not be read no longer reports a complete scan; it names `spent-status-unavailable`.
 - The live refund state follows the escrow: between `readyBy` and `t1` without the mark it stays closed, and at `t1` it opens to anyone holding the depositor's half.
 - Claim, refund and mark-ready read the order before signing: a closed or unfunded order is refused and a second mark is refused; the claim's ready/time rule stays with the contract.
+- `pnpm run build:sdk` rebuilds `assets/vendors/sdk/sdk-browser.js` with esbuild from `tools/sdk-browser-entry.mjs`; CI rebuilds it and refuses a diff, so the committed bundle cannot drift from `src/`.
+- `package.json` records `allowScripts` for `esbuild` and `keccak`; a clean npm install no longer warns about unreviewed install scripts.
 - Release workflow: the checkout, setup-node and pnpm actions are pinned by commit, and npm is installed at an exact version.
 
 ## 0.55.4 — 2026-11-01
