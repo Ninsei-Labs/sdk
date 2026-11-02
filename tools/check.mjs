@@ -2600,6 +2600,7 @@ const typesConsumerCheck = () => {
 };
 const quoteBindingCheck = () => runScriptCheck("check-quote-binding.mjs", "quote binding");
 const orderWorkerCheck = () => runScriptCheck("check-order-worker.mjs", "order worker");
+const securityInvariantsCheck = () => runScriptCheck("check-security-invariants.mjs", "security invariants");
 const CHECKS = {
   syntax: syntaxCheck,
   import: importCheck,
@@ -2662,6 +2663,7 @@ const CHECKS = {
   "atomic-flow": atomicFlowCheck,
   "quote-binding": quoteBindingCheck,
   "order-worker": orderWorkerCheck,
+  "security-invariants": securityInvariantsCheck,
   "types-consumer": typesConsumerCheck,
 };
 
