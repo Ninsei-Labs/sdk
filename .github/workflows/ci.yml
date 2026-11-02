@@ -88,6 +88,10 @@ jobs:
       - name: Check vendor bundles against their pinned manifest
         run: pnpm run check:vendor-bundles
 
+      # The DLEQ vectors pin the knowledge proofs and the pure-multiple regression.
+      - name: Check the DLEQ vectors and their edge cases
+        run: pnpm run check:dleq-vectors
+
       # A HASH GUARD MUST BE SEEN TO FAIL. This breaks the temporary manifest and requires both mutations (an
       # unlisted bundle and a changed hash) to come back red with the file named.
       - name: Break the vendor-bundle guard (RED, then named)

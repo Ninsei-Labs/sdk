@@ -12,6 +12,9 @@
 - `pnpm run build:sdk` rebuilds `assets/vendors/sdk/sdk-browser.js` with esbuild from `tools/sdk-browser-entry.mjs`; CI rebuilds it and refuses a diff, so the committed bundle cannot drift from `src/`.
 - Browser vendor bundles are pinned by SHA-256 in `assets/vendors/MANIFEST.json`; the `vendor-bundles` check reddens when a file changes without a manifest update.
 - `package.json` records `allowScripts` for `esbuild` and `keccak`; a clean npm install no longer warns about unreviewed install scripts.
+- **Breaking:** the DLEQ proof carries `pokA` and `pokB`: a Schnorr proof of knowledge per curve. It proves the claimed point is a pure multiple of the generator, so an `X = x*G + rho*H` quote is refused instead of passing the bit proof and locking the order. `verify` requires both fields; `requireKnowledge: false` exists only for historical vectors.
+- The firm request carries `pokA` and `pokB` through its proof normalisation. Point prefixes accept `0X` and `0x`, and unknown fields inside `sig` are ignored instead of being parsed as scalars.
+- `tools/check-dleq-vectors.mjs` pins four positive vectors and one pure-multiple vector. The pure-multiple proof passes the old statement and is refused by the knowledge proofs; the check mutates a copy to prove that guard reddens.
 - Release workflow: the checkout, setup-node and pnpm actions are pinned by commit, and npm is installed at an exact version.
 
 ## 0.55.4 — 2026-11-01

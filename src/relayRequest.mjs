@@ -13,7 +13,7 @@ import { relayViewInfo, sealViewEnvelope } from "./relayView.mjs";
 import { firmTermsDigest, firmTermsMissingFields } from "./relayTerms.mjs";
 
 const hexToBytes = (value, field, width) => {
-  const text = String(value === undefined || value === null ? "" : value).replace(/^0x/, "");
+  const text = String(value === undefined || value === null ? "" : value).replace(/^0x/i, "");
   if (!new RegExp("^[0-9a-fA-F]{" + width * 2 + "}$").test(text)) {
     throw new SdkError("bad-input", { field });
   }
@@ -46,7 +46,7 @@ const assertPoint = (value, field) => {
   return hex(bytes);
 };
 
-const PROOF_FIELDS = ["XA", "XB", "proofs"];
+const PROOF_FIELDS = ["XA", "XB", "pokA", "pokB", "proofs"];
 function normaliseProof(proof) {
   if (!proof || typeof proof !== "object") throw new SdkError("bad-input", { field: "clientHalf.proof" });
   for (const field of PROOF_FIELDS) {
@@ -59,6 +59,15 @@ function normaliseProof(proof) {
   }
   const xa = normHex(proof.XA, 33, "clientHalf.proof.XA");
   const xb = normHex(proof.XB, 32, "clientHalf.proof.XB");
+  const pok = (entry, label, width) => {
+    if (!entry || typeof entry !== "object") throw new SdkError("bad-input", { field: "clientHalf.proof." + label });
+    return {
+      R: normHex(entry.R, width, "clientHalf.proof." + label + ".R"),
+      s: normHex(entry.s, 32, "clientHalf.proof." + label + ".s"),
+    };
+  };
+  const pokA = pok(proof.pokA, "pokA", 33);
+  const pokB = pok(proof.pokB, "pokB", 32);
   const proofs = proof.proofs.map((entry, index) => {
     if (!entry || typeof entry !== "object" || !entry.sig) {
       throw new SdkError("bad-input", { field: "clientHalf.proof.proofs." + index });
@@ -73,7 +82,7 @@ function normaliseProof(proof) {
       sig,
     };
   });
-  return { XA: xa, XB: xb, proofs };
+  return { XA: xa, XB: xb, pokA, pokB, proofs };
 }
 
 /**

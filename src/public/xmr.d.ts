@@ -194,10 +194,18 @@ export interface Dleq2ProofPart {
   readonly sig: Dleq2Signature;
 }
 
-/** The proof: the point X on both curves, and one part per bit of the smaller group order. */
+/** A Schnorr proof that the point is a pure multiple of the curve generator. */
+export interface Dleq2KnowledgeProof {
+  readonly R: string;
+  readonly s: string;
+}
+
+/** The proof: the point X on both curves, one knowledge proof per curve, and one part per bit. */
 export interface Dleq2Proof {
   readonly XA: string;
   readonly XB: string;
+  readonly pokA: Dleq2KnowledgeProof;
+  readonly pokB: Dleq2KnowledgeProof;
   readonly proofs: readonly Dleq2ProofPart[];
 }
 
@@ -216,6 +224,8 @@ export interface Dleq2Prepared {
   readonly XA: string;
   readonly XB: string;
   readonly context: string;
+  readonly pokA: Dleq2KnowledgeProof;
+  readonly pokB: Dleq2KnowledgeProof;
   readonly bits: readonly Dleq2PreparedBit[];
 }
 
@@ -241,8 +251,9 @@ export interface Dleq2 {
   readonly curves: { readonly A: Dleq2Curve; readonly B: Dleq2Curve };
   /** The whole proof. `onBit` reports progress every 16 bits and at the last. */
   readonly prove: (x: bigint | string | number, context: string, onBit?: (done: number, total: number) => void) => Dleq2Proof;
-  /** Verifies a proof of untrusted shape: form is checked before counting, and every refusal is named. */
-  readonly verify: (proof: unknown, context: string) => Dleq2Verdict;
+  /** Verifies a proof of untrusted shape: form is checked before counting, and every refusal is named.
+   *  `requireKnowledge` defaults to true; set it to false only to inspect historical proofs. */
+  readonly verify: (proof: unknown, context: string, options?: { readonly requireKnowledge?: boolean }) => Dleq2Verdict;
   /** Step 1: the commitments. Sequential by construction. */
   readonly prepareProof: (x: bigint | string | number, context: string) => Dleq2Prepared;
   /** Step 2: one bit, on the prepared data alone - it needs neither the half nor the other bits. */

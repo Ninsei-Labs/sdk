@@ -9,8 +9,23 @@
 // audit and closed here. Now: a 64-byte hash, read LEAST-SIGNIFICANT first and reduced mod the order, exactly
 // what ed25519 HashToScalar does. CONSEQUENCE: old proofs do not verify, so the context version was raised
 // (ninsei-order-v3), else a live quote with an old proof would break silently.
-// STRICT SUBGROUP CHECK. ed25519 has cofactor 8, so a point may carry a small-order component; the check
-// "multiply by 8 is non-zero" lets it through and makes the equalities degenerate. We check strictly: [l]*P = 0.
+// BOTH CURVES READ LITTLE-ENDIAN BY DECISION. That matches ed25519 in the reference; go-dleq's secp256k1 side
+// reads big-endian. Security is neutral (either endianness gives a uniform challenge), but the wire forms differ.
+// THE BIT COUNT IS 253, NOT THE REFERENCE'S 252. 253 is bitlen(l), the smaller of the two orders. The reference
+// uses a conservative 252 for ed25519; it rejects witnesses in [2^252, 2^253), which Ninsei accepts. Honest halves
+// are below l < 2^253, so the ranges agree; vector kat-05 pins the boundary.
+// KNOWLEDGE PROOFS CLOSE THE PURE-MULTIPLE GAP. The bit proof only proves that the G-components share x. Without
+// a Schnorr proof of knowledge per curve, a counterparty could quote X = x*G + rho*H: the bit proof still
+// verifies, but the on-chain reveal needs rho*log(H), so the order locks up. `pokA`/`pokB` prove X = x*G for each
+// curve and are checked before the 253 bit parts. This is the guard MRL-0010 derivatives add.
+// STRICT SUBGROUP CHECK. ed25519 has cofactor 8, so a point may carry a small-order component. [8]*P != 0 was the
+// old test; it rejected a purely small-order point but not a point with a small component. [l]*P = 0 pins every
+// intermediate equation to the prime-order subgroup. This is canonical-form enforcement and defense-in-depth,
+// not the soundness fix: the review could not construct an accepting torsion proof even without it.
+// N3: UNCOMPRESSED secp256k1 POINTS (65-byte 04||x||y) ARE ACCEPTED. The point parser canonicalises them to the
+// compressed form before the challenge, so the transcript is the same; this is leniency, not a second encoding.
+// N4: SCALARS AT OR ABOVE THE ORDER ARE REDUCED, NOT REFUSED, matching the reference. A non-canonical sig scalar
+// therefore verifies as its residue; requiring < ord would add strictness without rejecting an honest proof.
 // IMPORTANT: the primitives are audited (@noble/curves), THIS implementation is not.
 //
 //
@@ -63,15 +78,16 @@ export function createDleq2({ ed25519, secp256k1, keccak256, sha3_512, randomByt
   };
   const enc = (x) => (typeof x === "string" ? x : x.toHex ? x.toHex() : String(x));
   function hexBytes(h) {
-    const s = h.replace(/^0x/, "");
+    const s = h.replace(/^0x/i, "");
     const out = new Uint8Array(s.length / 2);
     for (let i = 0; i < out.length; i++) out[i] = parseInt(s.substr(i * 2, 2), 16);
     return out;
   }
   const bigToHex = (v) => v.toString(16).padStart(64, "0");
   function bytesToBig(b) { let v = 0n; for (const x of b) v = (v << 8n) | BigInt(x); return v; }
-  // READ LEAST-SIGNIFICANT FIRST, as ed25519 in the reference. Not style: the reverse order gives a different
-  // challenge and the proof would not match the other side.
+  // READ LEAST-SIGNIFICANT FIRST FOR BOTH CURVES BY DECISION. This is ed25519's order in the reference; go-dleq
+  // reduces secp256k1 big-endian. Either choice is uniform and secure; the difference is wire compatibility, not
+  // soundness. The prover and verifier here use the same rule, so a Ninsei proof is self-consistent.
   function bytesToBigLE(b) { let v = 0n; for (let i = b.length - 1; i >= 0; i--) v = (v << 8n) | BigInt(b[i]); return v; }
   function concat(parts) {
     const t = parts.reduce((s, p) => s + p.length, 0), out = new Uint8Array(t);
@@ -182,10 +198,34 @@ export function createDleq2({ ed25519, secp256k1, keccak256, sha3_512, randomByt
   // Scalars go to hex: the proof must survive JSON and the thread boundary.
   const sigOut = (s) => ({ eA: bigToHex(s.eA), eB: bigToHex(s.eB), a0: bigToHex(s.a0), a1: bigToHex(s.a1), b0: bigToHex(s.b0), b1: bigToHex(s.b1) });
 
+  // SCHNORR PROOF OF KNOWLEDGE, ONE PER CURVE. The bit proof proves only that the G-components of XA and XB
+  // share x; it does not prove that either point is a pure multiple of G. A prover can put rho*H into X, adjust
+  // the last blinder, and still satisfy every bit equation. This proof closes that gap: it shows X = x*G, so a
+  // H-component cannot hide in the claimed point. The challenge binds the context, the point and the nonce point;
+  // a proof made for another order or another curve does not verify.
+  function knowledgeProof(curve, x, X, context, label) {
+    const k = randScalar(curve);
+    const R = mul(curve, k);
+    const e = challenge(curve, [ctxUtf8(context), ctxUtf8("ninsei-dleq-pok|" + label), encP(X), encP(R)]);
+    return { R: enc(R), s: bigToHex((k + e * x) % curve.order) };
+  }
+  function verifyKnowledge(curve, X, pok, context, label) {
+    if (!pok || typeof pok !== "object") return false;
+    if (typeof pok.R !== "string" || typeof pok.s !== "string") return false;
+    let R, s;
+    try {
+      R = curve.P.fromHex(pok.R.replace(/^0x/i, ""));
+      s = BigInt(String(pok.s).startsWith("0X") ? "0x" + String(pok.s).slice(2) : String(pok.s).startsWith("0x") ? pok.s : "0x" + pok.s);
+    } catch { return false; }
+    const e = challenge(curve, [ctxUtf8(context), ctxUtf8("ninsei-dleq-pok|" + label), encP(X), encP(R)]);
+    return mul(curve, s).equals(addP(R, mPublic(curve, X, e)));
+  }
+
   // STEP 1. PREPARATION. Computed SEQUENTIALLY and whole: commitments depend on the running sum, so this step is
   // not split. Per-bit data is prepared here - exactly what step 2 needs: the bit, its commitments and its
   // randomness. THE HALF IS NO LONGER HERE, and that is the key property.
   function prepareProof(x, context) {
+    x = typeof x === "bigint" ? x : BigInt(x);
     const XA = mul(curves.A, x), XB = mul(curves.B, x);
     const cA = commitments(curves.A, x), cB = commitments(curves.B, x);
     const bits = [];
@@ -197,7 +237,12 @@ export function createDleq2({ ed25519, secp256k1, keccak256, sha3_512, randomByt
         rA: bigToHex(cA.rs[i]), rB: bigToHex(cB.rs[i]),
       });
     }
-    return { XA: enc(XA), XB: enc(XB), context: String(context == null ? "" : context), bits };
+    return {
+      XA: enc(XA), XB: enc(XB), context: String(context == null ? "" : context),
+      pokA: knowledgeProof(curves.A, x, XA, context, "A"),
+      pokB: knowledgeProof(curves.B, x, XB, context, "B"),
+      bits,
+    };
   }
 
   // STEP 2. PROVE ONE BIT. Called on the prepared data, self-contained, knowing neither the half nor other bits.
@@ -221,7 +266,7 @@ export function createDleq2({ ed25519, secp256k1, keccak256, sha3_512, randomByt
       if (!item) throw new Error("assembleProof: no part for bit " + i);
       proofs.push({ cA: item.cA, cB: item.cB, sig: item.sig });
     }
-    return { XA: prepared.XA, XB: prepared.XB, proofs };
+    return { XA: prepared.XA, XB: prepared.XB, pokA: prepared.pokA, pokB: prepared.pokB, proofs };
   }
 
   // prove REMAINS THE SAME FUNCTION, assembled from the same three steps: no second implementation appeared.
@@ -250,18 +295,30 @@ export function createDleq2({ ed25519, secp256k1, keccak256, sha3_512, randomByt
   // FORM IS CHECKED BEFORE COUNTING. The old loop ran over the received list length: a short proof proved
   // ANOTHER representation, a long one burned check time. An honest path always sends exactly BITS parts. An
   // unparsable field returns a refusal, not an exception: the caller must get {ok:false}, not crash.
-  function verify(proof, context) {
+  function verify(proof, context, options = {}) {
     if (!proof || typeof proof !== "object") return { ok: false, reason: "proof: an object is expected" };
     if (typeof proof.XA !== "string" || typeof proof.XB !== "string") return { ok: false, reason: "proof: no XA or XB" };
     if (!Array.isArray(proof.proofs)) return { ok: false, reason: "proof: no parts list" };
     if (proof.proofs.length !== BITS) return { ok: false, reason: "proof: " + proof.proofs.length + " parts, expected " + BITS };
-    const P = (curve, h) => curve.P.fromHex(String(h).replace(/^0x/, ""));
+    const requireKnowledge = options.requireKnowledge !== false;
+    const P = (curve, h) => curve.P.fromHex(String(h).replace(/^0x/i, ""));
     let XA, XB, csA, csB;
     try {
       XA = P(curves.A, proof.XA); XB = P(curves.B, proof.XB);
       if (!torsionFree(curves.B, XB)) return { ok: false, reason: "proof: XB is not in the prime-order subgroup" };
     } catch (e) {
       return { ok: false, reason: "proof: XA or XB is unparsable (" + String((e && e.message) || e) + ")" };
+    }
+    // THE PURE-MULTIPLE GUARD COMES BEFORE THE BIT LOOP. It is optional only so old vectors can still be checked
+    // as historical artifacts; every proof produced by this module carries both fields and SDK callers require
+    // them. A missing or tampered `pokA`/`pokB` is a refusal, never a skipped check.
+    if (requireKnowledge) {
+      try {
+        if (!verifyKnowledge(curves.A, XA, proof.pokA, context, "A")) return { ok: false, reason: "proof: the secp256k1 knowledge proof did not verify" };
+        if (!verifyKnowledge(curves.B, XB, proof.pokB, context, "B")) return { ok: false, reason: "proof: the ed25519 knowledge proof did not verify" };
+      } catch (e) {
+        return { ok: false, reason: "proof: the knowledge proof is unparsable (" + String((e && e.message) || e) + ")" };
+      }
     }
     // THE BIT NUMBER IS NAMED HERE TOO: without it, "somewhere in the proof" is indistinguishable from any of
     // the 253 commitments being corrupt.
@@ -282,7 +339,14 @@ export function createDleq2({ ed25519, secp256k1, keccak256, sha3_512, randomByt
       try {
         if (!torsionFree(curves.B, csB[i])) return { ok: false, reason: "bit " + i + ": the commitment is not in the prime-order subgroup" };
         const cA = item.cA, cB = item.cB;
-        const sig = Object.fromEntries(Object.entries(item.sig).map(([k, v]) => [k, BigInt(String(v).startsWith("0x") ? v : "0x" + v)]));
+        // ONLY THE SIX PROTOCOL SCALARS ARE READ. Unknown fields in `sig` are ignored (N2), and a missing one
+        // still refuses: Object.entries would try to parse an unknown key as a scalar and throw.
+        const sig = {};
+        for (const k of ["eA", "eB", "a0", "a1", "b0", "b1"]) {
+          const v = item.sig[k];
+          const text = String(v);
+          sig[k] = BigInt(/^0x/i.test(text) ? text : "0x" + text);
+        }
         const pA = P(curves.A, cA), pB = P(curves.B, cB);
         const pre = (q1, q2) => [ctxUtf8(context), encP(pA), encP(pB), encP(q1), encP(q2)];
         const aG = mul(curves.A, sig.a1, curves.A.Galt), eCA = mPublic(curves.A, pA, sig.eA);
