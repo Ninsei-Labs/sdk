@@ -1484,7 +1484,15 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         commitHalfLocker: (offer.nodeHalf && offer.nodeHalf.commitHalf) || null,
         orderContext: offer.context || null, xmrAmount: quote.xmrAmount || null,
       };
-      await sellEscrowGate(offer.escrow, swap.expect);
+      // THE RECORD IS NOT A RECEIPT FOR A GATE THAT FAILED. createRecord has already written it, so a refusal
+      // from the escrow/deadline/slot gate must remove it again; otherwise the interface lists send-xmr for an
+      // order the SDK never checked.
+      try {
+        await sellEscrowGate(offer.escrow, swap.expect);
+      } catch (error) {
+        try { engine.swap.forgetSwap(swap.id, store); } catch { /* the gate's refusal is the actionable one */ }
+        throw error;
+      }
       try { engine.swap.saveSwap(swap, store); } catch { throw new SdkError("storage-unavailable", { step: "save-swap" }); }
       return { id: swap.id, side: "sell", escrow: offer.escrow, address: offer.jointAddress,
         xmrAmount: quote.xmrAmount, claimTip: quote.claimTip || null, orderQuote: offer.orderQuote || null,

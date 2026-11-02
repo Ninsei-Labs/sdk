@@ -2598,6 +2598,7 @@ const typesConsumerCheck = () => {
 const quoteBindingCheck = () => runScriptCheck("check-quote-binding.mjs", "quote binding");
 const orderWorkerCheck = () => runScriptCheck("check-order-worker.mjs", "order worker");
 const securityInvariantsCheck = () => runScriptCheck("check-security-invariants.mjs", "security invariants");
+const lifecycleLocalCheck = () => runScriptCheck("check-lifecycle-local.mjs", "local lifecycle");
 const CHECKS = {
   syntax: syntaxCheck,
   import: importCheck,
@@ -2661,6 +2662,7 @@ const CHECKS = {
   "quote-binding": quoteBindingCheck,
   "order-worker": orderWorkerCheck,
   "security-invariants": securityInvariantsCheck,
+  "lifecycle-local": lifecycleLocalCheck,
   "types-consumer": typesConsumerCheck,
 };
 
