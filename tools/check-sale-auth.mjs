@@ -35,7 +35,7 @@ function makeQuote(overrides = {}) {
   return quote;
 }
 
-async function callSale({ quote = makeQuote(), denylist = null, allowed = null, order = undefined, saleRequest = null } = {}) {
+async function callSale({ quote = makeQuote(), denylist = null, allowed = null, order = undefined, saleRequest = null, policy = null } = {}) {
   const ticket = { ok: true, handoff: { quote }, claimTip: { wei: quote.claimTip, signed: true } };
   if (order !== undefined) ticket.order = order;
   let reads = 0;
@@ -46,6 +46,8 @@ async function callSale({ quote = makeQuote(), denylist = null, allowed = null, 
     evmCall: async () => "0x" + "0".repeat(24) + (reads++ === 0 ? quote.provider.slice(2) : quote.factory.slice(2)),
     denylist,
     providerAllowed: allowed,
+    knownFactoryCodes: policy,
+    knownImplementationCodes: policy,
   });
   return sdk.sale(saleRequest || { claimer: quote.claimer, xmr: 1 });
 }
@@ -55,6 +57,13 @@ console.log("=== 1) A VALID SIGNED TICKET PASSES ===");
   const got = await callSale().catch((e) => e);
   if (got && got.ok === true) ok("the signed ticket is returned");
   else bad("a valid ticket was refused: " + (got && got.code));
+}
+
+console.log("=== 1b) AN EMPTY POLICY MEANS NO POLICY ===");
+{
+  const got = await callSale({ policy: [] }).catch((e) => e);
+  if (got && got.ok === true) ok("an empty policy leaves the signed ticket accepted");
+  else bad("an empty policy refused a valid ticket: " + (got && (got.code || "a ticket")));
 }
 
 console.log("=== 2) A TICKET SIGNED BY NOBODY IS REFUSED ===");
