@@ -299,12 +299,15 @@ export function nodeTestEvmWallet({ privateKey, rpcUrl, chainId = null, id = "no
      * None of these numbers is invented: a guessed gas limit costs a signature, and a guessed nonce costs a lost
      * transaction.
      */
-    async send({ to, data = "0x", value = 0n, gas = null, chainId: expectedChainId = null }) {
+    async send({ to, data = "0x", value = 0n, gas = null, chainId: expectedChainId = null, from: expectedFrom = null }) {
       if (!connected) throw new SdkError("wallet-not-connected");
       if (typeof to !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(to)) throw new SdkError("bad-input", { field: "send.to" });
       const remote = await assertTestContour();
       // THE SAME SEND-BOUNDARY RULE AS THE BROWSER ADAPTER: the action guard can be stale by the time this line
-      // runs, so an expected chain that differs from the node's chain refuses before signing.
+      // runs, so an expected chain or account that differs from the node's chain or owner refuses before signing.
+      if (expectedFrom !== null && expectedFrom !== undefined && String(expectedFrom).toLowerCase() !== String(owner).toLowerCase()) {
+        throw new SdkError("wrong-account", { vm: "evm", step: "send", want: String(expectedFrom).toLowerCase(), got: owner });
+      }
       if (expectedChainId !== null && expectedChainId !== undefined && Number(expectedChainId) !== Number(remote)) {
         throw new SdkError("wrong-chain", { vm: "evm", step: "send", want: Number(expectedChainId), got: Number(remote) });
       }

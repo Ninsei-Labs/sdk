@@ -70,34 +70,44 @@ export function createActions({ call = null, blockTime = null } = {}) {
       return Number.isSafeInteger(at) && at > 0 ? at : null;
     } catch { return null; }
   };
-  const deps = (wallet, chainId) => ({ call: reader, send: (tx) => wallet.send({ ...tx, chainId }), receipt: (h) => wallet.receipt(h), blockTime: clock });
+  // THE SENDER IS CAPTURED WITH THE OTHER ACTION INPUTS. The adapter reads eth_accounts again at the send boundary,
+  // so a wallet switch between this guard and the transaction is a refusal rather than a claim from a foreign
+  // account. A wallet that cannot name its account cannot prove which key will reveal the half.
+  const senderOf = async (wallet, step) => {
+    const sender = typeof wallet.address === "function" ? await wallet.address() : null;
+    if (typeof sender !== "string" || !sender.trim()) throw new SdkError("bad-input", { field: "wallet.address", step });
+    return sender;
+  };
+  const deps = (wallet, chainId, from) => ({ call: reader, send: (tx) => wallet.send({ ...tx, chainId, from }), receipt: (h) => wallet.receipt(h), blockTime: clock });
   return {
     /** Marking "I saw the XMR on the shared address". Without it, claiming is forbidden by the contract. */
     async markReady(request, wallet) {
       requestOrFail(request, []);
       walletOrFail(wallet);
       const { escrow, expect, onStep } = request;
+      const sender = await senderOf(wallet, "mark-ready");
       await assertWalletChain(wallet, expect.chainId, "mark-ready");
-      return await withCodes("mark-ready", () => flow.markReadyOrder({ escrow, expect, onStep, deps: deps(wallet, expect.chainId) }));
+      return await withCodes("mark-ready", () => flow.markReadyOrder({ escrow, expect, onStep, deps: deps(wallet, expect.chainId, sender) }));
     },
     /** Claiming: it reveals your own half, so expectations are mandatory. */
     async claim(request, wallet) {
       requestOrFail(request, ["halfClaimer"]);
       walletOrFail(wallet);
       const { escrow, halfClaimer, expect, onStep } = request;
-      const sender = typeof wallet.address === "function" ? await wallet.address() : null;
+      const sender = await senderOf(wallet, "claim");
       const verdict = claimSenderVerdict({ sender, claimer: request.claimer || (expect && expect.claimer) });
       if (!verdict.ok) throw new SdkError(verdict.code, { field: verdict.field, why: verdict.why, surface: "actions.claim" });
       await assertWalletChain(wallet, expect.chainId, "claim");
-      return await withCodes("claim", () => flow.claimOrder({ escrow, halfClaimer, expect, onStep, deps: deps(wallet, expect.chainId) }));
+      return await withCodes("claim", () => flow.claimOrder({ escrow, halfClaimer, expect, onStep, deps: deps(wallet, expect.chainId, sender) }));
     },
     /** Refunding: it also reveals a half. The core passes the expectations ALWAYS, though the engine does not require them. */
     async refund(request, wallet) {
       requestOrFail(request, ["halfLocker"]);
       walletOrFail(wallet);
       const { escrow, halfLocker, expect, onStep } = request;
+      const sender = await senderOf(wallet, "refund");
       await assertWalletChain(wallet, expect.chainId, "refund");
-      return await withCodes("refund", () => flow.refundOrder({ escrow, halfLocker, expect, onStep, deps: deps(wallet, expect.chainId) }));
+      return await withCodes("refund", () => flow.refundOrder({ escrow, halfLocker, expect, onStep, deps: deps(wallet, expect.chainId, sender) }));
     },
   };
 }
