@@ -439,8 +439,11 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
       // milliseconds (Date.now), so exactly ONE boundary is converted - "now", not the quote value itself: one
       // unit for the value, one conversion at the input.
       const nowSec = Math.floor(now() / 1000);
-      if (Number.isFinite(validUntil) && validUntil > 0 && validUntil <= nowSec) {
-        fail("quote-expired", { step: "signature", validUntil });
+      // THE TTL IS MANDATORY AND MUST BE IN THE FUTURE. Zero, a fraction, an unsafe integer and a missing value are
+      // not "never expires": the relay path already requires a safe future integer, and a direct quote must not be
+      // weaker than the same quote after it crosses the relay.
+      if (!Number.isSafeInteger(validUntil) || validUntil <= nowSec) {
+        fail("quote-expired", { step: "signature", validUntil: quote.validUntil });
       }
       // RECOVER, THEN MATCH THE NAMED KEY. A signature that does not recover is one refusal; a valid signature
       // that recovers to a DIFFERENT address is another (the quote names a key that did not sign it).
@@ -673,8 +676,11 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
       // milliseconds (Date.now), so exactly ONE boundary is converted - "now", not the quote value itself: one
       // unit for the value, one conversion at the input.
       const nowSec = Math.floor(now() / 1000);
-      if (Number.isFinite(validUntil) && validUntil > 0 && validUntil <= nowSec) {
-        fail("quote-expired", { step: "signature", validUntil });
+      // THE TTL IS MANDATORY AND MUST BE IN THE FUTURE. Zero, a fraction, an unsafe integer and a missing value are
+      // not "never expires": the relay path already requires a safe future integer, and a direct quote must not be
+      // weaker than the same quote after it crosses the relay.
+      if (!Number.isSafeInteger(validUntil) || validUntil <= nowSec) {
+        fail("quote-expired", { step: "signature", validUntil: quote.validUntil });
       }
       // RECOVER, THEN MATCH THE NAMED KEY. A signature that does not recover is one refusal; a valid signature
       // that recovers to a DIFFERENT address is another (the quote names a key that did not sign it).
