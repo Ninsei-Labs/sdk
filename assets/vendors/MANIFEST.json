@@ -11,7 +11,7 @@
       "source": "monero-js"
     },
     "sdk/sdk-browser.js": {
-      "sha256": "20f72f53b0f40d77b69067d7ba396a9062577540ed30668ee60c48066225caf8",
+      "sha256": "33904a7fa1871d3bc89d895f142faa978e93fa59cf110adc731b6e659cc382cb",
       "source": "sdk/src (facade, adapters, recovery)"
     },
     "walletconnect/wc-browser.js": {
