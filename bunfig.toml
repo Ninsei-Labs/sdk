@@ -1,0 +1,3 @@
+[install]
+# HOLD NEW RELEASES FOR THREE DAYS (Bun counts seconds).
+minimumReleaseAge = 259200
