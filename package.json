@@ -94,6 +94,7 @@
       "default": "./src/index.mjs"
     },
     "./adapters": {
+      "types": "./src/adapters/index.d.ts",
       "default": "./src/adapters/index.mjs"
     },
     "./xmr": {

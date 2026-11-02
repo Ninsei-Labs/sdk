@@ -11,6 +11,17 @@ machine). The wallet arrives as an EIP-1193 provider, storage as an adapter, and
 
 The security-invariant map and the V8 line-coverage command are described in [`docs/coverage.md`](docs/coverage.md).
 
+## Integration
+
+The seam table, buy/sell/claim/recovery flows, retry and idempotency rules, cancellation semantics and the support
+matrix are in [`docs/integration.md`](docs/integration.md). The declarations remain the source of truth for types.
+
+## Security
+
+Report suspected vulnerabilities through GitHub's private **Report a vulnerability** flow, not a public issue.
+The supported versions, scope, response targets, safe-harbor rules and disclosure process are in
+[`SECURITY.md`](SECURITY.md).
+
 ## State (0.1.0)
 
 | Surface | State |
@@ -57,8 +68,9 @@ claim. A future driver adds its own settlement methods; the profile alone never 
 compares the list of what the SDK returns with what is declared in the contract (both ways).
 
 EVERY PUBLISHED SUBPATH CARRIES ITS OWN DECLARATIONS: `.` (`index.d.ts`), `./xmr`, `./order`, `./evm`,
-`./core`, `./recovery` and `./provider` (`src/public/<entry>.d.ts`). Each of them declares exactly the symbols its barrel
-re-exports, so a typed consumer sees the same surface the runtime has, and nothing else.
+`./core`, `./networks`, `./recovery`, `./provider`, `./relay` (`src/public/<entry>.d.ts`) and `./adapters`
+(`src/adapters/index.d.ts`). Each of them declares exactly the symbols its barrel re-exports, so a typed consumer sees
+the same surface the runtime has, and nothing else.
 `tools/check.mjs --only=types` keeps the two sides equal (a subpath without a `types` target, a declarations
 file that does not read as declarations, or a symbol declared on one side only is red), and
 `tools/check-types-teeth.mjs` is its breaking run.
@@ -240,8 +252,8 @@ The retired backend no longer decides a swap: its watch row may observe money, b
 a decline; the client's two-node check and the escrow's own `Declined` event do.
 
 Storage is a refusal, not a silent empty state: a failed read, corrupt JSON, a failed write or remove is
-`storage-unavailable` with a step, and a second client with another adapter is refused rather than taking over the
-first client's records.
+`storage-unavailable` with a step. Every SDK instance gets its own store over the adapter it was given, so two
+clients with different adapters keep separate records and neither takes over the other's.
 
 Every body route the SDK sends carries `sdkVersion` from the package (`quotes.firm`, `quotes.sale` and the funding
 mark). The caller cannot override it with a different line.
@@ -304,9 +316,10 @@ trigger where those exist; on another VM they simply do not appear, rather than 
    Network -> virtual machine -> driver: the SDK takes networks from the engine's registry (`CHAINS`) rather than
    keeping its own list; a network without a driver is rejected by name (`not-implemented` with `vm` and the list
    of supported ones), rather than being assumed EVM.
-   Storage arrives through the `storage` option and becomes the core's storage: the state of unfinished swaps and
-   the agent session live where the interface decided. Without the option the core takes its default — web storage
-   if it is present in the environment, otherwise process memory.
+   Storage arrives through the `storage` option and becomes THAT INSTANCE'S swap store: the state of unfinished
+   swaps lives where the interface decided. Without the option the instance takes the default — web storage if it
+   is present in the environment, otherwise process memory. Actions read the chain through the provider of the
+   wallet adapter they were given, not through a process-wide provider.
 3. **The wallet is outside.** The SDK opens no windows and does not look for injected providers itself.
 4. **The step order and the guards are inside `swaps.start`** (stage 2): funds are not locked until the interface
    has confirmed the recovery file is saved; retrying after an error or a reload is safe.
