@@ -70,6 +70,7 @@ export function escrowCashierAddress(chainSlug) {
 // The full flow. onStage(stage, detail) is called on every step - the interface must show what is going on.
 export async function runAtomicOrder({
   chainSlug, locker, claimer, amountWei, amountLabel, providerId = null,
+  xmrNetwork = null,
   claimWindowSeconds = 3600, readyWindowSeconds = 14400, salt: providedSalt, onStage,
   // THE SUBSTITUTION POINTS FOR THE SAKE OF THE CHECK, and they are not decoration. The live flow could be
   // neither run in a check nor covered otherwise: it requires a browser Worker and a signature in the wallet.
@@ -230,7 +231,7 @@ export async function runAtomicOrder({
     const joint = await worker.jointAddress({
       ownSpendHalf: mine.half, ownViewHalf: mine.viewHalf,
       otherSpendPoint: counter.edPub, otherViewPoint,
-      network: (chain.monero && chain.monero.networkType) || MONERO.networkType,
+      network: xmrNetwork || (chain.monero && chain.monero.networkType) || MONERO.networkType,
     });
 
     // THE COUNTERPARTY STAND-IN ON A LIVE NETWORK IS A REFUSAL, NOT A SIGNATURE (the auditor's finding, review_02

@@ -276,7 +276,11 @@ export async function openRecoveryKeyFile(contents, passphrase = "") {
     if (lines[0].trim() !== RECOVERY_KEY_FILE_MAGIC) throw failed("parse");
     const words = lines.slice(1).map((line) => line.trim()).find((line) => line && validateMnemonic(line.toLowerCase(), wordlist));
     if (!words) throw failed("parse");
-    return recoveryKeyOf(words);
+    // THE HEADER DATE IS PART OF THE FILE. The header carries a day, not a time, so the opened key gets that day
+    // at 00:00 UTC; a caller can then search from the key's creation instead of parsing the file itself.
+    const stamp = lines.map((line) => line.trim()).find((line) => /^Key [0-9a-f]{4}, created \d{4}-\d{2}-\d{2}$/.test(line));
+    const createdAt = stamp ? stamp.slice(stamp.lastIndexOf(" ") + 1) : undefined;
+    return recoveryKeyOf(words, createdAt);
   }
 
   let envelope;
@@ -303,7 +307,11 @@ export async function openRecoveryKeyFile(contents, passphrase = "") {
   } catch {
     throw failed("decrypt");
   }
-  const key = recoveryKeyOf(payload && payload.mnemonic);
+  // THE SEALED METADATA IS AUTHENTICATED BY THE AAD. Keep its full creation time; the password file promised
+  // more precision than the plain header and the opener must not replace it with the time of opening.
+  let key;
+  try { key = recoveryKeyOf(payload && payload.mnemonic, envelope.meta && envelope.meta.createdAt); }
+  catch { throw failed("parse"); }
   if (envelope.meta && envelope.meta.fingerprint && envelope.meta.fingerprint !== key.fingerprint) throw failed("fingerprint");
   return key;
 }

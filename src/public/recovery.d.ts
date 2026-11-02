@@ -385,7 +385,8 @@ export declare function recoveryKeyFileName(request: { mnemonic?: string; finger
 export declare function recoveryKeyText(request: { mnemonic: string; createdAt?: string | Date }): string;
 /** A backup file, optionally encrypted with a passphrase of at least 12 characters. */
 export declare function createRecoveryKeyFile(request: { mnemonic: string; createdAt?: string | Date; passphrase?: string }): Promise<string>;
-/** Reads a plain or encrypted backup file and validates the words. */
+/** Reads a plain or encrypted backup file and validates the words. `createdAt` is the file's date: the plain
+ *  header day at 00:00 UTC, the password envelope's sealed time. */
 export declare function openRecoveryKeyFile(contents: string, passphrase?: string): Promise<RecoveryKey>;
 /** Saves the key through a storage adapter. */
 export declare function saveRecoveryKey(storage: RecoveryKeyStorage, key: RecoveryKey & { backupConfirmed?: boolean }): RecoveryKey;

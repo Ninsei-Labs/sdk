@@ -92,6 +92,10 @@ jobs:
       - name: Check the DLEQ vectors and their edge cases
         run: pnpm run check:dleq-vectors
 
+      # A testnet SDK instance must not write stagenet into its swap records.
+      - name: Check the swap record's Monero network
+        run: pnpm run check:swap-network
+
       # A HASH GUARD MUST BE SEEN TO FAIL. This breaks the temporary manifest and requires both mutations (an
       # unlisted bundle and a changed hash) to come back red with the file named.
       - name: Break the vendor-bundle guard (RED, then named)

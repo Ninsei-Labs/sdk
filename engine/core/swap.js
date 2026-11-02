@@ -61,7 +61,7 @@ export function createSwap(input) {
     // THERE IS NO QUOTE KIND IN THE RECORD. The former field mode ("floating"/"fixed") was a choice of price
     // kind, and in version 4 there is no second kind: a firm quote is exactly one - the order quote.
     network: input.network || DEFAULT_CHAIN,
-    moneroNetwork: MONERO.networkType,
+    moneroNetwork: input.moneroNetwork || MONERO.networkType,
     realStart: now,
     simStartWall: now,
     createdAt: new Date(now).toISOString(),
@@ -146,7 +146,7 @@ export function createReverseSwap(input = {}) {
     scenario: "happy",
     speed: Number(input.speed) || 60,
     network: input.network || DEFAULT_CHAIN,
-    moneroNetwork: MONERO.networkType,
+    moneroNetwork: input.moneroNetwork || MONERO.networkType,
     realStart: now,
     simStartWall: now,
     createdAt: new Date(now).toISOString(),
@@ -179,7 +179,7 @@ export function createReverseSwap(input = {}) {
       counterViewHalf: input.counterViewHalf || null,
       counterViewPoint: input.counterViewPoint || null,
       counterSpendPoint: input.counterSpendPoint || null,
-      moneroNetwork: MONERO.networkType,
+      moneroNetwork: input.moneroNetwork || MONERO.networkType,
       birthHeight: input.escrowBirthHeight || null,
       readyBy: input.readyBy || null,
       t1: input.t1 || null,

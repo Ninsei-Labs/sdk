@@ -1,5 +1,8 @@
 ## 0.56.0 — 2026-11-02
 
+- The swap record takes its Monero network from the SDK instance's `xmrNetwork` (or an explicit `moneroNetwork` on the request), not from the demo's stagenet constant. The recovery file copies that value, so a testnet instance no longer asks its nodes for stagenet.
+- `openRecoveryKeyFile` returns the file's creation date: the plain file's header day at 00:00 UTC, and the password file's sealed full time. Opening a key no longer replaces its date with the time of opening.
+- `runAtomicOrder` accepts an explicit `xmrNetwork`; without one it keeps the chain's Monero profile and then the demo fallback.
 - **Breaking:** the v1 index recovery derivation is gone. `findSwaps` no longer accepts `fromIndex`, `maxIndex`, `signal` or `onProgress`, and its result is `{ swaps, complete }`. `swaps.start` no longer accepts `recoveryIndex`; new swaps always use the order's public salt. A search no longer scans a number range and can no longer become `max-index` incomplete when another person's order shares the factory.
 - Removed the public `takerHalves`, `reserveRecoveryIndex`, `releaseRecoveryIndex`, `commitRecoveryIndex`, `recoveryIndexTaken`, `recoveryBinding`, `RECOVERY_INDEX_MAX`, `RECOVERY_SCAN_DEFAULT` and `RECOVERY_KEY_DOMAIN` exports. The salt-based `takerHalvesV2`, `recoveryBindingV2` and `newRecoverySalt` remain.
 - The scan start height is the OLDEST height among the good Monero witnesses, not the first answer; witnesses more than 100 blocks apart are refused as a disagreement.

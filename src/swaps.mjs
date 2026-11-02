@@ -289,12 +289,15 @@ const MIN_PASSPHRASE = 12;
 // `receiveAddress`.
 // Exported for the relay/record seam check: the function is the only place that decides which amount reaches
 // the arrival check, and a unit test of createRecord alone cannot see that decision.
-export const recordInputOf = (request) => {
+export const recordInputOf = (request, xmrNetwork = null) => {
   const quote = request && request.quote && typeof request.quote === "object" ? request.quote : {};
   const pass = (v) => (v === undefined || v === null || v === "" ? undefined : v);
   return {
     side: request.side || "buy",
     network: quote.chain ? quote.chain : undefined,
+    // THE RECORD'S MONERO NETWORK COMES FROM THE INSTANCE, NOT THE DEMO CONSTANT. A testnet instance that recorded
+    // stagenet made the recovery file and the start-height probe disagree with the node it was configured for.
+    moneroNetwork: request.moneroNetwork || xmrNetwork || undefined,
     payToken: quote.asset ? String(quote.asset).toLowerCase() : undefined,
     payAmount: quote.amount !== undefined ? quote.amount : undefined,
     xmrAmount: quote.size !== undefined ? quote.size : undefined,
@@ -870,7 +873,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       // A START WITHOUT THE SIGNED XMR AMOUNT IS NOT A START. `quote.size` is a rounded display value and the relay
       // answer does not carry it; the arrival check needs the exact integer the order quote signed. Refuse here, before
       // a wallet or a funding send, instead of recording an incomplete swap that later reads "no amount".
-      if (!recordInputOf(request).expectedAtomic) {
+      if (!recordInputOf(request, xmrNetwork).expectedAtomic) {
         throw new SdkError("bad-input", { field: "expectedAtomic", why: "signed-amount-missing" });
       }
 
@@ -918,7 +921,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       let keySide = null;
       let derivedViewHalf = null;
       const makeRecord = typeof createRecord === "function" ? createRecord
-        : async (req) => recordModule.createRecord(recordInputOf(req), { order: req.order, side: keySide });
+        : async (req) => recordModule.createRecord(recordInputOf(req, xmrNetwork), { order: req.order, side: keySide });
       const passphrase = typeof request.passphrase === "string" ? request.passphrase : "";
       if (typeof passphrase !== "string") throw new SdkError("bad-input", { field: "passphrase" });
       if (passphrase.length > 0 && passphrase.length < MIN_PASSPHRASE) throw new SdkError("bad-input", { field: "passphrase", min: MIN_PASSPHRASE });
@@ -1449,6 +1452,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       }
       const made = recordModule.createRecord({
         side: "sell", network: String(order.chainId),
+        moneroNetwork: xmrNetwork || undefined,
         payToken: order.asset || quote.asset || undefined,
         payAmount: quote.amount, xmrAmount: Number(quote.xmrAmount) / 1e12,
         orderQuoteId: quoteId || undefined,
