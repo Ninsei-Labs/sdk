@@ -8,7 +8,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(ROOT, "coverage");
@@ -27,10 +27,14 @@ const run = (args) => execFileSync(process.execPath, args, {
   stdio: "inherit",
 });
 
+let batteryFailed = false;
 try {
   run(["tools/check.mjs", ...(only ? ["--only=" + only] : [])]);
-} catch {
-  // The coverage run still produces a report for the checks that did run; the CI status is the caller's concern.
+} catch (error) {
+  // Keep the partial coverage report, but never exit zero: a red battery must not look like a successful
+  // coverage run just because V8 files were produced.
+  batteryFailed = true;
+  console.error("coverage: the check battery failed; the report is partial");
 }
 
 const inScope = (file) => {
@@ -107,3 +111,4 @@ for (const row of summary.filter((row) => critical.has(row.file))) {
   console.log("  " + row.percent.toString().padStart(5) + "%  " + row.file);
 }
 console.log("report: " + relative(ROOT, reportFile));
+if (batteryFailed) process.exitCode = 1;

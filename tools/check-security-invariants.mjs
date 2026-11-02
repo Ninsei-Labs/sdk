@@ -23,13 +23,19 @@ for (const invariant of SECURITY_INVARIANTS) {
     if (!existsSync(join(ROOT, file))) problems.push(`${invariant.id}: missing file ${file}`);
     covered.add(file);
   }
+  let mentionedByCheck = false;
   console.log("  ok    " + invariant.id + " has " + (invariant.checks || []).length + " check(s)");
   for (const check of invariant.checks || []) {
     if (!existsSync(join(ROOT, check))) problems.push(`${invariant.id}: missing check ${check}`);
     else {
       const text = readFileSync(join(ROOT, check), "utf8");
       if (!/^(?:#!|\/\/)/.test(text)) problems.push(`${invariant.id}: ${check} is not a script`);
+      const mentioned = (invariant.files || []).some((file) => [file, "../" + file, "./" + file].some((name) => text.includes(name)));
+      if (mentioned) mentionedByCheck = true;
     }
+  }
+  if ((invariant.checks || []).length && !mentionedByCheck) {
+    problems.push(`${invariant.id}: none of its checks mentions any of its files`);
   }
 }
 

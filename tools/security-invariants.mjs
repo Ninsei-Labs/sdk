@@ -32,7 +32,7 @@ export const SECURITY_INVARIANTS = [
   {
     id: "RECOVERY-01",
     statement: "Recovery halves are bound to chain, factory, role and public salt; the mnemonic never leaves the client.",
-    files: ["src/recovery-key.mjs"],
+    files: ["src/recovery-key.mjs", "src/recovery.mjs", "src/public/recovery.mjs"],
     checks: ["tools/check-recovery-key.mjs", "tools/check-recovery-open.mjs"],
   },
   {
