@@ -454,6 +454,24 @@ export async function assertOrderSlots(escrow, expect, what = "signature", deps 
   return verdict;
 }
 
+// THE ORDER MUST STILL BE OPEN BEFORE A HALF IS REVEALED. A closed order (claimed or refunded) and an
+// unfunded address have no action to take; the slot check alone cannot see that. `ready` is required for a claim,
+// forbidden for a mark, and irrelevant to a refund. The deadline rule is separate: this guard answers the state
+// question, not the clock.
+async function assertOrderOpen(escrow, what, deps, { ready = null } = {}) {
+  const state = await orderStatus(escrow, deps);
+  if (!state.isFunded || state.isClaimed || state.isRefunded) {
+    throw new SdkError("contract-reverted", { step: what, why: "closed" });
+  }
+  if (ready !== null) {
+    const call = deps.call || readContract;
+    const raw = await call({ to: escrow, data: encodeRead("ready") });
+    const marked = BigInt(raw) !== 0n;
+    if (ready && !marked) throw new SdkError("contract-reverted", { step: what, why: "not-ready" });
+    if (!ready && marked) throw new SdkError("contract-reverted", { step: what, why: "already-ready" });
+  }
+}
+
 // Claim the ETH by the CLAIMER'S half. The field name in the contract is halfClaimer (:213); the former word
 // "secret" is a synonym of the same value (the half serves as the preimage of the commitment), while "hashlock"
 // lied here: the current contract has NO hashlock field. Instead it has two half commitments -
@@ -463,8 +481,10 @@ export async function assertOrderSlots(escrow, expect, what = "signature", deps 
 export async function claimOrder({ escrow, halfClaimer, expect, onStep, deps = {} }) {
   if (!escrow) throw new SdkError("bad-input", { field: "escrow" });
   if (!halfClaimer) throw new SdkError("bad-input", { field: "halfClaimer" });
-  // SLOT CHECK BEFORE SIGNING: a claim reveals the half, and it must be revealed in the VERY order whose
-  // commitments we know. Beyond this point the decision cannot be undone.
+  // STATE, READY AND SLOTS BEFORE SIGNING: a claim reveals the half, and it must be revealed in the VERY order
+  // whose commitments we know, while that order is open and marked ready. Beyond this point the decision cannot
+  // be undone.
+  await assertOrderOpen(escrow, "claim", deps, { ready: true });
   await assertOrderSlots(escrow, expect, "claim", deps);
   onStep?.("confirm-claim");
   // THE CLAIM GAS LIMIT COMES FROM THE SHARED MODULE, NOT A LITERAL HERE (issue #127): the node lays exactly
@@ -485,6 +505,9 @@ export async function refundOrder({ escrow, halfLocker, onStep, expect = null, d
   if (!escrow) throw new SdkError("bad-input", { field: "escrow" });
   if (!halfLocker) throw new SdkError("bad-input", { field: "halfLocker" });
   onStep?.("confirm-refund");
+  // A CLOSED ORDER IS NOT A REFUND. The state is read before the half is signed; the deadline itself stays with
+  // the caller and the contract (there is one boundary, t1).
+  await assertOrderOpen(escrow, "refund", deps);
   // THE SLOT CHECK HERE TOO, WHEN EXPECTATIONS ARE GIVEN. A refund REVEALS the half - that is, it is as
   // irreversible as a claim, and signing it under an order whose commitments we have not checked is forbidden
   // for the same reason. Expectations are optional for compatibility with previous calls (the page calls without
@@ -504,9 +527,10 @@ export async function refundOrder({ escrow, halfLocker, onStep, expect = null, d
 // would go through.
 export async function markReadyOrder({ escrow, expect, onStep, deps = {} }) {
   if (!escrow) throw new SdkError("bad-input", { field: "escrow" });
-  // SLOT CHECK BEFORE SIGNING: ready() grants the claimer settlement at its own address, and the grant is given
-  // to the VERY order whose points and commitments we have checked. A mark on a foreign order is a signature
-  // under what we did not assemble.
+  // A MARK ON A CLOSED OR ALREADY MARKED ORDER IS REFUSED. Then the slot check: ready() grants the claimer
+  // settlement at its own address, and the grant is given to the VERY order whose points and commitments we have
+  // checked. A mark on a foreign order is a signature under what we did not assemble.
+  await assertOrderOpen(escrow, "mark-ready", deps, { ready: false });
   await assertOrderSlots(escrow, expect, "mark-ready", deps);
   onStep?.("confirm-mark-ready");
   const hash = await (deps.send || sendTransaction)({ to: escrow, data: encodeMarkReady(), gas: 120_000n });

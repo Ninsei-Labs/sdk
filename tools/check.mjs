@@ -29,6 +29,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import keccakPkg from "keccak256";
 // THE RECOVERY KEY CHECK (sdk#79): one key, its backup file, reservations and the on-chain search.
 import { recoveryKeyCheck } from "./check-recovery-key.mjs";
+import { actionStateCheck } from "./check-action-state.mjs";
 import { sweepWindowCheck } from "./check-sweep-window.mjs";
 import { sweepFromOrderCheck } from "./check-sweep-order.mjs";
 import { sweepAdapterCheck } from "./check-sweep-adapter.mjs";
@@ -2618,6 +2619,7 @@ const CHECKS = {
   terminal: terminalCheck,
   provider: providerCheck,
   "recovery-key": recoveryKeyCheck,
+  "action-state": actionStateCheck,
   "sale-auth": saleAuthCheck,
   "backup-confirmation": backupConfirmationCheck,
   "key-view": keyViewCheck,
