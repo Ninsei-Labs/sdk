@@ -51,7 +51,11 @@ jobs:
       - name: Build the browser bundle and check it is current
         run: |
           pnpm run build:sdk
-          git diff --exit-code -- assets/vendors/sdk/sdk-browser.js
+          if ! git diff --quiet -- assets/vendors/sdk/sdk-browser.js; then
+            echo "::error::assets/vendors/sdk/sdk-browser.js is stale; rebuild it with pnpm run build:sdk:docker"
+            git diff --stat -- assets/vendors/sdk/sdk-browser.js
+            exit 1
+          fi
 
       - name: Check syntax (src and engine parse)
         run: pnpm run check:syntax
