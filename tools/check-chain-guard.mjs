@@ -7,6 +7,7 @@
 import { assertWalletChain } from "../src/chainGuard.mjs";
 import { evmWallet } from "../src/adapters/evm-wallet.mjs";
 import { createActions } from "../src/actions.mjs";
+import { send as fund } from "../src/lock.mjs";
 import * as engine from "../src/engine.mjs";
 
 export const chainGuardCheck = async () => {
@@ -167,6 +168,67 @@ export const chainGuardCheck = async () => {
     check(sent.length === 0, "a foreign-account claim reached eth_sendTransaction");
   }
 
+  // THE FUNDING SEND BOUNDARY USES THE SAME ADAPTER, NOT A TEST DOUBLE. The locker names the depositor; the
+  // provider serves it while the action is being assembled and switches to another account before the transaction.
+  // The adapter must refuse before eth_sendTransaction, and a matching account must carry `from: locker`.
+  {
+    const locker = "0x" + "11".repeat(20);
+    const claimer = "0x" + "22".repeat(20);
+    const factory = "0x" + "33".repeat(20);
+    const escrow = "0x" + "44".repeat(20);
+    const slot = "0x" + "55".repeat(32);
+    const point = "0x" + "66".repeat(32);
+    const now = Math.floor(Date.now() / 1000);
+    const quote = {
+      provider: locker, quoteKey: "0x" + "77".repeat(20), registry: "0x" + "88".repeat(20),
+      cashier: "0x" + "99".repeat(20), locker, claimer, amount: "1000000000000000000",
+      readyBy: now + 3600, t1: now + 7200, salt: "0x" + "aa".repeat(32),
+      commitHalfClaimer: slot, edPointClaimer: point, chainId: 1,
+      feeBps: "0", fee: "0", feeRecipient: "0x" + "bb".repeat(20), validUntil: now + 600,
+      nonce: "1", xmrAmount: "1000000000000", claimTip: "0", signature: "0x" + "00".repeat(65),
+    };
+    const request = {
+      factory, locker, claimer, commitHalfLocker: slot, commitHalfClaimer: slot,
+      edPointLocker: point, edPointClaimer: point, edViewPointLocker: point,
+      amountWei: quote.amount, readyBy: quote.readyBy, t1: quote.t1, salt: quote.salt,
+      chainId: 1, quote,
+    };
+    const call = async ({ to }) => (String(to).toLowerCase() === factory.toLowerCase()
+      ? "0x" + "0".repeat(24) + escrow.slice(2)
+      : "0x");
+    const makeWallet = (account, sent) => {
+      const provider = {
+        request: async ({ method, params }) => {
+          if (method === "eth_chainId") return "0x1";
+          if (method === "eth_accounts") return [account];
+          if (method === "eth_sendTransaction") { sent.push(params[0]); return "0x" + "cc".repeat(32); }
+          if (method === "eth_getTransactionReceipt") return null;
+          throw new Error("unexpected " + method);
+        },
+      };
+      return evmWallet(provider);
+    };
+
+    const sent = [];
+    try {
+      await fund(request, makeWallet(locker, sent), { call });
+      check(sent.length === 1 && sent[0].from.toLowerCase() === locker,
+        "funding did not put the order's locker into the transaction");
+    } catch (error) {
+      check(false, "a matching funding send was refused: " + (error && error.code));
+    }
+
+    const foreignSent = [];
+    try {
+      await fund(request, makeWallet("0x" + "dd".repeat(20), foreignSent), { call });
+      check(false, "funding from another account passed");
+    } catch (error) {
+      check(error && error.code === "wrong-account",
+        "funding from another account did not name wrong-account");
+    }
+    check(foreignSent.length === 0, "a foreign-account funding reached eth_sendTransaction");
+  }
+
   // THE ACTION READS THROUGH ITS OWN WALLET, NOT THE PROCESS-WIDE ENGINE PROVIDER. No `call` seam is passed:
   // the only allowed source is wallet.driver(). The provider must see the reads.
   {
@@ -197,6 +259,7 @@ export const chainGuardCheck = async () => {
   notes.push("funding, markReady, claim and refund read the wallet chain before signing");
   notes.push("the EVM adapter reads eth_chainId again at the send boundary and puts chainId into the transaction");
   notes.push("the EVM adapter reads eth_accounts at the send boundary and refuses an account other than the action's sender");
+  notes.push("funding sends from the order's locker and refuses an account switch before eth_sendTransaction");
   return { note: "the wallet must be on the order's chain and account before any transaction and at the send boundary", problems, notes };
 };
 
