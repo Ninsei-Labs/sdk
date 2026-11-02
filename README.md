@@ -7,6 +7,11 @@ agreement: there is nothing to lay out here, and nothing to compute there.
 The package **knows nothing about the DOM**: neither `document`, nor `window`, nor `localStorage` (checked by
 machine). The wallet arrives as an EIP-1193 provider, storage as an adapter, and the interface opens the windows.
 
+## Integration
+
+The seam table, buy/sell/claim/recovery flows, retry and idempotency rules, cancellation semantics and the support
+matrix are in [`docs/integration.md`](docs/integration.md). The declarations remain the source of truth for types.
+
 ## Security
 
 Report suspected vulnerabilities through GitHub's private **Report a vulnerability** flow, not a public issue.
