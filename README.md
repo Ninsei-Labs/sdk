@@ -7,6 +7,10 @@ agreement: there is nothing to lay out here, and nothing to compute there.
 The package **knows nothing about the DOM**: neither `document`, nor `window`, nor `localStorage` (checked by
 machine). The wallet arrives as an EIP-1193 provider, storage as an adapter, and the interface opens the windows.
 
+## Coverage
+
+The security-invariant map and the V8 line-coverage command are described in [`docs/coverage.md`](docs/coverage.md).
+
 ## Integration
 
 The seam table, buy/sell/claim/recovery flows, retry and idempotency rules, cancellation semantics and the support

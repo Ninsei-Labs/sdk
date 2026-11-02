@@ -1,5 +1,6 @@
 ## 0.56.0 — 2026-11-02
 
+- Added a machine-checked security-invariant map and a baseline V8 line-coverage command. The map ties sender/chain binding, quote policy and TTL, DLEQ knowledge proofs, recovery, storage, relay, terminal state, arrival and the adapter surface to executable checks; the coverage command runs the normal battery with `NODE_V8_COVERAGE` and writes `coverage/coverage-summary.json`.
 - Rebuilt the committed browser bundle after the adapter and instance-scope changes, and pinned its new SHA-256 in `assets/vendors/MANIFEST.json`. CI now reports a stale bundle with a stat line instead of dumping the minified diff to the job log.
 - Every `createNinsei` instance now owns its storage store; the engine's swap-record helpers accept that store, so two clients with different adapters list, read and forget separate records. Action guards read the chain and the latest block through the provider of the wallet adapter they were given, not through the process-wide engine provider. The legacy `bindStorage` remains only for the demo/test setup.
 - `./adapters` now carries TypeScript declarations for the five production adapters; the TypeScript consumer imports `evmWallet`, the storage adapters and both Monero wallet roles from the packed subpath. The test-only Node EVM wallet moved to `tools/` and is no longer exported from the production adapter barrel.
