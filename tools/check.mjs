@@ -23,6 +23,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, w
 import { tmpdir } from "node:os";
 import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { lineCoverage, mergeRanges } from "./coverage-merge.mjs";
 // AN INDEPENDENT KECCAK-256 FOR THE DECLINE CHECK (issue #40): the topic of the escrow's `Declined` event is
 // pinned as a literal AND recomputed with THIS implementation, while the module under test computes it with
 // @noble/hashes - two implementations agreeing is a cross-check, one agreeing with itself is not.
@@ -2561,6 +2562,28 @@ const runScriptCheck = (tool, label) => {
 };
 
 const saleAuthCheck = () => runScriptCheck("check-sale-auth.mjs", "sale auth");
+// THE COVERAGE MERGER MUST NOT DISCARD A CHILD PROCESS'S COUNT. A parent process loads a module with count 0;
+// a child executes the same range. Merging equal boundaries and then choosing the innermost range is what turns
+// that into covered. This is the measured defect the audit found in the old first-range-wins reduce.
+const coverageMergeCheck = () => {
+  const ranges = [
+    [{ startOffset: 0, endOffset: 18, count: 0 }, { startOffset: 0, endOffset: 4, count: 0 }],
+    [{ startOffset: 0, endOffset: 18, count: 0 }, { startOffset: 0, endOffset: 4, count: 1 }],
+  ];
+  const row = lineCoverage("one\ntwo\nthree", mergeRanges(ranges));
+  const problems = [];
+  if (row.covered !== 1) {
+    problems.push(`equal-boundary child count was lost: ${JSON.stringify(row)}`);
+  }
+  const nested = lineCoverage("one\ntwo", mergeRanges([[
+    { startOffset: 0, endOffset: 7, count: 1 },
+    { startOffset: 0, endOffset: 4, count: 0 },
+  ]]));
+  if (nested.covered !== 1 || nested.lines !== 2) {
+    problems.push(`the innermost range did not override its parent: ${JSON.stringify(nested)}`);
+  }
+  return { note: "the V8 merger keeps a child process's execution count and the innermost range", problems, notes: [] };
+};
 const quoteTtlCheck = () => runScriptCheck("check-quote-ttl.mjs", "quote ttl");
 const backupConfirmationCheck = () => runScriptCheck("check-backup-confirmation.mjs", "backup confirmation");
 const keyViewCheck = () => runScriptCheck("check-key-view.mjs", "key view");
@@ -2587,11 +2610,16 @@ const atomicFlowCheck = () => runScriptCheck("check-atomic-flow.mjs", "atomic fl
 const typesConsumerCheck = () => {
   const problems = [];
   try {
-    execFileSync(process.execPath, [p("node_modules", "typescript", "bin", "tsc"), "-p", p("tools", "ts-consumer", "tsconfig.json")], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    // The TypeScript compiler is not SDK source. Keep it out of the V8 coverage run: instrumenting a large
+    // compiler under `pnpm run coverage` is both irrelevant and a source of memory pressure at the end of the
+    // battery.
+    const env = { ...process.env };
+    delete env.NODE_V8_COVERAGE;
+    execFileSync(process.execPath, [p("node_modules", "typescript", "bin", "tsc"), "-p", p("tools", "ts-consumer", "tsconfig.json")], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env });
   } catch (error) {
     const text = String((error && (error.stdout || error.stderr || error.message)) || error);
     for (const line of text.split("\n")) if (/error TS/.test(line)) problems.push(line.trim());
-    if (!problems.length) problems.push("tsc failed: " + text.split("\n")[0]);
+    if (!problems.length) problems.push("tsc failed: " + (text.split("\n").find((line) => line.trim()) || "no output"));
   }
   return { note: problems.length ? "TypeScript consumer failed" : "TypeScript consumer compiles", problems, notes: [] };
 };
@@ -2627,6 +2655,7 @@ const CHECKS = {
   "vendor-bundles": vendorBundlesCheck,
   "refund-window": refundWindowCheck,
   "sale-auth": saleAuthCheck,
+  "coverage-merge": coverageMergeCheck,
   "quote-ttl": quoteTtlCheck,
   "backup-confirmation": backupConfirmationCheck,
   "key-view": keyViewCheck,

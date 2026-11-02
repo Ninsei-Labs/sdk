@@ -479,4 +479,5 @@ jobs:
         run: |
           DLEQ_GO_BIN=test/dleq-oracle/go/oracle \
           DLEQ_RUST_BIN=test/dleq-oracle/rust/target/release/dleq-verify \
+          DLEQ_REQUIRE_RUST=1 \
           pnpm run check:dleq-oracle

@@ -1,16 +1,23 @@
 #!/usr/bin/env node
-// A DIRECT QUOTE'S EXPIRY IS AS STRICT AS THE RELAY'S.
+// THE DIRECT AND SALE QUOTE PATHS APPLY THE SAME STRICT EXPIRY RULE.
 //
 // `validUntil: 0` used to bypass the expiry gate in the direct path; the relay path already required a safe future
-// integer. This guard drives the direct `quotes.firm` path and checks the same edge values on the sale ticket.
+// integer. This guard drives both `quotes.firm` and `quotes.sale` with the same edge table. The positive case names
+// the step AFTER the expiry gate, so an unrelated `bad-input` or transport failure cannot stand in for success.
 import { createQuotes } from "../src/quotes.mjs";
+import { primitives } from "../src/primitives.mjs";
+import { quoteDigest, signQuoteDigest } from "../src/quoteEip712Spec.mjs";
 
 const addr = (byte) => "0x" + byte.repeat(20);
-const nowSec = Math.floor(Date.now() / 1000);
+const nowSec = 1_700_000_000;
+const now = () => nowSec * 1000;
+const signerKey = "0x" + "11".repeat(32);
+const signerPub = primitives.secp256k1.getPublicKey(Uint8Array.from(Buffer.from(signerKey.slice(2), "hex")), false);
+const quoteKey = "0x" + Buffer.from(primitives.keccak256(signerPub.slice(1))).subarray(12).toString("hex");
 
 function quoteWith(validUntil) {
   return {
-    provider: addr("22"), quoteKey: addr("12"), registry: addr("55"), cashier: addr("66"),
+    provider: addr("22"), quoteKey, registry: addr("55"), cashier: addr("66"),
     locker: addr("44"), claimer: addr("33"), amount: "1000000000000000000",
     readyBy: nowSec + 7200, t1: nowSec + 14400, salt: "0x" + "44".repeat(32),
     commitHalfClaimer: "0x" + "55".repeat(32), edPointClaimer: "0x" + "66".repeat(32),
@@ -20,28 +27,78 @@ function quoteWith(validUntil) {
   };
 }
 
+function signedQuote(validUntil) {
+  const quote = quoteWith(validUntil);
+  quote.signature = signQuoteDigest({
+    crypto: primitives,
+    digest: quoteDigest({ crypto: primitives, quote }),
+    privateKey: signerKey,
+  });
+  return quote;
+}
+
 async function firmWith(validUntil) {
   const quote = quoteWith(validUntil);
   const sdk = createQuotes({
     config: { route: () => "/orderQuote" },
+    now,
     http: { async tryJson() { return { ok: true, body: { ok: true, quote } }; } },
   });
   return sdk.firm({ providerId: "p", order: { locker: quote.locker } }).catch((error) => error);
 }
 
+async function saleWith(validUntil, signed = false) {
+  const quote = signed ? signedQuote(validUntil) : quoteWith(validUntil);
+  const ticket = { ok: true, handoff: { quote }, claimTip: { wei: quote.claimTip, signed: true } };
+  let reads = 0;
+  const sdk = createQuotes({
+    config: { route: () => "/order-sell" },
+    now,
+    http: { async tryJson() { return { ok: true, body: ticket }; } },
+    evmBlock: async () => ({ baseFeePerGas: 100_000_000n, gasPrice: 100_000_000n }),
+    evmCall: async () => "0x" + "0".repeat(24) + (reads++ === 0 ? quote.provider.slice(2) : quote.factory.slice(2)),
+  });
+  return sdk.sale({ claimer: quote.claimer, xmr: 1 }).catch((error) => error);
+}
+
 const problems = [];
 const check = (condition, message) => { if (!condition) problems.push(message); };
 
-for (const value of [0, -1, 1.5, "not-a-number", "1e100"]) {
-  const got = await firmWith(value);
-  check(got && got.code === "quote-expired", `direct quote validUntil=${JSON.stringify(value)} answered ${JSON.stringify(got && (got.code || "a quote"))}`);
+// Every value below must stop at the shared expiry gate. null/undefined are added because Number(null) is 0 and
+// Number(undefined) is NaN: neither may become an eternal quote.
+const invalid = [0, -1, 1.5, "not-a-number", "1e100", Number.MAX_SAFE_INTEGER + 1];
+for (const value of invalid) {
+  const direct = await firmWith(value);
+  check(direct && direct.code === "quote-expired",
+    `direct quote validUntil=${JSON.stringify(value)} answered ${JSON.stringify(direct && (direct.code || "a quote"))}`);
+  const sale = await saleWith(value);
+  check(sale && sale.code === "quote-expired",
+    `sale quote validUntil=${JSON.stringify(value)} answered ${JSON.stringify(sale && (sale.code || "a ticket"))}`);
 }
 
-// A future TTL reaches the signature check; it must not be turned into an expiry refusal by this change.
-const future = await firmWith(nowSec + 600);
-check(future && future.code !== "quote-expired", "a future direct TTL was refused as expired");
+// A MISSING SIGNED FIELD IS ITS OWN REFUSAL. null/undefined must never become an eternal quote; the same
+// named `quote-field-unbound` gate runs before expiry in both paths.
+for (const value of [null, undefined]) {
+  const direct = await firmWith(value);
+  check(direct && direct.code === "quote-field-unbound",
+    `direct quote validUntil=${JSON.stringify(value)} answered ${JSON.stringify(direct && (direct.code || "a quote"))}`);
+  const sale = await saleWith(value);
+  check(sale && sale.code === "quote-field-unbound",
+    `sale quote validUntil=${JSON.stringify(value)} answered ${JSON.stringify(sale && (sale.code || "a ticket"))}`);
+}
 
-for (const value of [0, -1, 1.5, "not-a-number", "1e100"]) console.log("  ok    validUntil=" + JSON.stringify(value) + " is refused");
-console.log("  ok    a future TTL is not refused as expired");
+// A future TTL must pass the expiry gate and fail at the NEXT named step. The direct fixture has no valid
+// signature, so the expected sentinel is `quote-signature-invalid`; the signed sale ticket must be accepted.
+const future = nowSec + 600;
+{
+  const direct = await firmWith(future);
+  check(direct && direct.code === "quote-signature-invalid",
+    "a future direct TTL did not reach the signature check: " + JSON.stringify(direct && (direct.code || "a quote")));
+  const sale = await saleWith(future, true);
+  check(sale && sale.ok === true, "a future signed sale TTL was refused: " + JSON.stringify(sale && (sale.code || "a ticket")));
+}
+
+for (const value of [...invalid, null, undefined]) console.log("  ok    validUntil=" + JSON.stringify(value) + " is refused by both paths");
+console.log("  ok    a future TTL reaches the next gate on both paths");
 console.log(problems.length ? "quote ttl: FAILED\n" + problems.map((p) => "  FAIL  " + p).join("\n") : "quote ttl: direct and sale expiry edges behave");
 if (problems.length) process.exit(1);

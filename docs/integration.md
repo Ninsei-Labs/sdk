@@ -33,7 +33,7 @@ isolated; do not reuse a storage adapter between tenants.
 
 | Seam | Required for | Contract |
 | --- | --- | --- |
-| `storage` | Persisting swaps and the recovery key | `get` / `set` / `remove`; may be synchronous or return promises. A failed read/write is `storage-unavailable`, never an empty state. |
+| `storage` | Persisting swaps and the recovery key | `get` / `set` / `remove`, all synchronous. The core store is synchronous; a promise-returning adapter is not supported. A failed read/write is `storage-unavailable`, never an empty state. |
 | wallet adapter | Any action that signs or reads the wallet | `vm`, `connect`, `disconnect`, `address`, `chainId`, `subscribe`, `driver`, plus `send` / `receipt` for actions. `evmWallet(provider)` is the EVM implementation. |
 | `evmCall` | Quote policy, order slots, contract state | `({ to, data }) => Promise<hex>`. If absent, action guards read through the wallet adapter's `driver()` provider. |
 | `evmCode` | Factory/implementation code checks | `({ address }) => Promise<hex>`; without it the code-hash policy cannot be applied. |

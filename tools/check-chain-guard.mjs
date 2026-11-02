@@ -125,6 +125,48 @@ export const chainGuardCheck = async () => {
     } catch (error) { check(false, "markReady sender seam failed: " + (error && error.code)); }
   }
 
+  // THE CLAIM SEAM USES THE SAME CAPTURED SENDER AND REFUSES A FOREIGN ACCOUNT BEFORE SENDING. The half is
+  // revealed by the sender, so a wallet switch after the claimer check must not produce calldata at all.
+  {
+    const claimer = "0x" + "55".repeat(20);
+    const slot = "0x" + "11".repeat(32);
+    const word = (value) => BigInt(value).toString(16).padStart(64, "0");
+    const state = "0x" + [1, 0, 0, 0].map(word).join("");
+    const call = async ({ data }) => {
+      if (data === engine.escrow.encodeStatus()) return state;
+      if (data === engine.escrow.encodeRead("ready")) return "0x" + word(1);
+      if (data === engine.escrow.encodeRead("readyBy")) return "0x" + word(9999999999);
+      if (data === engine.escrow.encodeT1()) return "0x" + word(99999999999);
+      return slot;
+    };
+    const expect = { chainId: 1, claimer, edPointLocker: slot, edPointClaimer: slot, edViewPointLocker: slot,
+      commitHalfLocker: slot, commitHalfClaimer: slot };
+    const sent = [];
+    const wallet = {
+      address: async () => claimer,
+      chainId: async () => 1,
+      send: async (tx) => { sent.push(tx); return "0x" + "ab".repeat(32); },
+      receipt: async () => ({}),
+    };
+    try {
+      await createActions({ call, blockTime: async () => 1000 })
+        .claim({ escrow: "0x" + "aa".repeat(20), halfClaimer: slot, claimer, expect }, wallet);
+      check(sent.length === 1 && sent[0].from === claimer, "claim did not pass its captured sender to the wallet");
+    } catch (error) { check(false, "claim sender seam failed: " + (error && error.code)); }
+
+    const foreign = { ...wallet, address: async () => "0x" + "66".repeat(20), send: async (tx) => { sent.push(tx); return "0x" + "ab".repeat(32); } };
+    sent.length = 0;
+    try {
+      await createActions({ call, blockTime: async () => 1000 })
+        .claim({ escrow: "0x" + "aa".repeat(20), halfClaimer: slot, claimer, expect }, foreign);
+      check(false, "a claim from a foreign account passed");
+    } catch (error) {
+      check(error && error.code === "bad-input" && error.params && error.params.why === "not-the-claimer",
+        "a claim from a foreign account did not name the sender refusal");
+    }
+    check(sent.length === 0, "a foreign-account claim reached eth_sendTransaction");
+  }
+
   // THE ACTION READS THROUGH ITS OWN WALLET, NOT THE PROCESS-WIDE ENGINE PROVIDER. No `call` seam is passed:
   // the only allowed source is wallet.driver(). The provider must see the reads.
   {
