@@ -21,7 +21,7 @@ import * as engine from "./engine.mjs";
 import { orderQuoteMissingFields, recoverOrderQuoteKey } from "./quoteEip712.mjs";
 import { claimGasGiftWei } from "../engine/evm/claimGas.js";
 import { parseXmr } from "../engine/core/xmrAmount.js";
-import { takerHalves, takerHalvesV2, recoverySaltOf } from "./recovery-key.mjs";
+import { takerHalvesV2, recoverySaltOf } from "./recovery-key.mjs";
 import { acceptCounterparty, buildOwnSideFromHalves, jointAddress } from "./order.mjs";
 import { requestFirmQuote } from "./relayFirmClient.mjs";
 // THE CHAIN READ NEEDED TO ASK THE REGISTRY WHO OWNS THE KEY. The selector is COMPUTED from the signature, not
@@ -889,28 +889,17 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
         : request.recoveryKey && typeof request.recoveryKey.mnemonic === "string" ? request.recoveryKey.mnemonic : null;
       if (!mnemonic) fail("bad-input", { field: "recoveryKey" });
       const saltRequested = request.recoverySalt !== undefined && request.recoverySalt !== null;
-      const indexRequested = request.recoveryIndex !== undefined && request.recoveryIndex !== null;
-      if (saltRequested && indexRequested) fail("bad-input", { field: "recoverySalt", why: "with-recovery-index" });
-      let derived = null;
-      let derivation = null;
-      if (indexRequested) {
-        const index = Number(request.recoveryIndex);
-        if (!Number.isSafeInteger(index) || index < 0) fail("bad-input", { field: "recoveryIndex" });
-        derived = takerHalves({ mnemonic, chainId, index });
-        derivation = { kind: "index-v1", index };
-      } else {
-        if (!order.factory || !/^0x[0-9a-f]{40}$/i.test(String(order.factory))) fail("bad-input", { field: "order.factory" });
-        let salt = null;
-        try { salt = recoverySaltOf(saltRequested ? request.recoverySalt : order.salt); }
-        catch { fail("bad-input", { field: "recoverySalt" }); }
-        if (saltRequested) {
-          let orderSalt = null;
-          try { orderSalt = recoverySaltOf(order.salt); } catch { fail("bad-input", { field: "recoverySalt", why: "order-salt" }); }
-          if (salt !== orderSalt) fail("bad-input", { field: "recoverySalt", why: "order-salt" });
-        }
-        derived = takerHalvesV2({ mnemonic, chainId, factory: order.factory, salt });
-        derivation = { kind: "salt-v2", salt };
+      if (!order.factory || !/^0x[0-9a-f]{40}$/i.test(String(order.factory))) fail("bad-input", { field: "order.factory" });
+      let salt = null;
+      try { salt = recoverySaltOf(saltRequested ? request.recoverySalt : order.salt); }
+      catch { fail("bad-input", { field: "recoverySalt" }); }
+      if (saltRequested) {
+        let orderSalt = null;
+        try { orderSalt = recoverySaltOf(order.salt); } catch { fail("bad-input", { field: "recoverySalt", why: "order-salt" }); }
+        if (salt !== orderSalt) fail("bad-input", { field: "recoverySalt", why: "order-salt" });
       }
+      const derived = takerHalvesV2({ mnemonic, chainId, factory: order.factory, salt });
+      const derivation = { kind: "salt-v2", salt };
       const own = buildOwnSideFromHalves(order, { spendHalf: derived.spendHalf, viewHalf: derived.viewHalf });
       const xa = secp256k1.Point.fromHex(own.side.proof.XA);
       const clientHalf = {

@@ -4,12 +4,14 @@
 // the person's spend and view points, the other side's points, the joint address and the restore height.
 import { createSweep } from "../src/sweep.mjs";
 import { createSwaps } from "../src/swaps.mjs";
-import { takerHalves, takerHalvesV2 } from "../src/recovery-key.mjs";
+import { takerHalvesV2 } from "../src/recovery-key.mjs";
 
 const WORDS = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 const CHAIN = 421614;
 const field = (byte) => "0x" + String(byte).repeat(20);
 
+const factoryV2main = field("dd");
+const saltV2main = "0x" + "ab".repeat(32);
 const orderFor = (halves, side) => ({
   escrow: field("aa"),
   locker: field("bb"),
@@ -17,7 +19,9 @@ const orderFor = (halves, side) => ({
   edPointLocker: side === "locker" ? halves.spendPoint : halves.makerViewPoint,
   edPointClaimer: side === "locker" ? halves.makerViewPoint : halves.spendPoint,
   edViewPointLocker: side === "locker" ? halves.viewPoint : halves.makerViewPoint,
-  index: 0,
+  derivation: "salt-v2",
+  factory: factoryV2main,
+  salt: saltV2main,
   side,
   xmrAmount: "1250000000000",
   startHeight: 2_100_000,
@@ -31,7 +35,7 @@ export const sweepFromOrderCheck = async () => {
   const notes = [];
   const check = (condition, message) => { if (!condition) problems.push(message); };
   const sweep = createSweep({});
-  const halves = takerHalves({ mnemonic: WORDS, chainId: CHAIN, index: 0 });
+  const halves = takerHalvesV2({ mnemonic: WORDS, chainId: CHAIN, factory: factoryV2main, salt: saltV2main });
 
   const buy = await sweep.fromOrder({
     mnemonic: WORDS, chainId: CHAIN, network: "arbitrum-sepolia", moneroNetwork: "stagenet",

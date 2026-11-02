@@ -1,3 +1,11 @@
+## 0.56.0 — 2026-11-02
+
+- **Breaking:** the v1 index recovery derivation is gone. `findSwaps` no longer accepts `fromIndex`, `maxIndex`, `signal` or `onProgress`, and its result is `{ swaps, complete }`. `swaps.start` no longer accepts `recoveryIndex`; new swaps always use the order's public salt. A search no longer scans a number range and can no longer become `max-index` incomplete when another person's order shares the factory.
+- Removed the public `takerHalves`, `reserveRecoveryIndex`, `releaseRecoveryIndex`, `commitRecoveryIndex`, `recoveryIndexTaken`, `recoveryBinding`, `RECOVERY_INDEX_MAX`, `RECOVERY_SCAN_DEFAULT` and `RECOVERY_KEY_DOMAIN` exports. The salt-based `takerHalvesV2`, `recoveryBindingV2` and `newRecoverySalt` remain.
+- The scan start height is the OLDEST height among the good Monero witnesses, not the first answer; witnesses more than 100 blocks apart are refused as a disagreement.
+- A withdrawal window whose spent status could not be read no longer reports a complete scan; it names `spent-status-unavailable`.
+- Release workflow: the checkout, setup-node and pnpm actions are pinned by commit, and npm is installed at an exact version.
+
 ## 0.55.4 — 2026-11-01
 
 - `createNinsei` now defaults the factory and escrow-implementation pins from the settlement network; a caller's

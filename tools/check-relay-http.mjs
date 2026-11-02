@@ -19,7 +19,7 @@ import { relayQuoteDigest } from "../src/relayQuote.mjs";
 import { quoteDigest, signQuoteDigest } from "../src/quoteEip712Spec.mjs";
 import * as engine from "../src/engine.mjs";
 import { requestFirmQuote } from "../src/relayFirmClient.mjs";
-import { takerHalves } from "../src/recovery-key.mjs";
+import { takerHalvesV2 } from "../src/recovery-key.mjs";
 import { buildOwnSideFromHalves } from "../src/order.mjs";
 
 const suite = new CipherSuite({
@@ -66,7 +66,7 @@ function signedFeatures() {
 }
 
 const words = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-const halves = takerHalves({ mnemonic: words, chainId: 421614, index: 0 });
+const halves = takerHalvesV2({ mnemonic: words, chainId: 421614, factory: "0x" + "11".repeat(20), salt: "0x" + "44".repeat(32) });
 const order = {
   chainId: 421614,
   factory: "0x" + "11".repeat(20),
