@@ -7,7 +7,7 @@
 //
 // Run: node tools/check-backup-confirmation.mjs
 import { createSwaps } from "../src/swaps.mjs";
-import { takerHalves } from "../src/recovery-key.mjs";
+import { takerHalvesV2 } from "../src/recovery-key.mjs";
 import { buildOwnSideFromHalves } from "../src/order.mjs";
 import { primitives } from "../src/primitives.mjs";
 import { quoteDigest, signQuoteDigest } from "../src/quoteEip712Spec.mjs";
@@ -22,7 +22,7 @@ const now = Math.floor(Date.now() / 1000);
 const order = { chainId: 421614, factory: addr("11"), locker: addr("22"), claimer: addr("33"),
   amount: "1000000000000000000", readyBy: now + 7200, t1: now + 14400, salt: "0x" + "44".repeat(32) };
 const maker = buildOwnSideFromHalves(order, { spendHalf: "0x03", viewHalf: "0x04" });
-const derived = takerHalves({ mnemonic: WORDS, chainId: 421614, index: 0 });
+const derived = takerHalvesV2({ mnemonic: WORDS, chainId: 421614, factory: order.factory, salt: order.salt });
 const makerKey = "0x" + "11".repeat(32);
 const pub = primitives.secp256k1.getPublicKey(Buffer.from(makerKey.slice(2), "hex"), false);
 const quote = { ...order, provider: order.claimer,
@@ -44,7 +44,7 @@ const deps = { mode: "live", xmrNetwork: "stagenet", logs: async () => [],
 const request = { quote: { id: "q", chain: "arbitrum-sepolia", asset: "ETH", amount: 1, size: 1 }, order, orderQuote: quote,
   counterparty: { proof: maker.side.proof, edPointClaimer: maker.spendPoint,
     viewHalfClaimer: derived.makerViewHalf, viewPoint: derived.makerViewPoint, commitHalfClaimer: quote.commitHalfClaimer },
-  recoveryKey: WORDS, recoveryIndex: 0, receiveTo: "synthetic-xmr-destination", restoreHeight: 100, wallet,
+  recoveryKey: WORDS, recoverySalt: order.salt, receiveTo: "synthetic-xmr-destination", restoreHeight: 100, wallet,
   onRecoveryKey: async () => { asked += 1; return false; } };
 
 let pass = 0;

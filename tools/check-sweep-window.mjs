@@ -35,6 +35,8 @@ export const sweepWindowCheck = async () => {
   check(one.total === "5" && one.unlocked === "5", `the window balance is ${one.total}/${one.unlocked}`);
   check(one.window && one.window.used === true, "the window was not marked as used");
   check(one.window && one.window.fallback === false, "a used window was marked as a fallback");
+  check(one.scanComplete === false && one.scanIncompleteReason === "spent-status-unavailable",
+    `a window without spent status reported ${JSON.stringify({ complete: one.scanComplete, reason: one.scanIncompleteReason })}`);
   check(found.calls.some((call) => call[0] === "scan" && call[1] === 2), "scanTxs did not receive both hashes");
   check(found.calls.some((call) => call[0] === "height" && call[1] === 900), "the wallet was not set at the tip");
   check(!found.calls.some((call) => call[0] === "rescan"), "a rescan followed scanTxs and would wipe the result");
@@ -58,6 +60,8 @@ export const sweepWindowCheck = async () => {
   check(spent.window && spent.window.spent === 1 && spent.window.keyImages === 2,
     `the spent check reported ${JSON.stringify(spent.window)}`);
   check(nodeCalls.length === 1 && nodeCalls[0][0].endsWith("/is_key_image_spent"), "the key images were not checked at the node");
+  check(spent.scanComplete === true && spent.scanIncompleteReason === undefined,
+    `a window with spent status was reported incomplete: ${JSON.stringify({ complete: spent.scanComplete, reason: spent.scanIncompleteReason })}`);
 
   const noScan = fake({ balance: 5n, scanTxs: false });
   const skipped = await restoreWallet({ wallet: noScan.wallet, fromHeight: 100,

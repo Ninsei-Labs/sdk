@@ -178,17 +178,11 @@ range is not aligned: it is the provider's refusal, and it arrives as a code. In
 
 ## Found orders and the paying token
 
-`findSwaps` returns the orders whose commitment came from the recovery key. A salt-based order is found from the
-public `salt` in its own `OrderCreated`: the binding is `ninsei-taker-v2|<chain>|<factory>|taker|<salt>`, so the same
-words on another device or at another factory produce a different half and no number is reserved. The result says
-`derivation: "salt-v2"` and leaves `index` null. Existing v1 orders stay on `ninsei-taker-v1|<chain>|<index>` and are
-still found by the index path; a v2 result needs no range scan. For a v1 fallback, discovery does **not** stop after a
-run of empty numbers. One call scans at most `RECOVERY_SCAN_DEFAULT` (1000) indices; that keeps a shared factory from
-freezing the page. The result names where it stopped: `complete: false`, `searchedUpTo`, `incompleteReason: "max-index"`
-and `nextIndex`. A caller that needs more passes `nextIndex` back as `fromIndex`; the scan yields between chunks so the
-page stays responsive. `maxIndex` is the number of indices for this call, and `gap` is ignored. `onProgress` receives
-`{ scanned, index }` after each chunk and after the final index; `signal` stops between chunks and returns
-`incompleteReason: "aborted"` with the same resumable shape.
+`findSwaps` returns the orders whose commitment came from the recovery key. An order is found from the public `salt`
+in its own `OrderCreated`: the binding is `ninsei-taker-v2|<chain>|<factory>|taker|<salt>`, so the same words on
+another device or at another factory produce a different half and no number is reserved. The result says
+`derivation: "salt-v2"` and has no index. There is no range scan and no `max-index` result: every order in the logs is
+read once, and an unreadable log request is a refusal, not a partial answer.
 
 - `amount` — the escrow's **native** amount in wei;
 - `settlementToken: "native"` — what the escrow receives;
@@ -211,8 +205,7 @@ touching the index allocator.
 The found order also carries the Monero start height and the reason it is absent. `no-block-time`,
 `monero-nodes-unreachable` and `monero-network-mismatch` are different answers: a missing settlement timestamp is not
 a dead node, and a node on another network is not an absent reader. A page that starts swaps without the SDK's start
-path can call `recoveryIndexTaken` from `./recovery` before using a number; it checks the factory's `OrderCreated`
-logs from the registry's deployment block.
+path must use the order's own public salt; there is no number to reserve or check.
 
 A revealed half published as `h + n` (the alias the escrow accepts) is reduced modulo the secp256k1 order before the
 sweep key check, so it rebuilds the same key and remains withdrawable.

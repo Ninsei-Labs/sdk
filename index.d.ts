@@ -94,11 +94,11 @@ export interface NinseiOptions {
    */
   evmCall?: (request: { readonly to: string; readonly data: string }) => Promise<string>;
   /**
-   * READING THE CONTRACT CODE FROM OUTSIDE (issue #103): ({ address }) -> hex code. Needed for the factory-code
+   * READING THE CONTRACT CODE FROM OUTSIDE (issue #103): (address) -> hex code. Needed for the factory-code
    * check - `extcodehash` is keccak256 of this code, and the factory a provider names in its registry record is
    * matched against the interface's known builds. Same rule as evmCall: a read, not a node substitution.
    */
-  evmCode?: (request: { readonly address: string }) => Promise<string>;
+  evmCode?: (address: string) => Promise<string>;
   /**
    * READING THE ESCROW'S LOGS FROM OUTSIDE (issue #40): `({ address, topics, fromBlock, toBlock }) -> logs`, for
    * the MAKER'S DECLINE. The escrow emits `Declined(claimer)` and keeps NO getter that names it, while `status()`
@@ -684,8 +684,6 @@ export interface FirmRelayOffer {
   readonly recoveryKey: string | { readonly mnemonic: string };
   /** A fresh salt the client owns; it must equal `order.salt`. Defaults to `order.salt`. */
   readonly recoverySalt?: string;
-  /** The v1 index; it is mutually exclusive with `recoverySalt`. */
-  readonly recoveryIndex?: number;
   /** The market's chain and asset, for example `421614:ETH`. Derived when exactly one window matches. */
   readonly market?: string;
   readonly xmrNetwork?: string;
@@ -713,8 +711,7 @@ export interface FirmRelayAnswer {
   readonly jointAddress: string;
   /** The escrow address predicted from the signed quote and the depositor's half. */
   readonly escrow: string;
-  readonly recovery: { readonly kind: "salt-v2"; readonly salt: string }
-    | { readonly kind: "index-v1"; readonly index: number };
+  readonly recovery: { readonly kind: "salt-v2"; readonly salt: string };
   readonly relay: string | null;
   readonly offered: number | null;
   readonly forwarded: Readonly<Record<string, unknown>> | null;
@@ -1252,14 +1249,8 @@ export interface StartRequest {
    * kept through the SDK's storage adapter.
    */
   recoveryKey?: string | { readonly mnemonic: string };
-  /** The swap number, when the caller already reserved one. Absent - the SDK reserves the next free number. */
-  recoveryIndex?: number;
-  /** The per-order salt the caller put into the signed quote. When present, the key uses the v2 salt binding and
-   * no index is reserved; it must equal `order.salt`. */
+  /** The per-order salt the caller put into the signed quote; it must equal `order.salt`. */
   recoverySalt?: string | number | bigint;
-  /** The first block for the on-chain number check. Absent - the chain registry's escrow deployment block, and
-   * zero only when the registry has no height. */
-  fromBlock?: string | number;
   /** The Monero height the swap starts at. Absent - the SDK asks the configured nodes (`get_info`) and refuses
    * the start if none answers on the swap's network. */
   restoreHeight?: number;
@@ -1553,8 +1544,7 @@ export interface SweepFromOrderRequest {
     readonly edPointLocker: string;
     readonly edPointClaimer: string;
     readonly edViewPointLocker: string;
-    readonly index?: number | null;
-    readonly derivation?: "index-v1" | "salt-v2";
+    readonly derivation?: "salt-v2";
     readonly factory?: string;
     readonly salt?: string;
     readonly side: "locker" | "claimer";

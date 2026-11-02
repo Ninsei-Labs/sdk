@@ -58,7 +58,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest # cloud-hosted only: npm accepts OIDC from these, not from self-hosted
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # A VERSION IS PUBLISHED ONLY FROM A COMMIT ON MAIN WHOSE CI PASSED. The run read is CI's run of the push to
       # main for this exact commit. A tag is often pushed while that run still goes, so a queued or running run is
@@ -94,7 +94,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "24.22.1"
           registry-url: "https://registry.npmjs.org" # wires up the .npmrc the OIDC exchange rides on
@@ -103,12 +103,12 @@ jobs:
       # publishing floor (11.12.1), and an old npm cannot do the OIDC exchange.
       - name: Ensure npm supports trusted publishing
         run: |
-          npm install -g npm@^11.12.1
+          npm install -g npm@11.19.1
           npm --version
 
       # pnpm is this repository's package manager, so the lock file is pnpm's.
       # npm is still used for the publish itself: npm owns the OIDC exchange.
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
         # No version here on purpose: packageManager in package.json is the one place that names pnpm.
         # A second number in a workflow drifts from it and fails the run before anything is built
         # (ERR_PNPM_BAD_PM_VERSION). The action reads the field.

@@ -13,7 +13,7 @@ import { nodeFeaturesDigest } from "../src/relayFeatures.mjs";
 import { buildFirmRequest } from "../src/relayRequest.mjs";
 import { firmTermsDigest } from "../src/relayTerms.mjs";
 import { openViewEnvelope, relayViewInfo } from "../src/relayView.mjs";
-import { takerHalves } from "../src/recovery-key.mjs";
+import { takerHalvesV2 } from "../src/recovery-key.mjs";
 import { buildOwnSideFromHalves } from "../src/order.mjs";
 
 let pass = 0;
@@ -72,7 +72,7 @@ function signedFeatures(changes = {}) {
 }
 
 const words = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-const halves = takerHalves({ mnemonic: words, chainId: 421614, index: 0 });
+const halves = takerHalvesV2({ mnemonic: words, chainId: 421614, factory: "0x" + "11".repeat(20), salt: "0x" + "44".repeat(32) });
 const order = {
   chainId: 421614,
   factory: "0x" + "11".repeat(20),

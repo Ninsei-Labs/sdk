@@ -27,9 +27,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 // pinned as a literal AND recomputed with THIS implementation, while the module under test computes it with
 // @noble/hashes - two implementations agreeing is a cross-check, one agreeing with itself is not.
 import keccakPkg from "keccak256";
-// THE RECOVERY KEY CHECK (sdk#79): one key, its backup file, reservations and the on-chain search.
+// THE RECOVERY KEY CHECK (sdk#79): one key, its backup file and the salt-based on-chain search.
 import { recoveryKeyCheck } from "./check-recovery-key.mjs";
 import { actionStateCheck } from "./check-action-state.mjs";
+import { refundWindowCheck } from "./check-refund-window.mjs";
 import { sweepWindowCheck } from "./check-sweep-window.mjs";
 import { sweepFromOrderCheck } from "./check-sweep-order.mjs";
 import { sweepAdapterCheck } from "./check-sweep-adapter.mjs";
@@ -2620,6 +2621,7 @@ const CHECKS = {
   provider: providerCheck,
   "recovery-key": recoveryKeyCheck,
   "action-state": actionStateCheck,
+  "refund-window": refundWindowCheck,
   "sale-auth": saleAuthCheck,
   "backup-confirmation": backupConfirmationCheck,
   "key-view": keyViewCheck,
