@@ -269,14 +269,10 @@ export declare function recoveryFileName(swapId?: string | null): string;
 export declare const RECOVERY_KEY_VERSION: number;
 /** Twelve words, by the BIP39 rules. */
 export declare const RECOVERY_KEY_WORDS: number;
-/** The default number of v1 indices one `findSwaps` call scans. */
-export declare const RECOVERY_SCAN_DEFAULT: number;
 /** The store key a browser adapter keeps the key under. */
 export declare const RECOVERY_KEY_STORE: string;
 /** The first line of a plain backup file. */
 export declare const RECOVERY_KEY_FILE_MAGIC: string;
-/** The domain half derivation binds to; the chain id and swap number join it. */
-export declare const RECOVERY_KEY_DOMAIN: string;
 /** The salt-based derivation domain; the chain, factory, role and order salt join it. */
 export declare const RECOVERY_KEY_DOMAIN_V2: string;
 /** The domain of the counterparty's view half, derived from the same one key. */
@@ -300,7 +296,6 @@ export interface RecoveryKey {
 
 /** A derived swap number: the halves cross JSON as hex scalars. */
 export interface TakerHalves {
-  readonly index: number;
   readonly binding: string;
   readonly spendHalf: string;
   readonly viewHalf: string;
@@ -311,9 +306,8 @@ export interface TakerHalves {
   readonly spendCommitment: string;
 }
 
-/** A salt-based derivation: no number is reserved, and the public order salt is the input. */
-export interface TakerHalvesV2 extends Omit<TakerHalves, "index"> {
-  readonly index: null;
+/** A salt-based derivation: the public order salt is the input. */
+export interface TakerHalvesV2 extends TakerHalves {
   readonly derivation: "salt-v2";
   readonly factory: string;
   readonly role: string;
@@ -353,10 +347,8 @@ export interface FoundSwap {
    * the expected clone. */
   readonly xmrAmount: string | null;
   readonly xmrAmountReason: "event" | "no-code-reader" | "code" | "not-clone" | null;
-  /** The v1 swap number; null for a salt-based v2 order. */
-  readonly index: number | null;
-  /** Which derivation found this order. v1 orders keep recovering through the index path. */
-  readonly derivation: "index-v1" | "salt-v2";
+  /** The derivation that found this order. */
+  readonly derivation: "salt-v2";
   /** The factory the order was read from; the v2 binding needs it. */
   readonly factory: string;
   readonly side: "locker" | "claimer";
@@ -379,16 +371,12 @@ export declare function createRecoveryKey(options?: { createdAt?: string | Date 
 export declare function importRecoveryKey(mnemonic: string, options?: { createdAt?: string | Date }): RecoveryKey;
 /** The short public fingerprint (four hex characters) of the words. */
 export declare function fingerprintOf(mnemonic: string): string;
-/** The binding for a chain and swap number: `ninsei-taker-v1|<chainId>|<index>`. */
-export declare function recoveryBinding(chainId: number, index: number): string;
 /** The salt-based binding: `ninsei-taker-v2|<chainId>|<factory>|<role>|<salt>`. */
 export declare function recoveryBindingV2(request: { chainId: number; factory: string; role?: string; salt: string }): string;
 /** Normalises a 32-byte salt from an event word, a hex string, a bigint or a safe integer. */
 export declare function recoverySaltOf(value: string | number | bigint): string;
 /** A fresh 32-byte public salt for one salt-based order. */
 export declare function newRecoverySalt(): string;
-/** Derives the taker spend and view halves for one swap number. */
-export declare function takerHalves(request: { mnemonic: string; chainId: number; index: number }): TakerHalves;
 /** Derives the taker halves from a public per-order salt; no index is reserved. */
 export declare function takerHalvesV2(request: { mnemonic: string; chainId: number; factory: string; role?: string; salt: string }): TakerHalvesV2;
 /** The stable backup name, with `DO-NOT-DELETE` in it on purpose. */
@@ -400,26 +388,9 @@ export declare function createRecoveryKeyFile(request: { mnemonic: string; creat
 /** Reads a plain or encrypted backup file and validates the words. */
 export declare function openRecoveryKeyFile(contents: string, passphrase?: string): Promise<RecoveryKey>;
 /** Saves the key through a storage adapter. */
-export declare function saveRecoveryKey(storage: RecoveryKeyStorage, key: RecoveryKey & { nextIndex?: number; reserved?: Record<string, unknown>; retired?: Record<string, unknown>; backupConfirmed?: boolean }): RecoveryKey;
+export declare function saveRecoveryKey(storage: RecoveryKeyStorage, key: RecoveryKey & { backupConfirmed?: boolean }): RecoveryKey;
 /** Reads the key from a storage adapter, or null. */
-export declare function loadRecoveryKey(storage: RecoveryKeyStorage): (RecoveryKey & { nextIndex: number; reserved: Record<string, unknown>; retired: Record<string, unknown>; backupConfirmed?: boolean }) | null;
-/** Reserves a swap number; the caller releases it if the request is abandoned. */
-export declare function reserveRecoveryIndex(storage: RecoveryKeyStorage, request: { chainId: number; swapId?: string | null }): number;
-/** True when an order already holds this number's commitment on chain. A page that starts swaps without the SDK's
- * start path calls this before using a number; an unreadable log is a refusal, not "free". */
-export declare function recoveryIndexTaken(request: {
-  mnemonic: string;
-  chainId: number;
-  index: number;
-  factory: string;
-  evmLogs: (request: { address: string; topics: (string | null)[]; fromBlock: number | string; toBlock: number | string }) => Promise<unknown[]>;
-  fromBlock?: number | string;
-  toBlock?: number | string;
-}): Promise<boolean>;
-/** Releases a number that never reached the chain. */
-export declare function releaseRecoveryIndex(storage: RecoveryKeyStorage, index: number): void;
-/** Retires a number after its order exists on chain. */
-export declare function commitRecoveryIndex(storage: RecoveryKeyStorage, index: number): void;
+export declare function loadRecoveryKey(storage: RecoveryKeyStorage): (RecoveryKey & { backupConfirmed?: boolean }) | null;
 /** Finds orders whose commitment was made from the key's halves. */
 export declare function findSwaps(request: {
   mnemonic: string;
@@ -431,17 +402,6 @@ export declare function findSwaps(request: {
   /** The factory's deployment block from the chain registry; used when `fromBlock` is omitted. */
   deploymentBlock?: number | null;
   toBlock?: number | string;
-  /** Deprecated and ignored: discovery no longer stops after a run of empty numbers. */
-  gap?: number;
-  /** The first index to try. Defaults to 0; a continuation passes the previous `nextIndex`. */
-  fromIndex?: number;
-  /** How many indices this call may try. Defaults to `RECOVERY_SCAN_DEFAULT` (1000), not the allocator ceiling. */
-  maxIndex?: number;
-  /** Stop the scan between chunks. An aborted scan returns `complete: false`, `incompleteReason: "aborted"` and
-   * the `nextIndex` to resume from. */
-  signal?: { readonly aborted: boolean } | null;
-  /** Called after every chunk and after the last index, with the count and the index just scanned. */
-  onProgress?: ((value: { readonly scanned: number; readonly index: number }) => void) | null;
   /** Reads the settlement block timestamp, in seconds: (blockNumber) -> seconds. */
   evmBlockTime?: (blockNumber: number) => Promise<number>;
   /** Reads contract code: (address) -> 0x-hex. Used to read the XMR amount from an order clone. */
@@ -459,13 +419,7 @@ export declare function findSwaps(request: {
   fetchImpl?: typeof fetch;
 }): Promise<{
   swaps: FoundSwap[];
-  scanned: number;
-  /** The last index tried, or null when no index was scanned. */
-  searchedUpTo: number | null;
-  /** True when every order in the logs was matched, or when the allocator range was searched to its end. */
+  /** True when every order in the logs was read. There is no index range to exhaust. */
   complete: boolean;
-  /** `max-index` or `aborted` when a bound or the caller stopped the search before every order was matched. */
-  incompleteReason?: string;
-  /** The next index to pass as `fromIndex`; absent when the search is complete. */
-  nextIndex?: number;
 }>;
+
