@@ -206,8 +206,9 @@ export function createNinsei(options) {
   // ONE CLIENT, ONE STORE. A second client with another adapter used to replace the module-wide store, so the
   // first client listed the second's swaps and could delete them. Even a client that brought no adapter binds the
   // current one, so a later explicit store cannot take it over.
-  engine.store.bindStorage(o.storage || engine.store.storage());
-  if (o.storage) engine.auth.setSessionStore(o.storage);
+  // ONE CLIENT, ONE STORE - WITHOUT A PROCESS-WIDE EXCLUSIVE BINDING. Each facade gets a store over its own
+  // adapter; two clients with different storages coexist and neither can take over the other's records.
+  const store = engine.store.createStore(o.storage || engine.store.storage());
   const http = createHttp({ apiBase: config.apiBase, fetchImpl: o.fetch, timeoutMs: config.limits.httpTimeoutMs });
   // THE CHAIN READ AND THE ALLOW-LIST GO INTO THE QUOTE CHECK: without the read the signature certifies itself,
   // so the same evmCall seam the lock and the actions use is handed to the quotes too.
@@ -294,7 +295,7 @@ export function createNinsei(options) {
     // THE PATHS, THE POLL TIMINGS AND THE PASS GO INTO THE START: without the configuration the "server" step
     // would not know where to knock, and without the pass there is nothing to present to the service (and that
     // is a refusal with a CODE, not an invented path).
-    swaps: createSwaps({ preflight, http, mode: o.mode, xmrNetwork: o.xmrNetwork, call: o.evmCall,
+    swaps: createSwaps({ preflight, http, mode: o.mode, xmrNetwork: o.xmrNetwork, call: o.evmCall, store,
       // THE LOG SEAM FOR THE DECLINE CHECK: the watch asks the escrow for its `Declined` event on every tick, so
       // a declined order stops the wait at once instead of running to `xmr-timeout`.
       logs: o.evmLogs || null,

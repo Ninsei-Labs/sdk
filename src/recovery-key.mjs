@@ -2,9 +2,9 @@
 //
 // The taker used to make a random secret per swap and ask a person to save a file before funding. One BIP39 key,
 // made once and saved once, removes that step. The seeds of this module are the ONLY source of the taker's
-// halves: the spend and view halves for swap number i come from halfFromSeed with a binding that is known at
-// recovery time. The factory is deliberately not part of the binding: numbers then run across a redeployment,
-// and the search reads every factory the caller names.
+// halves: the spend and view halves for an order come from halfFromSeed with a v2 binding that names the chain,
+// the role, the public order salt and the factory. The factory is part of the binding, so a redeployment produces
+// different halves; recovery must read the factory the order names.
 //
 // THE KEY NEVER LEAVES THE CLIENT. The search sends an address and the OrderCreated topic to a log reader; it
 // never sends the words, the seed, a half or a commitment. A service that answered "which of these are mine"

@@ -75,7 +75,7 @@ const CASES = [
     file: "src/swaps.mjs",
     expects: "the record of a declined swap does not report the state",
     patch: (text) => text.replace(
-      /        try \{ engine\.swap\.saveSwap\(swap\); \} catch \{ throw new SdkError\("storage-unavailable", \{ step: "decline" \}\); \}\r?\n/,
+      /        try \{ engine\.swap\.saveSwap\(swap(?:, store)?\); \} catch \{ throw new SdkError\("storage-unavailable", \{ step: "decline" \}\); \}\r?\n/,
       "        // BREAKING RUN D: the record is not written.\n"),
   },
   {

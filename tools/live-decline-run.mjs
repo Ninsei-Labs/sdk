@@ -14,7 +14,7 @@
 // With either of the first two missing the run says so and exits 0 - a skip is named, never silent.
 //
 // Run: NINSEI_TEST_EVM_RPC=http://127.0.0.1:8545 NINSEI_DECLINE_ESCROW=0x... node tools/live-decline-run.mjs
-import { envValue, evmRpcProvider } from "../src/adapters/node-test-evm-wallet.mjs";
+import { envValue, evmRpcProvider } from "./node-test-evm-wallet.mjs";
 import { orderDecline } from "../src/swap-flow.mjs";
 import { DECLINED_TERMINAL, DECLINED_CODE, DECLINED_TOPIC0, DECLINE_FIELDS } from "../src/decline.mjs";
 import { createNinsei } from "../src/index.mjs";

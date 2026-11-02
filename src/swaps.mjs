@@ -354,7 +354,7 @@ export async function startHeightFromNodes({ nodes = [], network = null, fetchIm
   throw new SdkError("xmr-no-nodes", { step: "restore-height", network: network || null, why });
 }
 
-export function createSwaps({ preflight, http, createRecord, mode = null, xmrNetwork = null, call = null,
+export function createSwaps({ preflight, http, createRecord, mode = null, xmrNetwork = null, call = null, store = engine.store,
   // THE PATHS AND LIMITS ARE BROUGHT BY THE CONFIGURATION: the "server" step's paths are named by names (config.route),
   // and the timeout and rate of the watch polling - in config.limits. Without the configuration the step answers with a
   // code rather than following invented paths.
@@ -403,7 +403,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       fetchImpl: request.fetchImpl || (typeof fetch === "function" ? fetch : null) });
   }
   const records = () => {
-    const state = engine.store.loadState();
+    const state = store.loadState();
     const all = Object.values((state && state.swaps) || {}).filter((s) => s && s.id);
     return all.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
   };
@@ -449,7 +449,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       swap.escrow = { ...escrowRecord, address: escrow, fundingPending: false,
         evmBirthBlock: Number(verdict.birthBlock) > 0 ? Number(verdict.birthBlock) : (escrowRecord.evmBirthBlock ?? null) };
       delete swap.fundingPending;
-      try { engine.swap.saveSwap(swap); } catch { throw new SdkError("storage-unavailable", { step: "save-escrow" }); }
+      try { engine.swap.saveSwap(swap, store); } catch { throw new SdkError("storage-unavailable", { step: "save-escrow" }); }
       return { id: swap.id || null, escrow,
         address: (record.swapWallet && record.swapWallet.address) || null,
         step: "xmr-incoming", server: null, watch: null, next: "watch" };
@@ -668,7 +668,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
      */
     async progress(id) {
       if (typeof id !== "string" || !id) throw new SdkError("bad-input", { field: "id" });
-      const swap = engine.swap.getSwap(id);
+      const swap = engine.swap.getSwap(id, store);
       if (!swap) return null;
       return {
         id: String(swap.id || id),
@@ -691,15 +691,15 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
      */
     async confirmReady(id) {
       if (typeof id !== "string" || !id) throw new SdkError("bad-input", { field: "id" });
-      return engine.swap.confirmReady(id);
+      return engine.swap.confirmReady(id, store);
     },
     async refundEth(id, by = "you") {
       if (typeof id !== "string" || !id) throw new SdkError("bad-input", { field: "id" });
-      return engine.swap.refundEth(id, by);
+      return engine.swap.refundEth(id, by, store);
     },
     async sweepNow(id) {
       if (typeof id !== "string" || !id) throw new SdkError("bad-input", { field: "id" });
-      return engine.swap.sweepNow(id);
+      return engine.swap.sweepNow(id, store);
     },
 
     /**
@@ -710,10 +710,10 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
     async setDestination(id, address) {
       if (typeof id !== "string" || !id) throw new SdkError("bad-input", { field: "id" });
       if (typeof address !== "string" || !address) throw new SdkError("bad-input", { field: "address" });
-      const swap = engine.swap.getSwap(id);
+      const swap = engine.swap.getSwap(id, store);
       if (!swap) return null;
       swap.receiveAddress = address;
-      return engine.swap.saveSwap(swap);
+      return engine.swap.saveSwap(swap, store);
     },
 
     /**
@@ -734,11 +734,11 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
     async forget(id) {
       if (typeof id !== "string" || !id) throw new SdkError("bad-input", { field: "id" });
       let state = null;
-      try { state = engine.store.loadState(); } catch { throw new SdkError("storage-unavailable", { step: "forget" }); }
+      try { state = store.loadState(); } catch { throw new SdkError("storage-unavailable", { step: "forget" }); }
       const swaps = state && state.swaps;
       if (!swaps || !swaps[id]) return false;
       delete swaps[id];
-      try { engine.store.saveState(state); } catch { throw new SdkError("storage-unavailable", { step: "forget" }); }
+      try { store.saveState(state); } catch { throw new SdkError("storage-unavailable", { step: "forget" }); }
       return true;
     },
 
@@ -771,7 +771,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       // not look like "the service has no swaps" - the two are different, and only one of them means "synced".
       const body = answer.body;
       if (!body || !Array.isArray(body.swaps)) throw new SdkError("server-unavailable", { step: "sync", why: "bad-response" });
-      const added = engine.swap.addServerSwaps(body.swaps);
+      const added = engine.swap.addServerSwaps(body.swaps, store);
       return { ok: true, added, seen: body.swaps.length };
     },
 
@@ -921,7 +921,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       let keySide = null;
       let derivedViewHalf = null;
       const makeRecord = typeof createRecord === "function" ? createRecord
-        : async (req) => recordModule.createRecord(recordInputOf(req, xmrNetwork), { order: req.order, side: keySide });
+        : async (req) => recordModule.createRecord(recordInputOf(req, xmrNetwork), { order: req.order, side: keySide, store });
       const passphrase = typeof request.passphrase === "string" ? request.passphrase : "";
       if (typeof passphrase !== "string") throw new SdkError("bad-input", { field: "passphrase" });
       if (passphrase.length > 0 && passphrase.length < MIN_PASSPHRASE) throw new SdkError("bad-input", { field: "passphrase", min: MIN_PASSPHRASE });
@@ -935,7 +935,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       // No per-swap file is assembled on this path.
       let recovery = null;
       {
-        const storage = engine.store.storage();
+        const storage = store.storage();
         const supplied = typeof request.recoveryKey === "string"
           ? request.recoveryKey
           : request.recoveryKey && typeof request.recoveryKey.mnemonic === "string" ? request.recoveryKey.mnemonic : null;
@@ -1021,7 +1021,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
           moneroNetwork: step.wallet.network, standIn: step.counterparty.standIn,
           providerId: step.counterparty.providerId, orderContext: step.context,
         };
-        try { engine.swap.saveSwap(record.swap); } catch { throw new SdkError("storage-unavailable", { step: "save-swap" }); }
+        try { engine.swap.saveSwap(record.swap, store); } catch { throw new SdkError("storage-unavailable", { step: "save-swap" }); }
         record = { ...record, swapWallet: engine.swap.halvesWalletOf(record.swap) };
         if (!record.swapWallet) throw new SdkError("bad-input", { field: "swapWallet" });
         builtSide = step;
@@ -1034,7 +1034,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       record.swap.restoreHeight = measuredHeight;
       record.restoreHeight = measuredHeight;
       record.swap.escrow = { ...(record.swap.escrow || {}), moneroRestoreHeight: measuredHeight };
-      try { engine.swap.saveSwap(record.swap); } catch { throw new SdkError("storage-unavailable", { step: "save-restore-height" }); }
+      try { engine.swap.saveSwap(record.swap, store); } catch { throw new SdkError("storage-unavailable", { step: "save-restore-height" }); }
 
       // 2a. THE KEY IS CONFIRMED ONCE. The same twelve words cover every swap, and a person who already saved them
       // is not asked again. A new key is shown before the money moves - no saved key, no funding.
@@ -1133,7 +1133,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         record.swap.escrow = { ...escrowRecord, address: predicted || escrowRecord.address || null,
           fundTx: pendingTx || escrowRecord.fundTx || null, fundingPending: true,
           fundingReason: funded.pendingReason || "no-receipt" };
-        try { engine.swap.saveSwap(record.swap); } catch { throw new SdkError("storage-unavailable", { step: "save-pending" }); }
+        try { engine.swap.saveSwap(record.swap, store); } catch { throw new SdkError("storage-unavailable", { step: "save-pending" }); }
         return { id: record.swap.id || null, escrow: record.swap.escrow.address || null,
           address: (record.swapWallet && record.swapWallet.address) || null,
           step: "funding-pending", txHash: pendingTx,
@@ -1150,7 +1150,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
           // watch and the recovery file take the Monero height measured above. The old name `birthHeight` stays
           // readable on records written before this split.
           evmBirthBlock: Number(funded.birthBlock) > 0 ? Number(funded.birthBlock) : (escrowRecord.evmBirthBlock ?? escrowRecord.birthHeight ?? null) };
-        try { engine.swap.saveSwap(record.swap); } catch { throw new SdkError("storage-unavailable", { step: "save-escrow" }); }
+        try { engine.swap.saveSwap(record.swap, store); } catch { throw new SdkError("storage-unavailable", { step: "save-escrow" }); }
         // THE SALT IS THE RECOVERY BINDING; there is no index reservation to commit here.
       }
 
@@ -1246,7 +1246,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       // durable, and the escrow may also arrive in the request. The watch is not a new user of the store - and it
       // must not start failing where it did not before.
       let record = null;
-      try { record = engine.swap.getSwap(id); } catch { record = null; }
+      try { record = engine.swap.getSwap(id, store); } catch { record = null; }
       const escrowAddress = request.escrow || (record && record.escrow && record.escrow.address) || null;
       // FROM THE ESCROW'S BIRTH HEIGHT when the record knows it: the event cannot be older than the funding, and
       // walking the whole chain every tick is a cost with no answer behind it.
@@ -1270,7 +1270,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       const settleDecline = (swap, at) => {
         if (!swap || swap.settlement) return;
         swap.settlement = { kind: DECLINED_TERMINAL, phase: DECLINED_TERMINAL, at };
-        try { engine.swap.saveSwap(swap); } catch { throw new SdkError("storage-unavailable", { step: "decline" }); }
+        try { engine.swap.saveSwap(swap, store); } catch { throw new SdkError("storage-unavailable", { step: "decline" }); }
       };
       // THE STATE THE WATCH REPORTS FOR A DECLINE: no arrival, the state's own code, the node's own token and
       // WHERE it was seen ("event", "status", or "record" when it was already written down). NO reason, category
@@ -1415,7 +1415,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
           claimTip: existing.claimTip || quote.claimTip, orderQuote: existing.orderQuote || offer.orderQuote,
           resumed: true, next: "send-xmr" };
       }
-      const storage = engine.store.storage();
+      const storage = store.storage();
       const supplied = typeof request.recoveryKey === "string"
         ? request.recoveryKey
         : request.recoveryKey && typeof request.recoveryKey.mnemonic === "string" ? request.recoveryKey.mnemonic : null;
@@ -1458,7 +1458,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         orderQuoteId: quoteId || undefined,
         receiveAddress: order.claimer,
         makerId: quote.provider || null,
-      }, { order, side: own.side });
+      }, { order, side: own.side, store });
       const swap = made.swap;
       swap.side = "sell";
       swap.order = order;
@@ -1485,7 +1485,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         orderContext: offer.context || null, xmrAmount: quote.xmrAmount || null,
       };
       await sellEscrowGate(offer.escrow, swap.expect);
-      try { engine.swap.saveSwap(swap); } catch { throw new SdkError("storage-unavailable", { step: "save-swap" }); }
+      try { engine.swap.saveSwap(swap, store); } catch { throw new SdkError("storage-unavailable", { step: "save-swap" }); }
       return { id: swap.id, side: "sell", escrow: offer.escrow, address: offer.jointAddress,
         xmrAmount: quote.xmrAmount, claimTip: quote.claimTip || null, orderQuote: offer.orderQuote || null,
         resumed: false, next: "send-xmr" };
@@ -1500,7 +1500,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       const id = String(request.id || "").trim();
       if (!id) throw new SdkError("bad-input", { field: "id" });
       let swap = null;
-      try { swap = engine.swap.getSwap(id); } catch { swap = null; }
+      try { swap = engine.swap.getSwap(id, store); } catch { swap = null; }
       if (!swap || swap.side !== "sell") throw new SdkError("bad-input", { field: "id", why: "sell-not-found" });
       const escrow = request.escrow || (swap.escrow && swap.escrow.address) || null;
       const halfClaimer = request.halfClaimer || (swap.escrow && swap.escrow.half) || null;
