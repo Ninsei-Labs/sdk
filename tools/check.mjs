@@ -40,6 +40,7 @@ import { claimSenderCheck } from "./check-claim-sender.mjs";
 import { chainGuardCheck } from "./check-chain-guard.mjs";
 import { quoteRankCheck } from "./check-quote-rank.mjs";
 import { settlementProfilesCheck } from "./check-settlement-profiles.mjs";
+import { dleqVectorsCheck } from "./check-dleq-vectors.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const p = (...parts) => join(ROOT, ...parts);
@@ -2648,6 +2649,7 @@ const CHECKS = {
   "chain-guard": chainGuardCheck,
   "quote-rank": quoteRankCheck,
   "settlement-profiles": settlementProfilesCheck,
+  "dleq-vectors": dleqVectorsCheck,
   "funding-receipt": fundingReceiptCheck,
   storage: storageCheck,
   "scan-range": scanRangeCheck,
