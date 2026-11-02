@@ -168,7 +168,6 @@ fn verify_pok_secp(x: ProjectivePoint, pok: &VPok, ctxb: &[u8]) -> Result<(), St
     let xb = x.to_encoded_point(true);
     let rb = r.to_encoded_point(true);
     let e = challenge_secp(&[ctxb, b"ninsei-dleq-pok|A", xb.as_bytes(), rb.as_bytes()]);
-    eprintln!("RUST pokA e={:x?} s={:x?}", e.to_bytes(), s.to_bytes());
     if ProjectivePoint::GENERATOR * s != r + x * e {
         return Err("pokA did not verify".into());
     }
@@ -276,9 +275,14 @@ fn verify(v: &Vector, override_context: Option<&str>) -> Result<(), String> {
 fn check_dir(dir: &str) -> i32 {
     let mut pass = 0i32;
     let mut failed = 0i32;
-    let mut entries: Vec<_> = fs::read_dir(dir)
-        .map_err(|e| e.to_string())
-        .unwrap()
+    let read_dir = match fs::read_dir(dir) {
+        Ok(read_dir) => read_dir,
+        Err(e) => {
+            eprintln!("cannot read {}: {}", dir, e);
+            return 1;
+        }
+    };
+    let mut entries: Vec<_> = read_dir
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| p.extension().map(|x| x == "json").unwrap_or(false))

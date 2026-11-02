@@ -15,7 +15,7 @@ bundle; `package.json` `files` does not include `test/`.
 The Go oracle requires Go 1.27.3 or newer and generates the proofs. The Rust verifier requires Rust 1.99 or newer.
 The SDK and Rust both verify the Go proofs; the SDK prover is also checked by Go and Rust. The JS runner is
 `tools/check-dleq-oracle.mjs`. It also replays the committed JS fixtures through all three verifiers and checks that
-a wrong context, a wrong public point and a different witness are refused.
+a wrong context, a wrong public point, a low-order ed25519 point and a different witness are refused.
 
 ## Build and run
 

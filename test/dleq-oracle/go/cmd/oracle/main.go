@@ -1,11 +1,12 @@
 // oracle: differential driver for the refdleq fork.
 //
-//	oracle prove  --x <be-hex> [--context s] [--bits N] [--legacy-secp-le]
+//	oracle prove  --x <be-hex> [--context s] [--bits N]
 //	              [--no-sigs] [--strict-torsion] [--seed <hex>] [--out path|-]
 //	oracle verify --file path|-  [same mode flags]
 //
-// With no mode flags the oracle IS the reference go-dleq (Options{}).
-// --bits 253 --legacy-secp-le --no-sigs --context <s> reproduces the SDK mode.
+// The command always runs the SDK verifier mode:
+// --bits 253 --strict-torsion --no-sigs --context <s>. Reference mode is not
+// exposed.
 // With --seed, crypto/rand.Reader is replaced by the same keccak-256 DRBG the
 // JS harness uses, so both sides are individually reproducible.
 package main
@@ -88,7 +89,6 @@ type sigPair struct {
 }
 
 type modeFlags struct {
-	fs            *flag.FlagSet
 	context       *string
 	bits          *uint64
 	noSigs        *bool
@@ -97,7 +97,6 @@ type modeFlags struct {
 
 func addModeFlags(fs *flag.FlagSet) *modeFlags {
 	return &modeFlags{
-		fs:            fs,
 		context:       fs.String("context", "", "context string prepended to challenges"),
 		bits:          fs.Uint64("bits", 0, "bit count; 0 = reference rule min(255,252)=252"),
 		noSigs:        fs.Bool("no-sigs", false, "omit knowledge signatures (SDK proofs carry none)"),
@@ -251,11 +250,11 @@ func cmdVerify(args []string) {
 		outcome(false, "proof: missing knowledge proofs")
 		return
 	}
-	if err := dleq.VerifyPok(curveA, proof.CommitmentA, *v.Proof.PokA, v.Context, "A", false); err != nil {
+	if err := dleq.VerifyPok(curveA, proof.CommitmentA, *v.Proof.PokA, v.Context, "A"); err != nil {
 		outcome(false, "pokA: "+err.Error())
 		return
 	}
-	if err := dleq.VerifyPok(curveB, proof.CommitmentB, *v.Proof.PokB, v.Context, "B", true); err != nil {
+	if err := dleq.VerifyPok(curveB, proof.CommitmentB, *v.Proof.PokB, v.Context, "B"); err != nil {
 		outcome(false, "pokB: "+err.Error())
 		return
 	}

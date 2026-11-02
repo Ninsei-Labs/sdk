@@ -37,7 +37,7 @@ const run = (bin, args) => {
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const verifySdk = (proof, context) => dleq.verify(clone(proof), context);
 const verifyGo = (file, signatures = false) =>
-  run(GO, ["verify", "--file", file, "--bits", "253", ...(signatures ? [] : ["--no-sigs"])]);
+  run(GO, ["verify", "--file", file, "--bits", "253", "--strict-torsion", ...(signatures ? [] : ["--no-sigs"])]);
 const verifyRust = (file) => (RUST ? run(RUST, ["verify", "--file", file]) : null);
 
 // A fixed corpus: the witness, context and DRBG seed are the inputs; proofs are regenerated every run.
@@ -98,7 +98,15 @@ try {
     writeFileSync(wrongPointFile, JSON.stringify(wrongPointVector));
     assertVerdict(`${name}: wrong point`, wrongPointFile, wrongPointVector.proof, context, false);
 
-    // Negative three: the public keys of a different witness under the same transcript.
+    // Negative three: a low-order ed25519 point. The SDK and Rust reject it with the strict subgroup
+    // check; the Go verifier is run with --strict-torsion and must not accept it either.
+    const torsionFile = join(temp, name + "-torsion.json");
+    const torsionVector = clone(goVector);
+    torsionVector.proof.XB = "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f";
+    writeFileSync(torsionFile, JSON.stringify(torsionVector));
+    assertVerdict(`${name}: torsion point`, torsionFile, torsionVector.proof, context, false);
+
+    // Negative four: the public keys of a different witness under the same transcript.
     const nextX = (BigInt("0x" + x) + 1n).toString(16);
     const otherFile = join(temp, name + "-other.json");
     const otherGen = run(GO, ["prove", "--x", nextX, "--context", context, "--bits", "253", "--no-sigs", "--seed", seed, "--out", otherFile]);
@@ -114,7 +122,7 @@ try {
       assertVerdict(`${name}: wrong witness`, wrongWitnessFile, wrongWitnessVector.proof, context, false);
     }
 
-    // Negative four: a corrupted Schnorr knowledge proof.
+    // Negative five: a corrupted Schnorr knowledge proof.
     const badFile = join(temp, name + "-bad-pok.json");
     const bad = clone(goVector);
     bad.proof.pokA.s = (bad.proof.pokA.s[0] === "0" ? "1" : "0") + bad.proof.pokA.s.slice(1);

@@ -1,9 +1,9 @@
 // Forked from github.com/athanorlabs/go-dleq/prove.go (MIT).
 // ORACLE patches, kept minimal and marked:
-//   - Options{Bits, Context, SkipSignatures} selects the SDK behaviour while the
-//     zero value reproduces the reference exactly (NewProof is untouched).
+//   - Options{Bits, Context, SkipSignatures} selects the SDK behaviour. This
+//     fork has no reference-mode constructor; R-REF-1 cannot be selected.
 //   - hashToScalar prepends the context bytes to the challenge preimage; the
-//     SDK prepends ctxUtf8(context), so --context "" reproduces the reference.
+//     SDK prepends ctxUtf8(context).
 package dleq
 
 import (

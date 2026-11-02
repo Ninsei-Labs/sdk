@@ -23,8 +23,8 @@ func (p *Proof) Verify(curveA, curveB Curve) error {
 	return p.VerifyWithOptions(curveA, curveB, Options{})
 }
 
-// VerifyWithOptions is the ORACLE's toggleable verifier. Options{} reproduces
-// Verify exactly.
+// VerifyWithOptions is the ORACLE verifier. The command passes the SDK options;
+// Options{} keeps the upstream defaults for direct callers.
 func (p *Proof) VerifyWithOptions(curveA, curveB Curve, opts Options) error {
 	bits := opts.Bits
 	if bits == 0 {

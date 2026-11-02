@@ -233,7 +233,7 @@ func MakePok(curve Curve, x Scalar, X Point, context, label string, little bool)
 
 // VerifyPok checks s*G == R + e*X with the same context and curve label the
 // SDK uses. A missing or malformed field is a refusal, not a skipped check.
-func VerifyPok(curve Curve, X Point, pok VectorPok, context, label string, little bool) error {
+func VerifyPok(curve Curve, X Point, pok VectorPok, context, label string) error {
 	rb, err := fromHex(pok.R)
 	if err != nil {
 		return fmt.Errorf("pok R: %w", err)
@@ -242,7 +242,9 @@ func VerifyPok(curve Curve, X Point, pok VectorPok, context, label string, littl
 	if err != nil {
 		return fmt.Errorf("pok R: %w", err)
 	}
-	s, err := scalarFromHex(curve, pok.S, little)
+	// Use the same reduction as the SDK: a display integer, never refused for
+	// being non-canonical. ed25519's strict decoder would otherwise diverge.
+	s, err := decodeScalarMod(curve, pok.S)
 	if err != nil {
 		return fmt.Errorf("pok s: %w", err)
 	}
@@ -273,22 +275,4 @@ func scalarHex(s Scalar, little bool) string {
 		return revHex(b)
 	}
 	return toHex(b)
-}
-
-func scalarFromHex(curve Curve, value string, little bool) (Scalar, error) {
-	b, err := fromHex(value)
-	if err != nil {
-		return nil, err
-	}
-	if len(b) > 32 {
-		return nil, errors.New("scalar too long")
-	}
-	padded := make([]byte, 32)
-	copy(padded[32-len(b):], b)
-	if little {
-		for i := 0; i < 16; i++ {
-			padded[i], padded[31-i] = padded[31-i], padded[i]
-		}
-	}
-	return curve.DecodeToScalar(padded)
 }
