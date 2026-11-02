@@ -54,11 +54,23 @@ const withCodes = async (step, work) => {
   }
 };
 
-export function createActions({ call = null } = {}) {
+export function createActions({ call = null, blockTime = null } = {}) {
   // WHAT READS THE CHAIN IS ALSO A SEAM, and not only for the checks: the slot check and the signature must go
   // ONE way, otherwise part of the check goes past the wallet and part does not. By default - the engine's read.
   const reader = call || engine.evm.readContract;
-  const deps = (wallet) => ({ call: reader, send: (tx) => wallet.send(tx), receipt: (h) => wallet.receipt(h) });
+  // THE LATEST BLOCK TIMESTAMP IS THE CLOCK THE CONTRACT USES. It comes from the same provider as the contract
+  // reads; an absent provider or an unreadable block leaves it null, and the time rule is skipped rather than
+  // guessed from the device clock.
+  const clock = typeof blockTime === "function" ? blockTime : async () => {
+    try {
+      const provider = engine.evm.currentProvider();
+      if (!provider || typeof provider.request !== "function") return null;
+      const block = await provider.request({ method: "eth_getBlockByNumber", params: ["latest", false] });
+      const at = Number(block && block.timestamp);
+      return Number.isSafeInteger(at) && at > 0 ? at : null;
+    } catch { return null; }
+  };
+  const deps = (wallet) => ({ call: reader, send: (tx) => wallet.send(tx), receipt: (h) => wallet.receipt(h), blockTime: clock });
   return {
     /** Marking "I saw the XMR on the shared address". Without it, claiming is forbidden by the contract. */
     async markReady(request, wallet) {

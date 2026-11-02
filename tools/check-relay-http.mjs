@@ -206,12 +206,14 @@ function relayBody(answer) {
   return { version: 1, relay: "test-relay", offered: 1, forwarded: { relayId: "test-relay" }, answer };
 }
 
-function fakeFetch({ ok = true, status = 200, body = null, error = null } = {}) {
+function fakeFetch({ ok = true, status = 200, body = null, error = null, relay = null } = {}) {
   const calls = [];
+  const info = relay || { version: 1, relayId: "test-relay", feeRecipient: "0x" + "99".repeat(20), feeBps: "0" };
   return {
     calls,
     fetchImpl: async (url, init) => {
       calls.push({ url, init });
+      if (String(url).endsWith("/v1/relay")) return { ok: true, status: 200, json: async () => info };
       if (error) throw error;
       return { ok, status, json: async () => body };
     },
@@ -245,7 +247,7 @@ try {
   const result = await call({ fetchImpl: success.fetchImpl });
   if (result.quote.amount === built.terms.order.amount && result.answer.type === "quote") ok("the answer is verified and returned");
   else bad("the returned answer did not carry the quote");
-  const sent = success.calls[0];
+  const sent = success.calls.find((item) => String(item.url).endsWith("/v1/quote"));
   if (sent && sent.url === "https://relay.example/v1/quote") ok("the endpoint is POST <relay>/v1/quote");
   else bad("unexpected endpoint: " + (sent && sent.url));
   const sentBody = JSON.parse(sent.init.body);
@@ -257,6 +259,29 @@ try {
     ok("the payload string and the partner label are sent exactly");
   } else bad("the request body changed: " + JSON.stringify(Object.keys(sentBody)));
 } catch (error) { bad("valid answer refused: " + JSON.stringify(error && (error.code || error.message))); }
+
+console.log("=== 1a2) THE PUBLISHED FEE MUST MATCH THE SIGNED QUOTE ===");
+{
+  const badRecipient = fakeFetch({ body: relayBody(makeAnswer(built)),
+    relay: { version: 1, relayId: "test-relay", feeRecipient: "0x" + "98".repeat(20), feeBps: "0" } });
+  try {
+    await call({ fetchImpl: badRecipient.fetchImpl });
+    bad("a fee recipient different from the published one passed");
+  } catch (error) {
+    if (error && error.code === "quote-refused" && error.params && error.params.why === "fee-recipient") ok("a foreign fee recipient is refused");
+    else bad("wrong fee recipient code: " + JSON.stringify(error && (error.code || error.message)));
+  }
+  const noPartner = { ...requestBase };
+  const badBps = fakeFetch({ body: relayBody(makeAnswer(built)),
+    relay: { version: 1, relayId: "test-relay", feeRecipient: "0x" + "99".repeat(20), feeBps: "30" } });
+  try {
+    await requestFirmQuote({ relayUrl: "https://relay.example/", ...noPartner, fetchImpl: badBps.fetchImpl });
+    bad("a fee rate different from the published one passed without a partner");
+  } catch (error) {
+    if (error && error.code === "quote-refused" && error.params && error.params.why === "fee-bps") ok("a changed operator rate is refused");
+    else bad("wrong fee rate code: " + JSON.stringify(error && (error.code || error.message)));
+  }
+}
 
 console.log("=== 1b) A BID ANSWER PLACES THE NODE AS LOCKER ===");
 const bidSuccess = fakeFetch({ body: relayBody(makeAnswer(bidBuilt)) });
@@ -355,22 +380,22 @@ console.log("=== 4b) A RETRY KEEPS THE SAME SALT ===");
 const retryCalls = [];
 let retryAttempt = 0;
 const retryFetch = async (url, init) => {
+  if (String(url).endsWith("/v1/relay")) {
+    return { ok: true, status: 200, json: async () => ({ version: 1, relayId: "test-relay", feeRecipient: "0x" + "99".repeat(20), feeBps: "0" }) };
+  }
   retryCalls.push(JSON.parse(init.body));
   retryAttempt += 1;
-  if (retryAttempt === 1) throw new Error("timeout");
+  if (retryAttempt === 1) throw Object.assign(new Error("timeout"), { name: "AbortError" });
   return { ok: true, status: 200, json: async () => relayBody(makeAnswer(built)) };
 };
 try {
-  try { await call({ fetchImpl: retryFetch }); } catch (error) {
-    if (!error || error.code !== "server-unavailable") throw error;
-  }
   const result = await call({ fetchImpl: retryFetch });
   const salts = retryCalls.map((body) => JSON.parse(body.payload).terms.order.salt);
   if (result.quote.salt.toLowerCase() === order.salt.toLowerCase()
     && salts.length === 2 && salts.every((salt) => salt.toLowerCase() === order.salt.toLowerCase())) {
-    ok("a retry after a timeout sends the same salt");
-  } else bad("the retry changed the salt: " + JSON.stringify(salts));
-} catch (error) { bad("the same-salt retry failed: " + JSON.stringify(error && (error.code || error.message))); }
+    ok("a timeout is retried automatically with the same salt");
+  } else bad("the automatic retry changed the salt: " + JSON.stringify(salts));
+} catch (error) { bad("the automatic same-salt retry failed: " + JSON.stringify(error && (error.code || error.message))); }
 
 console.log("=== 5) BREAKING RUN: A DROPPED REFUSAL CODE IS CAUGHT ===");
 {

@@ -13,6 +13,7 @@ import { quoteDigest, signQuoteDigest } from "../src/quoteEip712Spec.mjs";
 import { halfCommitmentHex } from "../engine/atomic/orderHalfCommit.js";
 import { memoryStorage, setStorage } from "../engine/core/store.js";
 import { FACTORY_METHODS, ORDER_CREATED_TOPIC } from "../engine/evm/factory.js";
+import { encodeStatus } from "../engine/evm/escrow.js";
 import { takerHalvesV2 } from "../src/recovery-key.mjs";
 import { markBodyOf } from "../src/swaps.mjs";
 import { SDK_VERSION } from "../src/version.mjs";
@@ -104,7 +105,7 @@ console.log("=== 1c) A SALT THE QUOTE DID NOT CARRY IS REFUSED ===");
   else bad("salt mismatch: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
 }
 
-async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 } } = {}) {
+async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 }, funded = false } = {}) {
   if (fresh) setStorage(memoryStorage());
   let sent = 0;
   const wallet = { chainId: async () => order.chainId, address: async () => order.locker,
@@ -115,8 +116,12 @@ async function startPending({ fresh = true, receipt = { status: "0x1", logs: [],
   const request = { quote: { id: "q", chain: "arbitrum-sepolia", asset: "ETH", amount: 1, size: 1 }, order, orderQuote: quote,
     counterparty, recoveryKey: WORDS, recoverySalt: order.salt, receiveTo: "synthetic-xmr-destination",
     restoreHeight: 100, wallet, onRecoveryKey: async () => true };
+  const fundedStatus = "0x" + [1, 0, 0, 0].map((value) => BigInt(value).toString(16).padStart(64, "0")).join("");
   const result = await createSwaps({ mode: "live", xmrNetwork: "stagenet", logs: async () => [],
-    call: async ({ data }) => (data.startsWith(FACTORY_METHODS.predict) ? "0x" + "0".repeat(24) + "88".repeat(20) : "0x"),
+    call: async ({ data }) => {
+      if (data === encodeStatus()) return funded ? fundedStatus : "0x";
+      return data.startsWith(FACTORY_METHODS.predict) ? "0x" + "0".repeat(24) + "88".repeat(20) : "0x";
+    },
   }).start(request).catch((error) => error);
   return { result, sent };
 }
@@ -140,6 +145,16 @@ console.log("=== 1d2) A RETRY READS THE SAME HASH AND DOES NOT SEND AGAIN ===");
   if (predicted && second.result && second.result.step === "xmr-incoming" && second.result.escrow === predicted && second.sent === 0) {
     ok("the retry reads the pending hash, saves the escrow and sends nothing");
   } else bad("pending retry: " + JSON.stringify({ ctor: second.result && second.result.constructor && second.result.constructor.name, keys: second.result && Object.keys(second.result), code: second.result && second.result.code, msg: second.result && second.result.message, sent: second.sent }));
+}
+
+console.log("=== 1d3) A FUNDED STATUS RESCUES A MISSING RECEIPT ===");
+{
+  const first = await startPending();
+  const predicted = first.result && first.result.escrow;
+  const second = await startPending({ fresh: false, receipt: null, funded: true });
+  if (predicted && second.result && second.result.step === "xmr-incoming" && second.result.escrow === predicted && second.sent === 0) {
+    ok("a funded status saves the predicted escrow when the receipt is gone");
+  } else bad("funded status fallback: " + JSON.stringify({ step: second.result && second.result.step, escrow: second.result && second.result.escrow, predicted, sent: second.sent, code: second.result && second.result.code }));
 }
 
 console.log("=== 1e) THE MARK BODY NAMES THE SDK LINE ===");

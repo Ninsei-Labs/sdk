@@ -417,14 +417,21 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
     const swap = record.swap || record;
     const escrowRecord = swap.escrow && typeof swap.escrow === "object" ? swap.escrow : {};
     const txHash = escrowRecord.fundTx || swap.fundTx || null;
-    if (!txHash) {
+    // THE RECEIPT IS A HANDLE, NOT THE ONLY SOURCE OF TRUTH. A Safe over WalletConnect, a sped-up transaction or
+    // a provider that lost the receipt can hide a funded escrow; the predicted address is already on the record,
+    // so its own status() is asked before the start is left pending forever. A failed read is not "not funded".
+    let onChain = null;
+    if (escrowRecord.address) {
+      try { onChain = await flow.orderStatus(escrowRecord.address, { call: reader }); } catch { onChain = null; }
+    }
+    if (!txHash && !(onChain && onChain.isFunded)) {
       return { id: swap.id || null, escrow: escrowRecord.address || null,
         address: (record.swapWallet && record.swapWallet.address) || null,
         step: "funding-pending", txHash: null, reason: "no-transaction-hash", next: "receipt" };
     }
     const wallet = request.wallet;
     let receipt = null;
-    if (wallet && typeof wallet.receipt === "function") {
+    if (txHash && wallet && typeof wallet.receipt === "function") {
       try { receipt = await wallet.receipt(txHash); } catch { receipt = null; }
     }
     const order = request.order && typeof request.order === "object" ? request.order : {};
@@ -433,12 +440,14 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       expectedEscrow: escrowRecord.address || null,
     });
     if (verdict.status === "reverted") throw new SdkError("contract-reverted", { step: "funding" });
-    if (verdict.status === "funded") {
-      swap.escrow = { ...escrowRecord, address: verdict.escrow, fundingPending: false,
+    if (verdict.status === "funded" || (onChain && onChain.isFunded)) {
+      const escrow = verdict.status === "funded" ? verdict.escrow : escrowRecord.address;
+      if (!escrow) throw new SdkError("funding-pending", { reason: "no-escrow-address" });
+      swap.escrow = { ...escrowRecord, address: escrow, fundingPending: false,
         evmBirthBlock: Number(verdict.birthBlock) > 0 ? Number(verdict.birthBlock) : (escrowRecord.evmBirthBlock ?? null) };
       delete swap.fundingPending;
       try { engine.swap.saveSwap(swap); } catch { throw new SdkError("storage-unavailable", { step: "save-escrow" }); }
-      return { id: swap.id || null, escrow: verdict.escrow,
+      return { id: swap.id || null, escrow,
         address: (record.swapWallet && record.swapWallet.address) || null,
         step: "xmr-incoming", server: null, watch: null, next: "watch" };
     }

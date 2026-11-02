@@ -153,7 +153,10 @@ function relayFetch({ tamperProof = false } = {}) {
   const bodies = [];
   return {
     bodies,
-    fetchImpl: async (_url, init) => {
+    fetchImpl: async (url, init) => {
+      if (String(url).endsWith("/v1/relay")) {
+        return { ok: true, status: 200, json: async () => ({ version: 1, relayId: "test-relay", feeRecipient: "0x" + "99".repeat(20), feeBps: "0" }) };
+      }
       const body = JSON.parse(init.body);
       bodies.push(body);
       const payload = JSON.parse(body.payload);
@@ -280,7 +283,9 @@ try {
 }
 
 console.log("=== 6) THE ADAPTER DOES NOT TAKE A REFUSAL AS A QUOTE ===");
-const refusal = { fetchImpl: async () => ({ ok: false, status: 409, json: async () => ({ version: 1, code: "price_changed" }) }) };
+const refusal = { fetchImpl: async (url) => String(url).endsWith("/v1/relay")
+  ? { ok: true, status: 200, json: async () => ({ version: 1, relayId: "test-relay", feeRecipient: "0x" + "99".repeat(20), feeBps: "0" }) }
+  : { ok: false, status: 409, json: async () => ({ version: 1, code: "price_changed" }) } };
 try {
   await call(makeQuotes(), refusal);
   bad("a refusal passed");

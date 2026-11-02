@@ -6,6 +6,9 @@
 - A withdrawal window whose spent status could not be read no longer reports a complete scan; it names `spent-status-unavailable`.
 - The live refund state follows the escrow: between `readyBy` and `t1` without the mark it stays closed, and at `t1` it opens to anyone holding the depositor's half.
 - Claim, refund and mark-ready read the order before signing: a closed or unfunded order is refused and a second mark is refused; the claim's ready/time rule stays with the contract.
+- A start whose receipt is gone reads the predicted escrow's `status()` before it stays `funding-pending`; a funded escrow is resumed as `xmr-incoming`.
+- Claim, refund and mark-ready read the latest block timestamp and the escrow deadlines; a claim before `readyBy` without the mark, a refund between `readyBy` and `t1`, and a mark after `readyBy` are refused before signing.
+- `firmRelay` compares the signed fee recipient and, without a partner key, the fee rate with `GET /v1/relay`; a mismatch is refused. A timed-out quote request is retried once with the same bytes.
 - `pnpm run build:sdk` rebuilds `assets/vendors/sdk/sdk-browser.js` with esbuild from `tools/sdk-browser-entry.mjs`; CI rebuilds it and refuses a diff, so the committed bundle cannot drift from `src/`.
 - `package.json` records `allowScripts` for `esbuild` and `keccak`; a clean npm install no longer warns about unreviewed install scripts.
 - Release workflow: the checkout, setup-node and pnpm actions are pinned by commit, and npm is installed at an exact version.
