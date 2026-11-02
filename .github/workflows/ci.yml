@@ -96,6 +96,10 @@ jobs:
       - name: Check the swap record's Monero network
         run: pnpm run check:swap-network
 
+      # Direct and relay quotes must agree that an expiry is a required, future integer.
+      - name: Check direct and sale quote expiry
+        run: pnpm run check:quote-ttl
+
       # A HASH GUARD MUST BE SEEN TO FAIL. This breaks the temporary manifest and requires both mutations (an
       # unlisted bundle and a changed hash) to come back red with the file named.
       - name: Break the vendor-bundle guard (RED, then named)
