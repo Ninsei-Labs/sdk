@@ -82,6 +82,13 @@ console.log("=== 3) AN EXPIRED TICKET IS REFUSED ===");
   else bad("an expired ticket returned " + (got && (got.code || "a ticket")));
 }
 
+console.log("=== 3b) ZERO TTL IS NOT AN ETERNAL TICKET ===");
+{
+  const got = await callSale({ quote: makeQuote({ validUntil: 0 }) }).catch((e) => e);
+  if (got && got.code === "quote-expired") ok("a zero-TTL ticket is refused");
+  else bad("a zero-TTL ticket returned " + (got && (got.code || "a ticket")));
+}
+
 console.log("=== 4) A DENIED CLAIMER IS REFUSED ===");
 {
   const got = await callSale({ denylist: new Set([addr("33").toLowerCase()]) }).catch((e) => e);

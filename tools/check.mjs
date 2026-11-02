@@ -2564,6 +2564,7 @@ const runScriptCheck = (tool, label) => {
 };
 
 const saleAuthCheck = () => runScriptCheck("check-sale-auth.mjs", "sale auth");
+const quoteTtlCheck = () => runScriptCheck("check-quote-ttl.mjs", "quote ttl");
 const backupConfirmationCheck = () => runScriptCheck("check-backup-confirmation.mjs", "backup confirmation");
 const keyViewCheck = () => runScriptCheck("check-key-view.mjs", "key view");
 const relayViewCheck = () => runScriptCheck("check-relay-view.mjs", "relay view");
@@ -2627,6 +2628,7 @@ const CHECKS = {
   "vendor-bundles": vendorBundlesCheck,
   "refund-window": refundWindowCheck,
   "sale-auth": saleAuthCheck,
+  "quote-ttl": quoteTtlCheck,
   "backup-confirmation": backupConfirmationCheck,
   "key-view": keyViewCheck,
   "relay-view": relayViewCheck,
