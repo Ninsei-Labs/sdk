@@ -11,6 +11,12 @@ import { fileURLToPath } from "node:url";
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const VENDORS = join(ROOT, "assets", "vendors");
 
+// THE HASH IS OVER THE CHECKED-IN BYTES, NOT THE WORKING-TREE LINE ENDINGS. A Windows checkout may turn LF into
+// CRLF; Git stores LF, and CI checks out LF. Normalising CRLF keeps the same manifest valid on both.
+const sha256Of = (file) => createHash("sha256")
+  .update(readFileSync(file).toString("utf8").replace(/\r\n/g, "\n"))
+  .digest("hex");
+
 const listBundles = (dir, root = dir, out = []) => {
   for (const name of readdirSync(dir)) {
     const full = join(dir, name);
@@ -34,7 +40,7 @@ export const vendorBundlesCheck = ({ vendorsDir = VENDORS, manifestPath = join(V
     const file = join(vendorsDir, rel);
     if (!existsSync(file)) { problems.push(`${rel}: listed in the manifest but missing`); continue; }
     const want = String(entry && entry.sha256 || "").toLowerCase();
-    const got = createHash("sha256").update(readFileSync(file)).digest("hex");
+    const got = sha256Of(file);
     if (!/^[0-9a-f]{64}$/.test(want) || got !== want) problems.push(`${rel}: sha256 ${got}, expected ${want || "a 64-digit hash"}`);
   }
   // EVERY JAVASCRIPT FILE UNDER vendors IS AN INPUT THE PACKAGE SHIPS. A fifth bundle added to the directory but
