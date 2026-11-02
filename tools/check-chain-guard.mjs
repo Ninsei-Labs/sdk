@@ -5,6 +5,7 @@
 // transaction the contract cannot accept; an adapter that cannot answer its chain cannot prove the network and is
 // refused as well.
 import { assertWalletChain } from "../src/chainGuard.mjs";
+import { evmWallet } from "../src/adapters/evm-wallet.mjs";
 
 export const chainGuardCheck = async () => {
   const want = 421614;
@@ -41,8 +42,40 @@ export const chainGuardCheck = async () => {
       "missing chainId shape: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
   }
 
+  // THE SEND BOUNDARY ITSELF. A wallet can switch networks after the action's guard; the adapter must read
+  // eth_chainId immediately before eth_sendTransaction, refuse a mismatch and put the chain into the transaction.
+  {
+    const make = (chainHex) => {
+      const calls = [];
+      const p = {
+        request: async (request) => {
+          if (request.method === "eth_accounts") return ["0x" + "11".repeat(20)];
+          if (request.method === "eth_chainId") return chainHex;
+          if (request.method === "eth_sendTransaction") { calls.push(request.params[0]); return "0x" + "22".repeat(32); }
+          throw new Error("unexpected " + request.method);
+        },
+      };
+      return { wallet: evmWallet(p), calls };
+    };
+    const good = make("0x1");
+    try {
+      await good.wallet.send({ to: "0x" + "33".repeat(20), data: "0x", value: 5n, chainId: 1 });
+      check(good.calls.length === 1 && good.calls[0].chainId === "0x1", "send did not put chainId into the transaction");
+    } catch (error) { check(false, "a matching send was refused: " + (error && error.code)); }
+    const wrong = make("0x1");
+    try {
+      await wrong.wallet.send({ to: "0x" + "33".repeat(20), data: "0x", chainId: 421614 });
+      check(false, "send on another chain passed");
+    } catch (error) {
+      check(error && error.code === "wrong-chain" && error.params && error.params.got === 1 && error.params.want === 421614,
+        "send wrong-chain shape: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
+    }
+    check(wrong.calls.length === 0, "a mismatched send reached eth_sendTransaction");
+  }
+
   notes.push("funding, markReady, claim and refund read the wallet chain before signing");
-  return { note: "the wallet must be on the order's chain before any transaction", problems, notes };
+  notes.push("the EVM adapter reads eth_chainId again at the send boundary and puts chainId into the transaction");
+  return { note: "the wallet must be on the order's chain before any transaction and at the send boundary", problems, notes };
 };
 
 if (import.meta.main) {

@@ -70,7 +70,7 @@ export function createActions({ call = null, blockTime = null } = {}) {
       return Number.isSafeInteger(at) && at > 0 ? at : null;
     } catch { return null; }
   };
-  const deps = (wallet) => ({ call: reader, send: (tx) => wallet.send(tx), receipt: (h) => wallet.receipt(h), blockTime: clock });
+  const deps = (wallet, chainId) => ({ call: reader, send: (tx) => wallet.send({ ...tx, chainId }), receipt: (h) => wallet.receipt(h), blockTime: clock });
   return {
     /** Marking "I saw the XMR on the shared address". Without it, claiming is forbidden by the contract. */
     async markReady(request, wallet) {
@@ -78,7 +78,7 @@ export function createActions({ call = null, blockTime = null } = {}) {
       walletOrFail(wallet);
       const { escrow, expect, onStep } = request;
       await assertWalletChain(wallet, expect.chainId, "mark-ready");
-      return await withCodes("mark-ready", () => flow.markReadyOrder({ escrow, expect, onStep, deps: deps(wallet) }));
+      return await withCodes("mark-ready", () => flow.markReadyOrder({ escrow, expect, onStep, deps: deps(wallet, expect.chainId) }));
     },
     /** Claiming: it reveals your own half, so expectations are mandatory. */
     async claim(request, wallet) {
@@ -89,7 +89,7 @@ export function createActions({ call = null, blockTime = null } = {}) {
       const verdict = claimSenderVerdict({ sender, claimer: request.claimer || (expect && expect.claimer) });
       if (!verdict.ok) throw new SdkError(verdict.code, { field: verdict.field, why: verdict.why, surface: "actions.claim" });
       await assertWalletChain(wallet, expect.chainId, "claim");
-      return await withCodes("claim", () => flow.claimOrder({ escrow, halfClaimer, expect, onStep, deps: deps(wallet) }));
+      return await withCodes("claim", () => flow.claimOrder({ escrow, halfClaimer, expect, onStep, deps: deps(wallet, expect.chainId) }));
     },
     /** Refunding: it also reveals a half. The core passes the expectations ALWAYS, though the engine does not require them. */
     async refund(request, wallet) {
@@ -97,7 +97,7 @@ export function createActions({ call = null, blockTime = null } = {}) {
       walletOrFail(wallet);
       const { escrow, halfLocker, expect, onStep } = request;
       await assertWalletChain(wallet, expect.chainId, "refund");
-      return await withCodes("refund", () => flow.refundOrder({ escrow, halfLocker, expect, onStep, deps: deps(wallet) }));
+      return await withCodes("refund", () => flow.refundOrder({ escrow, halfLocker, expect, onStep, deps: deps(wallet, expect.chainId) }));
     },
   };
 }

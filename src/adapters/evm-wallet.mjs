@@ -103,15 +103,26 @@ export function evmWallet(provider, { id = "evm" } = {}) {
     // THERE IS DELIBERATELY NO POLLING HERE: `receipt` asks once and returns the receipt, or null if the transaction
     // is not in a block yet. The waiting policy (how long, how often, what on refusal) is set by the caller: a
     // policy of its own inside the adapter would mean two calls wait differently.
-    async send({ to, data = "0x", value = 0n, gas = null }) {
+    async send({ to, data = "0x", value = 0n, gas = null, chainId = null }) {
       if (typeof to !== "string" || !to) throw new SdkError("bad-input", { field: "send.to" });
       const accounts = await provider.request({ method: "eth_accounts" });
       const from = Array.isArray(accounts) ? accounts[0] : null;
       if (!from) throw new SdkError("wallet-not-connected", { step: "send" });
       const hex = (v) => "0x" + BigInt(v).toString(16);
+      // THE CHAIN IS READ AT THE SEND BOUNDARY, NOT ONLY AT THE START OF THE ACTION. A wallet can switch networks
+      // between the action's guard and this call; reading here and putting the expected chain into the transaction
+      // makes that switch a refusal instead of a signature on the wrong chain.
+      const got = hexToInt(await provider.request({ method: "eth_chainId" }).catch(() => null));
+      if (!Number.isSafeInteger(got) || got <= 0) {
+        throw new SdkError("wrong-chain", { vm: "evm", step: "send", want: chainId === null || chainId === undefined ? null : Number(chainId), got: null, why: "unreadable" });
+      }
+      const want = chainId === null || chainId === undefined ? got : Number(chainId);
+      if (!Number.isSafeInteger(want) || want <= 0 || got !== want) {
+        throw new SdkError("wrong-chain", { vm: "evm", step: "send", want, got });
+      }
       // GAS IS PASSED IF THE CALLER SET IT: every contract call has its own estimate (marking ready, claiming,
       // refunding), and it comes from the same place as the calldata - the engine's EVM layer.
-      const tx = { from, to, data, value: hex(value) };
+      const tx = { from, to, data, value: hex(value), chainId: hexChainId(got) };
       if (gas !== null && gas !== undefined) tx.gas = hex(gas);
       return await provider.request({ method: "eth_sendTransaction", params: [tx] });
     },

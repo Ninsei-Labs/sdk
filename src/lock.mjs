@@ -98,7 +98,7 @@ export async function send(request, wallet, deps = {}) {
     return await evm.fundOrder({
       ...canonical,
       call: reader,
-      send: (tx) => wallet.send(tx),
+      send: (tx) => wallet.send({ ...tx, chainId: canonical.chainId }),
       // NORMALISING THE RECEIPT ARGUMENT'S SHAPE - HERE, AT THE CORE'S BOUNDARY, NOT AT EVERY CALLER.
       //
       // funding.js calls the receipt with an OBJECT { hash } (waitReceipt), while the adapter contract declares

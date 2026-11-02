@@ -56,6 +56,11 @@ permissions:
 
 jobs:
   publish:
+    # THE PUBLISH JOB RUNS IN A NAMED ENVIRONMENT. The environment carries the protection rules (required reviewers
+    # and a deployment branch/tag policy); npm trusted publishing names the same environment, so a manual run or a
+    # tag cannot reach the publish token path without passing those rules. Create `npm-publish` in repository
+    # Settings -> Environments and require reviewers before the first real release.
+    environment: npm-publish
     runs-on: ubuntu-latest # cloud-hosted only: npm accepts OIDC from these, not from self-hosted
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

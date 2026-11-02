@@ -299,10 +299,15 @@ export function nodeTestEvmWallet({ privateKey, rpcUrl, chainId = null, id = "no
      * None of these numbers is invented: a guessed gas limit costs a signature, and a guessed nonce costs a lost
      * transaction.
      */
-    async send({ to, data = "0x", value = 0n, gas = null }) {
+    async send({ to, data = "0x", value = 0n, gas = null, chainId: expectedChainId = null }) {
       if (!connected) throw new SdkError("wallet-not-connected");
       if (typeof to !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(to)) throw new SdkError("bad-input", { field: "send.to" });
       const remote = await assertTestContour();
+      // THE SAME SEND-BOUNDARY RULE AS THE BROWSER ADAPTER: the action guard can be stale by the time this line
+      // runs, so an expected chain that differs from the node's chain refuses before signing.
+      if (expectedChainId !== null && expectedChainId !== undefined && Number(expectedChainId) !== Number(remote)) {
+        throw new SdkError("wrong-chain", { vm: "evm", step: "send", want: Number(expectedChainId), got: Number(remote) });
+      }
       const valueWei = BigInt(value === undefined || value === null ? 0 : value);
       const nonce = Number(BigInt(await provider.request({ method: "eth_getTransactionCount", params: [owner, "pending"] })));
       // NEVER SIGN BELOW THE BLOCK BASE FEE. On a live node eth_gasPrice answers a tick behind and comes out
