@@ -25,6 +25,7 @@
     "check:dleq-vectors": "node tools/check-dleq-vectors.mjs",
     "check:swap-network": "node tools/check.mjs --only=swap-network",
     "check:quote-ttl": "node tools/check.mjs --only=quote-ttl",
+    "check:dleq-oracle": "node tools/check-dleq-oracle.mjs",
     "check:vendor-bundles-teeth": "node tools/check-vendor-bundles-teeth.mjs",
     "check:types": "node tools/check.mjs --only=types",
     "check:types-teeth": "node tools/check-types-teeth.mjs",
