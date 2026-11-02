@@ -519,25 +519,33 @@ export function derive(swap, now = nowReal()) {
     }
   } else if (live && readyAt === null && chainReadyByMs !== null && nowReal() >= chainReadyByMs
              && (chainT1Ms === null || nowReal() < chainT1Ms)) {
-    // THERE WAS A DEAD ZONE - NOW AN OPEN DOOR. The depositor will not mark anymore, and the contract forbids a
-    // claim without it, so the claim window NEVER OPENED - and a refund is allowed right after readyBy (the
-    // contract condition: block.timestamp < readyBy || (block.timestamp < t1 && ready)). It also publishes the
-    // depositor's half, so the maker takes his XMR back without waiting for t1. That is the answer to the dead
-    // zone: before, the money and the half waited for t1, and the Monero leg was unavailable to both sides.
+    // THE DEAD ZONE IS REAL, AND THE CONTRACT DOES NOT OPEN THE REFUND IN IT. `refund()` rejects a call before
+    // `t1` when `block.timestamp >= readyBy` and `ready` is false; the same rule keeps the claim closed without the
+    // mark. Nothing can be signed between `readyBy` and `t1`, so the screen must not offer a refund that reverts.
     phase = "dead_zone";
-    phaseLabel = "Ready deadline passed - the refund is open";
+    phaseLabel = "Ready deadline passed - the refund opens at T1";
     can.ready = false;
-    can.refund = true;
-    can.refundByAnyone = true;
+    can.refund = false;
+    can.refundByAnyone = false;
     note = "The ready() deadline has passed without your confirmation, so the maker cannot claim - and the " +
-      "refund is open NOW, not at T1. It returns your ETH and publishes your half, so the maker can reclaim " +
-      "the XMR from Monero right away. " +
-      (chainT1Ms !== null ? "T1 closes the order for good: " + new Date(chainT1Ms).toISOString() + "." : "");
+      "escrow refuses a refund before T1 while the mark is absent. Nothing can be signed now; the refund opens " +
+      "at T1 and returns your ETH and publishes your half. " +
+      (chainT1Ms !== null ? "T1: " + new Date(chainT1Ms).toISOString() + "." : "");
   } else if (live && readyAt === null) {
     // Live mode: Monero-leg states come from the backend. The simulated EVM-leg timeouts (T0/T1, watchtower)
     // are deliberately NOT shown here: the contract does not exist yet, and a "refund ETH" button would be a
     // lie. The "EVM leg - simulation" mark hangs in the UI separately (derive().simulated).
-    if (xmr.status === XMR_STATUS.LOCKED) {
+    if (chainT1Ms !== null && nowReal() >= chainT1Ms) {
+      // THE OTHER SIDE OF THE DEAD ZONE. From T1 the refund is open even without the ready mark; before this
+      // branch existed, a live order without the mark stayed "received, waiting" forever after T1.
+      phase = "refund_available";
+      phaseLabel = "Claim deadline passed - the refund is open";
+      can.ready = false;
+      can.refund = true;
+      can.refundByAnyone = true;
+      note = "The claim deadline passed without the ready mark. The refund is open to anyone who can present " +
+        "the depositor's half - that half is yours in the recovery file. It returns your ETH and publishes your half.";
+    } else if (xmr.status === XMR_STATUS.LOCKED) {
       // THE MONEY IS AT THE ADDRESS BUT LOCKED BY unlock_time. This is a NAMED state, not "waiting for arrival":
       // otherwise the screen would be silent and the amount would look zero. A readiness mark is impossible here
       // - claiming ETH against locked XMR would give the maker ETH for money that cannot be paid with.
@@ -644,16 +652,10 @@ export function derive(swap, now = nowReal()) {
         can.refund = realNow >= escrowT0;                   // an old order: from t0, and only the locker
         can.refundByAnyone = realNow >= chainT1;            // from t1 - anyone
       } else {
-        // A NEW ORDER: TWO BOUNDARIES. From t1 - as before, a refund is open to all. But if the ready mark is
-        // absent, the claim window never opened, and a refund is open right after readyBy: otherwise the dead
-        // zone would hold the money and the half until t1. The mark is taken from the RECORD (readyAt) - the
-        // user sets it himself, and in this branch it is empty. If the record is lost while the chain has the
-        // mark, the contract refuses: an honest refusal instead of a promise we would not keep.
-        const chainReadyBy = swap.escrow && swap.escrow.readyBy ? Number(swap.escrow.readyBy) * 1000 : null;
-        const earlyRefund = chainReadyBy !== null && realNow >= chainReadyBy && readyAt === null;
-        can.refund = realNow >= chainT1 || earlyRefund;
-        can.refundByAnyone = can.refund;                    // and from t1 a refund is open to all at once
-        if (earlyRefund && realNow < chainT1) refundAfterSim = null;   // the refund is already open: no countdown
+        // A NEW ORDER HAS ONE BOUNDARY. The escrow's `refund()` rejects every call before T1, including the
+        // window after readyBy without the mark; from T1 it is open to anyone. There is no early refund to offer.
+        can.refund = realNow >= chainT1;
+        can.refundByAnyone = can.refund;                    // from t1 a refund is open to all at once
       }
     } else if (!isLiveNetwork(swap)) {
       can.refund = sim >= t1At;                             // a demo deal: as before, from the simulator
