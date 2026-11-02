@@ -311,7 +311,7 @@ jobs:
       - name: Check the packed consumer (pack, install, import every subpath)
         run: pnpm run check:packed-consumer
 
-      - name: Check recovery key paths (v1 index and v2 salt)
+      - name: Check recovery key paths (v2 salt binding)
         run: pnpm run check:recovery-key
 
       - name: Check recovery file opening (text is parsed, v3 opens)
