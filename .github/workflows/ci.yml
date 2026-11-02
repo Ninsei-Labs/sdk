@@ -479,4 +479,19 @@ jobs:
         run: |
           DLEQ_GO_BIN=test/dleq-oracle/go/oracle \
           DLEQ_RUST_BIN=test/dleq-oracle/rust/target/release/dleq-verify \
+          DLEQ_REQUIRE_RUST=1 \
           pnpm run check:dleq-oracle
+
+  # ONE REQUIRED CHECK FOR BRANCH PROTECTION. A repository can require this job instead of every leaf job; it
+  # runs even when a dependency fails (`always()`), so a skipped or cancelled dependency cannot look like a pass.
+  required:
+    name: Required CI
+    if: always()
+    needs: [checks, dleq-oracle]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every CI job to succeed
+        run: |
+          test "${{ needs.checks.result }}" = "success"
+          test "${{ needs.dleq-oracle.result }}" = "success"

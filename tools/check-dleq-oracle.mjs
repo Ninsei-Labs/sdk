@@ -5,8 +5,9 @@
 // verifier both check them; the SDK prover is then checked by the Go and Rust verifiers. This is not a
 // generated-and-self-checked fixture: the two implementations do not share code.
 //
-//   DLEQ_GO_BIN   path to the built Go oracle (default test/dleq-oracle/go/oracle[.exe])
-//   DLEQ_RUST_BIN path to the built Rust verifier (optional; when absent that half is reported as skipped)
+//   DLEQ_GO_BIN       path to the built Go oracle (default test/dleq-oracle/go/oracle[.exe])
+//   DLEQ_RUST_BIN     path to the built Rust verifier
+//   DLEQ_REQUIRE_RUST set to 1 in CI: a missing Rust binary is a FAILURE, not a skipped half
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,12 +20,14 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const isWindows = process.platform === "win32";
 const GO = process.env.DLEQ_GO_BIN || join(ROOT, "test", "dleq-oracle", "go", isWindows ? "oracle.exe" : "oracle");
 const RUST = process.env.DLEQ_RUST_BIN || null;
+const REQUIRE_RUST = process.env.DLEQ_REQUIRE_RUST === "1";
 const FIXTURES = join(ROOT, "tools", "fixtures", "dleq-vectors");
 const dleq = createDleq2(primitives);
 const temp = mkdtempSync(join(tmpdir(), "sdk-dleq-oracle-"));
 
 const problems = [];
 const notes = [];
+if (REQUIRE_RUST && !RUST) problems.push("DLEQ_REQUIRE_RUST=1 but DLEQ_RUST_BIN is unset");
 let checks = 0;
 const check = (condition, message) => {
   checks++;

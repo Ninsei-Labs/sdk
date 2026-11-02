@@ -50,4 +50,4 @@ if (problems.length) {
   console.log(`security invariants: FAILED (${problems.length})`);
   process.exit(1);
 }
-console.log("security invariants: " + notes[0]);
+console.log("security invariants: " + notes[0] + " (inventory lint; mapped scripts are not executed)");

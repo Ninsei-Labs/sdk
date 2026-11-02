@@ -77,7 +77,47 @@ try {
       bad("subpath import: " + String(error.stderr || error.message || error));
     }
 
-    console.log("=== 3) THE RELATIVE ASSETS THE ENGINE IMPORTS ARE IN THE TARBALL ===");
+    console.log("=== 3) THE TYPES IN THE TARBALL COMPILE FOR AN EXTERNAL CONSUMER ===");
+    // THE WORKING-TREE CONSUMER IS NOT THE TARBALL. A declaration can resolve against the repository and still be
+    // absent or unresolved after `npm pack`. Reuse the same consumer source, but compile it from the installed tree
+    // with the repository's TypeScript binary and `skipLibCheck: false`.
+    const consumerTs = readFileSync(join(ROOT, "tools", "ts-consumer", "consumer.ts"), "utf8");
+    writeFileSync(join(consumer, "consumer.ts"), consumerTs, "utf8");
+    writeFileSync(join(consumer, "tsconfig.json"), JSON.stringify({
+      compilerOptions: {
+        target: "ES2022", module: "NodeNext", moduleResolution: "NodeNext", strict: true,
+        noEmit: true, skipLibCheck: false, types: [], lib: ["ES2022", "DOM"],
+      },
+      include: ["consumer.ts"],
+    }, null, 2) + "\n", "utf8");
+    try {
+      execFileSync(process.execPath, [join(ROOT, "node_modules", "typescript", "bin", "tsc"), "-p", join(consumer, "tsconfig.json")],
+        { cwd: consumer, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+      ok("the packed declarations compile for an external consumer");
+    } catch (error) {
+      bad("packed TypeScript consumer: " + String(error.stdout || error.stderr || error.message || error).split("\n").slice(0, 4).join(" "));
+    }
+
+    // A DECLARATION THAT COMPILES EVERYTHING IS NOT A USEFUL DECLARATION. Prove the packed types reject a
+    // concrete wrong argument; if this compiles, the subpath has fallen back to `any`.
+    writeFileSync(join(consumer, "negative.ts"),
+      'import { moneroFeeEstimate } from "@ninsei-labs/sdk/xmr";\nexport const bad = moneroFeeEstimate({ url: 1 });\n', "utf8");
+    writeFileSync(join(consumer, "tsconfig.negative.json"), JSON.stringify({
+      compilerOptions: {
+        target: "ES2022", module: "NodeNext", moduleResolution: "NodeNext", strict: true,
+        noEmit: true, skipLibCheck: false, types: [], lib: ["ES2022", "DOM"],
+      },
+      include: ["negative.ts"],
+    }, null, 2) + "\n", "utf8");
+    try {
+      execFileSync(process.execPath, [join(ROOT, "node_modules", "typescript", "bin", "tsc"), "-p", join(consumer, "tsconfig.negative.json")],
+        { cwd: consumer, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+      bad("the packed types accepted a number for a string option");
+    } catch {
+      ok("the packed types reject a wrong argument");
+    }
+
+    console.log("=== 4) THE RELATIVE ASSETS THE ENGINE IMPORTS ARE IN THE TARBALL ===");
     const installed = join(consumer, "node_modules", "@ninsei-labs", "sdk");
     for (const rel of ["assets/vendors/atomic/atomic-browser.js", "assets/vendors/monero/monero-js-browser.js", "engine/atomic/order-worker.js", "index.d.ts"]) {
       if (existsSync(join(installed, rel))) ok(rel + " is present");

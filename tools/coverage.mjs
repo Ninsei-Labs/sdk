@@ -5,10 +5,11 @@
 // line coverage of executable ranges, not a claim of branch or mutation coverage; the security-invariants map is
 // the reviewable half of the argument. Run it as `pnpm run coverage`.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { lineCoverage } from "./coverage-merge.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(ROOT, "coverage");
@@ -42,7 +43,7 @@ const inScope = (file) => {
   return /^(src|engine)\//.test(rel) && /\.(mjs|js)$/.test(rel);
 };
 
-const files = new Map(); // absolute path -> array of ranges
+const files = new Map(); // absolute path -> array of ranges from every process
 for (const entry of readdirSync(RAW)) {
   if (!entry.endsWith(".json")) continue;
   let data;
@@ -62,39 +63,45 @@ for (const entry of readdirSync(RAW)) {
   }
 }
 
-const lineStarts = (text) => {
-  const starts = [0];
-  for (let i = 0; i < text.length; i += 1) if (text[i] === "\n") starts.push(i + 1);
-  return starts;
+// THE INVENTORY IS NOT THE PROFILE LIST. A module that no check loaded has no V8 row at all; showing only loaded
+// files makes the denominator look better than the source tree. Keep every source file in the report and mark the
+// never-loaded ones explicitly. Their executable line count is unknown without V8, so they are not folded into the
+// percentage; the count of unloaded files is reported separately.
+const walkSource = (dir, out = []) => {
+  for (const name of readdirSync(dir)) {
+    const full = join(dir, name);
+    const info = statSync(full);
+    if (info.isDirectory()) walkSource(full, out);
+    else if (inScope(full)) out.push(full);
+  }
+  return out;
 };
+for (const file of [...walkSource(join(ROOT, "src")), ...walkSource(join(ROOT, "engine"))]) {
+  if (!files.has(file)) files.set(file, []);
+}
+
 const summary = [];
 let totalLines = 0;
 let totalCovered = 0;
+let unloadedFiles = 0;
 for (const [file, ranges] of [...files.entries()].sort()) {
-  const text = readFileSync(file, "utf8");
-  const starts = lineStarts(text);
-  let lines = 0;
-  let covered = 0;
-  for (let i = 0; i < starts.length; i += 1) {
-    const start = starts[i];
-    const end = i + 1 < starts.length ? starts[i + 1] : text.length + 1;
-    const touching = ranges.filter((range) => range.startOffset < end && range.endOffset > start);
-    if (!touching.length) continue; // comments/blank/declarations with no executable range
-    lines += 1;
-    // V8 ranges are nested: the module/top-level range covers the whole file and would paint an uncalled function
-    // as covered. The innermost range that contains the line start is the one that describes that line.
-    const innermost = touching.reduce((best, range) => (range.endOffset - range.startOffset < best.endOffset - best.startOffset ? range : best));
-    if (innermost.count > 0) covered += 1;
+  const rel = relative(ROOT, file).replaceAll("\\", "/");
+  if (!ranges.length) {
+    unloadedFiles += 1;
+    summary.push({ file: rel, lines: 0, covered: 0, percent: 0, loaded: false });
+    continue;
   }
-  totalLines += lines;
-  totalCovered += covered;
-  summary.push({ file: relative(ROOT, file).replaceAll("\\", "/"), lines, covered, percent: lines ? Number(((covered / lines) * 100).toFixed(1)) : 100 });
+  const text = readFileSync(file, "utf8");
+  const row = lineCoverage(text, ranges);
+  totalLines += row.lines;
+  totalCovered += row.covered;
+  summary.push({ file: rel, lines: row.lines, covered: row.covered, percent: row.percent, loaded: true });
 }
 
 const result = {
   kind: "v8-line-coverage",
-  note: "Executable-range line coverage; not branch or mutation coverage",
-  totals: { lines: totalLines, covered: totalCovered, percent: totalLines ? Number(((totalCovered / totalLines) * 100).toFixed(1)) : 100 },
+  note: "Executable-range line coverage; not branch or mutation coverage. Never-loaded files are listed but not in the percentage.",
+  totals: { lines: totalLines, covered: totalCovered, percent: totalLines ? Number(((totalCovered / totalLines) * 100).toFixed(1)) : 100, unloadedFiles },
   files: summary,
 };
 writeFileSync(reportFile, JSON.stringify(result, null, 2) + "\n");
@@ -106,7 +113,7 @@ const critical = new Set([
   "src/swaps.mjs", "src/swap-flow.mjs", "src/xmr-arrival.mjs", "engine/atomic/dleq2.js",
   "engine/core/store.js", "src/adapters/index.mjs", "src/adapters/evm-wallet.mjs", "src/index.mjs",
 ]);
-console.log("coverage: " + result.totals.percent + "% of executable lines (" + result.totals.covered + "/" + result.totals.lines + ")");
+console.log("coverage: " + result.totals.percent + "% of executable lines (" + result.totals.covered + "/" + result.totals.lines + "), " + result.totals.unloadedFiles + " source file(s) never loaded");
 for (const row of summary.filter((row) => critical.has(row.file))) {
   console.log("  " + row.percent.toString().padStart(5) + "%  " + row.file);
 }
