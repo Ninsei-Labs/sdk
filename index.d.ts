@@ -393,7 +393,7 @@ export interface WalletAdapter {
    * Send a leg transaction (lock, marking ready, claim, refund). The request shape is what this VM calls a transfer;
    * for EVM it is `{ to, data, value }` and the transaction hash in response.
    */
-  send(request: { readonly to: string; readonly data?: string; readonly value?: bigint | number | string; readonly gas?: bigint | number | string; readonly chainId?: number }): Promise<string>;
+  send(request: { readonly to: string; readonly data?: string; readonly value?: bigint | number | string; readonly gas?: bigint | number | string; readonly chainId?: number; readonly from?: string }): Promise<string>;
   /**
    * The transaction receipt: asked ONCE, returns the receipt or null (not in a block yet). The waiting policy is set
    * by the caller, not the adapter - otherwise two calls would wait differently.
@@ -1851,6 +1851,7 @@ export type ErrorCode =
   | "wallet-not-connected"
   | "wallet-rejected"
   | "wrong-chain"
+  | "wrong-account"
   | "quote-unavailable"
   | "quote-refused"
   /**

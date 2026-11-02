@@ -46,6 +46,9 @@ export const ERROR_CODES = [
   "wallet-not-connected",
   "wallet-rejected",
   "wrong-chain",
+  // THE SENDER CHANGED BETWEEN THE ACTION GUARD AND eth_sendTransaction. A claim or refund reveals a half, so
+  // signing from another account would publish the half without paying the claimer; the adapter refuses first.
+  "wrong-account",
   "quote-unavailable",
   "quote-refused",
   // A NODE'S ADDRESS DENYLIST REFUSAL (issue #16): the maker's node answers {ok:false, code:"denied-address", why}
@@ -149,6 +152,7 @@ export const ERROR_META = Object.freeze({
   "wallet-not-connected": { retryable: false, side: "wallet" },
   "wallet-rejected": { retryable: false, side: "wallet" },
   "wrong-chain": { retryable: false, side: "wallet" },
+  "wrong-account": { retryable: false, side: "wallet" },
   "quote-unavailable": { retryable: true, side: "provider" },
   "quote-refused": { retryable: false, side: "provider" },
   "address-denied": { retryable: false, side: "caller" },

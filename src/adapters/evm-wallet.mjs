@@ -103,26 +103,34 @@ export function evmWallet(provider, { id = "evm" } = {}) {
     // THERE IS DELIBERATELY NO POLLING HERE: `receipt` asks once and returns the receipt, or null if the transaction
     // is not in a block yet. The waiting policy (how long, how often, what on refusal) is set by the caller: a
     // policy of its own inside the adapter would mean two calls wait differently.
-    async send({ to, data = "0x", value = 0n, gas = null, chainId = null }) {
+    async send({ to, data = "0x", value = 0n, gas = null, chainId = null, from: expectedFrom = null }) {
       if (typeof to !== "string" || !to) throw new SdkError("bad-input", { field: "send.to" });
-      const accounts = await provider.request({ method: "eth_accounts" });
-      const from = Array.isArray(accounts) ? accounts[0] : null;
-      if (!from) throw new SdkError("wallet-not-connected", { step: "send" });
       const hex = (v) => "0x" + BigInt(v).toString(16);
-      // THE CHAIN IS READ AT THE SEND BOUNDARY, NOT ONLY AT THE START OF THE ACTION. A wallet can switch networks
-      // between the action's guard and this call; reading here and putting the expected chain into the transaction
-      // makes that switch a refusal instead of a signature on the wrong chain.
-      const got = hexToInt(await provider.request({ method: "eth_chainId" }).catch(() => null));
-      if (!Number.isSafeInteger(got) || got <= 0) {
+      // THE CHAIN AND THE SENDER ARE READ AT THE SEND BOUNDARY, NOT ONLY AT THE START OF THE ACTION. A wallet can
+      // switch networks or accounts between the action's guard and this call; reading both here, refusing a
+      // mismatch and putting the values into the transaction makes that switch a refusal instead of a signature
+      // from the wrong key or on the wrong chain.
+      const gotChain = hexToInt(await provider.request({ method: "eth_chainId" }).catch(() => null));
+      if (!Number.isSafeInteger(gotChain) || gotChain <= 0) {
         throw new SdkError("wrong-chain", { vm: "evm", step: "send", want: chainId === null || chainId === undefined ? null : Number(chainId), got: null, why: "unreadable" });
       }
-      const want = chainId === null || chainId === undefined ? got : Number(chainId);
-      if (!Number.isSafeInteger(want) || want <= 0 || got !== want) {
-        throw new SdkError("wrong-chain", { vm: "evm", step: "send", want, got });
+      const wantChain = chainId === null || chainId === undefined ? gotChain : Number(chainId);
+      if (!Number.isSafeInteger(wantChain) || wantChain <= 0 || gotChain !== wantChain) {
+        throw new SdkError("wrong-chain", { vm: "evm", step: "send", want: wantChain, got: gotChain });
+      }
+      const accounts = await provider.request({ method: "eth_accounts" });
+      const account = Array.isArray(accounts) ? accounts[0] : null;
+      if (typeof account !== "string" || !ADDRESS_RE.test(account)) throw new SdkError("wallet-not-connected", { step: "send" });
+      if (expectedFrom !== null && expectedFrom !== undefined) {
+        const wantFrom = String(expectedFrom).toLowerCase();
+        if (!ADDRESS_RE.test(wantFrom)) throw new SdkError("bad-input", { field: "send.from" });
+        if (account.toLowerCase() !== wantFrom) {
+          throw new SdkError("wrong-account", { vm: "evm", step: "send", want: wantFrom, got: account });
+        }
       }
       // GAS IS PASSED IF THE CALLER SET IT: every contract call has its own estimate (marking ready, claiming,
       // refunding), and it comes from the same place as the calldata - the engine's EVM layer.
-      const tx = { from, to, data, value: hex(value), chainId: hexChainId(got) };
+      const tx = { from: account, to, data, value: hex(value), chainId: hexChainId(gotChain) };
       if (gas !== null && gas !== undefined) tx.gas = hex(gas);
       return await provider.request({ method: "eth_sendTransaction", params: [tx] });
     },
