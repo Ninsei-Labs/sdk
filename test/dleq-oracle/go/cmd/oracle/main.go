@@ -71,15 +71,15 @@ type compat struct {
 }
 
 type vector struct {
-	Schema      string           `json:"schema"`
-	GeneratedBy string           `json:"generatedBy"`
-	Compat      compat           `json:"compat"`
-	X           string           `json:"x"`
-	Context     string           `json:"context"`
-	Proof       dleq.VectorProof `json:"proof"`
-	Signatures  *sigPair         `json:"signatures,omitempty"`
-	Expect      map[string]bool  `json:"expect,omitempty"`
-	Note        string           `json:"note,omitempty"`
+	Schema      string                 `json:"schema"`
+	GeneratedBy string                 `json:"generatedBy"`
+	Compat      compat                 `json:"compat"`
+	X           string                 `json:"x"`
+	Context     string                 `json:"context"`
+	Proof       dleq.VectorProof       `json:"proof"`
+	Signatures  *sigPair               `json:"signatures,omitempty"`
+	Expect      map[string]interface{} `json:"expect,omitempty"`
+	Note        string                 `json:"note,omitempty"`
 }
 
 type sigPair struct {
@@ -88,11 +88,11 @@ type sigPair struct {
 }
 
 type modeFlags struct {
-	fs             *flag.FlagSet
-	context        *string
-	bits           *uint64
-	noSigs         *bool
-	strictTorsion  *bool
+	fs            *flag.FlagSet
+	context       *string
+	bits          *uint64
+	noSigs        *bool
+	strictTorsion *bool
 }
 
 func addModeFlags(fs *flag.FlagSet) *modeFlags {
@@ -206,7 +206,7 @@ func cmdProve(args []string) {
 		X:           fmt.Sprintf("%064x", xInt),
 		Context:     *m.context,
 		Proof:       vp,
-		Expect:      map[string]bool{"verify": true},
+		Expect:      map[string]interface{}{"verify": true},
 	}
 	if !*m.noSigs {
 		v.Signatures = &sigPair{A: proof.SignatureAHex(), B: proof.SignatureBHex()}

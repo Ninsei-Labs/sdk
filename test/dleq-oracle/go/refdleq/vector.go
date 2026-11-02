@@ -20,8 +20,8 @@ type VectorSig struct {
 }
 
 type VectorPart struct {
-	CA string    `json:"cA"`
-	CB string    `json:"cB"`
+	CA  string    `json:"cA"`
+	CB  string    `json:"cB"`
 	Sig VectorSig `json:"sig"`
 }
 
@@ -292,4 +292,3 @@ func scalarFromHex(curve Curve, value string, little bool) (Scalar, error) {
 	}
 	return curve.DecodeToScalar(padded)
 }
-
