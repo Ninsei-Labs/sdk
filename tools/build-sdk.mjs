@@ -11,6 +11,20 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(ROOT, "assets", "vendors", "sdk", "sdk-browser.js");
 
+// THE HEAVY VENDOR FILES STAY SEPARATE. `engine/evm/session.js` and the Monero adapter import their browser
+// bundles dynamically; esbuild follows those imports unless they are kept external. Without this plugin the SDK
+// bundle absorbs WalletConnect (about 2 MB), monero-js and the atomic bundle, and the page pays for all of them
+// on every load even when it never opens a WalletConnect session. The page serves these from `/assets/`.
+const keepVendorsExternal = {
+  name: "keep-vendors-external",
+  setup(build) {
+    build.onResolve({ filter: /assets\/vendors\// }, (args) => {
+      const rel = args.path.slice(args.path.indexOf("assets/vendors/"));
+      return { path: "/" + rel, external: true };
+    });
+  },
+};
+
 await build({
   entryPoints: [join(ROOT, "tools", "sdk-browser-entry.mjs")],
   outfile: OUT,
@@ -20,6 +34,7 @@ await build({
   target: "es2022",
   minify: true,
   define: { global: "globalThis" },
+  plugins: [keepVendorsExternal],
   logLevel: "info",
 });
 console.log("built:", OUT, "-", ((await stat(OUT)).size / 1024).toFixed(0), "KiB");
