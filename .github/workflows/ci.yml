@@ -46,6 +46,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # THE BROWSER ARTIFACT IS BUILT, NOT HAND-EDITED. A stale bundle is a second version of the core that the
+      # page would load; rebuilding it here and refusing a diff keeps the committed file and the source together.
+      - name: Build the browser bundle and check it is current
+        run: |
+          pnpm run build:sdk
+          git diff --exit-code -- assets/vendors/sdk/sdk-browser.js
+
       - name: Check syntax (src and engine parse)
         run: pnpm run check:syntax
 

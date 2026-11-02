@@ -15,4 +15,5 @@ nodeLinker: hoisted
 # prebuilt binaries and its hook is `node-gyp-build || exit 0`, so allowing it
 # only lets it pick the prebuild - the tree stays as flat as npm used to build it.
 allowBuilds:
+  esbuild: true
   keccak: true

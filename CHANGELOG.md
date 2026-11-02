@@ -9,8 +9,9 @@
 - A start whose receipt is gone reads the predicted escrow's `status()` before it stays `funding-pending`; a funded escrow is resumed as `xmr-incoming`.
 - Claim, refund and mark-ready read the latest block timestamp and the escrow deadlines; a claim before `readyBy` without the mark, a refund between `readyBy` and `t1`, and a mark after `readyBy` are refused before signing.
 - `firmRelay` compares the signed fee recipient and, without a partner key, the fee rate with `GET /v1/relay`; a mismatch is refused. A timed-out quote request is retried once with the same bytes.
-- Browser vendor bundles are pinned by SHA-256 in `assets/vendors/MANIFEST.json`; the `vendor-bundles` check reddens when a file changes without a manifest update. Actual rebuilding still belongs to the page repository.
-- `package.json` records `allowScripts` for `keccak`, so npm's install-script policy does not warn on a clean clone.
+- `pnpm run build:sdk` rebuilds `assets/vendors/sdk/sdk-browser.js` with esbuild from `tools/sdk-browser-entry.mjs`; CI rebuilds it and refuses a diff, so the committed bundle cannot drift from `src/`.
+- Browser vendor bundles are pinned by SHA-256 in `assets/vendors/MANIFEST.json`; the `vendor-bundles` check reddens when a file changes without a manifest update.
+- `package.json` records `allowScripts` for `esbuild` and `keccak`; a clean npm install no longer warns about unreviewed install scripts.
 - Release workflow: the checkout, setup-node and pnpm actions are pinned by commit, and npm is installed at an exact version.
 
 ## 0.55.4 — 2026-11-01

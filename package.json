@@ -12,6 +12,8 @@
   "main": "src/index.mjs",
   "scripts": {
     "check": "node tools/check.mjs",
+    "build:sdk": "node tools/build-sdk.mjs",
+    "build:sdk:docker": "node tools/build-sdk-docker.mjs",
     "check:syntax": "node tools/check.mjs --only=syntax",
     "check:import": "node tools/check.mjs --only=import",
     "check:surface": "node tools/check.mjs --only=surface",
@@ -170,9 +172,11 @@
   },
   "sideEffects": false,
   "devDependencies": {
+    "esbuild": "0.28.2",
     "typescript": "7.0.2"
   },
   "allowScripts": {
+    "esbuild": true,
     "keccak": true
   }
 }
