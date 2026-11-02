@@ -65,7 +65,7 @@ const heightOf = async (driver, name) => {
 // AN INCOMPLETE SCAN IS A NAMED OUTCOME, NOT A ZERO BALANCE. The wallet library's sync is best-effort: a node
 // that refuses block downloads leaves a wallet at height 0, and a caller that only reads `unlocked` shows "no
 // XMR". The heights and the sync error decide the verdict here, so the page does not have to guess.
-const scanCompleteness = async (driver, { syncError = null, rescanError = null } = {}) => {
+const scanCompleteness = async (driver, { syncError = null, rescanError = null, spentChecked = true } = {}) => {
   const walletHeight = await heightOf(driver, "getHeight");
   const nodeHeight = await heightOf(driver, "getDaemonHeight");
   let reason = null;
@@ -76,6 +76,9 @@ const scanCompleteness = async (driver, { syncError = null, rescanError = null }
   else if (syncError) reason = "sync-failed";
   else if (walletHeight === null || nodeHeight === null) reason = "no-heights";
   else if (walletHeight < nodeHeight) reason = "behind-node";
+  // A BALANCE FROM A WINDOW IS NOT A COMPLETE SCAN WHEN SPENT STATUS WAS NEVER READ. An output spent just after
+  // `t1` would still look withdrawable; naming the gap is safer than reporting a complete pass over it.
+  else if (!spentChecked) reason = "spent-status-unavailable";
   return { scanComplete: reason === null, ...(reason === null ? {} : { scanIncompleteReason: reason }), walletHeight, nodeHeight };
 };
 
@@ -275,7 +278,8 @@ export async function restoreWallet(request = {}) {
       // A WINDOW WITH COINS IS THE ANSWER. A window with none falls through to the full scan unless the caller
       // explicitly turned the fallback off.
       if (windowReport.used && (windowTotal > 0n || windowUnlocked > 0n || requestWindow.fallback === false)) {
-        const completeness = await scanCompleteness(driver, { syncError: windowSyncError });
+        const completeness = await scanCompleteness(driver, { syncError: windowSyncError,
+          spentChecked: windowReport.spent !== null && windowReport.spent !== undefined });
         return {
           total: windowTotal.toString(), unlocked: windowUnlocked.toString(), scanHeight,
           ...completeness, passes: 1, lockedPass: false, window: windowReport,

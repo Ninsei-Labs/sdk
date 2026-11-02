@@ -27,22 +27,11 @@ const halves = createHalves({ ed25519, secp256k1, keccak256, randomBytes });
 /** A BIP39 mnemonic with 128 bits of entropy: twelve words. */
 export const RECOVERY_KEY_VERSION = 1;
 export const RECOVERY_KEY_WORDS = 12;
-// The allocator's ceiling. Discovery must use the same range: a search that stops earlier can miss an order
-// whose number was skipped by an abandoned start or by a swap on another chain.
-export const RECOVERY_INDEX_MAX = 100000;
-// A DISCOVERY SCAN IS BOUNDED BY DEFAULT. The allocator can reach 100,000, but deriving a secp256k1 point for
-// every number on a phone is not a page-open cost. One thousand indices keeps the common case inside a short
-// call and, more importantly, the result NAMES that it stopped: the caller can continue from `nextIndex`.
-export const RECOVERY_SCAN_DEFAULT = 1000;
-// The scan yields to the event loop between chunks. A page must be able to paint and answer a cancel click even
-// when a caller explicitly asks for a large range; a synchronous loop of 100,000 derivations froze the page.
-export const RECOVERY_SCAN_YIELD_EVERY = 64;
 export const RECOVERY_KEY_STORE = "ninsei.recovery.key.v1";
 export const RECOVERY_KEY_FILE_MAGIC = "NINSEI RECOVERY KEY";
-export const RECOVERY_KEY_DOMAIN = "ninsei-taker-v1";
-// THE SALT-BASED VERSION. A v1 number is the same at every factory and every device; a v2 binding names the fresh
-// order salt, the factory and the role, so two orders cannot share a taker half even when the words are restored
-// elsewhere. The salt is already public in `OrderCreated`; recovery reads it back instead of reserving a number.
+// ONE DERIVATION: the binding names the fresh order salt, the factory and the role, so two orders cannot share a
+// taker half even when the words are restored elsewhere. The salt is already public in `OrderCreated`; recovery
+// reads it back instead of reserving a number.
 export const RECOVERY_KEY_DOMAIN_V2 = "ninsei-taker-v2";
 // The counterparty's view half is derived from the SAME ONE KEY, in a domain of its own. The taker sends this
 // number to the maker (the node), which uses it as its own view half; the taker keeps it, so the joint view key
@@ -124,21 +113,6 @@ function numberField(value, field) {
   return n;
 }
 
-/** The binding a swap number is derived from. The chain id keeps testnet and mainnet keys apart. */
-export function recoveryBinding(chainId, index) {
-  return `${RECOVERY_KEY_DOMAIN}|${numberField(chainId, "chainId")}|${numberField(index, "index")}`;
-}
-
-/**
- * The taker's two halves for swap number `index`.
- *
- * The halves are returned as 0x-prefixed scalars (64 hex digits), not BigInt: every crossing of JSON in this
- * package is a hex string, and a BigInt that reaches JSON.stringify fails the whole record.
- */
-export function takerHalves({ mnemonic, chainId, index }) {
-  return takerHalvesFromSeed(seedOf(mnemonic), chainId, index);
-}
-
 // THE SAME KEY, A PUBLIC PER-ORDER SALT. The factory and role are in the binding, so the same words, chain and
 // salt at another factory produce another half. `role` is fixed for the taker's side; the maker's view half is
 // separated by its own domain. Salt is the `salt` word from `OrderCreated`, never a secret.
@@ -153,18 +127,11 @@ export function takerHalvesV2({ mnemonic, chainId, factory, role = "taker", salt
   const binding = recoveryBindingV2({ chainId, factory, role, salt: normalized });
   return {
     ...halvesFromBinding(seedOf(mnemonic), binding),
-    index: null,
     derivation: "salt-v2",
     factory: factory.toLowerCase(),
     role,
     salt: normalized,
   };
-}
-
-// Discovery derives thousands of numbers from one mnemonic. The BIP39 seed is the expensive part (PBKDF2), so it
-// is computed once by the caller and passed here; the per-number work is only HMAC and a curve point.
-function takerHalvesFromSeed(seed, chainId, index) {
-  return { index: numberField(index, "index"), ...halvesFromBinding(seed, recoveryBinding(chainId, index)) };
 }
 
 function halvesFromBinding(seed, binding) {
@@ -186,14 +153,6 @@ function halvesFromBinding(seed, binding) {
     makerViewPoint: makerView.ed,
     spendCommitment: halfCommitmentHex(spendHalf, secp256k1, keccak256),
   };
-}
-
-// DISCOVERY NEEDS ONE COMMITMENT, NOT THREE POINTS. The view and maker-view halves are not compared during a
-// search, and their Edwards points are the expensive part of `takerHalves`; deriving only the spend scalar keeps
-// a full-range scan practical.
-function spendCommitmentFromSeed(seed, chainId, index) {
-  const spendHalf = halves.halfFromSeed(seed, recoveryBinding(chainId, index), halves.HALF_DOMAIN);
-  return halfCommitmentHex(spendHalf, secp256k1, keccak256).toLowerCase();
 }
 
 function spendCommitmentFromSeedV2(seed, { chainId, factory, role = "taker", salt }) {
@@ -376,8 +335,7 @@ const writeStore = (storage, value) => {
 /** Save the key next to the swap records. The words are the secret; the store is the caller's. */
 export function saveRecoveryKey(storage, key) {
   const checked = recoveryKeyOf(key && key.mnemonic, key && key.createdAt);
-  writeStore(storage, { ...checked, nextIndex: Number(key.nextIndex) || 0,
-    reserved: key.reserved || {}, retired: key.retired || {}, backupConfirmed: key.backupConfirmed === true });
+  writeStore(storage, { ...checked, backupConfirmed: key.backupConfirmed === true });
   return checked;
 }
 
@@ -385,52 +343,6 @@ export function loadRecoveryKey(storage) {
   const value = readStore(storage);
   if (!value) return null;
   return { ...value, fingerprint: value.fingerprint || fingerprintOf(value.mnemonic) };
-}
-
-/**
- * Reserve a number for a request. A reservation is not a spent number: if the request is abandoned, the caller
- * releases it and the same number is used again. The chain check belongs to the caller: a number is retired only
- * when an order with its commitment exists.
- */
-export function reserveRecoveryIndex(storage, { chainId, swapId = null } = {}) {
-  const key = loadRecoveryKey(storage);
-  if (!key) throw failed("key-missing");
-  const chain = String(numberField(chainId, "chainId"));
-  const reserved = { ...(key.reserved || {}) };
-  const retired = { ...(key.retired || {}) };
-  const index = Number(key.nextIndex) || 0;
-  // Holes left by RELEASED numbers are reused; a retired number was seen on chain and is never reused.
-  for (let i = 0; i < index; i += 1) {
-    if (!Object.prototype.hasOwnProperty.call(reserved, i) && !Object.prototype.hasOwnProperty.call(retired, i)) {
-      reserved[i] = { chainId: chain, swapId, at: new Date().toISOString() };
-      writeStore(storage, { ...key, reserved, retired });
-      return i;
-    }
-  }
-  if (index >= RECOVERY_INDEX_MAX) throw failed("index-exhausted");
-  reserved[index] = { chainId: chain, swapId, at: new Date().toISOString() };
-  writeStore(storage, { ...key, nextIndex: index + 1, reserved, retired });
-  return index;
-}
-
-export function releaseRecoveryIndex(storage, index) {
-  const key = loadRecoveryKey(storage);
-  if (!key) throw failed("key-missing");
-  const reserved = { ...(key.reserved || {}) };
-  delete reserved[String(numberField(index, "index"))];
-  writeStore(storage, { ...key, reserved });
-}
-
-/** Retire a number after its order exists on chain: it is never reused, so a later scan has no collision. */
-export function commitRecoveryIndex(storage, index) {
-  const key = loadRecoveryKey(storage);
-  if (!key) throw failed("key-missing");
-  const reserved = { ...(key.reserved || {}) };
-  const retired = { ...(key.retired || {}) };
-  const n = numberField(index, "index");
-  delete reserved[String(n)];
-  retired[String(n)] = true;
-  writeStore(storage, { ...key, reserved, retired });
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -507,25 +419,6 @@ async function readLogs(evmLogs, request) {
   }
   if (!Array.isArray(logs)) throw failed("logs");
   return logs;
-}
-
-/**
- * Is this number already held by an order on chain?
- *
- * A browser store is per device. The same twelve words opened on a second device, or restored before any search, start
- * at number 0 again; two swaps would then share the taker's halves, and a refund of one publishes a half the other's
- * maker can use. The check is the factory's own `OrderCreated` log, matched by the spend commitment the number derives.
- *
- * The caller owns the log transport, as everywhere else in this module. An unreadable log request is a refusal, not
- * "free": the number is not reserved on a guess.
- */
-export async function recoveryIndexTaken({ mnemonic, chainId, index, factory, evmLogs, fromBlock = 0, toBlock = "latest" } = {}) {
-  if (typeof factory !== "string" || !ADDRESS_RE.test(factory)) throw bad("factory");
-  const own = takerHalves({ mnemonic, chainId, index });
-  const logs = await readLogs(evmLogs, { address: factory, topics: [ORDER_CREATED_TOPICS], fromBlock, toBlock });
-  return logs.map(decodeOrderLog).filter(Boolean).some((order) =>
-    order.commitHalfLocker.toLowerCase() === own.spendCommitment.toLowerCase() ||
-    order.commitHalfClaimer.toLowerCase() === own.spendCommitment.toLowerCase());
 }
 
 // THE MONERO HEIGHT A RECOVERED ORDER STARTED AT. With one key there is no per-swap file to carry it, so it is
@@ -657,21 +550,11 @@ async function recoveredStartHeight(order, { evmBlockTime, moneroTip, moneroBloc
  * positions) and merges the answers. Without one, every OrderCreated of the factory is read and matched locally.
  */
 export async function findSwaps({ mnemonic, chainId, factory, address = null, evmLogs,
-  fromBlock = null, deploymentBlock = null, toBlock = "latest", gap = 5,
-  fromIndex = 0, maxIndex = RECOVERY_SCAN_DEFAULT,
-  signal = null, onProgress = null,
+  fromBlock = null, deploymentBlock = null, toBlock = "latest",
   evmBlockTime = null, evmCode = null, moneroTip = null, moneroBlockTimestamp = null,
   xmrNodes = null, moneroNetwork = null, fetchImpl = globalThis.fetch } = {}) {
   if (typeof factory !== "string" || !ADDRESS_RE.test(factory)) throw bad("factory");
   const chain = numberField(chainId, "chainId");
-  // `gap` is retained in the signature for callers of the old API, but it is deliberately NOT used: five empty
-  // numbers are ordinary when a start was abandoned or the key was used on another chain, and stopping there
-  // hides a funded order whose log is already in `logs`.
-  void gap;
-  const startIndex = numberField(fromIndex, "fromIndex");
-  if (startIndex < 0 || startIndex >= RECOVERY_INDEX_MAX) throw bad("fromIndex");
-  const asked = numberField(maxIndex, "maxIndex");
-  const max = Math.min(asked, RECOVERY_INDEX_MAX - startIndex);
   // THE CHAIN SAYS WHERE ITS ORDERS CAN START. An explicit fromBlock wins; otherwise the caller can pass the
   // factory's deployment block (the SDK's chain registry exposes it as escrow.deploymentBlock). Zero remains the
   // last resort for a caller that knows the factory existed at genesis.
@@ -705,11 +588,10 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
   const seed = seedOf(mnemonic);
   const found = [];
   const foundKeys = new Set();
-  const v2Matched = new Set();
 
   // A V2 ORDER IS FOUND FROM ITS OWN SALT. No index is reserved and no range is scanned: the binding names the
   // factory, the role and the public `OrderCreated` salt, so the same words on another device or at another
-  // factory produce a different half. The v2 pass runs first; v1 orders are left for the index scan below.
+  // factory produce a different half.
   for (const order of orders) {
     let commitment;
     try {
@@ -724,67 +606,7 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
     const key = orderKey(order);
     if (foundKeys.has(key)) continue;
     foundKeys.add(key);
-    v2Matched.add(key);
-    found.push({ ...order, index: null, derivation: "salt-v2", side });
-  }
-
-  // MATCH V1 BY COMMITMENT, NOT BY A DENSE INDEX RANGE. The logs are already in hand; the only cost of a missing
-  // index is one derivation. Building the map first also keeps each order from being compared against every
-  // index.
-  const byCommit = new Map();
-  for (const order of orders) {
-    if (v2Matched.has(orderKey(order))) continue;
-    const locker = order.commitHalfLocker.toLowerCase();
-    const claimer = order.commitHalfClaimer.toLowerCase();
-    if (locker) {
-      if (!byCommit.has(locker)) byCommit.set(locker, []);
-      byCommit.get(locker).push({ order, side: "locker" });
-    }
-    if (claimer && claimer !== locker) {
-      if (!byCommit.has(claimer)) byCommit.set(claimer, []);
-      byCommit.get(claimer).push({ order, side: "claimer" });
-    }
-  }
-  const v1Keys = orders.filter((order) => !v2Matched.has(orderKey(order))).map(orderKey);
-  const v1Needed = v1Keys.length > 0;
-  const remaining = new Set(v1Keys);
-  let scanned = 0;
-  let stoppedBy = null;
-  if (onProgress !== null && typeof onProgress !== "function") throw bad("onProgress");
-  if (v1Needed && signal && signal.aborted === true) stoppedBy = "aborted";
-  if (v1Needed && stoppedBy === null) {
-    for (let offset = 0; offset < max; offset += 1) {
-      const index = startIndex + offset;
-      scanned = offset + 1;
-      const commitment = spendCommitmentFromSeed(seed, chain, index);
-      const matches = byCommit.get(commitment) || [];
-      for (const { order, side } of matches) {
-        const key = orderKey(order);
-        if (foundKeys.has(key)) continue;
-        foundKeys.add(key);
-        remaining.delete(key);
-        found.push({ ...order, index, derivation: "index-v1", side });
-      }
-      // EVERY MATCHED ORDER ENDS ITS OWN SEARCH. A key with only its own orders in the logs does not pay for
-      // the rest of the bound once the last one is found. A shared factory keeps the unrelated logs, so the
-      // scan continues to the requested bound and reports that it stopped there.
-      const final = remaining.size === 0 || offset === max - 1;
-      if (final || scanned % RECOVERY_SCAN_YIELD_EVERY === 0) {
-        // Progress is advisory: a page callback that throws must not turn a completed scan into a failed one.
-        if (typeof onProgress === "function") {
-          try { onProgress({ scanned, index }); } catch { /* progress is not the result */ }
-        }
-      }
-      // A CALLER CAN CANCEL. The check is after the progress callback, so a worker that aborts from its
-      // progress handler stops at this chunk instead of finishing the requested range.
-      if (signal && signal.aborted === true) { stoppedBy = "aborted"; break; }
-      if (remaining.size === 0) break;
-      // A LARGE CALLER-SUPPLIED BOUND MUST NOT OWN THE MAIN THREAD. The scan yields between chunks so the page
-      // can paint, and a later call can continue from `nextIndex`.
-      if (scanned % RECOVERY_SCAN_YIELD_EVERY === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
-    }
+    found.push({ ...order, derivation: "salt-v2", side });
   }
   // EACH FOUND ORDER CARRIES THE MONERO HEIGHT ITS WITHDRAWAL MAY START FROM. The rule lives here, not in a
   // page: a widget and the recovery page must not derive two different answers from one chain.
@@ -834,17 +656,10 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
     order.xmrAmount = read.value;
     order.xmrAmountReason = read.reason;
   }
-  const searchedUpTo = scanned ? startIndex + scanned - 1 : null;
-  const complete = !v1Needed || remaining.size === 0 || startIndex + scanned >= RECOVERY_INDEX_MAX;
-  const nextIndex = complete ? null : startIndex + scanned;
   return {
     swaps: found,
-    scanned,
-    // A CALLER MUST NOT READ "NO SWAPS" AS "THE WHOLE RANGE WAS SEARCHED". The allocator ceiling is the only
-    // complete range; a smaller caller-supplied bound says where the search stopped. A result made only of v2
-    // orders has no range to search and is complete by construction.
-    searchedUpTo,
-    complete,
-    ...(complete ? {} : { incompleteReason: stoppedBy || "max-index", nextIndex }),
+    // EVERY ORDER IN THE LOGS WAS READ. There is no index range to exhaust, so a result cannot be partial by
+    // construction; an unreadable log request is a refusal from `readLogs`, not an incomplete answer.
+    complete: true,
   };
 }

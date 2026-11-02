@@ -24,7 +24,6 @@ export {
 // ONE RECOVERY KEY FOR EVERY SWAP (sdk#79): the taker's key, its derivation, its file and the on-chain search.
 export {
   RECOVERY_KEY_ALG,
-  RECOVERY_KEY_DOMAIN,
   RECOVERY_KEY_DOMAIN_V2,
   RECOVERY_KEY_ENVELOPE_VERSION,
   RECOVERY_KEY_FILE_MAGIC,
@@ -33,8 +32,6 @@ export {
   RECOVERY_KEY_VERSION,
   MAKER_VIEW_HALF_DOMAIN,
   RECOVERY_KEY_WORDS,
-  RECOVERY_SCAN_DEFAULT,
-  commitRecoveryIndex,
   createRecoveryKey,
   createRecoveryKeyFile,
   findSwaps,
@@ -43,15 +40,10 @@ export {
   loadRecoveryKey,
   newRecoverySalt,
   openRecoveryKeyFile,
-  recoveryBinding,
   recoveryBindingV2,
-  recoveryIndexTaken,
   recoverySaltOf,
   recoveryKeyFileName,
   recoveryKeyText,
-  releaseRecoveryIndex,
-  reserveRecoveryIndex,
   saveRecoveryKey,
-  takerHalves,
   takerHalvesV2,
 } from "../recovery-key.mjs";
