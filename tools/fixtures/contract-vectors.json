@@ -19,7 +19,7 @@
   ],
   "orderCreatedTopic": "0x09add13cca47b227c377447295bfaa00ef3169bfed0f5513d06f8be04af78aad",
   "factoryMethods": {
-    "predict": "0x3e949279",
-    "createOrderAndFund": "0x3a504547"
+    "predict": "0x76e3fdc8",
+    "createOrderAndFund": "0x50db6721"
   }
 }

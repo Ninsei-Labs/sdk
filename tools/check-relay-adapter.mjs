@@ -119,6 +119,9 @@ function answerFor(payload, { tamperProof = false } = {}) {
     nonce: "1",
     xmrAmount: payload.terms.xmrAmount,
     claimTip: payload.terms.claimTip,
+    commitHalfLocker: "0x" + "a1".repeat(32),
+    edPointLocker: "0x" + "a2".repeat(32),
+    edViewPointLocker: "0x" + "a3".repeat(32),
     factory: orderTerm.factory,
   };
   quote.quoteSignature = signQuoteDigest({
@@ -128,7 +131,7 @@ function answerFor(payload, { tamperProof = false } = {}) {
   });
   const inner = {
     factory: orderTerm.factory,
-    quoteVersion: 9,
+    quoteVersion: 10,
     contextVersion: "ninsei-order-v3",
     context,
     quote,

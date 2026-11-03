@@ -164,7 +164,7 @@ export function verifyFirmAnswer({ answer, features, request, now = null } = {})
   if (!payload || typeof payload !== "object" || !payload.quote) {
     throw new SdkError("quote-refused", { step: "answer", why: "payload" });
   }
-  if (payload.contextVersion !== "ninsei-order-v3" || Number(payload.quoteVersion) !== 9) {
+  if (payload.contextVersion !== "ninsei-order-v3" || Number(payload.quoteVersion) !== 10) {
     throw new SdkError("quote-refused", { step: "answer", why: "version" });
   }
   if (!same(payload.factory, request.terms.order.factory)) {
