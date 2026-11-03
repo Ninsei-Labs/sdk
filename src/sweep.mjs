@@ -29,6 +29,24 @@ const xmrAmountOf = (value) => {
 // The same boundary as when the file was issued: a passphrase shorter than twelve characters will not open the file.
 const MIN_PASSPHRASE = 12;
 const STEPS = ["unlock", "sync", "sweep", "relay"];
+
+// A NODE MUST NOT BE ABLE TO SET THE WITHDRAWAL FEE. The node's estimate reaches the SDK through the wallet,
+// and an untrusted node can answer with most of the balance. The absolute ceiling is deliberately far above a
+// normal priority fee (0.01 XMR) while still rejecting a percentage-sized charge. A caller that needs another
+// ceiling can pass `maxFeeAtomic` explicitly.
+export const MAX_SWEEP_FEE_ATOMIC = 10_000_000_000n; // 0.01 XMR
+
+export function sweepFeeVerdict({ feeAtomic = null, amountAtomic = null, maxFeeAtomic = MAX_SWEEP_FEE_ATOMIC } = {}) {
+  if (feeAtomic === null || feeAtomic === undefined) return { ok: true, checked: false, fee: null, limit: String(maxFeeAtomic) };
+  let fee;
+  let amount;
+  let limit;
+  try { fee = BigInt(feeAtomic); amount = amountAtomic === null || amountAtomic === undefined ? null : BigInt(amountAtomic); limit = BigInt(maxFeeAtomic); }
+  catch { return { ok: false, code: "sweep-fee-too-high", why: "unreadable", fee: String(feeAtomic), limit: String(maxFeeAtomic) }; }
+  if (fee < 0n || limit < 0n) return { ok: false, code: "sweep-fee-too-high", why: "negative", fee: fee.toString(), limit: limit.toString() };
+  if (fee > limit) return { ok: false, code: "sweep-fee-too-high", why: "ceiling", fee: fee.toString(), limit: limit.toString(), amount: amount === null ? null : amount.toString() };
+  return { ok: true, checked: true, fee: fee.toString(), limit: limit.toString(), amount: amount === null ? null : amount.toString() };
+}
 // `revealedHalf()` on the escrow. Public data: the function returns the half the settlement published.
 const REVEALED_HALF_SELECTOR = "0x3f267bb6";
 
@@ -361,6 +379,12 @@ export function createSweep({ http, config, call = null }) {
         // support, and the interface would show a free transfer.
         const fee = await feeOf(wallet, signed);
         const feeValue = fee === null ? null : BigInt(fee);
+        const feeVerdict = sweepFeeVerdict({
+          feeAtomic: fee,
+          amountAtomic: unlocked,
+          ...(request.maxFeeAtomic === undefined || request.maxFeeAtomic === null ? {} : { maxFeeAtomic: request.maxFeeAtomic }),
+        });
+        if (!feeVerdict.ok) throw new SdkError(feeVerdict.code, { fee: feeVerdict.fee, limit: feeVerdict.limit, amount: feeVerdict.amount, why: feeVerdict.why });
         const token = "sweep-" + (++sessionSeq);
         sessions.set(token, { wallet, plan, signed });
         return {

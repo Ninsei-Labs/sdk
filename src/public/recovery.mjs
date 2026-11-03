@@ -35,6 +35,8 @@ export {
   createRecoveryKey,
   createRecoveryKeyFile,
   findSwaps,
+  readEscrowEvents,
+  ESCROW_EVENT_TOPICS,
   fingerprintOf,
   importRecoveryKey,
   loadRecoveryKey,

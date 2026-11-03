@@ -1,6 +1,7 @@
 // THE RECOVERY KEY CHECK: fixed v2 vectors, the backup file, and the salt-based on-chain search.
 import * as recovery from "../src/public/recovery.mjs";
 import { buildOwnSideFromHalves } from "../src/order.mjs";
+import { ESCROW_EVENT_TOPICS, readEscrowEvents } from "../src/recovery-key.mjs";
 import { startHeightFromNodes } from "../src/swaps.mjs";
 
 const WORDS = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
@@ -135,6 +136,25 @@ export const recoveryKeyCheck = async () => {
   try { await startHeightFromNodes({ nodes: ["https://node.example"], network: "mainnet", fetchImpl: answer({ height: 1, nettype: "stagenet", synchronized: true }) }); }
   catch (error) { wrongNetwork = error; }
   check(wrongNetwork && wrongNetwork.code === "xmr-no-nodes" && wrongNetwork.params?.why === "network", "a wrong-network node was accepted");
+  // BULK SETTLEMENT EVENTS. One request with an address list returns the half, the ready mark and a decline
+  // without asking the RPC about each escrow separately.
+  {
+    const escrow = "0x" + "ab".repeat(20);
+    const half = "0x" + "cd".repeat(32);
+    const words = (values) => "0x" + values.map((value) => BigInt(value).toString(16).padStart(64, "0")).join("");
+    const logs = [
+      { address: escrow, topics: [ESCROW_EVENT_TOPICS.halfRevealed], data: words([BigInt(half), 1]), blockNumber: 5, transactionHash: "0x" + "01".repeat(32), logIndex: 0 },
+      { address: escrow, topics: [ESCROW_EVENT_TOPICS.ready, "0x" + "0".repeat(24) + "11".repeat(20)], data: "0x", blockNumber: 6, transactionHash: "0x" + "02".repeat(32), logIndex: 0 },
+      { address: escrow, topics: [ESCROW_EVENT_TOPICS.declined, "0x" + "0".repeat(24) + "22".repeat(20)], data: "0x", blockNumber: 7, transactionHash: "0x" + "03".repeat(32), logIndex: 0 },
+    ];
+    let request = null;
+    const events = await readEscrowEvents({ escrows: [escrow], evmLogs: async (value) => { request = value; return logs; } });
+    check(events.length === 3 && events[0].event === "HalfRevealed" && events[0].half === half && events[0].byClaimer === true,
+      "bulk events did not decode the revealed half");
+    check(events[1].event === "Ready" && events[2].event === "Declined", "bulk events lost the ready or declined event");
+    check(request && Array.isArray(request.address) && request.address[0] === escrow, "bulk events did not send the escrow list");
+  }
+
   notes.push("the v2 search uses the event salt, reads every log once, and derives the Monero start height");
   return { note: "the recovery key, its backup file and the salt-based search behave", problems, notes };
 };
