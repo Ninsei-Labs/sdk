@@ -18,10 +18,10 @@ import { keccak256 } from "../src/primitives.mjs";
 import { decodeAddress } from "../engine/evm/factory.js";
 
 const RPC = process.env.RPC_URL || "https://sepolia-rollup.arbitrum.io/rpc";
-const FACTORY = (process.env.FACTORY || "0x69b5a6878b542960af4d239ecc60ad1c9e3e6932").toLowerCase();
-const CASHIER = (process.env.CASHIER || "0x05b7433f66f2b75cc7ece9ec00af0fb810f9c9e0").toLowerCase();
+const FACTORY = (process.env.FACTORY || "0x6ab0ef3aa67b022d4007550e7556108537debb55").toLowerCase();
+const CASHIER = (process.env.CASHIER || "0x6c6c6da6392a92b8b9c69b3ec234d524cdcfcb57").toLowerCase();
 const EXPECTED_CODEHASH = (process.env.IMPLEMENTATION_CODEHASH
-  || "0xc6cde36301b6551a6ca8bd2c47fbd5ffd01ffcdf22d2f6909be2b3b2dcf360b4").toLowerCase();
+  || "0x334d6802099fccaef87b9569618ab3c46f6a2f075c2934c0cdbc8d4e4042944b").toLowerCase();
 const CHAIN_ID = 421614;
 
 let pass = 0;

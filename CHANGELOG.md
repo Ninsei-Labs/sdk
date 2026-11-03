@@ -1,3 +1,12 @@
+## 0.56.1 — 2026-11-03
+
+- `arbitrum-sepolia` moves to the `contracts-testnet-2026.11.03-fix` deployment: factory
+  `0x6ab0ef3aa67b022d4007550e7556108537debb55` (block `325677796`), cashier
+  `0x6c6c6da6392a92b8b9c69b3ec234d524cdcfcb57`, registry
+  `0xf06ec2b1de69ff5b528ed917edffbee7be6dccc9` and implementation code hash
+  `0x334d6802099fccaef87b9569618ab3c46f6a2f075c2934c0cdbc8d4e4042944b`. The factory code pin moves to
+  `0x9246f3b981311c4ed988d77bb2177ef45d78182e47d77a2077d0afe3f3377cb8`.
+
 ## 0.56.0 — 2026-11-02
 
 - Hardened test evidence: the V8 coverage merger now combines equal ranges across processes instead of keeping the first zero count, lists never-loaded source files, and has a regression check for both behaviours; the DLEQ oracle can require Rust in CI; the quote-TTL check drives direct and sale with the same edge table and a named post-expiry sentinel; the packed consumer compiles the TypeScript declarations from the installed tarball; and the claim sender seam is exercised end to end.
