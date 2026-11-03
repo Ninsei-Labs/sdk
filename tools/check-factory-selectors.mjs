@@ -45,9 +45,12 @@ const FIELD_TYPES = {
   nonce: "uint256",
   xmrAmount: "uint256",
   claimTip: "uint256",
+  commitHalfLocker: "bytes32",
+  edPointLocker: "bytes32",
+  edViewPointLocker: "bytes32",
 };
 
-const SUFFIX = "bytes32,bytes32,uint8,bytes32,bytes32,bytes32";
+const SUFFIX = "bytes32,bytes32,uint8";
 const selector = (signature) => "0x" + Buffer.from(keccak256(signature)).subarray(0, 4).toString("hex");
 
 function selectorsFor(fields) {
