@@ -99,7 +99,7 @@ const terms = {
     amount: order.amount, readyBy: order.readyBy, t1: order.t1, salt: order.salt,
   },
   xmrAmount: "1000000000000",
-  claimTip: "0", commitHalfLocker: "0x" + "a1".repeat(32), edPointLocker: "0x" + "a2".repeat(32), edViewPointLocker: "0x" + "a3".repeat(32),
+  claimTip: "0",
 };
 const built = await buildFirmRequest({
   features,
@@ -175,6 +175,9 @@ function makeAnswer(source, {
     nonce: "1",
     xmrAmount: source.terms.xmrAmount,
     claimTip: source.terms.claimTip,
+    commitHalfLocker: "0x" + "a1".repeat(32),
+    edPointLocker: "0x" + "a2".repeat(32),
+    edViewPointLocker: "0x" + "a3".repeat(32),
     factory,
   };
   quote.quoteSignature = signQuoteDigest({
