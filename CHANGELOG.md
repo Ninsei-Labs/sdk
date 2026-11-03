@@ -2,6 +2,8 @@
 
 - The provider settings search now includes the documented `rfq/` layout and has no duplicate candidates; the local file still outranks the production one.
 
+- Every teeth script now runs against a throwaway copy of the tree, so a hard interruption cannot leave a mutated source file in the checkout. The coverage command enforces committed floors for the critical money-path modules and refuses a new never-loaded critical file.
+
 - `arbitrum-sepolia` moves to the `contracts-testnet-2026.11.03-fix` deployment: factory
   `0x6ab0ef3aa67b022d4007550e7556108537debb55` (block `325677796`), cashier
   `0x6c6c6da6392a92b8b9c69b3ec234d524cdcfcb57`, registry

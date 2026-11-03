@@ -113,9 +113,53 @@ const critical = new Set([
   "src/swaps.mjs", "src/swap-flow.mjs", "src/xmr-arrival.mjs", "engine/atomic/dleq2.js",
   "engine/core/store.js", "src/adapters/index.mjs", "src/adapters/evm-wallet.mjs", "src/index.mjs",
 ]);
+
+// A BASELINE IS A FLOOR, NOT A SECURITY SCORE. The audit found that one global percentage lets a critical
+// money-path module fall while the total stays flat. The committed baseline records a floor per critical file and
+// the known-unloaded set; a new unloaded critical file or a drop below the floor is a red coverage run.
+// `tolerancePercent` absorbs the small process/runtime variation between a developer machine and CI, not a real
+// regression.
+const baselineFile = join(ROOT, "tools", "coverage-baseline.json");
+const coverageProblems = [];
+let baseline = null;
+try {
+  baseline = JSON.parse(readFileSync(baselineFile, "utf8"));
+} catch (error) {
+  coverageProblems.push("coverage baseline could not be read: " + String((error && error.message) || error));
+}
+if (baseline) {
+  const tolerance = Number.isFinite(Number(baseline.tolerancePercent)) ? Number(baseline.tolerancePercent) : 0;
+  if (Number(result.totals.percent) + tolerance < Number(baseline.totals.percent)) {
+    coverageProblems.push(`total line coverage ${result.totals.percent}% is below the baseline ${baseline.totals.percent}%`);
+  }
+  if (Number(result.totals.unloadedFiles) > Number(baseline.totals.unloadedFiles)) {
+    coverageProblems.push(`${result.totals.unloadedFiles} source file(s) never loaded, above the baseline ${baseline.totals.unloadedFiles}`);
+  }
+  const allowedUnloaded = new Set(Array.isArray(baseline.allowedUnloadedCritical) ? baseline.allowedUnloadedCritical : []);
+  for (const file of [...critical, ...Object.keys(baseline.critical || {})]) {
+    if (!Object.prototype.hasOwnProperty.call(baseline.critical || {}, file)) {
+      coverageProblems.push(`critical file ${file} has no baseline floor`);
+      continue;
+    }
+    const row = summary.find((entry) => entry.file === file);
+    if (!row) {
+      coverageProblems.push(`critical file ${file} is missing from the coverage report`);
+      continue;
+    }
+    const floor = baseline.critical[file];
+    if (!row.loaded) {
+      if (!allowedUnloaded.has(file)) coverageProblems.push(`critical file ${file} was never loaded and is not an allowed baseline gap`);
+    } else if (floor !== null && row.percent + tolerance < Number(floor)) {
+      coverageProblems.push(`${file} ${row.percent}% is below its baseline floor ${floor}%`);
+    }
+  }
+}
 console.log("coverage: " + result.totals.percent + "% of executable lines (" + result.totals.covered + "/" + result.totals.lines + "), " + result.totals.unloadedFiles + " source file(s) never loaded");
 for (const row of summary.filter((row) => critical.has(row.file))) {
   console.log("  " + row.percent.toString().padStart(5) + "%  " + row.file);
 }
+for (const problem of coverageProblems) console.log("  FAIL  " + problem);
 console.log("report: " + relative(ROOT, reportFile));
-if (batteryFailed) process.exitCode = 1;
+if (coverageProblems.length) console.log("coverage gate: FAILED (" + coverageProblems.length + ")");
+else console.log("coverage gate: critical-file floors hold");
+if (batteryFailed || coverageProblems.length) process.exitCode = 1;
