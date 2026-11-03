@@ -98,7 +98,12 @@ const future = nowSec + 600;
   check(sale && sale.ok === true, "a future signed sale TTL was refused: " + JSON.stringify(sale && (sale.code || "a ticket")));
 }
 
+if (problems.length) {
+  console.log("quote ttl: FAILED\n" + problems.map((p) => "  FAIL  " + p).join("\n"));
+  process.exit(1);
+}
+// PRINT `ok` ONLY AFTER THE ASSERTIONS PASSED. The old lines printed every case as ok even when `problems` held
+// failures; the exit code was right, but the log told a different story.
 for (const value of [...invalid, null, undefined]) console.log("  ok    validUntil=" + JSON.stringify(value) + " is refused by both paths");
 console.log("  ok    a future TTL reaches the next gate on both paths");
-console.log(problems.length ? "quote ttl: FAILED\n" + problems.map((p) => "  FAIL  " + p).join("\n") : "quote ttl: direct and sale expiry edges behave");
-if (problems.length) process.exit(1);
+console.log("quote ttl: direct and sale expiry edges behave");

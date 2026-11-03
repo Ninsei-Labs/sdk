@@ -1,5 +1,7 @@
 ## 0.56.1 — 2026-11-03
 
+- The provider settings search now includes the documented `rfq/` layout and has no duplicate candidates; the local file still outranks the production one.
+
 - `arbitrum-sepolia` moves to the `contracts-testnet-2026.11.03-fix` deployment: factory
   `0x6ab0ef3aa67b022d4007550e7556108537debb55` (block `325677796`), cashier
   `0x6c6c6da6392a92b8b9c69b3ec234d524cdcfcb57`, registry
