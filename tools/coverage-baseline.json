@@ -1,0 +1,30 @@
+{
+  "kind": "critical-line-coverage-baseline",
+  "note": "Baseline is a no-regression floor, not a claim that the covered branches are sufficient. A file may be above its floor; below it fails the coverage gate. The one known never-loaded critical file is named explicitly so a new unloaded file cannot hide.",
+  "tolerancePercent": 0.5,
+  "totals": {
+    "percent": 64,
+    "unloadedFiles": 9
+  },
+  "allowedUnloadedCritical": [
+    "src/adapters/index.mjs"
+  ],
+  "critical": {
+    "src/actions.mjs": 75.6,
+    "src/chainGuard.mjs": 85.2,
+    "src/quotes.mjs": 48.3,
+    "src/factoryPolicy.mjs": 83.3,
+    "src/recovery-key.mjs": 79.2,
+    "src/relayFirmClient.mjs": 84.6,
+    "src/relayQuote.mjs": 82.3,
+    "src/relayRequest.mjs": 84.1,
+    "src/swaps.mjs": 64.8,
+    "src/swap-flow.mjs": 84.6,
+    "src/xmr-arrival.mjs": 74.9,
+    "engine/atomic/dleq2.js": 89.4,
+    "engine/core/store.js": 83.9,
+    "src/adapters/index.mjs": null,
+    "src/adapters/evm-wallet.mjs": 39.1,
+    "src/index.mjs": 71.8
+  }
+}

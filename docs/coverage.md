@@ -39,6 +39,14 @@ Every `.mjs`/`.js` file under `src/` and `engine/` is listed as inventory. A fil
 `loaded: false` and counted in `totals.unloadedFiles`; its executable line count is unknown without V8, so it is not
 folded into the percentage. It is a baseline and a trend signal, not a release gate by itself.
 
+## Critical-file floors
+
+`tools/coverage-baseline.json` is the committed floor, not a security score. `pnpm run coverage` fails when a named
+critical file drops more than the stated tolerance below its floor, when a critical file becomes never loaded, or
+when the total number of never-loaded files grows. `src/adapters/index.mjs` is the one known never-loaded critical
+file; it is named explicitly so a new unloaded file cannot hide behind the same count. Raise a floor only after the
+new behaviour has tests that reach it.
+
 ## What is still missing
 
 - Branch coverage needs instrumentation that V8's raw format does not expose directly. It should be added with a
