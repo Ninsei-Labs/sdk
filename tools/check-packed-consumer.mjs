@@ -14,13 +14,18 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const NPM = process.platform === "win32" ? "npm.cmd" : "npm";
+// On Windows `execFileSync` cannot run `npm.cmd` directly; the old fix was `shell: true` with an argument array,
+// which Node deprecates and which turns paths into shell text. Run npm's own JS entry with the current Node instead.
+const NPM_CLI = join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+const HAS_NPM_CLI = existsSync(NPM_CLI);
 let pass = 0;
 const fails = [];
 const ok = (m) => { pass += 1; console.log("  ok    " + m); };
 const bad = (m) => { fails.push(m); console.log("  FAIL  " + m); };
-const run = (args, cwd) => execFileSync(NPM, args, {
+const run = (args, cwd) => execFileSync(HAS_NPM_CLI ? process.execPath : NPM, HAS_NPM_CLI ? [NPM_CLI, ...args] : args, {
   cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
-  shell: process.platform === "win32",
+  // The fallback exists only for a Node distribution without npm beside it; it keeps the Windows path working.
+  shell: !HAS_NPM_CLI && process.platform === "win32",
   env: { ...process.env, npm_config_update_notifier: "false" },
 });
 

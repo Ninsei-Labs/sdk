@@ -19,7 +19,7 @@
 //   node tools/check.mjs --only=surface      run one check (repeatable, comma-separated)
 //   node tools/check.mjs --list              list the check names
 import { execFileSync, execSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -2534,6 +2534,23 @@ const providerCheck = async () => {
   }
   notes.push("a settings file is found, read and applied by the same rules");
 
+  // THE SUPPORTED `rfq/` LAYOUT AND THE LOCAL-FIRST ORDER. The comment named `rfq/` but the candidate list did
+  // not carry it, and the duplicate entries meant the list described a search that was not the one performed.
+  const layout = mkdtempSync(join(tmpdir(), "sdk-provider-layout-"));
+  try {
+    mkdirSync(join(layout, "rfq"), { recursive: true });
+    writeFileSync(join(layout, "rfq", "rfq.env"), "LAYOUT=nested\n", "utf8");
+    writeFileSync(join(layout, ".env"), "LAYOUT=dotenv\n", "utf8");
+    const nested = provider.findEnvFile(layout);
+    if (nested !== join(layout, "rfq", "rfq.env")) problems.push(`findEnvFile did not search rfq/: ${nested}`);
+    writeFileSync(join(layout, "rfq.env.local"), "LAYOUT=local\n", "utf8");
+    const local = provider.findEnvFile(layout);
+    if (local !== join(layout, "rfq.env.local")) problems.push(`findEnvFile did not prefer the local file: ${local}`);
+    notes.push("the rfq/ settings layout is searched, and the local file outranks the production one");
+  } finally {
+    rmSync(layout, { recursive: true, force: true });
+  }
+
   const missing = order.orderQuoteMissingFields({});
   if (!Array.isArray(missing) || missing.length === 0) problems.push("orderQuoteMissingFields({}) is empty: an unverifiable quote would pass");
   let recovered = "not run";
@@ -2551,12 +2568,25 @@ const providerCheck = async () => {
 const runScriptCheck = (tool, label) => {
   const problems = [];
   try {
-    const out = execFileSync(process.execPath, [p("tools", tool)], { encoding: "utf8" });
+    // A CHECK THAT NEVER RETURNS MUST NOT STOP THE WHOLE BATTERY. Five minutes is above every fast script's
+    // measured time; a fork/live contour has its own named step and is not run through this helper.
+    const out = execFileSync(process.execPath, [p("tools", tool)], {
+      encoding: "utf8", timeout: 300_000, killSignal: "SIGKILL",
+    });
     const passed = (out.match(/^  ok    /gm) || []).length;
+    // AN EXIT ZERO WITHOUT AN ASSERTION IS NOT EVIDENCE. The named scripts print one `ok` line per executed case;
+    // a script that only imported a module and returned would otherwise be counted as a passing check.
+    if (passed === 0) problems.push(`${tool} exited 0 without a single ok assertion`);
     return { note: `${label}: ${passed} checks passed`, problems, notes: [] };
   } catch (error) {
     const text = String((error && (error.stdout || error.message)) || error);
     for (const line of text.split("\n")) if (/FAIL|FAILED/.test(line)) problems.push(line.trim());
+    // A NON-ZERO EXIT WITH NO PARSED LINE IS STILL A FAILURE. The old branch returned an empty problem list for a
+    // timeout or a crash, which the runner then printed as green.
+    if (!problems.length) {
+      const first = text.split("\n").find((line) => line.trim()) || "no output";
+      problems.push(`${label} exited non-zero: ${first.trim()}`);
+    }
     return { note: `${label} failed`, problems, notes: [] };
   }
 };

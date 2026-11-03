@@ -152,11 +152,11 @@ try {
   rmSync(temp, { recursive: true, force: true });
 }
 
-notes.push("Go generates v2 vectors; SDK and Rust verify them");
-notes.push("SDK proofs are verified by Go and Rust");
-notes.push("wrong context, wrong point and wrong witness are refused by every verifier");
-notes.push("committed JS fixtures are checked by the SDK, Go and Rust");
-notes.push(RUST ? "corrupted knowledge proof refused by all three verifiers" : "Rust verifier skipped (DLEQ_RUST_BIN is unset)");
+notes.push(RUST ? "Go generates v2 vectors; SDK and Rust verify them" : "Go generates v2 vectors; the SDK verifies them (Rust skipped)");
+notes.push(RUST ? "SDK proofs are verified by Go and Rust" : "SDK proofs are verified by Go (Rust skipped)");
+notes.push(RUST ? "wrong context, wrong point and wrong witness are refused by every verifier" : "wrong context, wrong point and wrong witness are refused by the SDK and Go");
+notes.push(RUST ? "committed JS fixtures are checked by the SDK, Go and Rust" : "committed JS fixtures are checked by the SDK and Go");
+notes.push(RUST ? "corrupted knowledge proof refused by all three verifiers" : "Rust verifier skipped (DLEQ_RUST_BIN is unset); no Rust verdict is claimed");
 for (const n of notes) console.log("  note: " + n);
 if (problems.length) {
   for (const p of problems) console.log("  FAIL  " + p);

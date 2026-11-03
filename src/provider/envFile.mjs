@@ -18,7 +18,17 @@ import { tmpdir } from "node:os";
 // the settings were in place (the quote checks fell exactly on this, and `npm run payout` with them).
 // The reverse order can err in one direction only: on the server there is no .local file at all, and the production
 // one remains the only one. An explicit --env= still outranks everything.
-export const ENV_CANDIDATES = ["rfq.env.local", "rfq.env.local", "rfq.env", "rfq.env", ".env.local", ".env"];
+// THE `rfq/` PATH IS A SUPPORTED LAYOUT, NOT A COMMENT: the node tree keeps its settings in `rfq/`, while a
+// checkout run from the repository root has the same file one level down. The local file outranks the production
+// file in BOTH layouts; an explicit --env= still outranks the list.
+export const ENV_CANDIDATES = [
+  "rfq.env.local",
+  "rfq/rfq.env.local",
+  "rfq.env",
+  "rfq/rfq.env",
+  ".env.local",
+  ".env",
+];
 
 export function findEnvFile(cwd, candidates = ENV_CANDIDATES) {
   for (const rel of candidates) {
