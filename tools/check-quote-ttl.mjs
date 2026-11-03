@@ -22,7 +22,7 @@ function quoteWith(validUntil) {
     readyBy: nowSec + 7200, t1: nowSec + 14400, salt: "0x" + "44".repeat(32),
     commitHalfClaimer: "0x" + "55".repeat(32), edPointClaimer: "0x" + "66".repeat(32),
     chainId: 421614, feeBps: "0", fee: "0", feeRecipient: addr("77"),
-    validUntil, nonce: "1", xmrAmount: "1000000000000", factory: addr("88"), claimTip: "0",
+    validUntil, nonce: "1", xmrAmount: "1000000000000", factory: addr("88"), claimTip: "0", commitHalfLocker: "0x" + "a1".repeat(32), edPointLocker: "0x" + "a2".repeat(32), edViewPointLocker: "0x" + "a3".repeat(32),
     signature: "0x" + "00".repeat(65),
   };
 }

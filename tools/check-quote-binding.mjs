@@ -20,7 +20,8 @@ const base = {
   edPointClaimer: "0x" + "19".repeat(32), chainId: "421614", feeBps: "0", fee: "0",
   feeRecipient: "0x" + "1a".repeat(20), validUntil: String(now + 600), nonce: "1",
   xmrAmount: "1000000000000", claimTip: "0", factory: "0x" + "1b".repeat(20),
-  signature: "0x" + "1c".repeat(65),
+  commitHalfLocker: "0x" + "1d".repeat(32), edPointLocker: "0x" + "1e".repeat(32),
+  edViewPointLocker: "0x" + "1f".repeat(32), signature: "0x" + "1c".repeat(65),
 };
 
 let pass = 0;

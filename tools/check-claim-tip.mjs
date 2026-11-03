@@ -54,7 +54,8 @@ export const claimTipCheck = async () => {
       commitHalfClaimer: "0x" + "55".repeat(32), edPointClaimer: "0x" + "66".repeat(32),
       chainId: 421614, feeBps: "0", fee: "0", feeRecipient: addr("77"),
       validUntil: nowSec + 600, nonce: "1", xmrAmount: "1000000000000", factory: addr("88"),
-      claimTip: String(tipWei) };
+      claimTip: String(tipWei), commitHalfLocker: "0x" + "a1".repeat(32),
+      edPointLocker: "0x" + "a2".repeat(32), edViewPointLocker: "0x" + "a3".repeat(32) };
     quote.signature = signQuoteDigest({ crypto: primitives, digest: quoteDigest({ crypto: primitives, quote }), privateKey: signerKey });
     return quote;
   };

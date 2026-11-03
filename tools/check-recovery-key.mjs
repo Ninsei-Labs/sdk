@@ -1,6 +1,7 @@
 // THE RECOVERY KEY CHECK: fixed v2 vectors, the backup file, and the salt-based on-chain search.
 import * as recovery from "../src/public/recovery.mjs";
 import { buildOwnSideFromHalves } from "../src/order.mjs";
+import { ESCROW_EVENT_TOPICS, readEscrowEvents } from "../src/recovery-key.mjs";
 import { startHeightFromNodes } from "../src/swaps.mjs";
 
 const WORDS = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
@@ -83,6 +84,26 @@ export const recoveryKeyCheck = async () => {
     evmLogs: async (request) => { allCalls.push(request); return [v2Log, foreign]; } });
   check(all.swaps.length === 1 && allCalls.length === 1 && all.complete === true, "a full log read did not return exactly the v2 order");
 
+  // A CHAIN CAN HAVE MORE THAN ONE FACTORY. Searching only the newest hides every older order; the result keeps
+  // each order's own factory and the commitments are derived with that factory, not with the last one in the list.
+  {
+    const otherFactory = address("ef");
+    const otherHalves = recovery.takerHalvesV2({ mnemonic: WORDS, chainId: CHAIN, factory: otherFactory, salt });
+    const otherLog = logFor({ commitment: otherHalves.spendCommitment, locker: address("bb"), claimer: address("cc"), salt });
+    const seen = [];
+    const multi = await recovery.findSwaps({
+      mnemonic: WORDS, chainId: CHAIN,
+      factories: [{ address: factory, deploymentBlock: 10 }, { address: otherFactory, deploymentBlock: 20 }],
+      evmLogs: async (request) => {
+        seen.push({ address: request.address, fromBlock: request.fromBlock });
+        return request.address === otherFactory ? [otherLog] : [v2Log];
+      },
+    });
+    check(multi.swaps.length === 2 && multi.swaps.some((row) => row.factory === factory)
+      && multi.swaps.some((row) => row.factory === otherFactory), `multi-factory search returned ${multi.swaps.length}`);
+    check(seen.length === 2 && seen[0].fromBlock === 10 && seen[1].fromBlock === 20, "each factory was not searched from its own deployment block");
+  }
+
   const xmrWord = BigInt(5_000_000_000_000).toString(16).padStart(64, "0");
   const cloneCode = "0x" + "00".repeat(621) + xmrWord + "00".repeat(877 - 621 - 32);
   const withXmr = await recovery.findSwaps({ mnemonic: WORDS, chainId: CHAIN, factory, address: address("bb"),
@@ -135,6 +156,25 @@ export const recoveryKeyCheck = async () => {
   try { await startHeightFromNodes({ nodes: ["https://node.example"], network: "mainnet", fetchImpl: answer({ height: 1, nettype: "stagenet", synchronized: true }) }); }
   catch (error) { wrongNetwork = error; }
   check(wrongNetwork && wrongNetwork.code === "xmr-no-nodes" && wrongNetwork.params?.why === "network", "a wrong-network node was accepted");
+  // BULK SETTLEMENT EVENTS. One request with an address list returns the half, the ready mark and a decline
+  // without asking the RPC about each escrow separately.
+  {
+    const escrow = "0x" + "ab".repeat(20);
+    const half = "0x" + "cd".repeat(32);
+    const words = (values) => "0x" + values.map((value) => BigInt(value).toString(16).padStart(64, "0")).join("");
+    const logs = [
+      { address: escrow, topics: [ESCROW_EVENT_TOPICS.halfRevealed], data: words([BigInt(half), 1]), blockNumber: 5, transactionHash: "0x" + "01".repeat(32), logIndex: 0 },
+      { address: escrow, topics: [ESCROW_EVENT_TOPICS.ready, "0x" + "0".repeat(24) + "11".repeat(20)], data: "0x", blockNumber: 6, transactionHash: "0x" + "02".repeat(32), logIndex: 0 },
+      { address: escrow, topics: [ESCROW_EVENT_TOPICS.declined, "0x" + "0".repeat(24) + "22".repeat(20)], data: "0x", blockNumber: 7, transactionHash: "0x" + "03".repeat(32), logIndex: 0 },
+    ];
+    let request = null;
+    const events = await readEscrowEvents({ escrows: [escrow], evmLogs: async (value) => { request = value; return logs; } });
+    check(events.length === 3 && events[0].event === "HalfRevealed" && events[0].half === half && events[0].byClaimer === true,
+      "bulk events did not decode the revealed half");
+    check(events[1].event === "Ready" && events[2].event === "Declined", "bulk events lost the ready or declined event");
+    check(request && Array.isArray(request.address) && request.address[0] === escrow, "bulk events did not send the escrow list");
+  }
+
   notes.push("the v2 search uses the event salt, reads every log once, and derives the Monero start height");
   return { note: "the recovery key, its backup file and the salt-based search behave", problems, notes };
 };

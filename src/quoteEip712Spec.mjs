@@ -35,19 +35,24 @@
 //   claimTip             - the tip the escrow pays to whoever sends `claim`, out of the payout, in the same
 //                          transaction (#18). It is inside the signed set so a provider cannot raise it after the
 //                          taker has seen the quote. Zero means no tip and is the only value a buy uses.
+//   commitHalfLocker,    - the depositor's half commitment and two Monero points. They used to travel beside the
+//   edPointLocker,         quote, outside the signature: a taker could show one set and fund another escrow with
+//   edViewPointLocker      a decoy. The chain now reads them from the signed quote, so one quote names one escrow.
 //
 // The domain's verifyingContract is the escrow FACTORY taken from the order: the contract that will verify the
 // quote in EVM (stage 2). The type order, the domain name and the version are part of the protocol - they may
 // change only together with the quote version.
 export const ORDER_QUOTE_DOMAIN_NAME = "NinseiEscrowFactory";
 export const ORDER_QUOTE_DOMAIN_VERSION = "1";
+// 10: the signed EIP-712 field set grew the depositor's half commitment and two Monero points. They used to be
+// factory arguments outside the signature, which let one quote fund an escrow with decoy locker fields.
 // 9: the signed EIP-712 field set grew `claimTip` (#18) - the tip a third-party sender of `claim` takes from the
 // payout, covered by the provider's signature like every other condition.
 // 8: the field set grew `xmrAmount` (#110 step 3). This is the request-shape generation label, and it moves WITH the
 // field set (see the note above). The DOMAIN name and the domain version string are UNCHANGED by it: they name the
 // domain (the factory address and the chain), which did not change. So here the label and the domain version string
 // move apart, and that is deliberate - the label tracks the message shape, not the domain identity.
-export const ORDER_QUOTE_VERSION = 9;
+export const ORDER_QUOTE_VERSION = 10;
 
 // The domain type string is assembled from parts ON PURPOSE. A single literal of it is a phrase of several
 // space-separated words, and the SDK check reads such literals as user-facing text. Do not "simplify" it.
@@ -77,6 +82,9 @@ export const ORDER_QUOTE_FIELDS = [
   ["nonce", "uint256"],
   ["xmrAmount", "uint256"],
   ["claimTip", "uint256"],
+  ["commitHalfLocker", "bytes32"],
+  ["edPointLocker", "bytes32"],
+  ["edViewPointLocker", "bytes32"],
 ];
 export const ORDER_QUOTE_TYPE = "OrderQuote(" + ORDER_QUOTE_FIELDS.map((f) => f[1] + " " + f[0]).join(",") + ")";
 

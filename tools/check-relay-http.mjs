@@ -175,6 +175,9 @@ function makeAnswer(source, {
     nonce: "1",
     xmrAmount: source.terms.xmrAmount,
     claimTip: source.terms.claimTip,
+    commitHalfLocker: "0x" + "a1".repeat(32),
+    edPointLocker: "0x" + "a2".repeat(32),
+    edViewPointLocker: "0x" + "a3".repeat(32),
     factory,
   };
   quote.quoteSignature = signQuoteDigest({
@@ -184,7 +187,7 @@ function makeAnswer(source, {
   });
   const payload = {
     factory,
-    quoteVersion: 9,
+    quoteVersion: 10,
     contextVersion: "ninsei-order-v3",
     context: engine.orderContext.orderContextString(source.terms.order),
     quote,

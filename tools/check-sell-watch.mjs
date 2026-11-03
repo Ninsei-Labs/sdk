@@ -5,7 +5,7 @@
 // take the ETH. This check drives the real `swaps.sellWatch` against a synthetic status()/ready() reader: no
 // backend, no signature, no guessed address.
 import * as engine from "../src/engine.mjs";
-import { createSwaps } from "../src/swaps.mjs";
+import { createSwaps, sellWatchTimeoutMs } from "../src/swaps.mjs";
 
 const escrow = "0x" + "a1".repeat(20);
 const status = (funded, claimed, refunded, balance = 0n) => "0x"
@@ -17,6 +17,15 @@ const check = (condition, message) => { if (condition) console.log("  ok    " + 
 
 function swapsWith(reader) {
   return createSwaps({ config: {}, call: reader });
+}
+
+console.log("=== 0) THE DEFAULT WAIT COVERS THE READY DEADLINE ===");
+{
+  const now = 1_700_000_000;
+  const short = sellWatchTimeoutMs({ configuredMs: 1_200_000, readyBySec: now + 600, nowSec: now });
+  check(short === 1_200_000, "a short deadline did not keep the configured floor");
+  const long = sellWatchTimeoutMs({ configuredMs: 1_200_000, readyBySec: now + 1_800, nowSec: now });
+  check(long === (1_800 + 300) * 1000, "a later readyBy did not extend the sell wait: " + long);
 }
 
 console.log("=== 1) FUNDED AND READY ===");

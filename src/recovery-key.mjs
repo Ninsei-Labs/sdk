@@ -429,6 +429,72 @@ async function readLogs(evmLogs, request) {
   return logs;
 }
 
+// THE SETTLEMENT EVENTS A RECOVERY PAGE NEEDS, READ IN ONE RPC. Asking status() and revealedHalf() per order
+// names every escrow to the public RPC operator next to the visitor's IP. One eth_getLogs with an address list and
+// the three event topics returns the same facts without the per-order calls.
+const eventTopic = (signature) => "0x" + Array.from(keccak256(new TextEncoder().encode(signature)),
+  (byte) => byte.toString(16).padStart(2, "0")).join("");
+export const ESCROW_EVENT_TOPICS = Object.freeze({
+  halfRevealed: eventTopic("HalfRevealed(bytes32,bool)"),
+  ready: eventTopic("Ready(address)"),
+  declined: eventTopic("Declined(address)"),
+});
+const ESCROW_EVENT_NAMES = new Map([
+  [ESCROW_EVENT_TOPICS.halfRevealed, "HalfRevealed"],
+  [ESCROW_EVENT_TOPICS.ready, "Ready"],
+  [ESCROW_EVENT_TOPICS.declined, "Declined"],
+]);
+const wordOf = (data, index) => {
+  const body = String(data || "").replace(/^0x/, "");
+  return body.length >= (index + 1) * 64 ? body.slice(index * 64, (index + 1) * 64) : null;
+};
+const addressTopic = (topic) => {
+  const body = String(topic || "").replace(/^0x/, "");
+  return body.length === 64 ? "0x" + body.slice(24).toLowerCase() : null;
+};
+
+/**
+ * Read settlement events for a list of escrows in one `eth_getLogs` call.
+ *
+ * `evmLogs` is the caller's seam and must accept an address array, a topic array and a block range. A page can
+ * use the result to rebuild the revealed half, the ready mark and a decline without asking the public RPC about
+ * each order separately. An unreadable request is a named `recovery-failed { step: "logs" }`, not an empty list.
+ */
+export async function readEscrowEvents({ escrows, evmLogs, fromBlock = "earliest", toBlock = "latest" } = {}) {
+  if (!Array.isArray(escrows) || !escrows.length) throw bad("escrows");
+  for (const escrow of escrows) {
+    if (typeof escrow !== "string" || !ADDRESS_RE.test(escrow)) throw bad("escrows");
+  }
+  const logs = await readLogs(evmLogs, {
+    address: [...new Set(escrows.map((escrow) => escrow.toLowerCase()))],
+    topics: [[ESCROW_EVENT_TOPICS.halfRevealed, ESCROW_EVENT_TOPICS.ready, ESCROW_EVENT_TOPICS.declined]],
+    fromBlock,
+    toBlock,
+  });
+  const events = [];
+  for (const log of logs) {
+    if (!log || typeof log !== "object") continue;
+    const topics = Array.isArray(log.topics) ? log.topics : [];
+    const topic0 = String(topics[0] || "").toLowerCase();
+    const name = ESCROW_EVENT_NAMES.get(topic0);
+    if (!name) continue;
+    const escrow = String(log.address || "").toLowerCase();
+    if (!ADDRESS_RE.test(escrow)) continue;
+    const common = { escrow, event: name, blockNumber: log.blockNumber ?? null, transactionHash: log.transactionHash || null,
+      logIndex: log.logIndex ?? null };
+    if (name === "HalfRevealed") {
+      const half = wordOf(log.data, 0);
+      const flag = wordOf(log.data, 1);
+      if (!half || !flag) continue;
+      events.push({ ...common, half: "0x" + half.toLowerCase(), byClaimer: BigInt("0x" + flag) !== 0n });
+    } else {
+      const by = addressTopic(topics[1]);
+      if (by) events.push({ ...common, by });
+    }
+  }
+  return events.sort((a, b) => Number(a.blockNumber || 0) - Number(b.blockNumber || 0) || Number(a.logIndex || 0) - Number(b.logIndex || 0));
+}
+
 // THE MONERO HEIGHT A RECOVERED ORDER STARTED AT. With one key there is no per-swap file to carry it, so it is
 // derived from the settlement chain: the timestamp of the block that holds OrderCreated, then the last Monero
 // block at or before it. A Monero block's timestamp may run ahead of wall time, hence the safety margin.
@@ -557,42 +623,59 @@ async function recoveredStartHeight(order, { evmBlockTime, moneroTip, moneroBloc
  * search asks for it as the locker and as the claimer (two queries; the RPC topic filter cannot say OR across two
  * positions) and merges the answers. Without one, every OrderCreated of the factory is read and matched locally.
  */
-export async function findSwaps({ mnemonic, chainId, factory, address = null, evmLogs,
+export async function findSwaps({ mnemonic, chainId, factory = null, factories = null, address = null, evmLogs,
   fromBlock = null, deploymentBlock = null, toBlock = "latest",
   evmBlockTime = null, evmCode = null, moneroTip = null, moneroBlockTimestamp = null,
   xmrNodes = null, moneroNetwork = null, fetchImpl = globalThis.fetch } = {}) {
-  if (typeof factory !== "string" || !ADDRESS_RE.test(factory)) throw bad("factory");
-  const chain = numberField(chainId, "chainId");
-  // THE CHAIN SAYS WHERE ITS ORDERS CAN START. An explicit fromBlock wins; otherwise the caller can pass the
-  // factory's deployment block (the SDK's chain registry exposes it as escrow.deploymentBlock). Zero remains the
-  // last resort for a caller that knows the factory existed at genesis.
-  if (deploymentBlock !== null && deploymentBlock !== undefined && !Number.isSafeInteger(Number(deploymentBlock))) {
-    throw bad("deploymentBlock");
-  }
-  const startBlock = fromBlock === null || fromBlock === undefined
-    ? (deploymentBlock === null || deploymentBlock === undefined ? 0 : Number(deploymentBlock))
-    : fromBlock;
-  const base = { address: factory, fromBlock: startBlock, toBlock };
-  let logs = [];
-  if (address) {
-    const padded = topicAddress(address);
-    const [asLocker, asClaimer] = await Promise.all([
-      readLogs(evmLogs, { ...base, topics: [ORDER_CREATED_TOPICS, null, padded, null] }),
-      readLogs(evmLogs, { ...base, topics: [ORDER_CREATED_TOPICS, null, null, padded] }),
-    ]);
-    const seen = new Set();
-    for (const log of asLocker.concat(asClaimer)) {
-      const id = `${log.transactionHash || ""}:${log.logIndex ?? ""}`;
-      if (seen.has(id)) continue;
-      seen.add(id);
-      logs.push(log);
-    }
+  // FACTORY HISTORY IS PART OF THE SEARCH. A chain can have more than one factory after a contract change;
+  // searching only the newest one hides every older order. Callers may pass `factories` as addresses or as
+  // `{ address|factory, deploymentBlock }`; a single `factory`/`deploymentBlock` remains the compatible form.
+  let targets = [];
+  if (Array.isArray(factories) && factories.length) {
+    targets = factories.map((entry) => {
+      const target = typeof entry === "string" ? entry : entry && (entry.factory || entry.address);
+      if (typeof target !== "string" || !ADDRESS_RE.test(target)) throw bad("factories");
+      const block = typeof entry === "object" && entry ? entry.deploymentBlock : null;
+      if (block !== null && block !== undefined && !Number.isSafeInteger(Number(block))) throw bad("factories.deploymentBlock");
+      return { factory: target, deploymentBlock: block === null || block === undefined ? null : Number(block) };
+    });
   } else {
-    logs = await readLogs(evmLogs, { ...base, topics: [ORDER_CREATED_TOPICS] });
+    if (typeof factory !== "string" || !ADDRESS_RE.test(factory)) throw bad("factory");
+    if (deploymentBlock !== null && deploymentBlock !== undefined && !Number.isSafeInteger(Number(deploymentBlock))) {
+      throw bad("deploymentBlock");
+    }
+    targets = [{ factory, deploymentBlock: deploymentBlock === null || deploymentBlock === undefined ? null : Number(deploymentBlock) }];
   }
-  const orders = logs.map(decodeOrderLog).filter(Boolean);
-  for (const order of orders) order.factory = factory;
-  const orderKey = (order) => `${order.transactionHash || ""}:${order.logIndex ?? ""}`;
+  const chain = numberField(chainId, "chainId");
+  let orders = [];
+  const seenLogs = new Set();
+  for (const target of targets) {
+    // THE CHAIN SAYS WHERE ITS ORDERS CAN START. An explicit fromBlock wins; otherwise the factory's own
+    // deployment block is used. Zero remains the last resort for a caller that knows the factory existed at genesis.
+    const startBlock = fromBlock === null || fromBlock === undefined
+      ? (target.deploymentBlock === null ? 0 : target.deploymentBlock)
+      : fromBlock;
+    const base = { address: target.factory, fromBlock: startBlock, toBlock };
+    let logs = [];
+    if (address) {
+      const padded = topicAddress(address);
+      const [asLocker, asClaimer] = await Promise.all([
+        readLogs(evmLogs, { ...base, topics: [ORDER_CREATED_TOPICS, null, padded, null] }),
+        readLogs(evmLogs, { ...base, topics: [ORDER_CREATED_TOPICS, null, null, padded] }),
+      ]);
+      logs = asLocker.concat(asClaimer);
+    } else {
+      logs = await readLogs(evmLogs, { ...base, topics: [ORDER_CREATED_TOPICS] });
+    }
+    for (const log of logs) {
+      const id = `${target.factory}:${log.address || ""}:${log.transactionHash || ""}:${log.logIndex ?? ""}`;
+      if (seenLogs.has(id)) continue;
+      seenLogs.add(id);
+      const order = decodeOrderLog(log);
+      if (order) orders.push({ ...order, factory: target.factory });
+    }
+  }
+  const orderKey = (order) => `${order.factory || ""}:${order.transactionHash || ""}:${order.logIndex ?? ""}`;
   const seed = seedOf(mnemonic);
   const found = [];
   const foundKeys = new Set();
@@ -603,7 +686,7 @@ export async function findSwaps({ mnemonic, chainId, factory, address = null, ev
   for (const order of orders) {
     let commitment;
     try {
-      commitment = spendCommitmentFromSeedV2(seed, { chainId: chain, factory, role: "taker", salt: order.salt });
+      commitment = spendCommitmentFromSeedV2(seed, { chainId: chain, factory: order.factory, role: "taker", salt: order.salt });
     } catch {
       continue;
     }

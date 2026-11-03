@@ -16,12 +16,13 @@ import { ed25519, keccak256, secp256k1 } from "../src/primitives.mjs";
 import { quoteDigest, signQuoteDigest } from "../src/quoteEip712Spec.mjs";
 
 const RPC = process.env.ANVIL_RPC || "http://127.0.0.1:8545";
-const FACTORY = (process.env.ANVIL_FACTORY || "0x69b5a6878b542960af4d239ecc60ad1c9e3e6932").toLowerCase();
-const REGISTRY = (process.env.ANVIL_REGISTRY || "0x4707a6684b654fbd74372ec624efc0f825af0537").toLowerCase();
-const CASHIER = (process.env.ANVIL_CASHIER || "0x05b7433f66f2b75cc7ece9ec00af0fb810f9c9e0").toLowerCase();
-// Anvil's default accounts: the provider signs the quote, the locker sends the deposit.
-const PROVIDER = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266";
-const PROVIDER_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+const FACTORY = (process.env.ANVIL_FACTORY || "0x6ab0ef3aa67b022d4007550e7556108537debb55").toLowerCase();
+const REGISTRY = (process.env.ANVIL_REGISTRY || "0xf06ec2b1de69ff5b528ed917edffbee7be6dccc9").toLowerCase();
+const CASHIER = (process.env.ANVIL_CASHIER || "0x6c6c6da6392a92b8b9c69b3ec234d524cdcfcb57").toLowerCase();
+// THE PROVIDER IS BORN WITH THE RUN. A committed private key, even Anvil's public default, trips push
+// protection; this key signs the quote and Anvil impersonates its address for the registry and decline calls.
+const PROVIDER_KEY = "0x" + randomBytes(32).toString("hex");
+const PROVIDER = "0x" + Buffer.from(keccak256(secp256k1.getPublicKey(Buffer.from(PROVIDER_KEY.slice(2), "hex"), false).slice(1))).subarray(-20).toString("hex");
 const LOCKER = "0x70997970c51812dc3a010c7d01b50e0d17dc79c8";
 const RELAYER = "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"; // sends a claim for the tip; never the claimer
 const AMOUNT = 1_000_000_000_000_000_000n; // 1 ETH, no fee
@@ -153,6 +154,7 @@ try {
 
 // Make sure the two stand-in accounts can pay gas and the deposit. A fork usually carries balances, but a fresh
 // fork at an old block may not.
+await rpc("anvil_impersonateAccount", [PROVIDER]);
 await rpc("anvil_setBalance", [PROVIDER, "0x" + (100n * 10n ** 18n).toString(16)]);
 await rpc("anvil_setBalance", [LOCKER, "0x" + (100n * 10n ** 18n).toString(16)]);
 await rpc("anvil_setBalance", [RELAYER, "0x" + (100n * 10n ** 18n).toString(16)]);

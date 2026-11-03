@@ -36,7 +36,7 @@ const quote = {
   chainId: order.chainId,
   amount: order.amount,
   xmrAmount: "1000000000000",
-  claimTip: "0",
+  claimTip: "0", commitHalfLocker: "0x" + "a1".repeat(32), edPointLocker: "0x" + "a2".repeat(32), edViewPointLocker: "0x" + "a3".repeat(32),
   edPointClaimer: own.spendPoint,
   commitHalfClaimer: ownCommit,
 };

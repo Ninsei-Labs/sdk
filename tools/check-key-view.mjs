@@ -32,7 +32,7 @@ const quote = { ...order, provider: order.claimer,
   registry: addr("55"), cashier: addr("66"),
   commitHalfClaimer: halfCommitmentHex(3n, primitives.secp256k1, primitives.keccak256),
   edPointClaimer: maker.spendPoint, feeBps: 0, fee: "0", feeRecipient: addr("77"),
-  validUntil: now + 600, nonce: "1", xmrAmount: "1000000000000", claimTip: "0" };
+  validUntil: now + 600, nonce: "1", xmrAmount: "1000000000000", claimTip: "0", commitHalfLocker: "0x" + "a1".repeat(32), edPointLocker: "0x" + "a2".repeat(32), edViewPointLocker: "0x" + "a3".repeat(32) };
 quote.signature = signQuoteDigest({ crypto: primitives, digest: quoteDigest({ crypto: primitives, quote }), privateKey: makerKey });
 
 let pass = 0;

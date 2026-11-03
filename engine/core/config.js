@@ -363,22 +363,22 @@ export const CHAINS = [
     explorerName: "arbiscan (sepolia)",
     gasUsd: 0.01,
     routeType: "atomic",
-    // THE DEMO'S MAIN NETWORK: the Ninsei escrow factory and the interface's fee cashier live here. The next
-    // contract version (contracts-testnet-2026.10.26) is a FACT, not an intention:
-    //   factory 0x69b5a6878b542960af4d239ecc60ad1c9e3e6932 (height 323014007,
-    //   transaction 0xbe8244da0cb1429edc92d18c7c8b5ba1c6b17c42a5806609d930a6496e918408);
-    //   cashier 0x05b7433f66f2b75cc7ece9ec00af0fb810f9c9e0;
-    //   registry 0x4707a6684b654fbd74372ec624efc0f825af0537 (this release deploys it);
-    //   implementation 0x2E0214c6242fB794a4cC861D609Ecee544735170, codehash
-    //   0xc6cde36301b6551a6ca8bd2c47fbd5ffd01ffcdf22d2f6909be2b3b2dcf360b4.
-    // `OrderCreated` now carries xmrAmount; the SDK reads it from the event and keeps the clone fallback for the
-    // previous event. PREVIOUS factory before this version: 0x3eE25f12758ec28e5b3045d16132D89Cd0bf341F
-    // (height 321430239, cashier 0x1123A3875775Da25FA181Af0d91EB278E94a5dfb).
+    // THE DEMO'S MAIN NETWORK: the Ninsei escrow factory and the interface's fee cashier live here. The current
+    // contract version (contracts-testnet-2026.11.03-fix) is a FACT, not an intention:
+    //   factory 0x6ab0ef3aa67b022d4007550e7556108537debb55 (height 325677796,
+    //   transaction 0xe5f2244c2aa07bb372352b5cb47fa6fdd531a1f8a763d4246b0d31efa0723d2d);
+    //   cashier 0x6c6c6da6392a92b8b9c69b3ec234d524cdcfcb57;
+    //   registry 0xf06ec2b1de69ff5b528ed917edffbee7be6dccc9 (this release deploys it);
+    //   implementation 0x584b8438204A7CDb207957F5572a7f34E5D526c8, codehash
+    //   0x334d6802099fccaef87b9569618ab3c46f6a2f075c2934c0cdbc8d4e4042944b.
+    // `OrderCreated` carries xmrAmount; the SDK reads it from the event. PREVIOUS factory before this version:
+    // 0x69b5a6878b542960af4d239ecc60ad1c9e3e6932 (height 323014007, cashier
+    // 0x05b7433f66f2b75cc7ece9ec00af0fb810f9c9e0).
     // mode: "live" - order creation TOGETHER WITH THE MONEY in one transaction (createOrderAndFund). cashier: the
     // INTERFACE's fee cashier, named in quotes. implementationCodeHash: the escrow implementation the factory
     // carries, checked against the chain. deploymentBlock: the height the factory was created at; a log search for
     // its orders starts here, not at zero, because public RPCs cap a log query at about 10M blocks.
-    escrow: { address: "0x69b5a6878b542960af4d239ecc60ad1c9e3e6932", mode: "live", deploymentBlock: 323014007, cashier: "0x05b7433f66f2b75cc7ece9ec00af0fb810f9c9e0", implementationCodeHash: "0xc6cde36301b6551a6ca8bd2c47fbd5ffd01ffcdf22d2f6909be2b3b2dcf360b4" },
+    escrow: { address: "0x6ab0ef3aa67b022d4007550e7556108537debb55", mode: "live", deploymentBlock: 325677796, cashier: "0x6c6c6da6392a92b8b9c69b3ec234d524cdcfcb57", implementationCodeHash: "0x334d6802099fccaef87b9569618ab3c46f6a2f075c2934c0cdbc8d4e4042944b" },
     tokens: [
       // Test USDC (Circle): decimals 6 and symbol "USDC" verified on chain by the same node.
       { symbol: "USDC", address: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d", decimals: 6, usd: 1, cls: "ar-token-usdc" },
@@ -798,9 +798,9 @@ export function allowedProvidersFor(chainOrId) {
 // named by the record and match the signed quote). Filled at deploy: the factory has no immutables, so one build
 // gives the same hash to anyone who deployed it - a provider's own factory lands in the same list.
 export const KNOWN_FACTORY_CODES = {
-  // contracts-testnet-2026.10.26, factory deployed at 0x69b5a6878b542960af4d239ecc60ad1c9e3e6932.
+  // contracts-testnet-2026.11.03-fix, factory deployed at 0x6ab0ef3aa67b022d4007550e7556108537debb55.
   // The factory has no immutables; this hash is reproducible from that release's source.
-  "arbitrum-sepolia": ["0x4d51e943b7786be7d3f9e2c44ad0b54f82932dba12ac6fa34be5088500d6615c"],
+  "arbitrum-sepolia": ["0x9246f3b981311c4ed988d77bb2177ef45d78182e47d77a2077d0afe3f3377cb8"],
 };
 
 export function knownFactoryCodesFor(chainOrId) {

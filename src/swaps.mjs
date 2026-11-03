@@ -354,6 +354,18 @@ export async function startHeightFromNodes({ nodes = [], network = null, fetchIm
   throw new SdkError("xmr-no-nodes", { step: "restore-height", network: network || null, why });
 }
 
+// THE SELL WAIT MUST OUTLIVE THE READY DEADLINE. The old fixed 20-minute wait equalled the mean time of ten
+// Monero blocks, so about half of honest sales expired before `ready`. A caller may set an explicit timeout;
+// otherwise the configured wait is extended to cover the remaining time to `readyBy` plus one confirmation margin.
+const SELL_WATCH_MARGIN_SEC = 300;
+export function sellWatchTimeoutMs({ configuredMs = 1_200_000, readyBySec = null, nowSec = Math.floor(Date.now() / 1000) } = {}) {
+  const configured = Number.isFinite(Number(configuredMs)) && Number(configuredMs) > 0 ? Number(configuredMs) : 1_200_000;
+  const readyAt = Number(readyBySec);
+  const now = Number(nowSec);
+  if (!Number.isSafeInteger(readyAt) || !Number.isSafeInteger(now) || readyAt <= now) return configured;
+  return Math.max(configured, (readyAt - now + SELL_WATCH_MARGIN_SEC) * 1000);
+}
+
 export function createSwaps({ preflight, http, createRecord, mode = null, xmrNetwork = null, call = null, store = engine.store,
   // THE PATHS AND LIMITS ARE BROUGHT BY THE CONFIGURATION: the "server" step's paths are named by names (config.route),
   // and the timeout and rate of the watch polling - in config.limits. Without the configuration the step answers with a
@@ -1528,10 +1540,19 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
       const escrow = String(request.escrow || "").trim();
       if (!escrow) throw new SdkError("bad-input", { field: "escrow" });
-      const timeoutMs = Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0
-        ? Number(request.timeoutMs) : limitOf("watchTimeoutMs", 1_200_000);
+      // THE WAIT IS BOUNDED BY THE ORDER'S OWN READY DEADLINE, NOT BY A FIXED 20 MINUTES. Ten confirmations
+      // average about twenty minutes, so the old default timed out roughly half of honest sales. A request may
+      // still set an explicit timeout; otherwise the wait covers the remaining time to readyBy plus a margin.
       const pollMs = Number.isFinite(Number(request.pollMs)) && Number(request.pollMs) > 0
         ? Number(request.pollMs) : limitOf("watchPollMs", 6_000);
+      let timeoutMs = Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0
+        ? Number(request.timeoutMs) : limitOf("watchTimeoutMs", 1_200_000);
+      if (!(Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0)) {
+        try {
+          const deadlines = await flow.orderDeadlines(escrow, { call: reader });
+          timeoutMs = sellWatchTimeoutMs({ configuredMs: timeoutMs, readyBySec: deadlines.readyBy });
+        } catch { /* no deadline read: keep the configured wait */ }
+      }
       const started = Date.now();
       let lastStatus = null;
       let lastError = null;

@@ -1911,6 +1911,8 @@ export type ErrorCode =
   | "xmr-too-late"
   | "contract-reverted"
   | "insufficient-funds"
+  /** A wallet/node reported a withdrawal fee above the SDK's ceiling; the transfer is refused. */
+  | "sweep-fee-too-high"
   /** The maker declines to pay the claim gas; the refusal is shown before the deal (issue #78). */
   | "gas-refused-by-maker"
   /** The claim gas was ordered but the recipient's balance did not grow. */

@@ -392,11 +392,42 @@ export declare function openRecoveryKeyFile(contents: string, passphrase?: strin
 export declare function saveRecoveryKey(storage: RecoveryKeyStorage, key: RecoveryKey & { backupConfirmed?: boolean }): RecoveryKey;
 /** Reads the key from a storage adapter, or null. */
 export declare function loadRecoveryKey(storage: RecoveryKeyStorage): (RecoveryKey & { backupConfirmed?: boolean }) | null;
+
+/** One settlement event read in bulk; the escrow is named by its address. */
+export interface EscrowEvent {
+  readonly escrow: string;
+  readonly event: "HalfRevealed" | "Ready" | "Declined";
+  readonly blockNumber: number | string | null;
+  readonly transactionHash: string | null;
+  readonly logIndex: number | string | null;
+  readonly half?: string;
+  readonly byClaimer?: boolean;
+  readonly by?: string;
+}
+
+/** The three settlement event topics; exported so a caller does not copy the signatures. */
+export declare const ESCROW_EVENT_TOPICS: {
+  readonly halfRevealed: string;
+  readonly ready: string;
+  readonly declined: string;
+};
+
+/** Read HalfRevealed, Ready and Declined for a list of escrows in one log request. */
+export declare function readEscrowEvents(request: {
+  escrows: readonly string[];
+  evmLogs: (request: { address: readonly string[]; topics: (string | null)[][]; fromBlock: number | string; toBlock: number | string }) => Promise<unknown[]>;
+  fromBlock?: number | string;
+  toBlock?: number | string;
+}): Promise<EscrowEvent[]>;
+
 /** Finds orders whose commitment was made from the key's halves. */
 export declare function findSwaps(request: {
   mnemonic: string;
   chainId: number;
-  factory: string;
+  /** One factory. When omitted, `factories` must name the chain's history. */
+  factory?: string | null;
+  /** Every factory of the chain, with its own deployment block; older orders stay searchable. */
+  factories?: readonly (string | { readonly address?: string; readonly factory?: string; readonly deploymentBlock?: number | null })[] | null;
   address?: string | null;
   evmLogs: (request: { address: string; topics: (string | null)[]; fromBlock: number | string; toBlock: number | string }) => Promise<unknown[]>;
   fromBlock?: number | string;
