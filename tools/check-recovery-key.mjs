@@ -84,6 +84,26 @@ export const recoveryKeyCheck = async () => {
     evmLogs: async (request) => { allCalls.push(request); return [v2Log, foreign]; } });
   check(all.swaps.length === 1 && allCalls.length === 1 && all.complete === true, "a full log read did not return exactly the v2 order");
 
+  // A CHAIN CAN HAVE MORE THAN ONE FACTORY. Searching only the newest hides every older order; the result keeps
+  // each order's own factory and the commitments are derived with that factory, not with the last one in the list.
+  {
+    const otherFactory = address("ef");
+    const otherHalves = recovery.takerHalvesV2({ mnemonic: WORDS, chainId: CHAIN, factory: otherFactory, salt });
+    const otherLog = logFor({ commitment: otherHalves.spendCommitment, locker: address("bb"), claimer: address("cc"), salt });
+    const seen = [];
+    const multi = await recovery.findSwaps({
+      mnemonic: WORDS, chainId: CHAIN,
+      factories: [{ address: factory, deploymentBlock: 10 }, { address: otherFactory, deploymentBlock: 20 }],
+      evmLogs: async (request) => {
+        seen.push({ address: request.address, fromBlock: request.fromBlock });
+        return request.address === otherFactory ? [otherLog] : [v2Log];
+      },
+    });
+    check(multi.swaps.length === 2 && multi.swaps.some((row) => row.factory === factory)
+      && multi.swaps.some((row) => row.factory === otherFactory), `multi-factory search returned ${multi.swaps.length}`);
+    check(seen.length === 2 && seen[0].fromBlock === 10 && seen[1].fromBlock === 20, "each factory was not searched from its own deployment block");
+  }
+
   const xmrWord = BigInt(5_000_000_000_000).toString(16).padStart(64, "0");
   const cloneCode = "0x" + "00".repeat(621) + xmrWord + "00".repeat(877 - 621 - 32);
   const withXmr = await recovery.findSwaps({ mnemonic: WORDS, chainId: CHAIN, factory, address: address("bb"),

@@ -668,7 +668,7 @@ export async function findSwaps({ mnemonic, chainId, factory = null, factories =
       logs = await readLogs(evmLogs, { ...base, topics: [ORDER_CREATED_TOPICS] });
     }
     for (const log of logs) {
-      const id = `${log.address || target.factory}:${log.transactionHash || ""}:${log.logIndex ?? ""}`;
+      const id = `${target.factory}:${log.address || ""}:${log.transactionHash || ""}:${log.logIndex ?? ""}`;
       if (seenLogs.has(id)) continue;
       seenLogs.add(id);
       const order = decodeOrderLog(log);
