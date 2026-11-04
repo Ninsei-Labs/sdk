@@ -64,6 +64,19 @@ else bad("backup prompts: " + asked);
 if (sent.length === 0) ok("no funding transaction was sent");
 else bad("funding was sent: " + sent.length);
 
+// THE SIGNED DEADLINE IS CHECKED AT THE LAST MOMENT BEFORE THE SEND. The clock is the facade's own millisecond
+// seam, so this scenario moves it past validUntil without touching the process clock.
+{
+  const expired = { ...request, onRecoveryKey: async () => true };
+  const result = await createSwaps({ ...deps, now: () => (quote.validUntil + 1) * 1000 })
+    .start(expired).catch((error) => error);
+  if (result && result.code === "quote-expired" && result.params && result.params.step === "lock") {
+    ok("a quote that expired before the lock is refused there");
+  } else bad("expired quote returned " + JSON.stringify(result && (result.code || String(result))));
+  if (sent.length === 0) ok("the expired quote never reaches the wallet");
+  else bad("expired quote was sent: " + sent.length);
+}
+
 console.log("");
 console.log(fails.length ? "FAILED: " + fails.length + " (passed " + pass + ")" : "backup confirmation: " + pass + " checks passed.");
 if (fails.length) process.exit(1);
