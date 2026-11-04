@@ -260,10 +260,15 @@ const baseUrl = (value) => {
   return out;
 };
 
-export async function fetchBlock(daemonUrl, height, fetchImpl = globalThis.fetch) {
+export async function fetchBlock(daemonUrl, height, fetchImpl = globalThis.fetch, timeoutMs = 8000) {
+  // THE DEADLINE COVERS THE BODY, NOT ONLY THE HEADERS. Without a signal a daemon that sends `{` and stops holds
+  // the whole scan forever.
+  const signal = typeof AbortSignal !== "undefined" && AbortSignal.timeout
+    ? AbortSignal.timeout(Math.max(1, Number(timeoutMs) || 8000)) : undefined;
   const res = await fetchImpl(`${baseUrl(daemonUrl)}/json_rpc`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: "block", method: "get_block", params: { height } }),
+    signal,
   });
   const j = await res.json();
   // A BUSY ANSWER IS NOT AN EMPTY BLOCK. The daemon answers BUSY while it is still indexing; a reader that treats
@@ -281,11 +286,14 @@ export async function fetchBlock(daemonUrl, height, fetchImpl = globalThis.fetch
 
 // Transactions by hash list. We hit the PATH /get_transactions, not /json_rpc: over JSON-RPC this method
 // silently returns empty, which looks like "no transactions".
-export async function fetchTransactions(daemonUrl, hashes, fetchImpl = globalThis.fetch) {
+export async function fetchTransactions(daemonUrl, hashes, fetchImpl = globalThis.fetch, timeoutMs = 8000) {
   if (!hashes.length) return [];
+  const signal = typeof AbortSignal !== "undefined" && AbortSignal.timeout
+    ? AbortSignal.timeout(Math.max(1, Number(timeoutMs) || 8000)) : undefined;
   const res = await fetchImpl(`${baseUrl(daemonUrl)}/get_transactions`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ txs_hashes: hashes, decode_as_json: true }),
+    signal,
   });
   const j = await res.json();
   // A BUSY ANSWER IS NOT AN EMPTY BLOCK. The daemon says BUSY while it is still indexing; returning [] would turn

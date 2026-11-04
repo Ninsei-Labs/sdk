@@ -366,7 +366,7 @@ export function sellWatchTimeoutMs({ configuredMs = 1_200_000, readyBySec = null
   return Math.max(configured, (readyAt - now + SELL_WATCH_MARGIN_SEC) * 1000);
 }
 
-export function createSwaps({ preflight, http, createRecord, mode = null, xmrNetwork = null, call = null, store = engine.store,
+export function createSwaps({ preflight, http, createRecord, mode = null, xmrNetwork = null, call = null, now = null, store = engine.store,
   // THE PATHS AND LIMITS ARE BROUGHT BY THE CONFIGURATION: the "server" step's paths are named by names (config.route),
   // and the timeout and rate of the watch polling - in config.limits. Without the configuration the step answers with a
   // code rather than following invented paths.
@@ -1134,6 +1134,21 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
             norm(request.orderQuote.commitHalfClaimer) !== norm(verifiedCommit) ||
             norm(request.orderQuote.edPointClaimer) !== norm(verifiedPoint)) {
           throw new SdkError("quote-refused", { step: "quote-binding", why: "counterparty-half" });
+        }
+      }
+      // THE SIGNED QUOTE MUST STILL BE VALID WHEN THE MONEY MOVES. The proof and the record work take seconds; a
+      // quote that expired in that window would reach the wallet and revert at the factory. Check the signed field
+      // immediately before the send, with a small margin for the next block.
+      const validUntil = request.orderQuote && request.orderQuote.validUntil !== undefined
+        ? request.orderQuote.validUntil
+        : undefined;
+      if (validUntil !== undefined && validUntil !== null) {
+        const until = Number(validUntil);
+        // THE CLOCK IS THE SDK'S OWN SEAM, IN MILLISECONDS, LIKE EVERY OTHER NOW IN THE FACADE.
+        const nowMs = typeof now === "function" ? Number(now()) : Date.now();
+        const nowSec = Math.floor(nowMs / 1000);
+        if (!Number.isSafeInteger(until) || !Number.isSafeInteger(nowSec) || until <= nowSec + 30) {
+          throw new SdkError("quote-expired", { validUntil: Number.isFinite(until) ? until : null, now: Number.isFinite(nowSec) ? nowSec : null, marginSec: 30, step: "lock" });
         }
       }
       lockRequest.quote = request.orderQuote || null;
