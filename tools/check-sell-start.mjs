@@ -97,6 +97,20 @@ try {
     "a foreign commitment is refused");
 }
 
+// THE WHOLE COMMITMENT IS THE IDENTITY. A quote that matches only the low 160 bits is a different commitment;
+// `findSwaps` compares all 32 bytes, so accepting this record would make the sale invisible to a words search.
+{
+  const sameLow = "0x" + "ff".repeat(12) + ownCommit.slice(2).slice(24);
+  try {
+    await swaps.startSell({ offer: { ...offer, escrow: "0x" + "f1".repeat(20),
+      quote: { ...quote, id: "oq_high_bits", commitHalfClaimer: sameLow } }, recoveryKey: mnemonic, onRecoveryKey: accept });
+    check(false, "a high-bit commitment passed");
+  } catch (error) {
+    check(error && error.code === "quote-refused" && error.params && error.params.why === "commitment",
+      "a commitment that differs above the low 160 bits is refused");
+  }
+}
+
 // A RELAY ANSWER IS NOT A FUNDED ESCROW: the gate must refuse before the person sees "send-xmr".
 const gateRead = (statusWord, slotOverride = {}) => async ({ data }) => {
   if (data === encodeStatus()) return "0x" + word(statusWord) + word(0) + word(0) + word(0);

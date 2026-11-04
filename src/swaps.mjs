@@ -1495,8 +1495,10 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
           return "0x" + Array.from(keccak256(point.toBytes(false).slice(1)), (b) => b.toString(16).padStart(2, "0")).join("");
         } catch { return null; }
       })();
-      const low160 = (v) => String(v || "").replace(/^0x/, "").toLowerCase().slice(-40);
-      if (!ownCommit || low160(ownCommit) !== low160(quote.commitHalfClaimer)) {
+      // THE WHOLE COMMITMENT, NOT ITS LOW 160 BITS. `findSwaps` compares all 32 bytes, so a bid whose high 96 bits
+      // differ would be invisible to a words-only search while `startSell` accepted it.
+      const fullHex = (v) => String(v || "").replace(/^0x/, "").toLowerCase();
+      if (!ownCommit || fullHex(ownCommit) !== fullHex(quote.commitHalfClaimer)) {
         throw new SdkError("quote-refused", { step: "sell-record", why: "commitment" });
       }
       if (String(own.spendPoint).toLowerCase() !== String(quote.edPointClaimer || "").toLowerCase()) {
