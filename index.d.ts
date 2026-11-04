@@ -1885,6 +1885,8 @@ export type ErrorCode =
   | "quote-factory-mismatch"
   /** The factory's runtime code is not a build this interface knows (`extcodehash`). */
   | "quote-factory-code-unknown"
+  /** The signed quote names a cashier other than the network's vault. */
+  | "quote-cashier-mismatch"
   | "recovery-declined"
   | "recovery-failed"
   | "storage-unavailable"

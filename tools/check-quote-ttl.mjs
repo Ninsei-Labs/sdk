@@ -37,22 +37,26 @@ function signedQuote(validUntil) {
   return quote;
 }
 
-async function firmWith(validUntil) {
+async function firmWith(validUntil, cashierPin = null) {
   const quote = quoteWith(validUntil);
+  const config = { route: () => "/orderQuote" };
+  if (cashierPin) config.settlement = { chain: { escrow: { cashier: cashierPin } } };
   const sdk = createQuotes({
-    config: { route: () => "/orderQuote" },
+    config,
     now,
     http: { async tryJson() { return { ok: true, body: { ok: true, quote } }; } },
   });
   return sdk.firm({ providerId: "p", order: { locker: quote.locker } }).catch((error) => error);
 }
 
-async function saleWith(validUntil, signed = false) {
+async function saleWith(validUntil, signed = false, cashierPin = null) {
   const quote = signed ? signedQuote(validUntil) : quoteWith(validUntil);
   const ticket = { ok: true, handoff: { quote }, claimTip: { wei: quote.claimTip, signed: true } };
   let reads = 0;
+  const config = { route: () => "/order-sell" };
+  if (cashierPin) config.settlement = { chain: { escrow: { cashier: cashierPin } } };
   const sdk = createQuotes({
-    config: { route: () => "/order-sell" },
+    config,
     now,
     http: { async tryJson() { return { ok: true, body: ticket }; } },
     evmBlock: async () => ({ baseFeePerGas: 100_000_000n, gasPrice: 100_000_000n }),
@@ -85,6 +89,16 @@ for (const value of [null, undefined]) {
   const sale = await saleWith(value);
   check(sale && sale.code === "quote-field-unbound",
     `sale quote validUntil=${JSON.stringify(value)} answered ${JSON.stringify(sale && (sale.code || "a ticket"))}`);
+}
+
+// A CASHIER THAT IS NOT THE NETWORK VAULT IS REFUSED ON BOTH DIRECT ENTRY POINTS.
+for (const [name, work] of [
+  ["firm", (pin) => firmWith(nowSec + 600, pin)],
+  ["sale", (pin) => saleWith(nowSec + 600, false, pin)],
+]) {
+  const got = await work(addr("99"));
+  check(got && got.code === "quote-cashier-mismatch",
+    `${name} accepted a foreign cashier: ${JSON.stringify(got && (got.code || "a quote"))}`);
 }
 
 // A future TTL must pass the expiry gate and fail at the NEXT named step. The direct fixture has no valid

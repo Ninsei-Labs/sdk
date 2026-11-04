@@ -34,6 +34,7 @@ const provider = "0x" + "a1".repeat(20);
 const registry = "0x" + "c3".repeat(20);
 const user = "0x" + "b2".repeat(20);
 const factory = "0x" + "11".repeat(20);
+const cashier = "0x40515449159EfbCb5eF5eB9e2E08ba432E150a1C";
 const predictedEscrow = "0x" + "dd".repeat(20);
 const nowSec = Math.floor(Date.now() / 1000);
 const mnemonic = createRecoveryKey().mnemonic;
@@ -87,7 +88,7 @@ function signRelay(answer) {
     + Buffer.from(sig.slice(33, 65)).toString("hex")
     + (27 + sig[0]).toString(16);
 }
-function answerFor(payload, { tamperProof = false } = {}) {
+function answerFor(payload, { tamperProof = false, cashierAddress = cashier } = {}) {
   const orderTerm = payload.terms.order;
   const context = engine.orderContext.orderContextString(orderTerm);
   const ask = payload.terms.side === "ask";
@@ -102,7 +103,7 @@ function answerFor(payload, { tamperProof = false } = {}) {
     provider: payload.terms.maker,
     quoteKey,
     registry: payload.terms.registry,
-    cashier: "0x" + "55".repeat(20),
+    cashier: cashierAddress,
     locker: orderTerm.locker,
     claimer: orderTerm.claimer,
     amount: orderTerm.amount,
@@ -152,7 +153,7 @@ function answerFor(payload, { tamperProof = false } = {}) {
   };
 }
 
-function relayFetch({ tamperProof = false } = {}) {
+function relayFetch({ tamperProof = false, cashierAddress = cashier } = {}) {
   const bodies = [];
   return {
     bodies,
@@ -163,14 +164,14 @@ function relayFetch({ tamperProof = false } = {}) {
       const body = JSON.parse(init.body);
       bodies.push(body);
       const payload = JSON.parse(body.payload);
-      return { ok: true, status: 200, json: async () => answerFor(payload, { tamperProof }) };
+      return { ok: true, status: 200, json: async () => answerFor(payload, { tamperProof, cashierAddress }) };
     },
   };
 }
 
-function makeQuotes({ providerWord = provider, factoryWord = factory } = {}) {
+function makeQuotes({ providerWord = provider, factoryWord = factory, cashierPin = cashier } = {}) {
   return createQuotes({
-    config: {},
+    config: { settlement: { chain: { escrow: cashierPin ? { cashier: cashierPin } : {} } } },
     now: () => nowSec * 1000,
     evmCall: async ({ data }) => {
       if (data.startsWith(providerSelector)) return word(providerWord);
@@ -295,6 +296,25 @@ try {
 } catch (error) {
   if (error && error.code === "quote-refused" && error.params && error.params.code === "price_changed") ok("the relay refusal keeps its code");
   else bad("wrong refusal: " + JSON.stringify(error && (error.code || error.message)));
+}
+
+console.log("=== 7) A FOREIGN CASHIER IS REFUSED ===");
+try {
+  await call(makeQuotes(), { fetchImpl: relayFetch({ cashierAddress: "0x" + "66".repeat(20) }).fetchImpl });
+  bad("a quote with a foreign cashier passed");
+} catch (error) {
+  if (error && error.code === "quote-cashier-mismatch") ok("a quote with a foreign cashier is refused");
+  else bad("wrong foreign-cashier code: " + JSON.stringify(error && (error.code || error.message)));
+}
+
+console.log("=== 8) A CHAIN PROFILE WITHOUT A VAULT IS REFUSED ===");
+try {
+  await call(makeQuotes({ cashierPin: null }), { fetchImpl: relayFetch().fetchImpl });
+  bad("a profile without a pinned cashier passed");
+} catch (error) {
+  if (error && error.code === "quote-cashier-mismatch" && error.params && error.params.why === "no-pinned-cashier") {
+    ok("a profile without a pinned cashier is refused");
+  } else bad("wrong missing-cashier code: " + JSON.stringify(error && (error.code || error.message)));
 }
 
 console.log("");
