@@ -1462,6 +1462,23 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       if (!saved && !supplied) throw new SdkError("bad-input", { field: "recoveryKey" });
       const key = saved || importRecoveryKey(supplied);
       if (!saved) saveRecoveryKey(storage, { ...key, backupConfirmed: false });
+      // A SELL CARRIES THE SAME KEY AS A BUY, SO IT NEEDS THE SAME BACKUP GATE. The one-time XMR address is the
+      // moment the seller can lose money; handing it out before the twelve words are saved turns a closed tab into
+      // an unrecoverable sale. The buy path already refuses to fund until this flag is true.
+      if (!saved || saved.backupConfirmed !== true) {
+        if (typeof request.onRecoveryKey !== "function") throw new SdkError("bad-input", { field: "onRecoveryKey" });
+        let file = null;
+        try {
+          file = {
+            name: recoveryKeyFileName(key),
+            contents: await createRecoveryKeyFile({ mnemonic: key.mnemonic, createdAt: key.createdAt, passphrase: request.passphrase }),
+          };
+        } catch { throw new SdkError("recovery-failed", { step: "encrypt-key" }); }
+        const confirmed = await request.onRecoveryKey(file);
+        if (confirmed !== true) throw new SdkError("recovery-declined", { key: key.fingerprint });
+        try { saveRecoveryKey(storage, { ...key, backupConfirmed: true }); }
+        catch { throw new SdkError("storage-unavailable", { step: "save-recovery-key" }); }
+      }
       const chainId = Number(order.chainId);
       if (!Number.isSafeInteger(chainId) || chainId <= 0) throw new SdkError("bad-input", { field: "order.chainId" });
       if (!order.factory || order.salt === undefined || order.salt === null) throw new SdkError("bad-input", { field: "order" });

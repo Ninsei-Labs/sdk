@@ -67,19 +67,20 @@ const read = async ({ data }) => {
   return "0x" + answer;
 };
 const swaps = createSwaps({ config: {}, call: read });
+const accept = async () => true;
 try {
-  const first = await swaps.startSell({ offer, recoveryKey: mnemonic });
+  const first = await swaps.startSell({ offer, recoveryKey: mnemonic, onRecoveryKey: accept });
   check(first.side === "sell" && first.escrow === escrow && first.address === offer.jointAddress,
     "the record carries the escrow and the one-time address");
   check(first.xmrAmount === quote.xmrAmount && first.next === "send-xmr", "the amount and the next step are named");
-  const again = await swaps.startSell({ offer, recoveryKey: mnemonic });
+  const again = await swaps.startSell({ offer, recoveryKey: mnemonic, onRecoveryKey: accept });
   check(again.resumed === true && again.id === first.id, "the same offer resumes the same record");
 } catch (error) {
   check(false, "startSell failed: " + JSON.stringify(error && (error.code || error.message)) + " " + JSON.stringify(error && error.params));
 }
 
 try {
-  await swaps.startSell({ offer: { ...offer, quote: { ...quote, commitHalfClaimer: "0x" + "00".repeat(32) } }, recoveryKey: mnemonic });
+  await swaps.startSell({ offer: { ...offer, quote: { ...quote, commitHalfClaimer: "0x" + "00".repeat(32) } }, recoveryKey: mnemonic, onRecoveryKey: accept });
   check(false, "a changed offer passed a retry");
 } catch (error) {
   check(error && error.code === "quote-refused" && error.params && error.params.why === "offer-changed",
@@ -89,7 +90,7 @@ try {
 try {
   const other = { ...offer, quote: { ...quote, id: "oq_sell_other", commitHalfClaimer: "0x" + "00".repeat(32) },
     escrow: "0x" + "ee".repeat(20), jointAddress: "5" + "A".repeat(94) };
-  await swaps.startSell({ offer: other, recoveryKey: mnemonic });
+  await swaps.startSell({ offer: other, recoveryKey: mnemonic, onRecoveryKey: accept });
   check(false, "a foreign commitment passed");
 } catch (error) {
   check(error && error.code === "quote-refused" && error.params && error.params.why === "commitment",
@@ -107,7 +108,7 @@ const gateOffer = { ...offer, escrow: "0x" + "ef".repeat(20), quote: { ...quote,
   jointAddress: "5" + "B".repeat(94) };
 try {
   const unfunded = createSwaps({ config: {}, call: gateRead(0) });
-  await unfunded.startSell({ offer: gateOffer, recoveryKey: mnemonic });
+  await unfunded.startSell({ offer: gateOffer, recoveryKey: mnemonic, onRecoveryKey: accept });
   check(false, "an unfunded escrow passed the send gate");
 } catch (error) {
   check(error && error.code === "quote-refused" && error.params && error.params.why === "escrow-not-open",
@@ -117,11 +118,26 @@ try {
   const slotsRead = gateRead(1, { [encodeRead("commitHalfLocker")]: bytes("0x" + "00".repeat(32)) });
   const wrongSlots = createSwaps({ config: {}, call: slotsRead });
   await wrongSlots.startSell({ offer: { ...gateOffer, escrow: "0x" + "fa".repeat(20),
-    quote: { ...gateOffer.quote, id: "oq_gate_slots" }, jointAddress: "5" + "C".repeat(94) }, recoveryKey: mnemonic });
+    quote: { ...gateOffer.quote, id: "oq_gate_slots" }, jointAddress: "5" + "C".repeat(94) }, recoveryKey: mnemonic, onRecoveryKey: accept });
   check(false, "a foreign locker commitment passed the send gate");
 } catch (error) {
   check(error && error.code === "contract-reverted" && error.params && error.params.step === "send-xmr",
     "a mismatch between escrow slots and the verified offer is refused");
+}
+
+// A SELL MUST NOT HAND OUT THE ONE-TIME ADDRESS BEFORE THE KEY IS SAVED. A fresh mnemonic and a fresh storage make
+// the backup prompt unavoidable; a declined answer stops before any record reaches send-xmr.
+{
+  const { setStorage, memoryStorage } = await import("../engine/core/store.js");
+  setStorage(memoryStorage());
+  const fresh = createRecoveryKey();
+  try {
+    await createSwaps({ config: {}, call: read }).startSell({ offer, recoveryKey: fresh.mnemonic,
+      onRecoveryKey: async () => false });
+    check(false, "a declined sell backup passed");
+  } catch (error) {
+    check(error && error.code === "recovery-declined", "a declined sell backup is refused");
+  }
 }
 
 if (problems.length) {
