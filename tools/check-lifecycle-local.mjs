@@ -83,9 +83,10 @@ const codeOf = async (work) => {
 const originalStore = memoryStorage();
 setStorage(originalStore);
 const firstSwaps = createSwaps({ config: {}, call: read });
+const accept = async () => true;
 let first = null;
 try {
-  first = await firstSwaps.startSell({ offer, recoveryKey: mnemonic });
+  first = await firstSwaps.startSell({ offer, recoveryKey: mnemonic, onRecoveryKey: accept });
   ok(first && first.side === "sell" && first.escrow === escrow, "the first start records the sell");
 } catch (error) {
   ok(false, "first start failed: " + JSON.stringify(error && (error.code || error.message)));
@@ -96,7 +97,7 @@ try {
 if (first) {
   const restarted = createSwaps({ config: {}, call: read });
   const again = await codeOf(async () => {
-    const result = await restarted.startSell({ offer, recoveryKey: mnemonic });
+    const result = await restarted.startSell({ offer, recoveryKey: mnemonic, onRecoveryKey: accept });
     ok(result.resumed === true && result.id === first.id, "a restarted client resumes the same record");
     const list = await restarted.list();
     ok(list.length === 1, "a restart did not create a second record");
@@ -112,7 +113,7 @@ if (first) {
   const tracedRead = async ({ data }) => { trace.push(data); return read({ data }); };
   const traced = createSwaps({ config: {}, call: tracedRead });
   try {
-    await traced.startSell({ offer, recoveryKey: mnemonic });
+    await traced.startSell({ offer, recoveryKey: mnemonic, onRecoveryKey: accept });
     const required = [encodeStatus(), encodeRead("t1"), encodeRead("readyBy"), encodeRead("termsHash"),
       encodeRead("edPointLocker"), encodeRead("edPointClaimer"), encodeRead("edViewPointLocker"),
       encodeRead("commitHalfLocker"), encodeRead("commitHalfClaimer")];
@@ -132,7 +133,7 @@ if (first) {
     return read({ data });
   };
   const failed = createSwaps({ config: {}, call: failingRead });
-  const got = await codeOf(() => failed.startSell({ offer, recoveryKey: mnemonic }));
+  const got = await codeOf(() => failed.startSell({ offer, recoveryKey: mnemonic, onRecoveryKey: accept }));
   ok(got && got.code === "quote-refused" && got.params && got.params.why === "escrow-unreadable",
     "an unreadable escrow is a named refusal");
   const list = await failed.list();
@@ -144,7 +145,7 @@ if (first) {
 if (first) {
   setStorage(originalStore);
   const changed = { ...offer, quote: { ...quote, commitHalfClaimer: "0x" + "00".repeat(32) } };
-  const got = await codeOf(() => firstSwaps.startSell({ offer: changed, recoveryKey: mnemonic }));
+  const got = await codeOf(() => firstSwaps.startSell({ offer: changed, recoveryKey: mnemonic, onRecoveryKey: accept }));
   ok(got && got.code === "quote-refused" && got.params && got.params.why === "offer-changed",
     "a changed offer is refused after a restart");
 }
@@ -153,7 +154,7 @@ if (first) {
 {
   setStorage({ get() { throw new Error("denied"); }, set() {}, remove() {} });
   const unreadable = createSwaps({ config: {}, call: read });
-  const got = await codeOf(() => unreadable.startSell({ offer, recoveryKey: mnemonic }));
+  const got = await codeOf(() => unreadable.startSell({ offer, recoveryKey: mnemonic, onRecoveryKey: accept }));
   ok(got && got.code === "storage-unavailable" && got.params && got.params.step === "read",
     "an unreadable store is a named storage refusal");
   setStorage(memoryStorage());

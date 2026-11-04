@@ -1095,6 +1095,10 @@ export interface SellStartRequest {
   readonly offer: FirmRelayAnswer;
   /** The twelve-word key; required only when no key is stored yet. */
   readonly recoveryKey?: string | { readonly mnemonic: string };
+  /** The recovery file's passphrase. In memory; the interface puts it on disk if it deems fit. */
+  readonly passphrase?: string;
+  /** Asked when the key is new or not yet confirmed. Returning anything but `true` refuses before `send-xmr`. */
+  onRecoveryKey?(file: RecoveryFile): Promise<boolean>;
 }
 
 export interface SellStart {
@@ -1127,12 +1131,14 @@ export interface SellWatchRequest {
 
 export interface SellWatchResult {
   readonly escrow: string;
-  readonly state: "ready" | "claimed" | "refunded";
+  readonly state: "ready" | "claim-open" | "claimed" | "refunded";
   readonly funded: boolean;
   readonly claimed: boolean;
   readonly refunded: boolean;
   /** `null` for a terminal claim/refund: the ready mark is not part of that answer. */
   readonly ready: boolean | null;
+  /** True when the escrow's readyBy has passed and no ready mark or terminal action was seen. */
+  readonly claimOpen: boolean;
   readonly balanceWei: string;
   readonly waitedMs: number;
 }

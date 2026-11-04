@@ -1462,6 +1462,23 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       if (!saved && !supplied) throw new SdkError("bad-input", { field: "recoveryKey" });
       const key = saved || importRecoveryKey(supplied);
       if (!saved) saveRecoveryKey(storage, { ...key, backupConfirmed: false });
+      // A SELL CARRIES THE SAME KEY AS A BUY, SO IT NEEDS THE SAME BACKUP GATE. The one-time XMR address is the
+      // moment the seller can lose money; handing it out before the twelve words are saved turns a closed tab into
+      // an unrecoverable sale. The buy path already refuses to fund until this flag is true.
+      if (!saved || saved.backupConfirmed !== true) {
+        if (typeof request.onRecoveryKey !== "function") throw new SdkError("bad-input", { field: "onRecoveryKey" });
+        let file = null;
+        try {
+          file = {
+            name: recoveryKeyFileName(key),
+            contents: await createRecoveryKeyFile({ mnemonic: key.mnemonic, createdAt: key.createdAt, passphrase: request.passphrase }),
+          };
+        } catch { throw new SdkError("recovery-failed", { step: "encrypt-key" }); }
+        const confirmed = await request.onRecoveryKey(file);
+        if (confirmed !== true) throw new SdkError("recovery-declined", { key: key.fingerprint });
+        try { saveRecoveryKey(storage, { ...key, backupConfirmed: true }); }
+        catch { throw new SdkError("storage-unavailable", { step: "save-recovery-key" }); }
+      }
       const chainId = Number(order.chainId);
       if (!Number.isSafeInteger(chainId) || chainId <= 0) throw new SdkError("bad-input", { field: "order.chainId" });
       if (!order.factory || order.salt === undefined || order.salt === null) throw new SdkError("bad-input", { field: "order" });
@@ -1478,8 +1495,10 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
           return "0x" + Array.from(keccak256(point.toBytes(false).slice(1)), (b) => b.toString(16).padStart(2, "0")).join("");
         } catch { return null; }
       })();
-      const low160 = (v) => String(v || "").replace(/^0x/, "").toLowerCase().slice(-40);
-      if (!ownCommit || low160(ownCommit) !== low160(quote.commitHalfClaimer)) {
+      // THE WHOLE COMMITMENT, NOT ITS LOW 160 BITS. `findSwaps` compares all 32 bytes, so a bid whose high 96 bits
+      // differ would be invisible to a words-only search while `startSell` accepted it.
+      const fullHex = (v) => String(v || "").replace(/^0x/, "").toLowerCase();
+      if (!ownCommit || fullHex(ownCommit) !== fullHex(quote.commitHalfClaimer)) {
         throw new SdkError("quote-refused", { step: "sell-record", why: "commitment" });
       }
       if (String(own.spendPoint).toLowerCase() !== String(quote.edPointClaimer || "").toLowerCase()) {
@@ -1579,6 +1598,16 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
           timeoutMs = sellWatchTimeoutMs({ configuredMs: timeoutMs, readyBySec: deadlines.readyBy });
         } catch { /* no deadline read: keep the configured wait */ }
       }
+      // THE CLAIM OPENS AT readyBy WITHOUT A MARK. The deadline comes from the escrow once; the clock is the
+      // facade's own millisecond seam, so a simulation and a caller that controls time agree with the rest of
+      // the SDK. A failed deadline read does not invent a claim window.
+      let deadlines = null;
+      try { deadlines = await flow.orderDeadlines(escrow, { call: reader }); }
+      catch { /* no deadline: the wait keeps its configured timeout and never reports claim-open */ }
+      const nowSec = () => {
+        const at = typeof now === "function" ? Number(now()) : Date.now();
+        return Number.isFinite(at) ? Math.floor(at / 1000) : null;
+      };
       const started = Date.now();
       let lastStatus = null;
       let lastError = null;
@@ -1588,7 +1617,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         if (lastStatus && (lastStatus.isClaimed || lastStatus.isRefunded)) {
           return { escrow, state: lastStatus.isClaimed ? "claimed" : "refunded",
             funded: lastStatus.isFunded, claimed: lastStatus.isClaimed, refunded: lastStatus.isRefunded,
-            ready: null, balanceWei: String(lastStatus.balance), waitedMs: Date.now() - started };
+            ready: null, claimOpen: false, balanceWei: String(lastStatus.balance), waitedMs: Date.now() - started };
         }
         if (lastStatus && lastStatus.isFunded) {
           let ready = null;
@@ -1599,7 +1628,16 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
           } catch (error) { lastError = (error && error.code) || "ready-unread"; }
           if (ready === true) {
             return { escrow, state: "ready", funded: true, claimed: false, refunded: false,
-              ready: true, balanceWei: String(lastStatus.balance), waitedMs: Date.now() - started };
+              ready: true, claimOpen: false, balanceWei: String(lastStatus.balance), waitedMs: Date.now() - started };
+          }
+        }
+        // AFTER readyBy THE CLAIM IS OPEN EVEN WITHOUT THE NODE'S READY MARK. The order is funded, no terminal
+        // action was seen, and the escrow's own deadline has passed; the seller can claim the ETH now.
+        if (lastStatus && lastStatus.isFunded && deadlines && Number.isSafeInteger(Number(deadlines.readyBy))) {
+          const at = nowSec();
+          if (at !== null && at >= Number(deadlines.readyBy)) {
+            return { escrow, state: "claim-open", funded: true, claimed: false, refunded: false,
+              ready: false, claimOpen: true, balanceWei: String(lastStatus.balance), waitedMs: Date.now() - started };
           }
         }
         if (Date.now() - started >= timeoutMs) {

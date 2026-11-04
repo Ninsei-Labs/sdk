@@ -37,6 +37,9 @@ export async function requestFirmQuote({
 } = {}) {
   const base = String(relayUrl === undefined || relayUrl === null ? "" : relayUrl).trim().replace(/\/+$/, "");
   if (!base) throw new SdkError("bad-input", { field: "relayUrl" });
+  // A QUOTE IS SIGNED FOR A RELAY ORIGIN, NOT FOR A PLAIN-TEXT HOP. An http:// base would let any middlebox read
+  // the sealed view material and change the relay's answer before the signature check.
+  if (!/^https:\/\//i.test(base)) throw new SdkError("bad-input", { field: "relayUrl", why: "not-https" });
 
   const built = await buildFirmRequest(request);
   const body = JSON.stringify({
@@ -110,7 +113,10 @@ export async function requestFirmQuote({
   if (!partner && String(published.feeBps) !== String(verified.quote.feeBps)) {
     throw new SdkError("quote-refused", { step: "fee", why: "fee-bps" });
   }
-  if (published.relayId !== undefined && published.relayId !== null && String(published.relayId) !== String(response.body.relay)) {
+  // THE RELAY MUST NAME ITSELF. A missing id on GET /v1/relay is not "nothing to compare": the answer's relay
+  // label would then be accepted without the one check that binds it.
+  if (published.relayId === undefined || published.relayId === null
+    || String(published.relayId) !== String(response.body.relay)) {
     throw new SdkError("quote-refused", { step: "relay-info", why: "relay" });
   }
   return {

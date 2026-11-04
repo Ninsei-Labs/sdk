@@ -15,8 +15,8 @@ const word = (v) => "0x" + v.toString(16).padStart(64, "0");
 const problems = [];
 const check = (condition, message) => { if (condition) console.log("  ok    " + message); else problems.push(message); };
 
-function swapsWith(reader) {
-  return createSwaps({ config: {}, call: reader });
+function swapsWith(reader, options = {}) {
+  return createSwaps({ config: {}, call: reader, ...options });
 }
 
 console.log("=== 0) THE DEFAULT WAIT COVERS THE READY DEADLINE ===");
@@ -48,17 +48,18 @@ try {
 console.log("=== 2) TERMINAL STATES END THE WAIT ===");
 for (const [claimed, refunded, state] of [[true, false, "claimed"], [false, true, "refunded"]]) {
   try {
-    let calls = 0;
+    let statusCalls = 0;
     const quotes = swapsWith(async ({ data }) => {
-      calls += 1;
-      if (data === engine.evm.ESCROW_METHODS.status) return status(true, claimed, refunded, 0n);
+      if (data === engine.evm.ESCROW_METHODS.status) { statusCalls += 1; return status(true, claimed, refunded, 0n); }
       throw new Error("ready must not be asked for a terminal order " + data);
     });
     const result = await quotes.sellWatch({ escrow, pollMs: 1, timeoutMs: 1_000 });
-    check(result.state === state && calls === 1, "a " + state + " order ends the wait without reading ready");
+    check(result.state === state && statusCalls === 1, "a " + state + " order ends the wait without reading ready");
   } catch (error) { check(false, state + " path failed: " + JSON.stringify(error && (error.code || error.message))); }
 }
 
+// The reader deliberately throws on readyBy/t1 here: the deadline read fails, so this is a timeout and not a
+// claim-open scenario. A future mock that answers those selectors would turn this case into claim-open.
 console.log("=== 3) A WAIT THAT EXPIRES IS NAMED ===");
 try {
   const quotes = swapsWith(async ({ data }) => {
@@ -73,7 +74,27 @@ try {
     "an unready order ends with sell-timeout");
 }
 
-console.log("=== 4) THE ADDRESS IS REQUIRED ===");
+console.log("=== 4) THE CLAIM OPENS AT readyBy WITHOUT A MARK ===");
+try {
+  const readyBy = 1_700_000_000;
+  let calls = 0;
+  const reader = async ({ data }) => {
+    calls += 1;
+    if (data === engine.evm.ESCROW_METHODS.status) return status(true, false, false, 5n);
+    if (data === engine.evm.ESCROW_METHODS.ready) return word(0n);
+    if (data === engine.evm.ESCROW_METHODS.readyBy) return word(BigInt(readyBy));
+    if (data === engine.evm.ESCROW_METHODS.t1) return word(BigInt(readyBy + 3_600));
+    if (data === engine.evm.ESCROW_METHODS.termsHash) return "0x" + "00".repeat(32);
+    throw new Error("unexpected selector " + data);
+  };
+  const result = await swapsWith(reader, { now: () => (readyBy + 1) * 1000 })
+    .sellWatch({ escrow, pollMs: 1, timeoutMs: 2_000 });
+  check(result.state === "claim-open" && result.claimOpen === true && result.ready === false,
+    "a funded order past readyBy reports the open claim");
+  check(calls >= 1, "the open claim needs no extra wait");
+} catch (error) { check(false, "claim-open path failed: " + JSON.stringify(error && (error.code || error.message))); }
+
+console.log("=== 5) THE ADDRESS IS REQUIRED ===");
 try {
   await swapsWith(async () => word(0n)).sellWatch({ pollMs: 1, timeoutMs: 1 });
   check(false, "a missing escrow passed");

@@ -400,6 +400,24 @@ try {
   } else bad("the automatic retry changed the salt: " + JSON.stringify(salts));
 } catch (error) { bad("the automatic same-salt retry failed: " + JSON.stringify(error && (error.code || error.message))); }
 
+console.log("=== 4c) THE RELAY ORIGIN AND ID ARE REQUIRED ===");
+try {
+  await call({ relayUrl: "http://relay.example/", fetchImpl: fakeFetch({ body: relayBody(makeAnswer(built)) }).fetchImpl });
+  bad("an http relay origin passed");
+} catch (error) {
+  if (error && error.code === "bad-input" && error.params && error.params.field === "relayUrl") ok("a plain-text relay origin is refused");
+  else bad("http relay origin returned " + JSON.stringify(error && (error.code || error.message)));
+}
+try {
+  const missingId = fakeFetch({ body: relayBody(makeAnswer(built)),
+    relay: { version: 1, feeRecipient: "0x" + "99".repeat(20), feeBps: "0" } });
+  await call({ fetchImpl: missingId.fetchImpl });
+  bad("a relay without relayId passed");
+} catch (error) {
+  if (error && error.code === "quote-refused" && error.params && error.params.why === "relay") ok("a missing relay id is refused");
+  else bad("missing relay id returned " + JSON.stringify(error && (error.code || error.message)));
+}
+
 console.log("=== 5) BREAKING RUN: A DROPPED REFUSAL CODE IS CAUGHT ===");
 {
   const sourcePath = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "relayFirmClient.mjs");
