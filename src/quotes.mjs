@@ -52,6 +52,25 @@ const addressFromWord = (raw) => {
   return h.length >= 40 ? "0x" + h.slice(-40).toLowerCase() : null;
 };
 
+// THE CASHIER IS THE NETWORK'S VAULT, NOT A FIELD THE MAKER MAY CHOOSE. The escrow binds it at birth, but the
+// client must refuse an answer before it funds or sends XMR: a look-alike vault with the canonical runtime and
+// crafted storage would pass the escrow's code check and make every claim revert after the payout.
+const pinnedCashier = (config) => {
+  const chain = config && config.settlement && config.settlement.chain;
+  const value = chain && chain.escrow && chain.escrow.cashier;
+  return typeof value === "string" && /^0x[0-9a-fA-F]{40}$/.test(value) ? value.toLowerCase() : null;
+};
+const requirePinnedCashier = (quote, step, config) => {
+  const chain = config && config.settlement && config.settlement.chain;
+  const pin = pinnedCashier(config);
+  // A caller without a network profile has nothing to compare against. A profile that names a chain but no vault
+  // is a broken profile, not a free pass: refuse it before a quote can be funded.
+  if (!pin && !chain) return;
+  const got = String(quote && quote.cashier || "").toLowerCase();
+  if (!pin) fail("quote-cashier-mismatch", { step, why: "no-pinned-cashier", got: got || null });
+  if (got !== pin) fail("quote-cashier-mismatch", { step, got: got || null, want: pin });
+};
+
 const num = (v) => (v === undefined || v === null || v === "" ? null : (Number.isFinite(Number(v)) ? Number(v) : null));
 const pairAsset = (pair) => String(pair || "").split("/")[0].toUpperCase();
 const pairCurrency = (pair) => String(pair || "").split("/")[1] ? String(pair).split("/")[1].toUpperCase() : "";
@@ -424,6 +443,7 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
       const ticket = res.body;
       const quote = (ticket.handoff && ticket.handoff.quote) || ticket.quote || null;
       if (!quote || typeof quote !== "object") fail("quote-field-unbound", { step: "order-sell", field: "quote" });
+      requirePinnedCashier(quote, "order-sell", config);
       // THE SALE TICKET IS A SIGNED QUOTE, AND IT GETS THE SAME GATES AS `firm`: every field of the signed set,
       // its expiry, the EIP-712 signature and the named key, the registry's provider mapping, the interface's
       // allow-list, and the factory/implementation policy. The one difference is the binding below: a sale has no
@@ -654,6 +674,7 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
       }
       const body = res.body;
       const quote = body.quote;
+      requirePinnedCashier(quote, "order-quote", config);
       // THE MAKER'S VIEW HALF IS OURS, NOT THE NODE'S CHOICE. When the caller supplies it, the quote must carry the
       // same scalar back; otherwise the maker used another half and the joint view key cannot be rebuilt from the key.
       if (viewHalfClaimer !== null) {
@@ -937,6 +958,7 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
         side,
       });
       const quote = result.quote;
+      requirePinnedCashier(quote, "relay", config);
       // THE NODE HALF IS NOT A DECORATION. The answer's proof must stand in THIS order's context and the proven
       // point must be the one the quote commits to. For ask that is the claimer's commitment; for bid the node
       // half is the locker's and carries its own commitment. This is the same engine check the swap path uses.

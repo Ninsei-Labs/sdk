@@ -83,10 +83,12 @@ export const ERROR_CODES = [
   //   quote-factory-unknown      - the record names no factory (zero);
   //   quote-factory-mismatch     - the signed quote names a DIFFERENT factory than the record;
   //   quote-factory-code-unknown - the factory's code is not a build this interface knows.
+  //   quote-cashier-mismatch - the signed quote names a cashier other than the network's vault.
   "quote-factory-unchecked",
   "quote-factory-unknown",
   "quote-factory-mismatch",
   "quote-factory-code-unknown",
+  "quote-cashier-mismatch",
   "recovery-declined",
   "recovery-failed",
   "storage-unavailable",
@@ -173,6 +175,7 @@ export const ERROR_META = Object.freeze({
   "quote-factory-unknown": { retryable: false, side: "chain" },
   "quote-factory-mismatch": { retryable: false, side: "chain" },
   "quote-factory-code-unknown": { retryable: false, side: "chain" },
+  "quote-cashier-mismatch": { retryable: false, side: "chain" },
   "recovery-declined": { retryable: false, side: "wallet" },
   "recovery-failed": { retryable: false, side: "wallet" },
   "storage-unavailable": { retryable: true, side: "service" },
