@@ -482,9 +482,10 @@ jobs:
       # `CHECKS` and not to this workflow used to run only in the release workflow: storage, scan-range,
       # funding-receipt, sweep-window, sweep-order, sweep-adapter, claim-tip, claim-sender, quote-rank, provider,
       # compose, entries, version and settlement-profiles were in that position. This last step runs every
-      # registered check, so a new entry is covered on the day it lands; the named steps stay for diagnosis.
-      - name: Run every registered SDK check (the release battery)
-        run: pnpm run check
+      # registered check under NODE_V8_COVERAGE, so the battery and the coverage floor are one pass; the named
+      # steps stay for diagnosis.
+      - name: Run every registered SDK check and enforce coverage
+        run: pnpm run coverage
 
   dleq-oracle:
     name: Go/Rust DLEQ oracle
@@ -522,29 +523,6 @@ jobs:
           DLEQ_REQUIRE_RUST=1 \
           pnpm run check:dleq-oracle
 
-  # THE COVERAGE GATE IS A SEPARATE JOB, NOT A SECOND RUN INSIDE `checks`: it executes the same battery under
-  # NODE_V8_COVERAGE, then enforces the committed critical-file floors. It runs in parallel, so the named checks
-  # keep their own diagnostics and the gate still has its own result.
-  coverage:
-    name: Coverage gate
-    needs: checks
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-      - name: Set up pnpm (from packageManager)
-        uses: pnpm/action-setup@v6
-      - name: Set up Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: '24.22.1'
-          cache: pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Measure coverage and enforce the critical-file floors
-        run: pnpm run coverage
-
   # ONE REQUIRED CHECK FOR BRANCH PROTECTION. A repository can require this job instead of every leaf job; it
   # runs even when a dependency fails (`always()`), so a skipped or cancelled dependency cannot look like a pass.
   required:
@@ -552,7 +530,7 @@ jobs:
     # A draft run must not turn skipped dependencies into a red required check. On `ready_for_review` the draft
     # flag is false, and this job asserts the real results.
     if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
-    needs: [checks, dleq-oracle, coverage]
+    needs: [checks, dleq-oracle]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -560,4 +538,3 @@ jobs:
         run: |
           test "${{ needs.checks.result }}" = "success"
           test "${{ needs.dleq-oracle.result }}" = "success"
-          test "${{ needs.coverage.result }}" = "success"
