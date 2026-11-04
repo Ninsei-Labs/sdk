@@ -53,7 +53,9 @@ The host normally follows this sequence:
 1. Build the offer or choose the provider.
 2. Call the quote method for the flow (`quotes.firm`, `quotes.firmRelay` or `quotes.sale`).
 3. Show the signed terms and the recovery key to the person.
-4. Call `swaps.start` with the quote, the wallet and the confirmation that the recovery key is saved.
+4. Call `swaps.start` with the quote, the wallet and the confirmation that the recovery key is saved. A relay answer
+   carries `startRequest` with the quote, order, orderQuote, counterparty and recovery salt; add your wallet,
+   `receiveTo` and height and pass it through.
 5. Watch the Monero arrival with `swaps.watch`.
 6. Mark ready only after the arrival is confirmed; claiming and refunding are separate actions.
 

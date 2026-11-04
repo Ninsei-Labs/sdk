@@ -712,6 +712,15 @@ export interface FirmRelayAnswer {
   /** The escrow address predicted from the signed quote and the depositor's half. */
   readonly escrow: string;
   readonly recovery: { readonly kind: "salt-v2"; readonly salt: string };
+  /** Everything `swaps.start` can take from the relay; the caller adds its wallet, `receiveTo` and height. */
+  readonly startRequest: Readonly<{
+    quote: Readonly<Record<string, unknown>>;
+    order: Readonly<Record<string, unknown>>;
+    orderQuote: Readonly<Record<string, unknown>>;
+    counterparty: Readonly<Record<string, unknown>>;
+    recoveryKey: unknown;
+    recoverySalt: string;
+  }>;
   readonly relay: string | null;
   readonly offered: number | null;
   readonly forwarded: Readonly<Record<string, unknown>> | null;
