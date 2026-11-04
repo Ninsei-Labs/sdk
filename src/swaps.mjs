@@ -845,6 +845,15 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         ? Number(request.blockTimeSec) : limitOf("xmrBlockTimeSec", 120);
       const leadSec = Number.isFinite(Number(request.leadSec)) && Number(request.leadSec) >= 0
         ? Number(request.leadSec) : minConfirmations * blockTimeSec;
+      // THE WALK STARTS AT THE SWAP'S BIRTH, NEVER AT GENESIS. A missing height used to become block 0, so a refund
+      // check on a real chain would walk every block ever mined. The record carries the measured height; a caller
+      // that has neither an explicit height nor a record height is refused rather than given a scan of the whole chain.
+      const fromHeight = request.fromHeight !== undefined && request.fromHeight !== null
+        ? Number(request.fromHeight)
+        : Number(swap && (swap.restoreHeight ?? e.moneroRestoreHeight ?? e.restoreHeight));
+      if (!Number.isSafeInteger(fromHeight) || fromHeight <= 0) {
+        throw new SdkError("bad-input", { field: "fromHeight", why: "missing" });
+      }
       const nowSec = Number.isFinite(Number(request.nowSec)) ? Number(request.nowSec) : nowOf();
       const leftSec = Math.floor(readyBy - nowSec);
       // PAST `readyBy` THE EARLY WINDOW IS GONE and the claim window is open: refunding is no longer ours to open.
@@ -854,7 +863,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
 
       const verdict = await verify({
         nodes: request.nodes, address, viewSecret, spendPub, expectedAtomic, minConfirmations,
-        txid: request.txid || null, fromHeight: request.fromHeight === undefined ? null : request.fromHeight,
+        txid: request.txid || null, fromHeight,
         timeoutMs: request.timeoutMs, nowSec,
       });
       // THE XMR IS THERE - NOTHING IS REFUNDED. This is the decisive condition of the guard: without it the

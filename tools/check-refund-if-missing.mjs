@@ -22,6 +22,7 @@ const base = {
   spendPub: "0x" + "33".repeat(32),
   expect: { edPointLocker: slot, edPointClaimer: slot, edViewPointLocker: slot, commitHalfLocker: slot, commitHalfClaimer: slot },
   expectedAtomic: "1000000000000",
+  fromHeight: 100,
   readyBySec: now + 50,
   nowSec: now,
   leadSec: 100,
@@ -30,10 +31,12 @@ const base = {
 async function run(verdict, { request = {}, throws = false } = {}) {
   let refunds = 0;
   let checks = 0;
+  let args = null;
   try {
     const result = await createSwaps({}).refundIfXmrMissing({ ...base, ...request }, {
-      verify: async () => {
+      verify: async (next) => {
         checks += 1;
+        args = next;
         if (throws) throw new SdkError("xmr-no-nodes", { tried: ["node"] });
         return verdict;
       },
@@ -43,9 +46,9 @@ async function run(verdict, { request = {}, throws = false } = {}) {
       },
       now: () => now,
     });
-    return { result, refunds, checks };
+    return { result, refunds, checks, args };
   } catch (error) {
-    return { error, refunds, checks };
+    return { error, refunds, checks, args };
   }
 }
 
@@ -128,6 +131,20 @@ export const refundIfMissingCheck = async () => {
     const failures = error && error.params && Array.isArray(error.params.nodes) ? error.params.nodes : [];
     check(error && error.code === "xmr-no-nodes" && failures.some((n) => n.why === "partial-transactions"),
       "a partial get_transactions answer did not keep its refusal");
+  }
+
+  // THE HEIGHT COMES FROM THE REQUEST OR THE RECORD; IT NEVER BECOMES GENESIS.
+  {
+    const fromRecord = await run({ seen: false, state: "pending", absent: true }, {
+      request: { fromHeight: undefined, swap: { restoreHeight: 1234 } },
+    });
+    check(fromRecord.args && fromRecord.args.fromHeight === 1234, "the record height did not reach the walk");
+    const missing = await run({ seen: false, state: "pending", absent: true }, {
+      request: { fromHeight: undefined, swap: {} },
+    });
+    check(missing.error && missing.error.code === "bad-input" && missing.error.params && missing.error.params.field === "fromHeight",
+      "a missing height did not refuse");
+    check(missing.refunds === 0, "a missing height refunded");
   }
 
   // THE TIME RULES STAY IN FRONT OF THE CHECK.
