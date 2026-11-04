@@ -1596,6 +1596,16 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
           timeoutMs = sellWatchTimeoutMs({ configuredMs: timeoutMs, readyBySec: deadlines.readyBy });
         } catch { /* no deadline read: keep the configured wait */ }
       }
+      // THE CLAIM OPENS AT readyBy WITHOUT A MARK. The deadline comes from the escrow once; the clock is the
+      // facade's own millisecond seam, so a simulation and a caller that controls time agree with the rest of
+      // the SDK. A failed deadline read does not invent a claim window.
+      let deadlines = null;
+      try { deadlines = await flow.orderDeadlines(escrow, { call: reader }); }
+      catch { /* no deadline: the wait keeps its configured timeout and never reports claim-open */ }
+      const nowSec = () => {
+        const at = typeof now === "function" ? Number(now()) : Date.now();
+        return Number.isFinite(at) ? Math.floor(at / 1000) : null;
+      };
       const started = Date.now();
       let lastStatus = null;
       let lastError = null;
@@ -1605,7 +1615,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         if (lastStatus && (lastStatus.isClaimed || lastStatus.isRefunded)) {
           return { escrow, state: lastStatus.isClaimed ? "claimed" : "refunded",
             funded: lastStatus.isFunded, claimed: lastStatus.isClaimed, refunded: lastStatus.isRefunded,
-            ready: null, balanceWei: String(lastStatus.balance), waitedMs: Date.now() - started };
+            ready: null, claimOpen: false, balanceWei: String(lastStatus.balance), waitedMs: Date.now() - started };
         }
         if (lastStatus && lastStatus.isFunded) {
           let ready = null;
@@ -1616,7 +1626,16 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
           } catch (error) { lastError = (error && error.code) || "ready-unread"; }
           if (ready === true) {
             return { escrow, state: "ready", funded: true, claimed: false, refunded: false,
-              ready: true, balanceWei: String(lastStatus.balance), waitedMs: Date.now() - started };
+              ready: true, claimOpen: false, balanceWei: String(lastStatus.balance), waitedMs: Date.now() - started };
+          }
+        }
+        // AFTER readyBy THE CLAIM IS OPEN EVEN WITHOUT THE NODE'S READY MARK. The order is funded, no terminal
+        // action was seen, and the escrow's own deadline has passed; the seller can claim the ETH now.
+        if (lastStatus && lastStatus.isFunded && deadlines && Number.isSafeInteger(Number(deadlines.readyBy))) {
+          const at = nowSec();
+          if (at !== null && at >= Number(deadlines.readyBy)) {
+            return { escrow, state: "claim-open", funded: true, claimed: false, refunded: false,
+              ready: false, claimOpen: true, balanceWei: String(lastStatus.balance), waitedMs: Date.now() - started };
           }
         }
         if (Date.now() - started >= timeoutMs) {
