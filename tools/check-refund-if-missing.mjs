@@ -83,21 +83,51 @@ export const refundIfMissingCheck = async () => {
     check(got.refunds === 0, "a failed check called the refund");
   }
 
-  // THE ARRIVAL CHECK MARKS ONLY A COMPLETED WALK WITH NO TRANSACTION. Two nodes answer with empty blocks; the
-  // marker is what lets the refund rule above tell that apart from a payout that is merely still confirming.
+  // THE ARRIVAL CHECK MARKS ONLY TWO OPERATORS' COMPLETED WALK WITH NO TRANSACTION. The marker is what lets the
+  // refund rule above tell that apart from a payout that is merely still confirming.
+  const emptyFetch = ({ busy = false, partial = false } = {}) => async (url, options) => {
+    const body = JSON.parse(options.body);
+    if (body.method === "get_info") {
+      const isBusy = busy && String(url).includes("busy.example");
+      return { ok: true, json: async () => ({ result: isBusy ? { height: 3, status: "BUSY" } : { height: 3, synchronized: true } }) };
+    }
+    if (body.method === "get_block") {
+      return { ok: true, json: async () => ({ result: { block_header: { hash: "ab".repeat(32) }, tx_hashes: partial ? ["aa", "bb"] : [] } }) };
+    }
+    if (String(url).endsWith("/get_transactions") && partial) {
+      return { ok: true, json: async () => ({ txs: [{ tx_hash: "aa" }], txs_as_json: ["{}"] }) };
+    }
+    throw new Error("unexpected monero call: " + body.method);
+  };
+  const request = (nodes, fetch) => ({
+    nodes, address, viewSecret: base.viewSecret, spendPub: base.spendPub, expectedAtomic: "1", fromHeight: 1, fetch,
+  });
   {
-    const fetch = async (url, options) => {
-      const body = JSON.parse(options.body);
-      if (body.method === "get_info") return { ok: true, json: async () => ({ result: { height: 3, synchronized: true } }) };
-      if (body.method === "get_block") return { ok: true, json: async () => ({ result: { block_header: { hash: "ab".repeat(32) }, tx_hashes: [] } }) };
-      throw new Error("unexpected monero call: " + body.method);
-    };
-    const verdict = await verifyArrival({
-      nodes: [{ url: "http://one.example", operator: "one" }, { url: "http://two.example", operator: "two" }],
-      address, viewSecret: base.viewSecret, spendPub: base.spendPub, expectedAtomic: "1", fromHeight: 1, fetch,
-    });
-    check(verdict && verdict.absent === true, "a completed empty walk did not carry absent: true");
+    const verdict = await verifyArrival(request([
+      { url: "http://one.example", operator: "one" },
+      { url: "http://two.example", operator: "two" },
+    ], emptyFetch()));
+    check(verdict && verdict.absent === true, "two empty operators did not carry absent: true");
     check(verdict && verdict.seen === false && !verdict.height, "an empty walk did not stay unseen");
+  }
+  {
+    const verdict = await verifyArrival(request([{ url: "http://one.example", operator: "one" }], emptyFetch()));
+    check(verdict && verdict.absent === false, "one operator's empty walk claimed absence");
+  }
+  {
+    const verdict = await verifyArrival(request([
+      { url: "http://busy.example", operator: "busy" },
+      { url: "http://one.example", operator: "one" },
+    ], emptyFetch({ busy: true })));
+    check(verdict && verdict.absent === false, "a busy operator's empty walk claimed absence");
+  }
+  try {
+    await verifyArrival(request([{ url: "http://partial.example", operator: "partial" }], emptyFetch({ partial: true })));
+    check(false, "a partial get_transactions answer became an absence");
+  } catch (error) {
+    const failures = error && error.params && Array.isArray(error.params.nodes) ? error.params.nodes : [];
+    check(error && error.code === "xmr-no-nodes" && failures.some((n) => n.why === "partial-transactions"),
+      "a partial get_transactions answer did not keep its refusal");
   }
 
   // THE TIME RULES STAY IN FRONT OF THE CHECK.
@@ -111,8 +141,8 @@ export const refundIfMissingCheck = async () => {
   }
 
   return {
-    note: "only a completed walk that found nothing refunds; a seen transaction and a failed check do not",
+    note: "only two operators' completed walk with nothing refunds; a seen transaction and a failed check do not",
     problems,
-    notes: problems.length ? [] : ["pending/one-node/arrived are kept apart from absent"],
+    notes: problems.length ? [] : ["pending/one-node/arrived are kept apart from absent; busy and partial answers are refusals"],
   };
 };

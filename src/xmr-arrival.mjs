@@ -47,7 +47,7 @@ const failureOf = (error, node) => {
   const name = String(params.name || (error && error.name) || "");
   if (params.status !== undefined && params.status !== null) code = "http";
   else if (/^(TimeoutError|AbortError)$/.test(name) || /timeout|abort/i.test(why) || /timeout|abort/i.test(name)) code = "timeout";
-  else if (why === "bad-json" || why === "no-height" || why === "no-block") code = "bad-answer";
+  else if (why === "bad-json" || why === "no-height" || why === "no-block" || why === "busy" || why === "partial-transactions") code = "bad-answer";
   const out = { url: node.url, operator: node.operator, code };
   if (params.status !== undefined && params.status !== null) out.status = params.status;
   if (why) out.why = why;
@@ -107,7 +107,7 @@ async function getInfo(node, fetchImpl, timeoutMs) {
   const r = j && j.result;
   if (!r || !Number.isFinite(Number(r.height))) throw new SdkError("xmr-no-nodes", { node: node.url, why: "no-height" });
   // A BUSY NODE HAS NOT FINISHED ITS OWN VIEW. Its height is not evidence that the walk was complete.
-  if (r.busy === true || (typeof r.status === "string" && r.status && r.status !== "OK")) {
+  if (r.busy === true || r.busy_syncing === true || (typeof r.status === "string" && r.status && r.status !== "OK")) {
     throw new SdkError("xmr-no-nodes", { node: node.url, why: "busy" });
   }
   return { height: Number(r.height), synced: r.synchronized !== false, nettype: r.nettype || null };
@@ -139,7 +139,9 @@ async function getBlockTxs(node, hashes, fetchImpl, timeoutMs) {
     throw new SdkError("xmr-no-nodes", { node: node.url, why: "partial-transactions", want: hashes.length, got: bodies.length });
   }
   const out = bodies.map((s, i) => {
-    const body = typeof s === "string" ? JSON.parse(s) : s;
+    let body;
+    try { body = typeof s === "string" ? JSON.parse(s) : s; }
+    catch { throw new SdkError("xmr-no-nodes", { node: node.url, why: "bad-json" }); }
     const w = wrappers[i] || {};
     body.tx_hash = String(w.tx_hash || body.tx_hash || "").replace(/^0x/, "").toLowerCase();
     body.block_height = w.block_height ?? null;
@@ -226,11 +228,11 @@ export async function verifyArrival(request) {
 
   // 2. LOCATE: from the birth height, by whole blocks. The first reachable node does the walk.
   let located = null;
-  let completedWalk = false;
+  const completedOperators = new Set();
   for (const { node } of live) {
     try {
       located = await locate(node, { txid: txidHint, address: request.address, viewSecret: request.viewSecret, spendPub: request.spendPub, fromHeight: request.fromHeight, toHeight: top, nowSec, fetchImpl, timeoutMs });
-      completedWalk = true;
+      if (!located) completedOperators.add(node.operator);
     } catch (error) {
       failed.push(failureOf(error, node));
       located = null;
@@ -238,10 +240,11 @@ export async function verifyArrival(request) {
     if (located) break;
   }
   if (!located) {
-    // ONE NODE FINISHED THE WALK AND FOUND NOTHING: that is a complete answer, even when another node failed.
-    // Only when NO node finished the walk is every node unreachable.
-    if (!completedWalk) throw new SdkError("xmr-no-nodes", { tried: nodes.map((n) => n.url), nodes: failed });
-    return { seen: false, state: "pending", absent: true, txid: txidHint, tip, checked: live.map((l) => ({ url: l.node.url, operator: l.node.operator, height: l.info.height })), failed };
+    // ABSENCE IS A CLAIM ABOUT MONEY, SO IT NEEDS TWO OPERATORS. One node can withhold a transaction and make
+    // this walk look empty; a refund signed on that answer would take the depositor's ETH from a maker who paid.
+    // Only when no node finished the walk is every node unreachable.
+    if (!completedOperators.size) throw new SdkError("xmr-no-nodes", { tried: nodes.map((n) => n.url), nodes: failed });
+    return { seen: false, state: "pending", absent: completedOperators.size >= 2, txid: txidHint, tip, completedOperators: [...completedOperators], checked: live.map((l) => ({ url: l.node.url, operator: l.node.operator, height: l.info.height })), failed };
   }
 
   // 3. VERIFY ON EVERY NODE: the SAME block hash, the SAME transaction inside it, the confirmations and the money.

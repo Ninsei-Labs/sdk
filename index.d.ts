@@ -981,6 +981,8 @@ export interface XmrArrivalVerdict {
   readonly state: "arrived" | "pending" | "one-node";
   /** True only when a node completed the walk and found no matching transaction. */
   readonly absent?: boolean;
+  /** The operators whose completed walk found no matching transaction. */
+  readonly completedOperators?: readonly string[];
   readonly txid: string | null;
   readonly height?: number;
   readonly blockHash?: string;

@@ -799,8 +799,8 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
      * uses (xmr-arrival.verifyArrival): two nodes of different operators on one block, and money barred by
      * unlock_time is not an arrival.
      *
-     * ONLY A POSITIVE "NOT ARRIVED" REFUNDS (`absent: true`, returned only when a node completed the walk and
-     * found no matching transaction). `pending` with a transaction, `one-node`, and every failure to check are NOT
+     * ONLY A POSITIVE "NOT ARRIVED" REFUNDS (`absent: true`, returned only when two operators completed the walk
+     * and found no matching transaction). `pending` with a transaction, `one-node`, and every failure to check are NOT
      * "no money": the helper refuses to sign, so a lagging or busy witness can never look like an empty address.
      *
      * IT FIRES ONLY WHEN LESS THAN THE CONFIRMATIONS' TIME IS LEFT before `readyBy`
