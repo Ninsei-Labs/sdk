@@ -40,16 +40,22 @@ export async function probeMoneroNode({ url, fetchImpl = globalThis.fetch, timeo
       signal: controller ? controller.signal : undefined,
     });
   } catch (error) {
+    if (timer) clearTimeout(timer);
     const aborted = error && (error.name === "AbortError" || error.code === "ABORT_ERR");
     return { ok: false, why: aborted ? "timeout" : "unreachable", ms: Date.now() - started };
-  } finally {
-    if (timer) clearTimeout(timer);
   }
   if (!response || !response.ok) {
+    if (timer) clearTimeout(timer);
     return { ok: false, why: "http", status: response ? response.status : null, ms: Date.now() - started };
   }
   let body = null;
-  try { body = await response.json(); } catch { return { ok: false, why: "not-json", ms: Date.now() - started }; }
+  // THE TIMER COVERS THE BODY TOO. Clearing it when the headers arrived left a node that sent `{` and stopped
+  // holding the whole call forever.
+  try { body = await response.json(); } catch {
+    if (timer) clearTimeout(timer);
+    return { ok: false, why: "not-json", ms: Date.now() - started };
+  }
+  if (timer) clearTimeout(timer);
   if (!body || body.error) {
     return { ok: false, why: "rpc", rpc: body && body.error ? body.error.code ?? null : null, ms: Date.now() - started };
   }

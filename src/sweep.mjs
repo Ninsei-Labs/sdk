@@ -37,7 +37,11 @@ const STEPS = ["unlock", "sync", "sweep", "relay"];
 export const MAX_SWEEP_FEE_ATOMIC = 10_000_000_000n; // 0.01 XMR
 
 export function sweepFeeVerdict({ feeAtomic = null, amountAtomic = null, maxFeeAtomic = MAX_SWEEP_FEE_ATOMIC } = {}) {
-  if (feeAtomic === null || feeAtomic === undefined) return { ok: true, checked: false, fee: null, limit: String(maxFeeAtomic) };
+  if (feeAtomic === null || feeAtomic === undefined) {
+    // A FEE THAT WAS NOT REPORTED IS NOT A FREE WITHDRAWAL. The ceiling cannot be applied to an unknown number;
+    // the page must show the refusal instead of a withdrawal whose cost is invisible.
+    return { ok: false, code: "sweep-fee-unknown", checked: false, fee: null, limit: String(maxFeeAtomic) };
+  }
   let fee;
   let amount;
   let limit;

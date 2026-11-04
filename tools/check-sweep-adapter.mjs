@@ -51,7 +51,7 @@ export const sweepAdapterCheck = async () => {
   const atCeiling = sweepFeeVerdict({ feeAtomic: MAX_SWEEP_FEE_ATOMIC, amountAtomic: 2_000_000_000_000n });
   check(atCeiling.ok === true, "the fee exactly at the ceiling was refused");
   const unknown = sweepFeeVerdict({ feeAtomic: null, amountAtomic: 2_000_000_000_000n });
-  check(unknown.ok === true && unknown.checked === false, "an unreported fee was treated as a refusal");
+  check(unknown.ok === false && unknown.code === "sweep-fee-unknown", "an unreported fee was not refused");
 
   // A MAINNET WALLET IS A WALLET. The adapter used to accept only the networks declared by the demo's engine
   // registry (stagenet/fakechain), so a production withdrawal was refused as bad-input before the library was even
