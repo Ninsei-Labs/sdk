@@ -169,8 +169,9 @@ function relayFetch({ tamperProof = false, cashierAddress = cashier } = {}) {
   };
 }
 
-function makeQuotes({ providerWord = provider, factoryWord = factory, cashierPin = cashier } = {}) {
+function makeQuotes({ providerWord = provider, factoryWord = factory, cashierPin = cashier, denylist = null } = {}) {
   return createQuotes({
+    denylist,
     config: { settlement: { chain: { escrow: cashierPin ? { cashier: cashierPin } : {} } } },
     now: () => nowSec * 1000,
     evmCall: async ({ data }) => {
@@ -244,6 +245,15 @@ try {
   if (result.viewHalfClaimer === derived.makerViewHalf) ok("the bid uses the same derived maker view half");
   else bad("the bid maker view half is not derived");
 } catch (error) { bad("valid bid call failed: " + JSON.stringify(error && (error.code || error.message)) + " " + JSON.stringify(error && error.params)); }
+
+console.log("=== 2a) THE DENYLIST CHECKS THE CLIENT ON A BID ===");
+try {
+  await call(makeQuotes({ denylist: new Set([user]) }), { order: bidOrder, side: "bid", fetchImpl: relayFetch().fetchImpl });
+  bad("a denied bid claimer passed");
+} catch (error) {
+  if (error && error.code === "address-denied") ok("the client's own claimer is denied on a bid");
+  else bad("bid denylist returned " + JSON.stringify(error && (error.code || error.message)));
+}
 
 console.log("=== 3) THE ROLE, THE KEY AND THE SALT ARE NOT GUESSED ===");
 for (const [label, overrides, field] of [

@@ -883,7 +883,10 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
       if (!sameText(featureProvider, features.provider)) {
         fail("quote-provider-mismatch", { step: "registry", got: featureProvider, want: features.provider });
       }
-      if (denylist && typeof order.locker === "string" && denylist.has(order.locker.toLowerCase())) {
+      // THE CLIENT'S OWN ADDRESS IS WHAT THE DENYLIST COVERS. On an ask that is the locker; on a bid the client
+      // is the claimer, and testing the maker's locker there checks the wrong party.
+      const deniedAddress = side === "bid" ? order.claimer : order.locker;
+      if (denylist && typeof deniedAddress === "string" && denylist.has(deniedAddress.toLowerCase())) {
         fail("address-denied", { step: "order-quote" });
       }
       // THE PROVIDER'S ROLE IS PART OF THE SIDE. A caller that names another claimer/locker is not asking
