@@ -1080,19 +1080,39 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
       const signedAtomic = result.orderQuote && result.orderQuote.xmrAmount !== undefined && result.orderQuote.xmrAmount !== null
         ? String(result.orderQuote.xmrAmount) : null;
       if (!signedAtomic) fail("quote-field-unbound", { step: "xmrAmount", field: "orderQuote.xmrAmount" });
+      // THE ANSWER IS ALSO A START REQUEST. `swaps.start` reads the paying asset from the quote; the relay answer
+      // carried only the signed order terms, so a caller that followed the guide reached `balance-unchecked`.
+      // The asset is display metadata here; the signed `orderQuote` is unchanged.
+      const marketAsset = request.market && String(request.market).includes(":")
+        ? String(request.market).split(":").slice(1).join(":") : null;
+      const asset = String(order.asset || marketAsset || "").trim();
+      const startQuote = { ...quote, viewHalfClaimer: derived.makerViewHalf, xmrAmount: signedAtomic,
+        ...(asset ? { asset, token: asset.toLowerCase() } : {}),
+        // A STABLE ID FOR THE PENDING-FUNDING RECORD. The signed nonce is the one value every relay answer carries.
+        ...(quote.nonce !== undefined && quote.nonce !== null ? { id: String(quote.nonce) } : {}) };
+      const startCounterparty = {
+        proof: nodeHalf.proof,
+        edPointClaimer: side === "ask" ? quote.edPointClaimer : nodeHalf.edPoint,
+        commitHalfClaimer: side === "ask" ? quote.commitHalfClaimer : nodeHalf.commitHalf,
+        viewHalfClaimer: derived.makerViewHalf,
+        viewPoint: side === "ask" ? result.edViewPointClaimer : result.edViewPointLocker,
+      };
       return {
         ...result,
-        quote: { ...quote, viewHalfClaimer: derived.makerViewHalf, xmrAmount: signedAtomic },
+        quote: startQuote,
         order: { ...order, xmrAmount: signedAtomic },
+        // THE CALLER ADDS ITS WALLET, `receiveTo` AND THE HEIGHT; everything the relay can know is here.
+        startRequest: {
+          quote: startQuote,
+          order: { ...order, xmrAmount: signedAtomic },
+          orderQuote: result.orderQuote,
+          counterparty: startCounterparty,
+          recoveryKey: request.recoveryKey,
+          recoverySalt: order.salt,
+        },
         // THE SHAPE `swaps.start` TAKES: the proof and the claimer commitment travel with the view half, so a
         // caller can pass this object as `counterparty` without rebuilding the relay fields.
-        counterparty: {
-          proof: nodeHalf.proof,
-          edPointClaimer: side === "ask" ? quote.edPointClaimer : nodeHalf.edPoint,
-          commitHalfClaimer: side === "ask" ? quote.commitHalfClaimer : nodeHalf.commitHalf,
-          viewHalfClaimer: derived.makerViewHalf,
-          viewPoint: side === "ask" ? result.edViewPointClaimer : result.edViewPointLocker,
-        },
+        counterparty: startCounterparty,
         viewHalfClaimer: derived.makerViewHalf,
         viewHalfPoint: derived.makerViewPoint,
         jointAddress: oneTimeAddress.address,

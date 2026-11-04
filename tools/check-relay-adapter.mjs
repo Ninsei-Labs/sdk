@@ -234,6 +234,13 @@ try {
   } else bad("the one-time XMR address is missing or short: " + JSON.stringify(result.jointAddress));
   if (result.escrow === predictedEscrow) ok("the escrow address comes from the signed quote");
   else bad("the escrow address is not the predicted one: " + JSON.stringify(result.escrow));
+  if (result.quote.asset === "ETH" && result.quote.token === "eth" && result.quote.id) {
+    ok("the relay answer carries the paying asset and a start id");
+  } else bad("start fields: " + JSON.stringify({ asset: result.quote.asset, token: result.quote.token, id: result.quote.id }));
+  if (result.startRequest && result.startRequest.quote === result.quote
+    && result.startRequest.orderQuote === result.orderQuote && result.startRequest.recoverySalt === order.salt) {
+    ok("the relay answer exposes a start request");
+  } else bad("start request: " + JSON.stringify(result.startRequest));
 } catch (error) { bad("valid adapter call failed: " + JSON.stringify(error && (error.code || error.message)) + " " + JSON.stringify(error && error.params)); }
 
 console.log("=== 2) THE BID SIDE KEEPS THE PROVIDER AS LOCKER ===");
