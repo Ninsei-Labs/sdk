@@ -56,6 +56,25 @@ if (BigInt("0x" + boundary.x) !== (1n << 252n)) problems.push("kat-05 does not c
   if (dleq.verify(base.proof, base.context + "|wrong").ok) fail("wrong-context", "a proof verified under another context");
 }
 
+// THE SECOND CURVE'S KNOWLEDGE PROOF IS ITS OWN GUARD. The pure-multiple vector refuses at pokA first, so a
+// deletion of the pokB check alone would stay green without these cases.
+{
+  const base = read("kat-01-pok");
+  const other = read("kat-06-pok-utf8");
+  const noB = clone(base.proof);
+  delete noB.pokB;
+  if (dleq.verify(noB, base.context).ok) fail("missing-pokB", "a proof without pokB was accepted");
+  const changedB = clone(base.proof);
+  changedB.pokB.s = (changedB.pokB.s[0] === "0" ? "1" : "0") + changedB.pokB.s.slice(1);
+  if (dleq.verify(changedB, base.context).ok) fail("changed-pokB", "a proof with a changed pokB was accepted");
+  const swapped = clone(base.proof);
+  [swapped.pokA, swapped.pokB] = [swapped.pokB, swapped.pokA];
+  if (dleq.verify(swapped, base.context).ok) fail("swapped-pokB", "a proof with the two knowledge proofs swapped was accepted");
+  const foreign = clone(base.proof);
+  foreign.pokB = clone(other.proof.pokB);
+  if (dleq.verify(foreign, base.context).ok) fail("foreign-pokB", "a proof with another vector's pokB was accepted");
+}
+
 // N1: the point paths accept 0X as well as 0x, and canonicalise the result.
 {
   const base = read("kat-01-pok");
@@ -126,6 +145,30 @@ if (BigInt("0x" + boundary.x) !== (1n << 252n)) problems.push("kat-05 does not c
       const broken = await import(pathToFileURL(copy).href + "?breaking=" + Date.now());
       const verdict = broken.createDleq2(primitives).verify(read("neg-pure-multiple").proof, "ninsei-order-v3|kat|01");
       if (!verdict.ok) fail("breaking-run", "without the knowledge check the pure-multiple proof was still refused");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+}
+
+// BREAKING RUN, POKB ONLY. Removing the ed25519 knowledge check from a copy must let the changed-pokB proof through;
+// otherwise these cases prove the pokA guard, not the one under test.
+{
+  const source = readFileSync(join(ROOT, "engine", "atomic", "dleq2.js"), "utf8");
+  const anchor = "if (!verifyKnowledge(curves.B, XB, proof.pokB, context, \"B\")) return { ok: false, reason: \"proof: the ed25519 knowledge proof did not verify\" };";
+  if (!source.includes(anchor)) {
+    fail("breaking-run-pokB", "the pokB anchor is missing; the mutation cannot be attempted");
+  } else {
+    const dir = mkdtempSync(join(tmpdir(), "sdk-dleq-pokb-"));
+    const copy = join(dir, "dleq2.mjs");
+    try {
+      writeFileSync(copy, source.replace(anchor, anchor.replace("if (!verifyKnowledge", "if (false && !verifyKnowledge")));
+      const broken = await import(pathToFileURL(copy).href + "?pokb=" + Date.now());
+      const base = read("kat-01-pok");
+      const changedB = clone(base.proof);
+      changedB.pokB.s = (changedB.pokB.s[0] === "0" ? "1" : "0") + changedB.pokB.s.slice(1);
+      const verdict = broken.createDleq2(primitives).verify(changedB, base.context);
+      if (!verdict.ok) fail("breaking-run-pokB", "without the pokB check the changed proof was still refused");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
