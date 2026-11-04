@@ -383,12 +383,25 @@ jobs:
           RPC_URL: https://ethereum-rpc.publicnode.com
           FALLBACK_RPC_URL: https://eth.drpc.org
         run: |
+          # PUBLIC RPCs ARE NOT INTERCHANGEABLE. A node can answer the header and still refuse the account state
+          # anvil needs for genesis. Try each endpoint as a SINGLE fork URL (anvil takes one), keep the one that
+          # starts, and name every failure in the log. The last endpoints are independent operators so a rate limit
+          # on one does not stop the job.
+          RPC_URLS=(
+            "$RPC_URL"
+            "$FALLBACK_RPC_URL"
+            "https://eth.llamarpc.com"
+            "https://1rpc.io/eth"
+            "https://cloudflare-eth.com"
+            "https://eth-mainnet.public.blastapi.io"
+          )
           # PIN A BLOCK EVERY ENDPOINT ALREADY HAS, BUT KEEP IT RECENT. A load-balanced endpoint can answer `latest`
           # from one node and then serve account state from another that is a few blocks behind; the fork then fails
           # while creating genesis with `block not found`. Forks far below the head are not a fix: public RPCs prune
           # that state and ask for an archive token. Five blocks is behind the spread and still current state.
           HEAD=""
-          for url in "$RPC_URL" "$FALLBACK_RPC_URL"; do
+          for url in "${RPC_URLS[@]}"; do
+            [ -n "$url" ] || continue
             for i in $(seq 1 30); do
               candidate=$(cast block-number --rpc-url "$url" 2>/dev/null | head -1 || true)
               case "$candidate" in
@@ -405,14 +418,27 @@ jobs:
           FORK_BLOCK=$((HEAD - 5))
           if [ "$FORK_BLOCK" -lt 1 ]; then FORK_BLOCK=1; fi
           echo "forking mainnet at block $FORK_BLOCK (head $HEAD)"
-          anvil --fork-url "$RPC_URL" --fork-url "$FALLBACK_RPC_URL" --fork-block-number "$FORK_BLOCK" --fork-state-by-number --fork-retry-backoff 1000 --retries 10 --port 8546 --chain-id 1 > /tmp/anvil-uniswap.log 2>&1 &
-          echo $! > /tmp/anvil-uniswap.pid
-          for i in $(seq 1 60); do
-            if cast chain-id --rpc-url http://127.0.0.1:8546 >/dev/null 2>&1; then exit 0; fi
-            sleep 1
+          FORKED=0
+          for url in "${RPC_URLS[@]}"; do
+            [ -n "$url" ] || continue
+            echo "trying fork via $url"
+            anvil --fork-url "$url" --fork-block-number "$FORK_BLOCK" --fork-state-by-number --fork-retry-backoff 1000 --retries 10 --port 8546 --chain-id 1 > /tmp/anvil-uniswap.log 2>&1 &
+            pid=$!
+            for i in $(seq 1 60); do
+              if cast chain-id --rpc-url http://127.0.0.1:8546 >/dev/null 2>&1; then FORKED=1; break 2; fi
+              if ! kill -0 "$pid" 2>/dev/null; then break; fi
+              sleep 1
+            done
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            echo "fork via $url did not start:"
+            cat /tmp/anvil-uniswap.log
           done
-          cat /tmp/anvil-uniswap.log
-          exit 1
+          if [ "$FORKED" -ne 1 ]; then
+            echo "could not start a mainnet fork from any endpoint"
+            exit 1
+          fi
+          echo "$pid" > /tmp/anvil-uniswap.pid
 
       - name: Check anvil Uniswap (USDC to native through the real UniversalRouter)
         env:
