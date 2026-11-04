@@ -3,11 +3,12 @@ name: house-rules
 # shared workflow.
 on:
   pull_request:
-    types: [opened, edited, synchronize, reopened]
+    types: [opened, edited, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
 permissions:
   contents: read
 jobs:
   house-rules:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     uses: Ninsei-Labs/.github/.github/workflows/house-rules.yml@main
