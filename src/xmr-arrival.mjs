@@ -106,6 +106,10 @@ async function getInfo(node, fetchImpl, timeoutMs) {
   const j = await call(node, "/json_rpc", { jsonrpc: "2.0", id: "info", method: "get_info" }, fetchImpl, timeoutMs);
   const r = j && j.result;
   if (!r || !Number.isFinite(Number(r.height))) throw new SdkError("xmr-no-nodes", { node: node.url, why: "no-height" });
+  // A BUSY NODE HAS NOT FINISHED ITS OWN VIEW. Its height is not evidence that the walk was complete.
+  if (r.busy === true || (typeof r.status === "string" && r.status && r.status !== "OK")) {
+    throw new SdkError("xmr-no-nodes", { node: node.url, why: "busy" });
+  }
   return { height: Number(r.height), synced: r.synchronized !== false, nettype: r.nettype || null };
 }
 
@@ -127,15 +131,25 @@ async function getBlock(node, height, fetchImpl, timeoutMs) {
 async function getBlockTxs(node, hashes, fetchImpl, timeoutMs) {
   if (!hashes.length) return [];
   const j = await call(node, "/get_transactions", { txs_hashes: hashes, decode_as_json: true }, fetchImpl, timeoutMs);
-  const wrappers = j.txs || [];
-  return (j.txs_as_json || []).map((s, i) => {
+  const wrappers = Array.isArray(j.txs) ? j.txs : [];
+  const bodies = Array.isArray(j.txs_as_json) ? j.txs_as_json : [];
+  // A PARTIAL ANSWER IS NOT AN EMPTY BLOCK. If the node returns fewer transactions than the block named, the walk
+  // cannot conclude "no payment": that answer is unknown and must stop the refund path.
+  if (bodies.length !== hashes.length || (wrappers.length && wrappers.length !== hashes.length)) {
+    throw new SdkError("xmr-no-nodes", { node: node.url, why: "partial-transactions", want: hashes.length, got: bodies.length });
+  }
+  const out = bodies.map((s, i) => {
     const body = typeof s === "string" ? JSON.parse(s) : s;
     const w = wrappers[i] || {};
     body.tx_hash = String(w.tx_hash || body.tx_hash || "").replace(/^0x/, "").toLowerCase();
     body.block_height = w.block_height ?? null;
     body.confirmations = w.confirmations ?? null;
     return body;
-  });
+  }).filter((body) => hashes.includes(String(body.tx_hash || "").toLowerCase()));
+  if (out.length !== hashes.length) {
+    throw new SdkError("xmr-no-nodes", { node: node.url, why: "partial-transactions", want: hashes.length, got: out.length });
+  }
+  return out;
 }
 
 // The amount of our own outputs in a matched transaction (a swap can be paid in several outputs). An output whose
@@ -227,7 +241,7 @@ export async function verifyArrival(request) {
     // ONE NODE FINISHED THE WALK AND FOUND NOTHING: that is a complete answer, even when another node failed.
     // Only when NO node finished the walk is every node unreachable.
     if (!completedWalk) throw new SdkError("xmr-no-nodes", { tried: nodes.map((n) => n.url), nodes: failed });
-    return { seen: false, state: "pending", txid: txidHint, tip, checked: live.map((l) => ({ url: l.node.url, operator: l.node.operator, height: l.info.height })), failed };
+    return { seen: false, state: "pending", absent: true, txid: txidHint, tip, checked: live.map((l) => ({ url: l.node.url, operator: l.node.operator, height: l.info.height })), failed };
   }
 
   // 3. VERIFY ON EVERY NODE: the SAME block hash, the SAME transaction inside it, the confirmations and the money.
