@@ -80,8 +80,8 @@ export function createActions({ call = null, blockTime = null } = {}) {
     };
   };
   // THE LATEST BLOCK TIMESTAMP IS THE CLOCK THE CONTRACT USES. It comes from the same provider as the contract
-  // reads; an absent provider or an unreadable block leaves it null, and the time rule is skipped rather than
-  // guessed from the device clock or from another instance's provider.
+  // reads; an absent provider or an unreadable block leaves it null, and the half-revealing action refuses with
+  // `clock-unreadable` rather than signing without a time verdict.
   const clockFor = (wallet) => typeof blockTime === "function" ? blockTime : async () => {
     try {
       const provider = providerOf(wallet);

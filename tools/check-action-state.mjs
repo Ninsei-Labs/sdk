@@ -91,6 +91,12 @@ export const actionStateCheck = async () => {
     if (got !== "clock-unreadable" || f.sent.length) problems.push(`${name} with no clock answered ${JSON.stringify(got)} and sent ${f.sent.length}`);
   }
 
+  {
+    const inMargin = fake({ ready: 1, now: 2950, readyBy: 2000, t1: 3000 });
+    const got = await why(() => claimOrder({ escrow: "0x" + "aa".repeat(20), halfClaimer: slot, expect, deps: inMargin.deps }));
+    if (got !== "window-closed" || inMargin.sent.length) problems.push(`a claim inside the t1 margin answered ${JSON.stringify(got)} and sent ${inMargin.sent.length}`);
+  }
+
   // A SEND LANDS IN A LATER BLOCK: THE LAST MINUTE BEFORE EACH DEADLINE IS NOT A SAFE WINDOW.
   for (const [name, work, ready, expected] of [
     ["claim", (deps) => claimOrder({ escrow: "0x" + "aa".repeat(20), halfClaimer: slot, expect, deps }), 0, "not-ready"],
