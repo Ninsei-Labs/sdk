@@ -1136,6 +1136,19 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
           throw new SdkError("quote-refused", { step: "quote-binding", why: "counterparty-half" });
         }
       }
+      // THE SIGNED QUOTE MUST STILL BE VALID WHEN THE MONEY MOVES. The proof and the record work take seconds; a
+      // quote that expired in that window would reach the wallet and revert at the factory. Check the signed field
+      // immediately before the send, with a small margin for the next block.
+      const validUntil = request.orderQuote && request.orderQuote.validUntil !== undefined
+        ? request.orderQuote.validUntil
+        : (request.quote ? request.quote.validUntil : undefined);
+      if (validUntil !== undefined && validUntil !== null) {
+        const until = Number(validUntil);
+        const nowSec = typeof request.now === "function" ? Number(request.now()) : Math.floor(Date.now() / 1000);
+        if (!Number.isSafeInteger(until) || !Number.isSafeInteger(nowSec) || until <= nowSec + 30) {
+          throw new SdkError("quote-expired", { validUntil: Number.isFinite(until) ? until : null, now: Number.isFinite(nowSec) ? nowSec : null, marginSec: 30, step: "lock" });
+        }
+      }
       lockRequest.quote = request.orderQuote || null;
       let funded = null;
       try { funded = await lock.send(lockRequest, wallet, { call: reader }); }
