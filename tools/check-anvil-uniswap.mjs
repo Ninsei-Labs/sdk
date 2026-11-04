@@ -43,9 +43,12 @@ const codeOf = (a) => rpc("eth_getCode", [a, "latest"]);
 const call = (to, data) => rpc("eth_call", [{ to, data }, "latest"]);
 const balanceOf = async (token, owner) => BigInt(await call(token, selector("balanceOf(address)") + addrWord(owner)));
 const ethBalance = async (a) => BigInt(await rpc("eth_getBalance", [a, "latest"]));
-async function send(from, to, data, value = 0) {
+async function send(from, to, data, value = 0, waitMs = 15_000) {
   const hash = await rpc("eth_sendTransaction", [{ from, to, data, value: "0x" + BigInt(value).toString(16), gas: "0x1e8480" }]);
-  for (let i = 0; i < 60; i += 1) {
+  // A FORKED ROUTER CALL FETCHES MANY STORAGE SLOTS BEFORE ANVIL MINES. Fifteen seconds is enough for an ERC-20
+  // transfer but not for a UniversalRouter swap on a cold fork; the receipt wait is per call.
+  const attempts = Math.max(1, Math.ceil(waitMs / 250));
+  for (let i = 0; i < attempts; i += 1) {
     const receipt = await rpc("eth_getTransactionReceipt", [hash]);
     if (receipt) {
       if (Number(receipt.status) !== 1) throw new Error("transaction reverted: " + hash);
@@ -101,7 +104,7 @@ try {
   await rpc("anvil_setBalance", [RECIPIENT, "0x" + (10n * 10n ** 18n).toString(16)]);
   await rpc("anvil_setBalance", [SENDER, "0x" + (10n * 10n ** 18n).toString(16)]);
   const before = await ethBalance(RECIPIENT);
-  await send(SENDER, ROUTER, data);
+  await send(SENDER, ROUTER, data, 0, 120_000);
   const after = await ethBalance(RECIPIENT);
   if (after > before) ok(`the recipient received ${(after - before).toString()} wei of native coin`);
   else bad(`recipient balance did not grow: ${before} -> ${after}`);
