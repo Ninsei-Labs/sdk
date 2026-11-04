@@ -7,7 +7,7 @@
 // ERR_PNPM_NO_SCRIPT, after a push.
 //
 // WHAT IS PROVEN: every `pnpm run <name>` in every workflow names a script that exists; and every `check:*`
-// script is named by at least one workflow. The second rule closes the gap that let sale authentication, backup
+// script is named by a workflow, or is in the `CHECKS` registry and so runs under `pnpm run check` / `coverage`. The second rule closes the gap that let sale authentication, backup
 // confirmation, the one-key view half, arrival consensus, order proof and the recovery paths run only in the
 // release workflow: a guard that no PR runs is not a guard on a pull request. A workflow may also run `pnpm
 // install`, `pnpm exec ...` or a package binary; those are not scripts and are not checked.
@@ -22,6 +22,17 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const WORKFLOWS = join(ROOT, ".github", "workflows");
+const CHECK_SOURCE = join(ROOT, "tools", "check.mjs");
+
+/** The names in the `CHECKS` registry. A full `check` or `coverage` run executes every one of them. */
+function registryCheckNames() {
+  const source = readFileSync(CHECK_SOURCE, "utf8");
+  const begin = source.indexOf("const CHECKS = {");
+  const end = source.indexOf("};", begin);
+  if (begin < 0 || end < 0) return [];
+  return [...source.slice(begin, end).matchAll(/^\s*(?:"([^"]+)"|([a-z][a-z0-9-]*))\s*:/gm)]
+    .map((m) => m[1] || m[2]);
+}
 
 let pass = 0;
 const fails = [];
@@ -42,7 +53,13 @@ export function namedScripts(files) {
 
 /** Every `check:*` script that no workflow names, sorted. */
 export function unrunCheckScripts(scripts, files) {
-  const named = new Set(namedScripts(files).map((n) => n.name));
+  const names = namedScripts(files).map((n) => n.name);
+  const named = new Set(names);
+  // `pnpm run check` and `pnpm run coverage` run the whole registry, so a named step for every registry key is
+  // not needed. External `check:*` scripts still need their own workflow step.
+  if (names.includes("check") || names.includes("coverage")) {
+    for (const key of registryCheckNames()) named.add("check:" + key);
+  }
   return Object.keys(scripts).filter((name) => name.startsWith("check:") && !named.has(name)).sort();
 }
 
@@ -79,10 +96,10 @@ console.log("=== BREAKING RUN: a dropped script reddens ===");
     else bad("breaking run does not redden");
 
     // A guard can exist and still be unrun: remove the only workflow line that names a check script and require it.
-    const unrunTarget = "check:recovery-open";
+    const unrunTarget = "check:live-contract";
     const without = Object.fromEntries(Object.entries(files).map(([name, text]) => [
       name,
-      text.replace(/^.*pnpm run check:recovery-open.*(?:\r?\n|$)/gm, ""),
+      text.replace(/^.*pnpm run check:live-contract.*(?:\r?\n|$)/gm, ""),
     ]));
     const wouldMissUnrun = unrunCheckScripts(scripts, without);
     if (wouldMissUnrun.includes(unrunTarget)) ok("breaking run REDDENS: an unrun " + JSON.stringify(unrunTarget) + " is caught");

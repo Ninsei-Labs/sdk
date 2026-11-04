@@ -1,7 +1,7 @@
 name: CI
 
-# The checks run on every pull request and on every push to main. Each check is its own NAMED step, so a red run
-# says which agreement broke without opening the log: the failure carries the step's name.
+# The checks run on every pull request and on every push to main. The registry battery runs once under coverage;
+# the steps here are setup, the guard-breaking runs and the checks that need an anvil or a live network.
 on:
   pull_request:
     # `ready_for_review` is not part of the default pull_request types: without it, marking a draft ready would not
@@ -70,77 +70,18 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
-      - name: Check syntax (src and engine parse)
-        run: pnpm run check:syntax
-
-      - name: Check import (the entry point loads in bare Node)
-        run: pnpm run check:import
-
-      - name: Check surface (index.d.ts against the runtime, both ways)
-        run: pnpm run check:surface
-
-      - name: Check engine mirror (parses, no dangling imports)
-        run: pnpm run check:mirror
-
-      # A field added to the signed quote changes both factory selectors. A stale pair is well-formed calldata
-      # that calls a function the factory does not have, so this guard derives the selectors from QUOTE_FIELDS.
       - name: Check factory selectors
         run: pnpm run check:factory-selectors
 
-      - name: Check package contents (the tarball against `files`)
-        run: pnpm run check:pack
-
-      # The pack reader's agreement is with the packer's ANSWER, and that answer changed container between npm 11
-      # (an array of one entry) and npm 12 (an object keyed by the package name): reading one container alone
-      # reported eight problems that did not exist. The guard is exercised with the packer itself stubbed - both
-      # containers must read to the same listing, and a shape that is neither (an empty one, one naming two
-      # packages, one carrying no `files` list) must come back RED naming its reason, so the next change of shape
-      # reddens here instead of passing as a tarball carrying nothing.
       - name: Break the pack guard (both containers read, unknown shapes refused)
         run: pnpm run check:pack-teeth
 
-      - name: Check for secrets
-        run: pnpm run check:secrets
-
-      - name: Check vendor bundles against their pinned manifest
-        run: pnpm run check:vendor-bundles
-
-      # The DLEQ vectors pin the knowledge proofs and the pure-multiple regression.
-      - name: Check the DLEQ vectors and their edge cases
-        run: pnpm run check:dleq-vectors
-
-      # A testnet SDK instance must not write stagenet into its swap records.
-      - name: Check the swap record's Monero network
-        run: pnpm run check:swap-network
-
-      # Direct and relay quotes must agree that an expiry is a required, future integer.
-      - name: Check direct and sale quote expiry
-        run: pnpm run check:quote-ttl
-
-      # A HASH GUARD MUST BE SEEN TO FAIL. This breaks the temporary manifest and requires both mutations (an
-      # unlisted bundle and a changed hash) to come back red with the file named.
       - name: Break the vendor-bundle guard (RED, then named)
         run: pnpm run check:vendor-bundles-teeth
 
-      # Every published subpath must carry declarations: a subpath without a `types` target resolves to
-      # nothing in a TypeScript consumer, and the entry a node needs then shows up as `any`. The check reads
-      # the exports map, the declarations and the barrels - it needs no compiler.
-      - name: Check entry types (every subpath declares what its barrel exports)
-        run: pnpm run check:types
-
-      # The guard above is exercised on a deliberately broken file: it must come back RED and NAME the
-      # reason, and the file must be restored byte for byte. A guard without a breaking run is unverified.
       - name: Break the entry-types guard (RED, then restored)
         run: pnpm run check:types-teeth
 
-      # The route-refusal vocabulary is a package agreement as well: every code a provider refuses with is
-      # DECLARED, the four tables answer to that union, the union is used by a declaration instead of standing
-      # beside the tables as a comment, and the `*Gate` verdict vocabulary is held out of both.
-      - name: Check the route refusals (the tables against RouteRefusalCode)
-        run: pnpm run check:refusals
-
-      # And that guard is exercised on deliberately broken files too: the tables' declared type, the union's use
-      # and the `*Gate` vocabulary each have their own case, each RED with its own reason, every file restored.
       - name: Break the refusals guard (RED, then restored)
         run: pnpm run check:refusals-teeth
 
@@ -150,27 +91,9 @@ jobs:
       - name: Check the native amount and the signed XMR atomic
         run: pnpm run check:native-amount
 
-      # THE MAKER'S DECLINE IS A STATE OF ITS OWN (issue #40): it is told apart from an ordinary refund by the
-      # escrow's `Declined` event or by the node's `declined` + `compliance` status, it stops the wait for XMR at
-      # once, it offers no recovery file and no manual refund - and it carries NO reason, category or provider.
-      - name: Check the maker's decline (a state of its own, not a refunded escrow)
-        run: pnpm run check:decline
-
-      # And that guard is exercised on deliberately broken files: the event source and the status source each have
-      # their own case, each RED with its own reason, every file restored byte for byte.
       - name: Break the decline guard (RED, then restored)
         run: pnpm run check:decline-teeth
 
-      # THE TERMINAL STATE A SWAP ENDS IN (issue #40's family): the map in src/swaps.mjs is keyed by the kinds the
-      # engine really writes - a REFUND is `kind: "refund_eth"`, and it used to be reported to the app as the
-      # fallback `closed` - and a refund driven to the end by both of its writers (the depositor's own and the
-      # watchtower's) must come back as `refunded_eth`.
-      - name: Check the terminal states (a refund reports its own state, not the fallback)
-        run: pnpm run check:terminal
-
-      # And that guard is exercised on deliberately broken files: the dead key put back, the refund's code sent to
-      # another declared code, a key nothing writes, the decline's own key dropped and a rename in the engine's
-      # mirror - each RED with its own reason, every file restored byte for byte.
       - name: Break the terminal-states guard (RED, then restored)
         run: pnpm run check:terminal-teeth
 
@@ -229,114 +152,12 @@ jobs:
       - name: Check the restore height (service wins, file is the fallback, none is named)
         run: pnpm run check:restore-height
 
-      # THESE GUARDS USED TO RUN ONLY IN THE RELEASE WORKFLOW. Each one covers a defect from the 0.51.2 review:
-      # a ticket that was not authenticated, a declined backup counted as saved, a foreign view half, a lying
-      # witness, a proof not tied to its commitment, and the v1/v2 recovery paths. A regression in any of them
-      # must redden a pull request, not the release after it.
-      - name: Check sale authentication (the ticket and the signed tip)
-        run: pnpm run check:sale-auth
-
-      - name: Check backup confirmation (a declined key is not a saved key)
-        run: pnpm run check:backup-confirmation
-
-      - name: Check the one-key view half (the funded address matches the words)
-        run: pnpm run check:key-view
-
-      # THE HPKE PROFILE A RELAY REQUEST USES. The module is not exported yet, but its suite, context and
-      # plaintext widths are wire agreements: a changed algorithm or word order must redden here rather than
-      # fail only when a quote is encrypted for a real maker.
-      - name: Check the relay view envelope (suite, context, widths)
-        run: pnpm run check:relay-view
-
-      # THE TERMS DIGEST IS THE HPKE CONTEXT AND THE REQUEST'S IDENTITY. The vector is recomputed in Go from
-      # the relay wire spec, so a wrong type string, field order or nested struct hash cannot agree with it.
-      - name: Check the relay terms digest (type strings, vector, field binding)
-        run: pnpm run check:relay-terms
-
-      # THE FEATURES ARE SIGNED BY THE QUOTE KEY. The vector is the relay's own; a wrong array order, a
-      # missing FirmWindow type or an unchecked capability must redden before a key is used.
-      - name: Check the relay features (signature, digest, request binding)
-        run: pnpm run check:relay-features
-
-      # THE REQUEST IS THE JOIN: signed features, a proved client half, both view points and one HPKE seal.
-      # The check opens the envelope for ask and bid, so the plaintext width and the context are exercised.
-      - name: Check the relay request (payload, ask/bid envelopes, refusals)
-        run: pnpm run check:relay-request
-
-      # THE ANSWER HAS TWO SIGNATURES: the outer relay frame and the inner OrderQuote. The vector is the
-      # relay's own; the check refuses a changed provider, signature, payload, amount or context.
-      - name: Check the relay answer (outer and inner signatures, terms, view points)
-        run: pnpm run check:relay-answer
-
-      # THE HTTP HOP: build the exact payload, POST it once, keep a refusal code and verify the answer
-      # before returning it. A transport failure is not a refusal.
-      - name: Check the relay HTTP hop (success, refusal, expiry, transport)
-        run: pnpm run check:relay-http
-
-      # THE ADAPTER STARTS FROM ONE RECOVERY KEY: derives the client half and both view points, builds the
-      # request, and verifies the answer against the registry and factory before returning it.
-      - name: Check the recovery-key relay adapter (ask, bid, refusals)
-        run: pnpm run check:relay-adapter
-
-      # THE SELL WAIT READS THE ESCROW ITSELF: funded/ready, claimed and refunded are chain facts, and a wait
-      # that expires is a named refusal rather than a silent stop.
-      - name: Check the sell wait (ready, claimed, refunded, timeout)
-        run: pnpm run check:sell-watch
-
-      # THE SELL RECORD CARRIES THE ONE-TIME ADDRESS AND THE HALF. A retry of the same offer resumes the same
-      # record; a changed commitment or point is refused before XMR is sent.
-      - name: Check the sell record (address, half, retry, changed offer)
-        run: pnpm run check:sell-start
-
-      - name: Check arrival consensus (every witness agrees on the whole observation)
-        run: pnpm run check:arrival-consensus
-
-      - name: Check a recorded arrival fixture (the block and transaction parser)
-        run: pnpm run check:arrival-real
-
-      - name: Check order proof binding (the proven point funds its own commitment)
-        run: pnpm run check:order-proof
-
-      # THE CONTRACT IS THE ORACLE. These fixed vectors were produced by `cast`, not by the SDK's own curve code:
-      # three half commitments, the OrderCreated topic and both factory selectors. A green suite that derives its
-      # expected value with the function under test cannot see a wrong point, unit or wire format.
-      - name: Check contract vectors (commitments, event topic, selectors from cast)
-        run: pnpm run check:contract-vectors
-
       - name: Check the CI boundary (no private repository checkout)
         run: pnpm run check:ci-boundary
 
-      # THE SEQUENCE THE PAGE RUNS, NOT ONLY ITS calldata. `runAtomicOrder` is called with a stand-in worker and a
-      # stand-in funding call: the check proves the order of steps, the values passed across the boundary, and that
-      # a refused counterparty never reaches funding.
-      - name: Check the atomic order flow (build, verify, commit, fund)
-        run: pnpm run check:atomic-flow
-
-      # EVERY SIGNED FIELD MUST BE IN THE DIGEST. A field can be in ORDER_QUOTE_FIELDS and still be skipped by the
-      # struct-hash loop; mutating one field at a time must change the digest, and deleting it must name it.
-      - name: Check quote field binding (every field changes the digest)
-        run: pnpm run check:quote-binding
-
-      # THE DECLARATIONS MUST BE CONSUMABLE, NOT ONLY PARSEABLE. A minimal TypeScript consumer imports the root,
-      # ./xmr and ./recovery and assigns the public interfaces; tsc --noEmit is the type gate that the textual
-      # surface check cannot provide.
-      - name: Check the TypeScript consumer (declarations compile)
-        run: pnpm run check:types-consumer
-
-      # THE TARBALL, NOT THE WORKING TREE. Pack the package, install that tarball in an empty project and import
-      # every public subpath from it. This catches a missing asset or a subpath that only resolves from the repo.
       - name: Check the packed consumer (pack, install, import every subpath)
         run: pnpm run check:packed-consumer
 
-      - name: Check recovery key paths (v2 salt binding)
-        run: pnpm run check:recovery-key
-
-      - name: Check recovery file opening (text is parsed, v3 opens)
-        run: pnpm run check:recovery-open
-
-      # THE DEPLOYED CONTRACT IS THE ORACLE. One read-only call: the chain id, the factory and cashier code, and
-      # implementation() + its code hash. No anvil, no wallet, no transaction; it catches a stale address, network
-      # or implementation before anyone funds an order.
       - name: Check the live testnet contract (read-only)
         env:
           RPC_URL: https://sepolia-rollup.arbitrum.io/rpc
