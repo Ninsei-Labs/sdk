@@ -33,6 +33,7 @@ import { recoveryKeyCheck } from "./check-recovery-key.mjs";
 import { actionStateCheck } from "./check-action-state.mjs";
 import { vendorBundlesCheck } from "./check-vendor-bundles.mjs";
 import { refundWindowCheck } from "./check-refund-window.mjs";
+import { refundIfMissingCheck } from "./check-refund-if-missing.mjs";
 import { sweepWindowCheck } from "./check-sweep-window.mjs";
 import { sweepFromOrderCheck } from "./check-sweep-order.mjs";
 import { sweepAdapterCheck } from "./check-sweep-adapter.mjs";
@@ -2684,6 +2685,7 @@ const CHECKS = {
   "action-state": actionStateCheck,
   "vendor-bundles": vendorBundlesCheck,
   "refund-window": refundWindowCheck,
+  "refund-if-missing": refundIfMissingCheck,
   "sale-auth": saleAuthCheck,
   "coverage-merge": coverageMergeCheck,
   "quote-ttl": quoteTtlCheck,

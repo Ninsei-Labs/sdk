@@ -853,8 +853,9 @@ export interface SwapsApi {
    * THE CLIENT'S OWN EARLY REFUND WHEN THE XMR DID NOT ARRIVE (issue #88). While the interface is open, a depositor
    * who sees no XMR on the joint address takes the ETH back BEFORE `readyBy` - after it the maker may claim even
    * without the ready mark, and the early window is gone. The arrival is decided by THE SAME check as the watch
-   * (`verifyArrival`). Only a positive `pending`/`one-node` verdict refunds; an `arrived` verdict does not; a failure
-   * to check (no nodes, a disagreement) throws its own code and signs nothing. It fires only when less than the
+   * (`verifyArrival`). Only a verdict with `absent: true` refunds; a transaction that is seen (`pending` with a txid or
+   * height, `one-node`, `arrived`) does not; a failure to check (no nodes, a disagreement) throws its own code and
+   * signs nothing. It fires only when less than the
    * confirmations' time is left before `readyBy` (`minConfirmations * blockTimeSec`, overridable with `leadSec`).
    */
   refundIfXmrMissing(request: AutoRefundRequest, deps?: AutoRefundDeps): Promise<AutoRefundVerdict>;
@@ -978,6 +979,10 @@ export interface XmrArrivalRequest {
 export interface XmrArrivalVerdict {
   readonly seen: boolean;
   readonly state: "arrived" | "pending" | "one-node";
+  /** True only when a node completed the walk and found no matching transaction. */
+  readonly absent?: boolean;
+  /** The operators whose completed walk found no matching transaction. */
+  readonly completedOperators?: readonly string[];
   readonly txid: string | null;
   readonly height?: number;
   readonly blockHash?: string;
@@ -1043,7 +1048,7 @@ export interface AutoRefundDeps {
 /** What the client's own refund decided: refunded, waiting, still time, or the XMR is there. */
 export interface AutoRefundVerdict {
   readonly refunded: boolean;
-  readonly state: "refunded" | "waiting" | "claim-window" | "arrived";
+  readonly state: "refunded" | "waiting" | "claim-window" | "arrival-pending" | "arrived";
   readonly hash?: string | null;
   readonly leftSec: number;
   readonly needSec?: number;

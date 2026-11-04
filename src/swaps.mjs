@@ -799,9 +799,9 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
      * uses (xmr-arrival.verifyArrival): two nodes of different operators on one block, and money barred by
      * unlock_time is not an arrival.
      *
-     * ONLY A POSITIVE "NOT ARRIVED" REFUNDS (state `pending` or `one-node`). A failure to check - no reachable
-     * node, a disagreement, an underpayment, locked money - is NOT "no money": verifyArrival throws its own code
-     * and NOTHING is signed, so a broken or lagging witness can never look like an empty address.
+     * ONLY A POSITIVE "NOT ARRIVED" REFUNDS (`absent: true`, returned only when two operators completed the walk
+     * and found no matching transaction). `pending` with a transaction, `one-node`, and every failure to check are NOT
+     * "no money": the helper refuses to sign, so a lagging or busy witness can never look like an empty address.
      *
      * IT FIRES ONLY WHEN LESS THAN THE CONFIRMATIONS' TIME IS LEFT before `readyBy`
      * (`minConfirmations * blockTimeSec`, overridable with `leadSec`): refunding earlier would abandon a maker who
@@ -845,6 +845,15 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         ? Number(request.blockTimeSec) : limitOf("xmrBlockTimeSec", 120);
       const leadSec = Number.isFinite(Number(request.leadSec)) && Number(request.leadSec) >= 0
         ? Number(request.leadSec) : minConfirmations * blockTimeSec;
+      // THE WALK STARTS AT THE SWAP'S BIRTH, NEVER AT GENESIS. A missing height used to become block 0, so a refund
+      // check on a real chain would walk every block ever mined. The record carries the measured height; a caller
+      // that has neither an explicit height nor a record height is refused rather than given a scan of the whole chain.
+      const fromHeight = request.fromHeight !== undefined && request.fromHeight !== null
+        ? Number(request.fromHeight)
+        : Number(swap && (swap.restoreHeight ?? e.moneroRestoreHeight ?? e.restoreHeight));
+      if (!Number.isSafeInteger(fromHeight) || fromHeight <= 0) {
+        throw new SdkError("bad-input", { field: "fromHeight", why: "missing" });
+      }
       const nowSec = Number.isFinite(Number(request.nowSec)) ? Number(request.nowSec) : nowOf();
       const leftSec = Math.floor(readyBy - nowSec);
       // PAST `readyBy` THE EARLY WINDOW IS GONE and the claim window is open: refunding is no longer ours to open.
@@ -854,14 +863,16 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
 
       const verdict = await verify({
         nodes: request.nodes, address, viewSecret, spendPub, expectedAtomic, minConfirmations,
-        txid: request.txid || null, fromHeight: request.fromHeight === undefined ? null : request.fromHeight,
+        txid: request.txid || null, fromHeight,
         timeoutMs: request.timeoutMs, nowSec,
       });
       // THE XMR IS THERE - NOTHING IS REFUNDED. This is the decisive condition of the guard: without it the
       // client would take the ETH back from under a maker who has already sent the XMR.
       if (verdict.seen) return { refunded: false, state: "arrived", leftSec, verdict };
-      // NOT ARRIVED (pending / one-node) - the depositor takes the ETH back through the same action seam as the
-      // screen. A throw from `verify` above never reaches here and signs nothing.
+      // A TRANSACTION THAT IS THERE BUT NOT YET SETTLED IS NOT AN EMPTY ADDRESS. `pending` with a txid or height,
+      // and `one-node`, mean the money was seen; only the explicit absence marker proves there is nothing to wait
+      // for. A throw from `verify` above never reaches here and signs nothing either.
+      if (!verdict || verdict.absent !== true) return { refunded: false, state: "arrival-pending", leftSec, verdict };
       const res = await refund({ escrow, halfLocker, expect: request.expect, onStep: request.onStep }, request.wallet);
       return { refunded: true, state: "refunded", hash: (res && res.hash) || null, leftSec, verified: verdict };
     },
