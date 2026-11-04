@@ -58,6 +58,8 @@ for (const [claimed, refunded, state] of [[true, false, "claimed"], [false, true
   } catch (error) { check(false, state + " path failed: " + JSON.stringify(error && (error.code || error.message))); }
 }
 
+// The reader deliberately throws on readyBy/t1 here: the deadline read fails, so this is a timeout and not a
+// claim-open scenario. A future mock that answers those selectors would turn this case into claim-open.
 console.log("=== 3) A WAIT THAT EXPIRES IS NAMED ===");
 try {
   const quotes = swapsWith(async ({ data }) => {
