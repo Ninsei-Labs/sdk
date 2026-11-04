@@ -57,6 +57,15 @@ jobs:
             exit 1
           fi
 
+      - name: Keep the rebuilt bundle when it is stale
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: sdk-browser-rebuilt
+          path: assets/vendors/sdk/sdk-browser.js
+          if-no-files-found: ignore
+          retention-days: 3
+
       - name: Check syntax (src and engine parse)
         run: pnpm run check:syntax
 
@@ -449,6 +458,7 @@ jobs:
 
   dleq-oracle:
     name: Go/Rust DLEQ oracle
+    needs: checks
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -487,6 +497,7 @@ jobs:
   # keep their own diagnostics and the gate still has its own result.
   coverage:
     name: Coverage gate
+    needs: checks
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
