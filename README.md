@@ -35,7 +35,7 @@ The supported versions, scope, response targets, safe-harbor rules and disclosur
 | `quotes.firm` | works: a signed, binding quote with a TTL; a refusal is a named code |
 | `quotes.firmRelay` | works: a firm quote through a relay, built from one recovery key; the node half is DLEQ-checked |
 | `swaps.list` / `swaps.get` | read state from storage (and after a page reload) |
-| `swaps.start` | holds the order: guards → recovery file and the person's confirmation → order → locking funds → **recording with us and watching the Monero address**; returns the named state `step: "xmr-incoming"` |
+| `swaps.start` | holds the order: guards → recovery file and the person's confirmation → order → locking funds → **watching the Monero address**; no backend is required; returns the named state `step: "xmr-incoming"` |
 | `swaps.watch` | waits for XMR to arrive at the joint address with the same request as the page (`GET /swaps/{id}`): arrived — returns the fact (amount, confirmations, txid); did not wait — a refusal with the code `xmr-timeout`; already on the address but barred by `unlock_time` — a refusal with the code `xmr-locked` (the boundary is in `params.until`), and NO ready mark; the maker DECLINED the order — returns `SwapDeclinedWatch` (`declined: true`, `terminal: "declined"`, the node's own `code`), with every action off; with expectations and a wallet, places the ready mark after the arrival |
 | `wallet.balances` | works: the native coin and tokens, in minimal units |
 

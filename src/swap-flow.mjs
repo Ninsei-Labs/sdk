@@ -399,7 +399,7 @@ export async function orderDeadlines(escrow, deps = {}) {
     call({ to: escrow, data: encodeT1() }),
     call({ to: escrow, data: encodeTermsHash() }),
     // THE READY-MARK DEADLINE IS READ HERE TOO: without it the screen cannot say that the person is already in
-    // the dead zone (the mark is closed, claiming is closed, refunding is not open yet) - and that is exactly
+    // the dead zone (the mark is closed, the claim is open, refunding is not open yet) - and that is exactly
     // where the deal hangs silently.
     call({ to: escrow, data: encodeRead("readyBy") }),
   ]);

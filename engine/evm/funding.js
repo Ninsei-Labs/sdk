@@ -245,7 +245,9 @@ export async function fundOrder({ factory, locker, claimer, commitHalfLocker, co
   // code. Here that is guaranteed because both predict and createOrderAndFund are built from THE SAME terms: they
   // can diverge only if one of the two places is edited alone. They already did once (the preimage was missing from
   // the prediction); the cure is a shared source of fields, not care.
-  // THE DEPOSITOR'S FIELDS GO AS SEPARATE FACTORY ARGUMENTS (they are not in the signed set).
+  // THE DEPOSITOR'S FIELDS GO AS SEPARATE FACTORY ARGUMENTS, BUT THEY ARE IN THE SIGNED SET. Since quote protocol v10
+  // the factory signs them; the overwrite below must reproduce the signed values, or the digest check rejects the
+  // creation.
   const quoteEnc = { ...quote, commitHalfLocker: terms.commitHalfLocker, edPointLocker: terms.edPointLocker, edViewPointLocker: terms.edViewPointLocker };
   // QUOTE AND TERMS ARE ABOUT ONE THING: a divergence moves the escrow address and signs the wrong order.
   // THE COUNTERPARTY'S SPEND HALF IS PART OF THAT ONE THING. The proof is checked against the counterparty side,

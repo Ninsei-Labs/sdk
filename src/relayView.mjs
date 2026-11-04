@@ -66,9 +66,9 @@ export function relayViewInfo({ termsDigest, commitHalf, edPoint, edViewPointCli
 // One sender context, one Seal. The relay spec forbids reusing an ephemeral key for another encryption, so
 // the context is created here and never exposed.
 export async function sealViewEnvelope({ hpkeKey, info, plaintext } = {}) {
-  // The two plaintext lengths are part of the wire contract: ask carries the node's view scalar, bid carries
-  // the node's scalar followed by the client's. A caller that passes another length is refused before any
-  // network or cryptographic work.
+  // Both current request paths seal 64 bytes: the node's view scalar followed by the client's. A 32-byte body is
+  // still accepted for older vectors, but no current request produces one; a caller that passes another length is
+  // refused before any network or cryptographic work.
   const publicKey = hexToBytes(hpkeKey, 32, "hpkeKey");
   const body = bytesOf(plaintext);
   if (body.length !== 32 && body.length !== 64) {
