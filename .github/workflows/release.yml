@@ -51,17 +51,16 @@ on:
 
 permissions:
   contents: read
-  id-token: write # the OIDC exchange - required by npm trusted publishing
   actions: read # the CI run of the commit, read before a publish
 
 jobs:
-  publish:
-    # THE PUBLISH JOB RUNS IN A NAMED ENVIRONMENT. The environment carries the protection rules (required reviewers
-    # and a deployment branch/tag policy); npm trusted publishing names the same environment, so a manual run or a
-    # tag cannot reach the publish token path without passing those rules. Create `npm-publish` in repository
-    # Settings -> Environments and require reviewers before the first real release.
-    environment: npm-publish
-    runs-on: ubuntu-latest # cloud-hosted only: npm accepts OIDC from these, not from self-hosted
+  # THE BUILD JOB HAS NO OIDC TOKEN. Every dependency build script (esbuild, keccak) runs here, where it cannot
+  # mint the npm publishing token. The job packs one tarball and hands that exact file to the publish job.
+  build:
+    name: Build and verify
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.dist-tag.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -102,21 +101,10 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "24.22.1"
-          registry-url: "https://registry.npmjs.org" # wires up the .npmrc the OIDC exchange rides on
-
-      # The npm bundled with the runner image can be older than the trusted
-      # publishing floor (11.12.1), and an old npm cannot do the OIDC exchange.
-      - name: Ensure npm supports trusted publishing
-        run: |
-          npm install -g npm@11.19.1 --min-release-age=0
-          npm --version
 
       # pnpm is this repository's package manager, so the lock file is pnpm's.
-      # npm is still used for the publish itself: npm owns the OIDC exchange.
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
         # No version here on purpose: packageManager in package.json is the one place that names pnpm.
-        # A second number in a workflow drifts from it and fails the run before anything is built
-        # (ERR_PNPM_BAD_PM_VERSION). The action reads the field.
 
       - name: Install and verify
         run: |
@@ -141,8 +129,7 @@ jobs:
           fi
 
       # THE TAG, WORKED OUT AND NAMED BEFORE ANYTHING IS SENT. Derived from the version; a manual `tag` input
-      # overrides it and is echoed as a decision. The tool refuses (and the step fails) if a prerelease would take
-      # `latest` or a plain version would take a channel tag with no decision behind it.
+      # overrides it and is echoed as a decision.
       - name: Work out the npm dist-tag
         id: dist-tag
         env:
@@ -159,11 +146,51 @@ jobs:
           echo "dist-tag: version ${version} will publish under the \"${tag}\" tag"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
 
-      - name: What is about to be published
-        run: npm pack --dry-run
+      - name: Pack the tarball that will be published
+        run: |
+          mkdir -p dist
+          npm pack --pack-destination dist
+          ls -l dist
 
-      # THE TAG IS EXPLICIT: the publish never falls back to npm's default (`latest`), so a prerelease cannot move
-      # it by accident. The provenance attestation needs the repository and the package to be public.
-      - name: Publish
-        if: ${{ github.event_name == 'push' || inputs.dry-run == false }}
-        run: npm publish --access public --provenance --tag "${{ steps.dist-tag.outputs.tag }}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: npm-package
+          path: dist/*.tgz
+          if-no-files-found: error
+          retention-days: 3
+
+  # THE PUBLISH JOB HOLDS THE OIDC TOKEN AND INSTALLS NOTHING FROM THE PROJECT. It receives the tarball the build
+  # job checked. A dependency build script has no path into this job.
+  publish:
+    name: Publish
+    needs: build
+    if: ${{ github.event_name == 'push' || inputs.dry-run == false }}
+    environment: npm-publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # the OIDC exchange - required by npm trusted publishing
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: npm-package
+          path: dist
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24.22.1"
+          registry-url: "https://registry.npmjs.org" # wires up the .npmrc the OIDC exchange rides on
+
+      # The npm bundled with the runner image can be older than the trusted publishing floor (11.12.1), and an
+      # old npm cannot do the OIDC exchange. This installs the tool, not the package's dependencies.
+      - name: Ensure npm supports trusted publishing
+        run: |
+          npm install -g npm@11.19.1 --min-release-age=0
+          npm --version
+
+      - name: Publish the checked tarball
+        run: |
+          set -euo pipefail
+          tarball=$(find dist -maxdepth 1 -name '*.tgz' -print -quit)
+          test -n "$tarball"
+          npm publish "$tarball" --access public --provenance --ignore-scripts --tag "${{ needs.build.outputs.tag }}"
