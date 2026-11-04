@@ -229,6 +229,19 @@ export async function kyberUnsignedOrder({ params, chainId = null, fetchImpl = n
   if (typeNames !== expectedNames) return refusal("kyber-bad-response", { where: "sign-message", field: "types" });
   const missing = kyberOrderMissingFields(message);
   if (missing.length) return refusal("kyber-bad-response", { where: "sign-message", missing });
+  // THE SERVICE MUST SIGN THE ORDER WE ASKED FOR. A receiver, maker or asset it chooses for us is a valid order
+  // for someone else; compare every field the request fixed before the typed data reaches the wallet.
+  const addresses = ["maker", "makerAsset", "takerAsset", "receiver"];
+  for (const field of addresses) {
+    if (String(message[field] || "").toLowerCase() !== String(params[field] || "").toLowerCase()) {
+      return refusal("kyber-bad-response", { where: "sign-message", field });
+    }
+  }
+  for (const field of ["makingAmount", "takingAmount"]) {
+    if (String(message[field]) !== String(params[field])) {
+      return refusal("kyber-bad-response", { where: "sign-message", field });
+    }
+  }
   let digest;
   try {
     digest = kyberOrderDigestHex({ order: message, chainId: id, contract });

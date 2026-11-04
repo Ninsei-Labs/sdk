@@ -839,6 +839,9 @@ export const kyberRefusalCheck = async () => {
 
   // (2) an unexpected shape: a body that is not the shape we know (domain for another contract; orders not an array).
   named("unsigned: wrong domain", await kyber.kyberUnsignedOrder({ params, chainId: 137, fetchImpl: async () => response(200, signMessageBody({ domain: { name: "x", version: "1", chainId: 1, verifyingContract: "0x" + "00".repeat(20) } })) }), "kyber-bad-response");
+  const changedReceiver = signMessageBody();
+  changedReceiver.data.message.receiver = "0x" + "44".repeat(20);
+  named("unsigned: service chose a receiver", await kyber.kyberUnsignedOrder({ params, chainId: 137, fetchImpl: async () => response(200, changedReceiver) }), "kyber-bad-response");
   named("unsigned: empty data", await kyber.kyberUnsignedOrder({ params, chainId: 137, fetchImpl: async () => response(200, { code: 0, message: "ok", data: {} }) }), "kyber-bad-response");
   named("status: orders not an array", await kyber.kyberOrderStatus({ id: 1, chainId: 137, maker: MAKER, fetchImpl: async () => response(200, { code: 0, message: "ok", data: { orders: "nope" } }) }), "kyber-bad-response");
   named("status: unknown status word", await kyber.kyberOrderStatus({ id: 7, chainId: 137, maker: MAKER, fetchImpl: async () => response(200, { code: 0, message: "ok", data: { orders: [{ id: 7, status: "teleported" }] } }) }), "kyber-bad-response");
