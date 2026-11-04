@@ -477,18 +477,25 @@ async function assertActionWindow(escrow, what, deps, now = null) {
   ]);
   const marked = BigInt(readyRaw) !== 0n;
   const at = now === null ? Number(await deps.blockTime()) : Number(now);
-  if (!Number.isSafeInteger(at) || at <= 0) return;   // no chain time: do not sign a time verdict
+  // A HALF-REVEALING SEND NEEDS A READABLE CLOCK. Without it the deadline rule would be skipped, and a claim or
+  // refund that lands after its window still publishes the half. The actions facade always brings this seam.
+  if (!Number.isSafeInteger(at) || at <= 0) {
+    throw new SdkError("contract-reverted", { step: what, why: "clock-unreadable" });
+  }
+  // A TRANSACTION LANDS IN A LATER BLOCK. Keep a margin before every deadline so a send that is valid when signed
+  // does not become a revert that publishes the half.
+  const margin = 60;
   if (what === "claim") {
-    if (at >= Number(deadlines.t1)) throw new SdkError("contract-reverted", { step: what, why: "window-closed" });
+    if (at + margin >= Number(deadlines.t1)) throw new SdkError("contract-reverted", { step: what, why: "window-closed" });
     if (!marked && at < Number(deadlines.readyBy)) throw new SdkError("contract-reverted", { step: what, why: "not-ready" });
   } else if (what === "refund") {
     // refund(): before t1 it is allowed only while the mark is absent and readyBy has not passed.
-    if (at < Number(deadlines.t1) && (at >= Number(deadlines.readyBy) || marked)) {
+    if (at < Number(deadlines.t1) && (at + margin >= Number(deadlines.readyBy) || marked)) {
       throw new SdkError("contract-reverted", { step: what, why: "too-early" });
     }
   } else if (what === "mark-ready") {
     if (marked) throw new SdkError("contract-reverted", { step: what, why: "already-ready" });
-    if (at >= Number(deadlines.readyBy)) throw new SdkError("contract-reverted", { step: what, why: "ready-window-closed" });
+    if (at + margin >= Number(deadlines.readyBy)) throw new SdkError("contract-reverted", { step: what, why: "ready-window-closed" });
   }
 }
 

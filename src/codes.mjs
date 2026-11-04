@@ -125,6 +125,7 @@ export const ERROR_CODES = [
   // most of the withdrawal. The refusal names the fee and the limit so the interface does not present it as a
   // normal transfer.
   "sweep-fee-too-high",
+  "sweep-fee-unknown",
   // CLAIM GAS FOR THE XMR SELLER (issue #78). The seller comes from Monero and has no coin on the EVM side to pay
   // for the claim, so the maker may send it - but only when asked for, and only after the core has CONFIRMED the
   // gas actually arrived. The three codes name the three states the interface must not blur together:
@@ -191,6 +192,7 @@ export const ERROR_META = Object.freeze({
   "contract-reverted": { retryable: false, side: "chain" },
   "insufficient-funds": { retryable: false, side: "wallet" },
   "sweep-fee-too-high": { retryable: false, side: "chain" },
+  "sweep-fee-unknown": { retryable: true, side: "chain" },
   "gas-refused-by-maker": { retryable: false, side: "provider" },
   "gas-not-arrived": { retryable: true, side: "chain" },
   "gas-too-little": { retryable: false, side: "provider" },

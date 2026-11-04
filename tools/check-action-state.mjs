@@ -11,7 +11,7 @@ const slot = "0x" + "11".repeat(32);
 const word = (value) => BigInt(value).toString(16).padStart(64, "0");
 const status = (funded, claimed, refunded) => "0x" + [funded, claimed, refunded, 0].map(word).join("");
 const expect = { edPointLocker: slot, edPointClaimer: slot, edViewPointLocker: slot, commitHalfLocker: slot, commitHalfClaimer: slot };
-const fake = ({ state = status(1, 0, 0), ready = 1, now = 1000, readyBy = 2000, t1 = 3000, revertAction = null } = {}) => {
+const fake = ({ state = status(1, 0, 0), ready = 1, now = 1000, readyBy = 2000, t1 = 3000, clock = true, revertAction = null } = {}) => {
   const sent = [];
   const call = async ({ data }) => {
     if (revertAction && data === revertAction) throw new Error("execution reverted: simulation");
@@ -22,8 +22,9 @@ const fake = ({ state = status(1, 0, 0), ready = 1, now = 1000, readyBy = 2000, 
     if (data === engine.escrow.encodeTermsHash()) return slot;
     return slot;
   };
-  return { sent, call, deps: { call, blockTime: async () => now,
-    send: async (tx) => { sent.push(tx); return "0x" + "ab".repeat(32); } } };
+  return { sent, call, deps: { call,
+    send: async (tx) => { sent.push(tx); return "0x" + "ab".repeat(32); },
+    blockTime: async () => (clock ? now : null) } };
 };
 const why = async (work) => {
   try { await work(); return null; }
@@ -78,6 +79,34 @@ export const actionStateCheck = async () => {
   const lateMark = fake({ ready: 0, now: 2000, readyBy: 2000, t1: 3000 });
   const lateWhy = await why(() => markReadyOrder({ escrow: "0x" + "aa".repeat(20), expect, deps: lateMark.deps }));
   if (lateWhy !== "ready-window-closed" || lateMark.sent.length) problems.push(`a mark at readyBy answered ${JSON.stringify(lateWhy)}`);
+
+  // A CLOCK THAT CANNOT BE READ CANNOT PROVE A WINDOW; THE HALF MUST STAY UNREVEALED.
+  for (const [name, work, ready] of [
+    ["claim", (deps) => claimOrder({ escrow: "0x" + "aa".repeat(20), halfClaimer: slot, expect, deps }), 1],
+    ["refund", (deps) => refundOrder({ escrow: "0x" + "aa".repeat(20), halfLocker: slot, expect, deps }), 0],
+    ["mark-ready", (deps) => markReadyOrder({ escrow: "0x" + "aa".repeat(20), expect, deps }), 0],
+  ]) {
+    const f = fake({ ready, clock: false });
+    const got = await why(() => work(f.deps));
+    if (got !== "clock-unreadable" || f.sent.length) problems.push(`${name} with no clock answered ${JSON.stringify(got)} and sent ${f.sent.length}`);
+  }
+
+  {
+    const inMargin = fake({ ready: 1, now: 2950, readyBy: 2000, t1: 3000 });
+    const got = await why(() => claimOrder({ escrow: "0x" + "aa".repeat(20), halfClaimer: slot, expect, deps: inMargin.deps }));
+    if (got !== "window-closed" || inMargin.sent.length) problems.push(`a claim inside the t1 margin answered ${JSON.stringify(got)} and sent ${inMargin.sent.length}`);
+  }
+
+  // A SEND LANDS IN A LATER BLOCK: THE LAST MINUTE BEFORE EACH DEADLINE IS NOT A SAFE WINDOW.
+  for (const [name, work, ready, expected] of [
+    ["claim", (deps) => claimOrder({ escrow: "0x" + "aa".repeat(20), halfClaimer: slot, expect, deps }), 0, "not-ready"],
+    ["refund", (deps) => refundOrder({ escrow: "0x" + "aa".repeat(20), halfLocker: slot, expect, deps }), 0, "too-early"],
+    ["mark-ready", (deps) => markReadyOrder({ escrow: "0x" + "aa".repeat(20), expect, deps }), 0, "ready-window-closed"],
+  ]) {
+    const f = fake({ ready, now: 1950, readyBy: 2000, t1: 3000 });
+    const got = await why(() => work(f.deps));
+    if (got !== expected || f.sent.length) problems.push(`${name} inside the margin answered ${JSON.stringify(got)} and sent ${f.sent.length}`);
+  }
 
   // A SIMULATION REVERT MUST NOT BECOME A SENT TRANSACTION. The guards above are a subset of the contract's
   // rules; the eth_call is the part that answers with the contract itself.

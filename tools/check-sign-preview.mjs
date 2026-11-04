@@ -8,8 +8,8 @@
 //
 // WHAT IS PROVEN (a stand-in wallet; the recovery file is built by the engine):
 //   1) a reported fee comes back as a string, and `receive` is the remainder minus the fee;
-//   2) a wallet without `fee` gives null/null - not zero;
-//   3) a fee that is not a non-negative integer string, or a throwing fee, is unknown (null), not trusted;
+//   2) a wallet without a usable fee refuses with `sweep-fee-unknown`;
+//   3) a fee that is not a non-negative integer string, or a throwing fee, is the same refusal;
 //   4) a fee that claims more than the remainder gives `receive: null`, not a negative number.
 //
 // BREAKING RUNS (each mutates a COPY of the module in a temp directory):
@@ -105,13 +105,13 @@ console.log("=== 1) A REPORTED FEE: the recipient receives the remainder minus t
   }
 }
 
-console.log("=== 2) A WALLET THAT CANNOT REPORT A FEE: null, never zero ===");
+console.log("=== 2) A WALLET THAT CANNOT REPORT A FEE: sign refuses ===");
 {
   for (const [name, kind] of [["no fee method", "none"], ["fee throws", "throws"], ["fee is garbage", "garbage"], ["fee is null", "null"]]) {
     const o = await sign({ createSweep }, wallet({ feeKind: kind }));
-    if (o.kind !== "ok") { bad(name + ": sign refused"); continue; }
-    if (o.result.fee === null && o.result.receive === null) ok(name + " -> fee null, receive null");
-    else bad(name + " -> " + JSON.stringify({ fee: o.result.fee, receive: o.result.receive }));
+    if (o.kind === "ok") { bad(name + ": sign accepted an unknown fee"); continue; }
+    if (o.error && o.error.code === "sweep-fee-unknown") ok(name + " -> sweep-fee-unknown");
+    else bad(name + " -> " + JSON.stringify((o.error && o.error.code) || null));
   }
 }
 

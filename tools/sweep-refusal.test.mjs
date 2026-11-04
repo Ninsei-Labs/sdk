@@ -39,14 +39,15 @@ const bad = (m) => { fails.push(m); console.log("  FAIL  " + m); };
 // THE STAND-IN WITHDRAWAL WALLET: the adapter's surface (open/sync/unlockedBalance/sweepUnlocked/relay/close), but
 // instead of the library - the FACTS this run needs: how much is free and what input selection does. `sync` fails
 // low-level, the way monero-ts did on the regtest contour.
-function fakeWallet({ unlocked = 0n, syncThrows = true, sweepThrows = false, unlockedThrows = false } = {}) {
-  const calls = { open: 0, sync: 0, unlockedBalance: 0, sweepUnlocked: 0, relay: 0, close: 0 };
+function fakeWallet({ unlocked = 0n, syncThrows = true, sweepThrows = false, unlockedThrows = false, fee = 2_000_000n } = {}) {
+  const calls = { open: 0, sync: 0, unlockedBalance: 0, sweepUnlocked: 0, fee: 0, relay: 0, close: 0 };
   return {
     calls,
     async open() { calls.open += 1; },
     async sync() { calls.sync += 1; if (syncThrows) throw new Error("failed to get hashes"); },
     async unlockedBalance() { calls.unlockedBalance += 1; if (unlockedThrows) throw new Error("failed to get hashes"); return unlocked; },
     async sweepUnlocked() { calls.sweepUnlocked += 1; if (sweepThrows) throw new Error("failed to get hashes"); return { signed: true }; },
+    async fee() { calls.fee += 1; return fee; },
     async relay() { calls.relay += 1; return []; },
     async close() { calls.close += 1; },
   };
@@ -157,6 +158,22 @@ console.log("=== 3) A LOW-LEVEL LIBRARY ERROR COMES OUT WITH A CODE, NOT null ==
     else bad("a raw error came out WITHOUT a code: " + JSON.stringify({ code: (error && error.code) || null, message: String(error && error.message) }));
     if (String((error.params && error.params.why) || "").includes("failed to get hashes")) ok("the library's own reason is kept as a detail");
     else bad("the library's reason was lost: " + JSON.stringify(error.params));
+  }
+}
+
+console.log("=== 3b) AN UNREPORTED FEE IS REFUSED BEFORE ANY TRANSACTION IS SENT ===");
+{
+  const wallet = fakeWallet({ unlocked: 100_000_000_000n, syncThrows: false, sweepThrows: false, fee: null });
+  const outcome = await signOutcome({ createSweep }, wallet);
+  if (outcome.kind !== "error") bad("an unreported fee did not refuse: " + JSON.stringify(outcome.result));
+  else {
+    const error = outcome.error;
+    if (error.code === "sweep-fee-unknown") ok("an unreported fee is refused with the code sweep-fee-unknown");
+    else bad("an unreported fee answered " + JSON.stringify(error.code));
+    if (wallet.calls.relay === 0) ok("no transaction is relayed when the fee is unknown");
+    else bad("a transaction was relayed with an unknown fee");
+    if (wallet.calls.close === 1) ok("the wallet is closed after the fee refusal");
+    else bad("the wallet was left open after the fee refusal");
   }
 }
 

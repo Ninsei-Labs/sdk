@@ -59,14 +59,21 @@ export async function moneroFeeEstimate({ url, fetchImpl = globalThis.fetch, tim
       signal: controller ? controller.signal : undefined,
     });
   } catch (error) {
+    if (timer) clearTimeout(timer);
     const aborted = error && (error.name === "AbortError" || error.code === "ABORT_ERR");
     return { ok: false, why: aborted ? "timeout" : "unreachable" };
-  } finally {
-    if (timer) clearTimeout(timer);
   }
-  if (!response || !response.ok) return { ok: false, why: "http", status: response ? response.status : null };
+  if (!response || !response.ok) {
+    if (timer) clearTimeout(timer);
+    return { ok: false, why: "http", status: response ? response.status : null };
+  }
   let body = null;
-  try { body = await response.json(); } catch { return { ok: false, why: "not-json" }; }
+  // THE TIMER COVERS THE BODY TOO. The headers do not make the answer complete.
+  try { body = await response.json(); } catch {
+    if (timer) clearTimeout(timer);
+    return { ok: false, why: "not-json" };
+  }
+  if (timer) clearTimeout(timer);
   if (!body || body.error) return { ok: false, why: "rpc", rpc: body && body.error ? body.error.code ?? null : null };
   const result = body.result || {};
   // THE DAEMON'S OWN UNITS. `fee` and each entry of `fees` are atomic units PER BYTE; `quantization_mask` is the
