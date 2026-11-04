@@ -2,7 +2,7 @@
 //
 // THE FEE = THE PRICE OF A BYTE × THE SIZE OF THE TRANSACTION. The price belongs to the network, not to the wallet:
 // on Monero it moves with the median block load, so it is not set but ASKED - `get_fee_estimate` returns a price per
-// kilobyte for several priorities. The size is known only after the transaction is assembled (rings, inputs, outputs),
+// byte for several priorities. The size is known only after the transaction is assembled (rings, inputs, outputs),
 // so this module answers the PRICE, and `feeForBytes` is the only arithmetic that turns it into a sum.
 //
 // The page used to learn the fee only after signing; a person deciding whether to withdraw should see it before.

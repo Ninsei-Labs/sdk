@@ -519,17 +519,17 @@ export function derive(swap, now = nowReal()) {
     }
   } else if (live && readyAt === null && chainReadyByMs !== null && nowReal() >= chainReadyByMs
              && (chainT1Ms === null || nowReal() < chainT1Ms)) {
-    // THE DEAD ZONE IS REAL, AND THE CONTRACT DOES NOT OPEN THE REFUND IN IT. `refund()` rejects a call before
-    // `t1` when `block.timestamp >= readyBy` and `ready` is false; the same rule keeps the claim closed without the
-    // mark. Nothing can be signed between `readyBy` and `t1`, so the screen must not offer a refund that reverts.
+    // THE DEAD ZONE IS ABOUT THE REFUND, NOT THE CLAIM. `refund()` rejects a call before `t1` when
+    // `block.timestamp >= readyBy` and `ready` is false; the claim is open at `readyBy` even without the mark. The
+    // screen must not offer a refund that reverts.
     phase = "dead_zone";
     phaseLabel = "Ready deadline passed - the refund opens at T1";
     can.ready = false;
     can.refund = false;
     can.refundByAnyone = false;
-    note = "The ready() deadline has passed without your confirmation, so the maker cannot claim - and the " +
-      "escrow refuses a refund before T1 while the mark is absent. Nothing can be signed now; the refund opens " +
-      "at T1 and returns your ETH and publishes your half. " +
+    note = "The ready() deadline has passed without your confirmation. The maker can claim now, and the escrow " +
+      "refuses a refund before T1 while the mark is absent. The refund opens at T1 and returns your ETH and " +
+      "publishes your half. " +
       (chainT1Ms !== null ? "T1: " + new Date(chainT1Ms).toISOString() + "." : "");
   } else if (live && readyAt === null) {
     // Live mode: Monero-leg states come from the backend. The simulated EVM-leg timeouts (T0/T1, watchtower)
