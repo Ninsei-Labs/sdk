@@ -48,6 +48,21 @@ export const vendorBundlesCheck = ({ vendorsDir = VENDORS, manifestPath = join(V
   for (const rel of listBundles(vendorsDir)) {
     if (!listed.has(rel)) problems.push(`${rel}: present under assets/vendors but absent from the manifest`);
   }
+  // THE SDK BUNDLE EMBEDS THE PAGE BRIDGE, AND THE BRIDGE NAMES THE BUNDLE'S CACHE KEY. Changing that key after
+  // building leaves the committed bundle with the previous key and makes CI rebuild a different file. The key is a
+  // cache label, not the bundle hash: keep it stable and rebuild after changing it.
+  const bridgeFile = join(ROOT, "engine", "sdk", "bridge.js");
+  const sdkBundle = join(vendorsDir, "sdk", "sdk-browser.js");
+  if (existsSync(bridgeFile) && existsSync(sdkBundle)) {
+    const bridgeText = readFileSync(bridgeFile, "utf8");
+    const bundleText = readFileSync(sdkBundle, "utf8");
+    const bridgeKey = /sdk-browser\.js\?v=([0-9a-f]+)/.exec(bridgeText);
+    const bundleKey = /sdk-browser\.js\?v=([0-9a-f]+)/.exec(bundleText);
+    if (!bridgeKey || !bundleKey) problems.push("sdk/sdk-browser.js: the bridge query is missing");
+    else if (bridgeKey[1] !== bundleKey[1]) {
+      problems.push(`sdk/sdk-browser.js: embeds query ${bundleKey[1]}, while engine/sdk/bridge.js names ${bridgeKey[1]}; rebuild after changing the key`);
+    }
+  }
   if (!problems.length) notes.push(`${Object.keys(manifest.bundles).length} pinned browser bundles match their manifest`);
   return { note: "the prebuilt browser bundles match the pinned manifest", problems, notes };
 };
