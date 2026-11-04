@@ -68,8 +68,11 @@ export function createActions({ call = null, blockTime = null } = {}) {
     if (!provider || typeof provider.request !== "function") {
       return async () => { throw new SdkError("wallet-not-connected", { surface: "actions.read" }); };
     }
-    return async ({ to, data }) => {
-      const result = await provider.request({ method: "eth_call", params: [{ to, data }, "latest"] });
+    return async ({ to, data, from }) => {
+      // The simulation needs the same sender as the transaction: mark-ready and claim are sender-bound. For a
+      // plain read the field is simply absent.
+      const tx = from ? { to, data, from } : { to, data };
+      const result = await provider.request({ method: "eth_call", params: [tx, "latest"] });
       if (typeof result !== "string" || !result.startsWith("0x")) {
         throw new SdkError("contract-reverted", { surface: "actions.read" });
       }
@@ -96,7 +99,7 @@ export function createActions({ call = null, blockTime = null } = {}) {
     if (typeof sender !== "string" || !sender.trim()) throw new SdkError("bad-input", { field: "wallet.address", step });
     return sender;
   };
-  const deps = (wallet, chainId, from) => ({ call: readerFor(wallet), send: (tx) => wallet.send({ ...tx, chainId, from }), receipt: (h) => wallet.receipt(h), blockTime: clockFor(wallet) });
+  const deps = (wallet, chainId, from) => ({ call: readerFor(wallet), from, send: (tx) => wallet.send({ ...tx, chainId, from }), receipt: (h) => wallet.receipt(h), blockTime: clockFor(wallet) });
   return {
     /** Marking "I saw the XMR on the shared address". Without it, claiming is forbidden by the contract. */
     async markReady(request, wallet) {

@@ -492,6 +492,25 @@ async function assertActionWindow(escrow, what, deps, now = null) {
   }
 }
 
+// THE ACTION IS EXECUTED ON PAPER BEFORE IT IS SIGNED. `eth_call` runs the same call against the latest state
+// from the same sender, so a revert becomes a named refusal instead of a mined transaction that changed nothing.
+// The guards above answer the questions we know how to ask; this answers the contract itself, including its own
+// deadlines and the half checks. A caller without a call seam keeps the old behaviour.
+async function simulateAction(escrow, data, what, deps) {
+  const call = deps.call;
+  if (typeof call !== "function") return;
+  try {
+    await call({ to: escrow, data, from: deps.from });
+  } catch (error) {
+    const detail = error && (error.data || error.message);
+    throw new SdkError("contract-reverted", {
+      step: what,
+      why: "simulation",
+      detail: typeof detail === "string" ? detail.slice(0, 200) : null,
+    });
+  }
+}
+
 // Claim the ETH by the CLAIMER'S half. The field name in the contract is halfClaimer (:213); the former word
 // "secret" is a synonym of the same value (the half serves as the preimage of the commitment), while "hashlock"
 // lied here: the current contract has NO hashlock field. Instead it has two half commitments -
@@ -508,6 +527,7 @@ export async function claimOrder({ escrow, halfClaimer, expect, onStep, deps = {
   await assertOrderOpen(escrow, "claim", deps);
   await assertActionWindow(escrow, "claim", deps);
   await assertOrderSlots(escrow, expect, "claim", deps);
+  await simulateAction(escrow, encodeClaim(halfClaimer), "claim", deps);
   onStep?.("confirm-claim");
   // THE CLAIM GAS LIMIT COMES FROM THE SHARED MODULE, NOT A LITERAL HERE (issue #127): the node lays exactly
   // this limit into the gas gift. It is set explicitly and with a margin: claim has the same trap as order
@@ -535,6 +555,7 @@ export async function refundOrder({ escrow, halfLocker, onStep, expect = null, d
   // for the same reason. Expectations are optional for compatibility with previous calls (the page calls without
   // them); the core always passes them.
   if (expect) await assertOrderSlots(escrow, expect, "refund", deps);
+  await simulateAction(escrow, encodeRefund(halfLocker), "refund", deps);
   onStep?.("confirm-refund");
   const hash = await (deps.send || sendTransaction)({ to: escrow, data: encodeRefund(halfLocker), gas: 250_000n });
   return { hash };
@@ -552,6 +573,7 @@ export async function markReadyOrder({ escrow, expect, onStep, deps = {} }) {
   await assertOrderOpen(escrow, "mark-ready", deps);
   await assertActionWindow(escrow, "mark-ready", deps);
   await assertOrderSlots(escrow, expect, "mark-ready", deps);
+  await simulateAction(escrow, encodeMarkReady(), "mark-ready", deps);
   onStep?.("confirm-mark-ready");
   const hash = await (deps.send || sendTransaction)({ to: escrow, data: encodeMarkReady(), gas: 120_000n });
   return { hash };
