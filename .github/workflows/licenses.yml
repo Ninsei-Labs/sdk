@@ -7,6 +7,7 @@ name: License Compliance
 # The tree is read through pnpm itself (`pnpm licenses list --prod --json`), so no extra licence tool is installed.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
   workflow_dispatch:
@@ -21,6 +22,7 @@ permissions:
 jobs:
   licenses:
     name: Production dependency licenses
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

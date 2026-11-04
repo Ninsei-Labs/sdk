@@ -90,6 +90,34 @@ console.log("=== BREAKING RUN: a dropped script reddens ===");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
+// EVERY PULL REQUEST WORKFLOW MUST HAVE THE DRAFT GATE. A new workflow that listens to pull_request but omits the
+// draft flag spends runner minutes on every intermediate push, which is the whole point of the rule. The gate is
+// two text facts: the ready_for_review activity type and the draft condition on at least one job.
+export function draftGateMisses(files) {
+  return Object.entries(files)
+    .filter(([, text]) => /^\s{2}pull_request:/m.test(text.replace(/\r\n/g, "\n")))
+    .filter(([, text]) => !/ready_for_review/.test(text) || !/github\.event\.pull_request\.draft == false/.test(text))
+    .map(([name]) => name);
+}
+
+console.log("=== EVERY PULL REQUEST WORKFLOW HAS THE DRAFT GATE ===");
+const prWorkflows = Object.keys(files).filter((name) => /^\s{2}pull_request:/m.test(files[name].replace(/\r\n/g, "\n")));
+const ungated = draftGateMisses(files);
+if (prWorkflows.length) ok(prWorkflows.length + " pull request workflow(s) are scanned");
+else bad("no pull request workflow was found - the scanner is looking at nothing");
+if (!ungated.length) ok("every pull request workflow names ready_for_review and tests the draft flag");
+else bad("pull request workflows without the draft gate: " + JSON.stringify(ungated));
+
+console.log("=== BREAKING RUN: a removed draft condition reddens ===");
+{
+  const [name, text] = Object.entries(files).find(([, body]) => (body.match(/github\.event\.pull_request\.draft == false/g) || []).length === 1) || [];
+  const broken = name
+    ? { ...files, [name]: text.replace(/^\s*if:.*draft == false.*(?:\r?\n|$)/m, "") }
+    : files;
+  if (name && draftGateMisses(broken).includes(name)) ok("breaking run REDDENS: a workflow without the draft condition is caught");
+  else bad("breaking run does not catch a missing draft condition");
+}
+
 console.log("");
 console.log(fails.length ? "FAILED: " + fails.length + " (passed " + pass + ")" : "ci scripts: " + pass + " checks passed.");
 if (fails.length) process.exit(1);

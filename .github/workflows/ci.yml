@@ -4,6 +4,9 @@ name: CI
 # says which agreement broke without opening the log: the failure carries the step's name.
 on:
   pull_request:
+    # `ready_for_review` is not part of the default pull_request types: without it, marking a draft ready would not
+    # start the checks. Pushes to a draft still create a run, but every job is skipped below, so they cost no minutes.
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
   workflow_dispatch:
@@ -18,6 +21,7 @@ permissions:
 jobs:
   checks:
     name: SDK checks
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -519,7 +523,9 @@ jobs:
   # runs even when a dependency fails (`always()`), so a skipped or cancelled dependency cannot look like a pass.
   required:
     name: Required CI
-    if: always()
+    # A draft run must not turn skipped dependencies into a red required check. On `ready_for_review` the draft
+    # flag is false, and this job asserts the real results.
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     needs: [checks, dleq-oracle, coverage]
     runs-on: ubuntu-latest
     timeout-minutes: 5

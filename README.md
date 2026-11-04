@@ -308,6 +308,13 @@ core is reused in that case: quotes, the Monero leg, states and recovery do not 
 The check codes tied to EVM are named plainly: `allowance` (token allowances) and `gas` (the network-fee margin)
 trigger where those exist; on another VM they simply do not appear, rather than turning into "all good".
 
+## Pull requests
+
+Open a pull request as a draft. The CI battery, license check, house-rules check and dependency scan stay skipped
+while the pull request is a draft, so an intermediate push does not spend runner minutes. Run the local checks
+while you work. Mark the pull request ready only when the branch is final; that starts the full battery. A push
+after that runs it again, so keep the work in draft until the last commit.
+
 ## Rules
 
 1. **No DOM.** There is exactly one exception, and it is named: the `src/adapters` directory (the `localStorage`

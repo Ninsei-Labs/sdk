@@ -5,6 +5,7 @@ name: Dependency scan
 # complements CI: the package is public, and a malicious release would reach consumers before any test could see it.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - package.json
       - pnpm-lock.yaml
@@ -16,6 +17,7 @@ permissions:
 jobs:
   scan:
     name: npmscan dependency check
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
