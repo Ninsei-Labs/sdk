@@ -238,6 +238,7 @@ try {
     ok("the relay answer carries the paying asset and a start id");
   } else bad("start fields: " + JSON.stringify({ asset: result.quote.asset, token: result.quote.token, id: result.quote.id }));
   if (result.startRequest && result.startRequest.quote === result.quote
+    && result.startRequest.order === result.order
     && result.startRequest.orderQuote === result.orderQuote && result.startRequest.recoverySalt === order.salt) {
     ok("the relay answer exposes a start request");
   } else bad("start request: " + JSON.stringify(result.startRequest));

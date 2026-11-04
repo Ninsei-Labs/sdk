@@ -1097,14 +1097,16 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
         viewHalfClaimer: derived.makerViewHalf,
         viewPoint: side === "ask" ? result.edViewPointClaimer : result.edViewPointLocker,
       };
+      // ONE ORDER OBJECT, TWO REFERENCES. `order` and `startRequest.order` must not drift apart.
+      const startOrder = { ...order, xmrAmount: signedAtomic };
       return {
         ...result,
         quote: startQuote,
-        order: { ...order, xmrAmount: signedAtomic },
+        order: startOrder,
         // THE CALLER ADDS ITS WALLET, `receiveTo` AND THE HEIGHT; everything the relay can know is here.
         startRequest: {
           quote: startQuote,
-          order: { ...order, xmrAmount: signedAtomic },
+          order: startOrder,
           orderQuote: result.orderQuote,
           counterparty: startCounterparty,
           recoveryKey: request.recoveryKey,
