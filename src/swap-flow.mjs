@@ -503,6 +503,13 @@ async function simulateAction(escrow, data, what, deps) {
     await call({ to: escrow, data, from: deps.from });
   } catch (error) {
     const detail = error && (error.data || error.message);
+    const message = String((error && error.message) || "");
+    // A transport or wallet failure is not a revert. Keep it as it came: only a contract answer is turned into
+    // this action's refusal.
+    const reverted = (error && error.code === "contract-reverted")
+      || (error && typeof error.data === "string" && error.data.startsWith("0x"))
+      || /execution reverted|revert/i.test(message);
+    if (!reverted) throw error;
     throw new SdkError("contract-reverted", {
       step: what,
       why: "simulation",
