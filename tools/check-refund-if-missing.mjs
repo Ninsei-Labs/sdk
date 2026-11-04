@@ -88,17 +88,19 @@ export const refundIfMissingCheck = async () => {
 
   // THE ARRIVAL CHECK MARKS ONLY TWO OPERATORS' COMPLETED WALK WITH NO TRANSACTION. The marker is what lets the
   // refund rule above tell that apart from a payout that is merely still confirming.
-  const emptyFetch = ({ busy = false, partial = false } = {}) => async (url, options) => {
+  const emptyFetch = ({ busy = false, partial = false, mismatch = false, badJson = false } = {}) => async (url, options) => {
     const body = JSON.parse(options.body);
     if (body.method === "get_info") {
       const isBusy = busy && String(url).includes("busy.example");
       return { ok: true, json: async () => ({ result: isBusy ? { height: 3, status: "BUSY" } : { height: 3, synchronized: true } }) };
     }
     if (body.method === "get_block") {
-      return { ok: true, json: async () => ({ result: { block_header: { hash: "ab".repeat(32) }, tx_hashes: partial ? ["aa", "bb"] : [] } }) };
+      const hashes = partial ? ["aa", "bb"] : (mismatch || badJson ? ["aa"] : []);
+      return { ok: true, json: async () => ({ result: { block_header: { hash: "ab".repeat(32) }, tx_hashes: hashes } }) };
     }
-    if (String(url).endsWith("/get_transactions") && partial) {
-      return { ok: true, json: async () => ({ txs: [{ tx_hash: "aa" }], txs_as_json: ["{}"] }) };
+    if (String(url).endsWith("/get_transactions") && (partial || mismatch || badJson)) {
+      if (badJson) return { ok: true, json: async () => ({ txs: [{ tx_hash: "aa" }], txs_as_json: ["{"] }) };
+      return { ok: true, json: async () => ({ txs: [{ tx_hash: mismatch ? "cc" : "aa" }], txs_as_json: ["{}"] }) };
     }
     throw new Error("unexpected monero call: " + body.method);
   };
@@ -131,6 +133,22 @@ export const refundIfMissingCheck = async () => {
     const failures = error && error.params && Array.isArray(error.params.nodes) ? error.params.nodes : [];
     check(error && error.code === "xmr-no-nodes" && failures.some((n) => n.why === "partial-transactions"),
       "a partial get_transactions answer did not keep its refusal");
+  }
+
+  // A PARTIAL ANSWER WITH ALL BODIES, BUT A FOREIGN HASH, IS STILL UNKNOWN. The response length passes; the
+  // hash comparison is the second gate. A body that is not JSON is a named bad answer, not a raw syntax error.
+  for (const [name, options] of [
+    ["a foreign hash", { mismatch: true }],
+    ["a malformed body", { badJson: true }],
+  ]) {
+    try {
+      await verifyArrival(request([{ url: "http://" + name.replace(/\W/g, "") + ".example", operator: name }], emptyFetch(options)));
+      check(false, `${name} became an absence`);
+    } catch (error) {
+      const failures = error && error.params && Array.isArray(error.params.nodes) ? error.params.nodes : [];
+      check(error && error.code === "xmr-no-nodes" && failures.some((n) => n.why === "partial-transactions" || n.why === "bad-json"),
+        `${name} did not keep its refusal`);
+    }
   }
 
   // THE HEIGHT COMES FROM THE REQUEST OR THE RECORD; IT NEVER BECOMES GENESIS.
