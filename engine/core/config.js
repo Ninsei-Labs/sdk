@@ -364,21 +364,21 @@ export const CHAINS = [
     gasUsd: 0.01,
     routeType: "atomic",
     // THE DEMO'S MAIN NETWORK: the Ninsei escrow factory and the interface's fee cashier live here. The current
-    // contract version (contracts-testnet-2026.11.03-fix) is a FACT, not an intention:
-    //   factory 0x6ab0ef3aa67b022d4007550e7556108537debb55 (height 325677796,
-    //   transaction 0xe5f2244c2aa07bb372352b5cb47fa6fdd531a1f8a763d4246b0d31efa0723d2d);
-    //   cashier 0x6c6c6da6392a92b8b9c69b3ec234d524cdcfcb57;
-    //   registry 0xf06ec2b1de69ff5b528ed917edffbee7be6dccc9 (this release deploys it);
-    //   implementation 0x584b8438204A7CDb207957F5572a7f34E5D526c8, codehash
-    //   0x334d6802099fccaef87b9569618ab3c46f6a2f075c2934c0cdbc8d4e4042944b.
+    // contract version (contracts-testnet-2026.11.04) is a FACT, not an intention:
+    //   factory 0x245d3a4ac4b98d713f6c5130b56cd5d550f8cefe (height 326005419,
+    //   transaction 0xf62f54cbb0c236edc467652fce8c746c903a5d0ab4ecdd492649d57a92862296);
+    //   cashier 0x40515449159EfbCb5eF5eB9e2E08ba432E150a1C (created in the factory constructor);
+    //   registry 0x92191dc3517e15db6468628b1a493576728a9798 (this release deploys it);
+    //   implementation 0xF88658b53FcB965E580638bbFe048E8f587d6D11, codehash
+    //   0x7020a1017adbb4d4ce4710f7c632d48a5469a6f3076608e77d5675dee125653c.
     // `OrderCreated` carries xmrAmount; the SDK reads it from the event. PREVIOUS factory before this version:
-    // 0x69b5a6878b542960af4d239ecc60ad1c9e3e6932 (height 323014007, cashier
-    // 0x05b7433f66f2b75cc7ece9ec00af0fb810f9c9e0).
+    // 0x6ab0ef3aa67b022d4007550e7556108537debb55 (height 325677796, cashier
+    // 0x6c6c6da6392a92b8b9c69b3ec234d524cdcfcb57).
     // mode: "live" - order creation TOGETHER WITH THE MONEY in one transaction (createOrderAndFund). cashier: the
     // INTERFACE's fee cashier, named in quotes. implementationCodeHash: the escrow implementation the factory
     // carries, checked against the chain. deploymentBlock: the height the factory was created at; a log search for
     // its orders starts here, not at zero, because public RPCs cap a log query at about 10M blocks.
-    escrow: { address: "0x6ab0ef3aa67b022d4007550e7556108537debb55", mode: "live", deploymentBlock: 325677796, cashier: "0x6c6c6da6392a92b8b9c69b3ec234d524cdcfcb57", implementationCodeHash: "0x334d6802099fccaef87b9569618ab3c46f6a2f075c2934c0cdbc8d4e4042944b" },
+    escrow: { address: "0x245d3a4ac4b98d713f6c5130b56cd5d550f8cefe", mode: "live", deploymentBlock: 326005419, cashier: "0x40515449159EfbCb5eF5eB9e2E08ba432E150a1C", implementationCodeHash: "0x7020a1017adbb4d4ce4710f7c632d48a5469a6f3076608e77d5675dee125653c" },
     tokens: [
       // Test USDC (Circle): decimals 6 and symbol "USDC" verified on chain by the same node.
       { symbol: "USDC", address: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d", decimals: 6, usd: 1, cls: "ar-token-usdc" },
@@ -798,9 +798,9 @@ export function allowedProvidersFor(chainOrId) {
 // named by the record and match the signed quote). Filled at deploy: the factory has no immutables, so one build
 // gives the same hash to anyone who deployed it - a provider's own factory lands in the same list.
 export const KNOWN_FACTORY_CODES = {
-  // contracts-testnet-2026.11.03-fix, factory deployed at 0x6ab0ef3aa67b022d4007550e7556108537debb55.
+  // contracts-testnet-2026.11.04, factory deployed at 0x245d3a4ac4b98d713f6c5130b56cd5d550f8cefe.
   // The factory has no immutables; this hash is reproducible from that release's source.
-  "arbitrum-sepolia": ["0x9246f3b981311c4ed988d77bb2177ef45d78182e47d77a2077d0afe3f3377cb8"],
+  "arbitrum-sepolia": ["0x1fdfa1c922f660506243cab4c889aa83e22ce27d818bac9c5e4ecbccbdd04906"],
 };
 
 export function knownFactoryCodesFor(chainOrId) {

@@ -16,9 +16,9 @@ import { ed25519, keccak256, secp256k1 } from "../src/primitives.mjs";
 import { quoteDigest, signQuoteDigest } from "../src/quoteEip712Spec.mjs";
 
 const RPC = process.env.ANVIL_RPC || "http://127.0.0.1:8545";
-const FACTORY = (process.env.ANVIL_FACTORY || "0x6ab0ef3aa67b022d4007550e7556108537debb55").toLowerCase();
-const REGISTRY = (process.env.ANVIL_REGISTRY || "0xf06ec2b1de69ff5b528ed917edffbee7be6dccc9").toLowerCase();
-const CASHIER = (process.env.ANVIL_CASHIER || "0x6c6c6da6392a92b8b9c69b3ec234d524cdcfcb57").toLowerCase();
+const FACTORY = (process.env.ANVIL_FACTORY || "0x245d3a4ac4b98d713f6c5130b56cd5d550f8cefe").toLowerCase();
+const REGISTRY = (process.env.ANVIL_REGISTRY || "0x92191dc3517e15db6468628b1a493576728a9798").toLowerCase();
+const CASHIER = (process.env.ANVIL_CASHIER || "0x40515449159EfbCb5eF5eB9e2E08ba432E150a1C").toLowerCase();
 // THE PROVIDER IS BORN WITH THE RUN. A committed private key, even Anvil's public default, trips push
 // protection; this key signs the quote and Anvil impersonates its address for the registry and decline calls.
 const PROVIDER_KEY = "0x" + randomBytes(32).toString("hex");

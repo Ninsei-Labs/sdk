@@ -17,7 +17,7 @@ check("the default network has a factory policy", () => {
 });
 check("the policy is the deployed testnet factory build", () => {
   const policy = knownFactoryCodesFor("arbitrum-sepolia");
-  assert.deepEqual(policy, ["0x9246f3b981311c4ed988d77bb2177ef45d78182e47d77a2077d0afe3f3377cb8"]);
+  assert.deepEqual(policy, ["0x1fdfa1c922f660506243cab4c889aa83e22ce27d818bac9c5e4ecbccbdd04906"]);
 });
 check("a network without a deployed factory keeps no policy", () => {
   assert.equal(knownFactoryCodesFor("arbitrum"), null);

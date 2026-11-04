@@ -68,7 +68,7 @@ import { height as nodeHeightValue } from "../monero/node.js";
 
 // THE CORE ADDRESS AS A STRING - THE BUILT BUNDLE SHIPPED WITH THE PACKAGE. A relative URL resolves both in the
 // published `engine/` tree and in the page that serves this shim from `www/js/sdk/`; ?v=<hash> keeps the cache fresh.
-const SDK_BUNDLE = new URL("../../assets/vendors/sdk/sdk-browser.js?v=69d79c13", import.meta.url).href;
+const SDK_BUNDLE = new URL("../../assets/vendors/sdk/sdk-browser.js?v=ae66d98c", import.meta.url).href;
 
 // A NAMED SEAM FOR CHECKS - THE SAME TECHNIQUE AS sdkBookUse BELOW. The asynchronous path is driven against a
 // stand-in order book (the demo network has no provider), and the ordinary escrow funding that follows a settled
