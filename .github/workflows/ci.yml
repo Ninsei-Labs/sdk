@@ -79,8 +79,8 @@ jobs:
       - name: Break the vendor-bundle guard (RED, then named)
         run: pnpm run check:vendor-bundles-teeth
 
-      - name: Break the action-window guards (RED, then restored)
-        run: pnpm run check:action-state-teeth
+      - name: Break the action-window and sell guards (RED, then restored)
+        run: pnpm run check:guard-teeth
 
       - name: Break the entry-types guard (RED, then restored)
         run: pnpm run check:types-teeth

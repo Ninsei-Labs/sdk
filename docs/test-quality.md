@@ -35,5 +35,6 @@ Do not add a test that only raises the count. Add the smallest case that fails f
 
 ## Current teeth
 
-`tools/check-action-state-teeth.mjs` proves the action-window guards: removing the unreadable-clock refusal, the
-claim margin or the simulation refusal reddens `check:action-state`. Further guards must follow the same shape.
+`tools/check-guard-teeth.mjs` proves the action-window guards (unreadable clock, claim margin, simulation), the
+full-width sell commitment and the sell-watch claim-open report. Each removal reddens its named check with its own
+reason. Further guards must follow the same shape.
