@@ -268,6 +268,29 @@ const compactRefusal = (r) => ({ ...compactOffer(r), code: r.code, why: r.why })
  * base fee and the same formula; a quote may carry up to twice that estimate (gas moves between the sizing and
  * the check). Zero is the buy side and is always allowed. An unmeasured base fee is a refusal, not a free pass.
  */
+/**
+ * THE PRIORITY FEE OF A BLOCK, FROM ONE RULE. An explicit priority field wins; a plain RPC block may carry only
+ * `gasPrice`, so the priority is the part above the base fee. No block or no readable pair means zero - the
+ * caller then uses the base fee alone, which is the old, stricter behaviour.
+ */
+const priorityFeeOfBlock = (block) => {
+  if (!block || typeof block !== "object") return 0n;
+  const explicit = block.priorityFeePerGas !== undefined && block.priorityFeePerGas !== null
+    ? block.priorityFeePerGas
+    : (block.maxPriorityFeePerGas !== undefined && block.maxPriorityFeePerGas !== null
+      ? block.maxPriorityFeePerGas : null);
+  if (explicit !== null) return explicit;
+  const base = block.baseFeePerGas !== undefined ? block.baseFeePerGas : block.baseFeeWei;
+  if (block.gasPrice === undefined || block.gasPrice === null || base === undefined || base === null) return 0n;
+  try {
+    const gas = BigInt(block.gasPrice);
+    const baseValue = BigInt(base);
+    return gas > baseValue ? gas - baseValue : 0n;
+  } catch { return 0n; }
+};
+
+export const claimPriorityFeeOfBlock = priorityFeeOfBlock;
+
 export function claimTipVerdict({ claimTipWei = 0, baseFeeWei = null, priorityFeeWei = 0, factor = 2 } = {}) {
   let tip = 0n;
   try { tip = BigInt(claimTipWei === undefined || claimTipWei === null || claimTipWei === "" ? 0 : claimTipWei); }
@@ -624,14 +647,8 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
         const baseFeeWei = block && (block.baseFeePerGas !== undefined ? block.baseFeePerGas : block.baseFeeWei);
         // THE NODE SIZES THE TIP FROM THE GAS PRICE, PRIORITY INCLUDED. The SDK used to pass only the base fee, so an
         // honest L1 tip (or a base fee that dropped between sizing and checking) was refused.
-        let priorityFeeWei = block && block.priorityFeePerGas !== undefined ? block.priorityFeePerGas : null;
-        if (priorityFeeWei === null && block && block.gasPrice !== undefined && baseFeeWei !== undefined && baseFeeWei !== null) {
-          try {
-            const gas = BigInt(block.gasPrice); const base = BigInt(baseFeeWei);
-            priorityFeeWei = gas > base ? gas - base : 0n;
-          } catch { priorityFeeWei = 0n; }
-        }
-        const verdict = claimTipVerdict({ claimTipWei: shownBig, baseFeeWei, priorityFeeWei: priorityFeeWei === null ? 0n : priorityFeeWei });
+        const priorityFeeWei = priorityFeeOfBlock(block);
+        const verdict = claimTipVerdict({ claimTipWei: shownBig, baseFeeWei, priorityFeeWei });
         if (!verdict.ok) fail(verdict.code, { step: "claimTip", ...verdict });
       }
       return ticket;
@@ -840,7 +857,8 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
         let block = null;
         try { block = await evmBlock("latest"); } catch { fail("quote-tip-unchecked", { step: "claimTip", why: "block-read-failed" }); }
         const baseFeeWei = block && (block.baseFeePerGas !== undefined ? block.baseFeePerGas : block.baseFeeWei);
-        const verdict = claimTipVerdict({ claimTipWei: quote.claimTip, baseFeeWei });
+        const priorityFeeWei = priorityFeeOfBlock(block);
+        const verdict = claimTipVerdict({ claimTipWei: quote.claimTip, baseFeeWei, priorityFeeWei });
         if (!verdict.ok) fail(verdict.code, { step: "claimTip", ...verdict });
       }
       return quote;
@@ -1079,7 +1097,8 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
         let block = null;
         try { block = await evmBlock("latest"); } catch { fail("quote-tip-unchecked", { step: "claimTip", why: "block-read-failed" }); }
         const baseFeeWei = block && (block.baseFeePerGas !== undefined ? block.baseFeePerGas : block.baseFeeWei);
-        const verdict = claimTipVerdict({ claimTipWei: quote.claimTip, baseFeeWei });
+        const priorityFeeWei = priorityFeeOfBlock(block);
+        const verdict = claimTipVerdict({ claimTipWei: quote.claimTip, baseFeeWei, priorityFeeWei });
         if (!verdict.ok) fail(verdict.code, { step: "claimTip", ...verdict });
       }
       // THE SIGNED XMR AMOUNT TRAVELS WITH THE ORDER TERMS. `swaps.start` records its order as given, and the

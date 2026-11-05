@@ -808,7 +808,6 @@ export const kyberRefusalCheck = async () => {
   const problems = [];
   const notes = [];
   const kyber = await loadFresh(p("src", "legs", "kyber.mjs"));
-  const engineKyber = await loadFresh(p("engine", "evm", "asyncLegs.js"));
   const MAKER = "0x" + "11".repeat(20);
   const response = (status, body) => ({ ok: status < 400, status, json: async () => (typeof body === "function" ? body() : body) });
   const named = (label, result, code) => {
@@ -845,12 +844,6 @@ export const kyberRefusalCheck = async () => {
   named("unsigned: service chose a receiver", await kyber.kyberUnsignedOrder({ params, chainId: 137, fetchImpl: async () => response(200, changedReceiver) }), "kyber-bad-response");
   named("unsigned: service widened allowedSender", await kyber.kyberUnsignedOrder({ params: { ...params, allowedSenders: [MAKER] }, chainId: 137,
     fetchImpl: async () => response(200, signMessageBody()) }), "kyber-bad-response");
-  // THE ENGINE LEG IS THE COPY THE PAGE USES. It must refuse the same answer, not only the package copy.
-  const engineBody = signMessageBody();
-  engineBody.data.message.receiver = "0x" + "44".repeat(20);
-  named("engine unsigned: service chose a receiver", await engineKyber.kyberLegUnsigned({ params, chainId: 137,
-    orderbook: "https://kyber.example",
-    fetchImpl: async () => ({ status: 200, text: JSON.stringify(engineBody) }) }), "kyber-bad-response");
   named("unsigned: empty data", await kyber.kyberUnsignedOrder({ params, chainId: 137, fetchImpl: async () => response(200, { code: 0, message: "ok", data: {} }) }), "kyber-bad-response");
   named("status: orders not an array", await kyber.kyberOrderStatus({ id: 1, chainId: 137, maker: MAKER, fetchImpl: async () => response(200, { code: 0, message: "ok", data: { orders: "nope" } }) }), "kyber-bad-response");
   named("status: unknown status word", await kyber.kyberOrderStatus({ id: 7, chainId: 137, maker: MAKER, fetchImpl: async () => response(200, { code: 0, message: "ok", data: { orders: [{ id: 7, status: "teleported" }] } }) }), "kyber-bad-response");

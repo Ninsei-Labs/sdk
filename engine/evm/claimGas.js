@@ -12,7 +12,8 @@
 // cost plus an EXPLICIT margin for base-fee growth between ticket and claim.
 
 // THE CLAIM GAS LIMIT IS ONE NUMBER ON BOTH SIDES. MEASURED: an honest claim costs 120 721 gas on a live chain,
-// more than the old 120 000, which cut off legitimate claims. The limit has a margin: 200 000.
+// more than the old 120 000, which cut off legitimate claims. The limit has a margin: 200 000. The Arbitrum L1
+// share of a tipped claim was not part of that measurement.
 export const CLAIM_GAS_LIMIT = 200_000n;
 
 // THE TIP FLOOR IS NETWORK POLICY, NOT A CONSTANT IN THE SENDING CODE. A fixed 1 gwei minimum inflated

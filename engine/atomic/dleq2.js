@@ -24,8 +24,8 @@
 // not the soundness fix: the review could not construct an accepting torsion proof even without it.
 // N3: UNCOMPRESSED secp256k1 POINTS (65-byte 04||x||y) ARE ACCEPTED. The point parser canonicalises them to the
 // compressed form before the challenge, so the transcript is the same; this is leniency, not a second encoding.
-// N4: SCALARS AT OR ABOVE THE ORDER ARE REDUCED, NOT REFUSED, matching the reference. A non-canonical sig scalar
-// therefore verifies as its residue; requiring < ord would add strictness without rejecting an honest proof.
+// N4: SCALARS AT OR ABOVE THE ORDER ARE REDUCED HERE, NOT REFUSED, matching the reference. The relay spec 12.10
+// is stricter and refuses them on the wire; this verifier still accepts a reduced residue from an older vector.
 // IMPORTANT: the primitives are audited (@noble/curves), THIS implementation is not.
 //
 //

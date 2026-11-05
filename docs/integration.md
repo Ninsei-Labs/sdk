@@ -37,7 +37,7 @@ isolated; do not reuse a storage adapter between tenants.
 | wallet adapter | Any action that signs or reads the wallet | `vm`, `connect`, `disconnect`, `address`, `chainId`, `subscribe`, `driver`, plus `send` / `receipt` for actions. `evmWallet(provider)` is the EVM implementation. |
 | `evmCall` | Quote policy, order slots, contract state | `({ to, data }) => Promise<hex>`. If absent, action guards read through the wallet adapter's `driver()` provider. |
 | `evmCode` | Factory/implementation code checks | `(address: string) => Promise<hex>`; without it the code-hash policy cannot be applied. |
-| `evmBlock` | Quote tip and block-time checks | `(tag?) => Promise<{ timestamp, ... }>`; an unread block is a named refusal, not zero. |
+| `evmBlock` | Quote tip and block-time checks | `(tag?) => Promise<{ timestamp, baseFeePerGas?, baseFeeWei?, priorityFeePerGas?, maxPriorityFeePerGas?, gasPrice?, ... }>`; the priority fee may be explicit or derived from `gasPrice - baseFee`; an unread block is a named refusal, not zero. |
 | `evmLogs` | Decline and order event reads | `({ address, topics, fromBlock, toBlock }) => Promise<logs>`. |
 | `fetch` | HTTP and Monero-node probes | `fetch`-compatible function. Required only for paths that perform network reads. |
 | `serverAuth` | Authenticated service routes | `() => Promise<string>` or a ready bearer token, depending on the route. Missing auth is a named service refusal. |

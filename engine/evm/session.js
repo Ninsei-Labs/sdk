@@ -109,7 +109,7 @@ async function loadLib() {
   if (!lib) {
     // A dynamic import of our own file: CSP script-src 'self' allows it,
     // and the 2 MB bundle loads only when the user actually presses Connect.
-    lib = await import("../../assets/vendors/walletconnect/wc-browser.js?v=13fe06e5");
+    lib = await import("../../assets/vendors/walletconnect/wc-browser.js?v=fb64f27c");
   }
   return lib;
 }
