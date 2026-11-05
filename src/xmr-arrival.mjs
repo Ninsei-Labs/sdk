@@ -23,9 +23,9 @@
 // hashes), never for a single transaction: otherwise a node links the user's IP to the trade. Requests carry
 // `Content-Type: text/plain` (verified on every node in the default list - it avoids the CORS preflight).
 //
-// WHAT THE MAKER GIVES IS ONLY A HINT. The maker's node may name the payout txid; the backend may relay it. It
-// decides nothing - a fabricated txid simply fails the check. Without a txid the client scans blocks from the
-// swap's birth height (a few dozen blocks).
+// WHAT THE MAKER GIVES IS ONLY A REPORTED HINT. The maker's node may name the payout txid; the backend may relay
+// it, but it does not narrow the walk and cannot hide another transfer. Every matching transfer is judged; the
+// client scans blocks from the swap's birth height (a few dozen blocks).
 import { SdkError } from "./errors.mjs";
 import * as engine from "./engine.mjs";
 
@@ -159,29 +159,43 @@ async function getBlockTxs(node, hashes, fetchImpl, timeoutMs) {
 const sumOutputs = (hit) => hit.outputs.reduce((n, o) => n + (o.amountVerified ? (o.amountAtomic || 0n) : 0n), 0n);
 
 /**
- * FIND THE TRANSACTION, IF IT IS THERE. Blocks are walked from the swap's birth height upwards and the whole block
- * is asked for each height, so a public node never learns which transaction is ours. A txid hint only shortens the
- * work: a block without that hash is still fetched whole, but its transactions are not parsed.
+ * FIND THE BEST MATCHING TRANSFER. Blocks are walked from the swap's birth height upwards and the whole block is
+ * asked for each height, so a public node never learns which transaction is ours. Every matching transfer is
+ * judged: a full unlocked payout wins over dust or a locked one. The reported hint is not an input here.
  */
-async function locate(node, { txid, address, viewSecret, spendPub, fromHeight, toHeight, nowSec, fetchImpl, timeoutMs }) {
+async function locate(node, { expectedAtomic, address, viewSecret, spendPub, fromHeight, toHeight, nowSec, fetchImpl, timeoutMs }) {
   const from = Math.max(0, intOf(fromHeight) ?? 0);
   const to = intOf(toHeight);
   if (!Number.isFinite(to) || to < from) throw new SdkError("bad-input", { field: "fromHeight", got: fromHeight });
+  let best = null;
   for (let h = from; h <= to; h++) {
     const { txHashes } = await getBlock(node, h, fetchImpl, timeoutMs);
     if (!txHashes.length) continue;
-    if (txid && !txHashes.includes(txid)) continue;        // the hint says it is not in this block
+    // EVERY BLOCK IS WALKED. The reported hint cannot hide a full payout in another block.
     const txs = await getBlockTxs(node, txHashes, fetchImpl, timeoutMs);
     for (const tx of txs) {
-      if (txid && tx.tx_hash !== txid) continue;
-      const hit = engine.xmrScan.matchTransaction(tx, [{ address, viewSecret, spendPub }], { height: h, nowSec });
+      const hit = engine.xmrScan.matchTransaction(tx, [{ address, viewSecret, spendPub }], {
+        height: h, tipHeight: Math.max(0, to), nowSec,
+      });
       // LOCATE FINDS AN OUTPUT, NOT AN AMOUNT. The amount can be forged or unbacked; the verification step below
       // refuses it. Requiring a positive verified sum here made two nodes that agreed on a forged amount look like
       // "no transaction at all".
-      if (hit.length) return { txid: tx.tx_hash, height: h };
+      if (!hit.length) continue;
+      const amountAtomic = sumOutputs(hit[0]);
+      const amountVerified = hit[0].outputs.every((o) => o.amountVerified === true);
+      const locked = hit[0].unlock && hit[0].unlock.locked === true;
+      // JUDGE EVERY MATCHING TRANSFER. A dust transfer before the full payout is a real candidate but a worse
+      // one; a full unlocked payout wins over a full locked one. The verification step still compares the chosen
+      // transaction across operators.
+      const score = (amountAtomic >= expectedAtomic ? 4 : 0) + (amountVerified ? 2 : 0) + (locked ? 0 : 1);
+      const candidate = { txid: tx.tx_hash, height: h };
+      if (score === 7) return candidate;
+      if (!best || score > best.score || (score === best.score && amountAtomic > best.amountAtomic)) {
+        best = { ...candidate, score, amountAtomic };
+      }
     }
   }
-  return null;
+  return best;
 }
 
 /**
@@ -231,7 +245,7 @@ export async function verifyArrival(request) {
   const completedOperators = new Set();
   for (const { node } of live) {
     try {
-      located = await locate(node, { txid: txidHint, address: request.address, viewSecret: request.viewSecret, spendPub: request.spendPub, fromHeight: request.fromHeight, toHeight: top, nowSec, fetchImpl, timeoutMs });
+      located = await locate(node, { expectedAtomic, address: request.address, viewSecret: request.viewSecret, spendPub: request.spendPub, fromHeight: request.fromHeight, toHeight: top, nowSec, fetchImpl, timeoutMs });
       if (!located) completedOperators.add(node.operator);
     } catch (error) {
       failed.push(failureOf(error, node));
