@@ -292,6 +292,13 @@ const MIN_PASSPHRASE = 12;
 export const recordInputOf = (request, xmrNetwork = null) => {
   const quote = request && request.quote && typeof request.quote === "object" ? request.quote : {};
   const pass = (v) => (v === undefined || v === null || v === "" ? undefined : v);
+  const orderAtomic = request && request.order && request.order.xmrAmount !== undefined && request.order.xmrAmount !== null
+    ? String(request.order.xmrAmount) : null;
+  const quoteAtomic = request && request.orderQuote && request.orderQuote.xmrAmount !== undefined && request.orderQuote.xmrAmount !== null
+    ? String(request.orderQuote.xmrAmount) : null;
+  if (orderAtomic !== null && quoteAtomic !== null && orderAtomic !== quoteAtomic) {
+    throw new SdkError("bad-input", { field: "xmrAmount", why: "order-vs-quote" });
+  }
   return {
     side: request.side || "buy",
     network: quote.chain ? quote.chain : undefined,
@@ -305,10 +312,7 @@ export const recordInputOf = (request, xmrNetwork = null) => {
     // order's `xmrAmount` is the exact atomic value the maker will pay, and the arrival check compares that one.
     // THE SIGNED FIGURE, NEVER A DISPLAY ONE. The firm path puts the quote's signed `xmrAmount` on the order it
     // returns; a bare `quote.size` is a rounded screen number and must not reach the arrival check.
-    expectedAtomic: request.order && request.order.xmrAmount !== undefined && request.order.xmrAmount !== null
-      ? String(request.order.xmrAmount)
-      : (request.orderQuote && request.orderQuote.xmrAmount !== undefined && request.orderQuote.xmrAmount !== null
-        ? String(request.orderQuote.xmrAmount) : undefined),
+    expectedAtomic: quoteAtomic !== null ? quoteAtomic : (orderAtomic !== null ? orderAtomic : undefined),
     // THE ORDER-QUOTE ID IS PART OF THE RECORD, NOT A DETAIL OF THE SCREEN (a defect found): our service uses it to
     // tie the created escrow to the provider node's record, and without it the node cannot take the ETH
     // (sdk/src/swap-flow.mjs: quoteId: quote.id -> swap.orderQuoteId; markBodyOf reads exactly this field).
@@ -855,12 +859,12 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       const spendPub = request.spendPub || e.moneroSpendPub || null;
       if (!spendPub) throw new SdkError("bad-input", { field: "spendPub" });
       // THE EXPECTED SUM IN ATOMIC UNITS. Given explicitly, or derived from the record's XMR amount (1 XMR = 10^12).
-      let expectedAtomic = request.expectedAtomic !== undefined && request.expectedAtomic !== null
+      // THE AMOUNT MUST BE THE SIGNED ONE. `swap.xmrAmount` is a display figure; deriving the arrival amount from
+      // it would let a rounded number decide whether a payment is short. A record without the signed value is
+      // refused instead of guessed.
+      const expectedAtomic = request.expectedAtomic !== undefined && request.expectedAtomic !== null
         ? request.expectedAtomic : (e.expectedAtomic !== undefined && e.expectedAtomic !== null ? e.expectedAtomic : null);
-      if (expectedAtomic === null && swap && Number.isFinite(Number(swap.xmrAmount))) {
-        expectedAtomic = BigInt(Math.round(Number(swap.xmrAmount) * 1e12)).toString();
-      }
-      if (expectedAtomic === null) throw new SdkError("bad-input", { field: "expectedAtomic" });
+      if (expectedAtomic === null) throw new SdkError("bad-input", { field: "expectedAtomic", why: "unsigned-amount" });
       const readyBy = Number(request.readyBySec !== undefined && request.readyBySec !== null ? request.readyBySec : e.readyBy);
       if (!Number.isFinite(readyBy) || readyBy <= 0) throw new SdkError("bad-input", { field: "readyBySec" });
       const minConfirmations = Number.isFinite(Number(request.minConfirmations)) && Number(request.minConfirmations) > 0
@@ -885,11 +889,24 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       // TIME STILL LEFT BEYOND THE RESERVE - the maker has room to deliver; a refund now would abandon a live trade.
       if (leftSec > leadSec) return { refunded: false, state: "waiting", leftSec, needSec: leadSec, readyBy, nowSec };
 
-      const verdict = await verify({
-        nodes: request.nodes, address, viewSecret, spendPub, expectedAtomic, minConfirmations,
-        txid: request.txid || null, fromHeight,
-        timeoutMs: request.timeoutMs, nowSec,
-      });
+      let verdict = null;
+      try {
+        verdict = await verify({
+          nodes: request.nodes, address, viewSecret, spendPub, expectedAtomic, minConfirmations,
+          txid: request.txid || null, fromHeight,
+          timeoutMs: request.timeoutMs, nowSec,
+        });
+      } catch (error) {
+        // A SHORT PAYMENT OR A LOCKED OUTPUT IS NOT AN EMPTY ADDRESS. It is also not a completed arrival: return
+        // the named state and sign nothing. The caller can wait for the remainder or the lock to mature.
+        if (error && error.code === "xmr-underpaid") {
+          return { refunded: false, state: "arrival-underpaid", leftSec, verdict: null, error: error.params || null };
+        }
+        if (error && error.code === "xmr-locked") {
+          return { refunded: false, state: "arrival-locked", leftSec, verdict: null, error: error.params || null };
+        }
+        throw error;
+      }
       // THE XMR IS THERE - NOTHING IS REFUNDED. This is the decisive condition of the guard: without it the
       // client would take the ETH back from under a maker who has already sent the XMR.
       if (verdict.seen) return { refunded: false, state: "arrived", leftSec, verdict };

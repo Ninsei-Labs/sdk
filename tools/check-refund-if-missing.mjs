@@ -8,7 +8,7 @@
 // the walk and found no matching transaction. Every other waiting answer is returned as `arrival-pending`, and a
 // failure to check still throws before a signature.
 import { SdkError } from "../src/errors.mjs";
-import { createSwaps } from "../src/swaps.mjs";
+import { createSwaps, recordInputOf } from "../src/swaps.mjs";
 import { verifyArrival } from "../src/xmr-arrival.mjs";
 
 const now = 1_800_000_000;
@@ -28,7 +28,7 @@ const base = {
   leadSec: 100,
 };
 
-async function run(verdict, { request = {}, throws = false } = {}) {
+async function run(verdict, { request = {}, throws = false, error = null } = {}) {
   let refunds = 0;
   let checks = 0;
   let args = null;
@@ -37,6 +37,7 @@ async function run(verdict, { request = {}, throws = false } = {}) {
       verify: async (next) => {
         checks += 1;
         args = next;
+        if (error) throw error;
         if (throws) throw new SdkError("xmr-no-nodes", { tried: ["node"] });
         return verdict;
       },
@@ -77,6 +78,37 @@ export const refundIfMissingCheck = async () => {
     check(got.refunds === 0, `${name} called the refund`);
     check(got.result && got.result.state === (verdict.seen ? "arrived" : "arrival-pending"),
       `${name} reported ${JSON.stringify(got.result && got.result.state)}`);
+  }
+
+  // A SHORT OR LOCKED PAYMENT IS NAMED AND SIGNS NOTHING. It is not an empty address and not an arrival.
+  for (const [name, code, state] of [
+    ["underpaid", "xmr-underpaid", "arrival-underpaid"],
+    ["locked", "xmr-locked", "arrival-locked"],
+  ]) {
+    const got = await run(null, { error: new SdkError(code, { txid: "ab", height: 100 }) });
+    check(!got.error && got.result && got.result.refunded === false && got.result.state === state,
+      `${name} did not become ${state}`);
+    check(got.refunds === 0, `${name} called the refund`);
+  }
+
+  // THE DISPLAY AMOUNT IS NOT A SUBSTITUTE FOR THE SIGNED ONE.
+  {
+    const got = await run({ seen: false, state: "pending", absent: true }, {
+      request: { expectedAtomic: undefined, swap: { xmrAmount: 1 } },
+    });
+    check(got.error && got.error.code === "bad-input" && got.error.params && got.error.params.why === "unsigned-amount",
+      "an unsigned record amount refunded");
+    check(got.refunds === 0, "an unsigned record amount called the refund");
+  }
+
+  // THE ORDER AND THE SIGNED QUOTE MUST AGREE ON THE AMOUNT.
+  {
+    let refused = null;
+    try {
+      recordInputOf({ order: { xmrAmount: "1" }, orderQuote: { xmrAmount: "2" }, quote: {} });
+    } catch (error) { refused = error; }
+    check(refused && refused.code === "bad-input" && refused.params && refused.params.why === "order-vs-quote",
+      "two XMR amounts reached the record without a refusal");
   }
 
   // A FAILED CHECK SIGNS NOTHING.
@@ -176,7 +208,7 @@ export const refundIfMissingCheck = async () => {
   }
 
   return {
-    note: "only two operators' completed walk with nothing refunds; a seen transaction and a failed check do not",
+    note: "only two operators' completed walk with nothing refunds; pending, one-node, underpaid and locked do not",
     problems,
     notes: problems.length ? [] : ["pending/one-node/arrived are kept apart from absent; busy and partial answers are refusals"],
   };
