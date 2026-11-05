@@ -33,8 +33,9 @@ import * as engine from "./engine.mjs";
 // and a second implementation of the same event would be a second truth about it.
 import { declinedFromLogs, logReaderOf, blockBoundaryOf, DECLINED_TOPIC0 } from "./decline.mjs";
 // THE ORDER SIDE IS BUILT IN-PROCESS, by the same engine builder the record and the facade use. The old
-// browser worker shipped its own copy of the crypto bundle; it never checked the knowledge proofs, and the
-// package no longer needs a second build of the same primitives.
+// browser worker shipped its own copy of the crypto bundle. Its verifySide checked the DLEQ equation but not
+// that the proven point matched the quote's commitment; the package no longer needs a second build of the same
+// primitives.
 import { buildOwnSide, orderStep } from "./order.mjs";
 
 // THE ENGINE SURFACES, TAKEN THROUGH THE ONE SEAM (./engine.mjs) - exactly as the rest of the core does.
