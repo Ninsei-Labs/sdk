@@ -56,6 +56,41 @@ const cases = [
     from: "if (at !== null && at >= Number(deadlines.readyBy)) {", to: "if (false) {",
     wants: "claim-open",
   },
+  {
+    check: "claim-sender", source: "src/actions.mjs",
+    name: "the claim-sender policy is removed",
+    from: "if (from !== to) return { ok: false, code: \"bad-input\", field: \"wallet\", why: \"not-the-claimer\" };",
+    to: "if (false) return { ok: false, code: \"bad-input\", field: \"wallet\", why: \"not-the-claimer\" };",
+    wants: "third-party sender",
+  },
+  {
+    check: "funding-receipt", source: "engine/evm/funding.js",
+    name: "a reverted receipt is no longer reverted",
+    from: "if (status === 0) return { status: \"reverted\", reason: \"status-0\" };",
+    to: "if (false) return { status: \"reverted\", reason: \"status-0\" };",
+    wants: "status 0",
+  },
+  {
+    check: "order-proof", source: "engine/atomic/order.js",
+    name: "the proof-to-commitment binding is removed",
+    from: "if (!provenCommit || low160(provenCommit) !== low160(side.commitHalfClaimer)) {",
+    to: "if (false) {",
+    wants: "substituted commitment",
+  },
+  {
+    check: "sale-auth", source: "src/quotes.mjs",
+    name: "the returned order is no longer compared with the signed quote",
+    from: "if (!sameValue(ticket.order[name], quote[name])) {",
+    to: "if (false) {",
+    wants: "another amount",
+  },
+  {
+    check: "relay-adapter", source: "src/quotes.mjs",
+    name: "a foreign cashier is accepted",
+    from: "if (got !== pin) fail(\"quote-cashier-mismatch\", { step, got: got || null, want: pin });",
+    to: "if (false) fail(\"quote-cashier-mismatch\", { step, got: got || null, want: pin });",
+    wants: "foreign cashier",
+  },
 ];
 
 const originals = new Map();
