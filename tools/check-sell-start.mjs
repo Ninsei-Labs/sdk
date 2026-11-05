@@ -128,6 +128,32 @@ try {
   check(error && error.code === "quote-refused" && error.params && error.params.why === "escrow-not-open",
     "an unfunded escrow is refused before send-xmr");
 }
+// THE SALE GATE READS ONE BLOCK AND USES THE CHAIN'S TIME. A device clock far from the chain must not make a
+// close deadline look open, and status, deadlines and slots must all be read at the same block.
+{
+  const seenBlocks = [];
+  const atBlock = async ({ data, block }) => {
+    seenBlocks.push(block);
+    return read({ data });
+  };
+  const chainGate = createSwaps({
+    config: {},
+    call: atBlock,
+    evmBlock: async () => ({ number: 123, timestamp: order.readyBy - 100 }),
+  });
+  try {
+    await chainGate.startSell({ offer: { ...gateOffer, escrow: "0x" + "fb".repeat(20),
+      quote: { ...gateOffer.quote, id: "oq_gate_clock" }, jointAddress: "5" + "D".repeat(94) },
+      recoveryKey: mnemonic, onRecoveryKey: accept });
+    check(false, "a close deadline passed under the chain clock");
+  } catch (error) {
+    check(error && error.code === "quote-refused" && error.params && error.params.why === "deadline-too-close",
+      "the chain timestamp closes the sale deadline");
+  }
+  check(seenBlocks.length > 0 && seenBlocks.every((block) => block === "0x7b"),
+    "status, deadlines and slots were read at one block");
+}
+
 try {
   const slotsRead = gateRead(1, { [encodeRead("commitHalfLocker")]: bytes("0x" + "00".repeat(32)) });
   const wrongSlots = createSwaps({ config: {}, call: slotsRead });

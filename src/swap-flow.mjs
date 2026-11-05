@@ -356,7 +356,7 @@ export async function orderStatus(escrow, deps = {}) {
   // the engine read. The page goes through the bridge, which hands in the wallet's own reader, so the state is
   // read by the same wallet that will sign.
   const call = deps.call || readContract;
-  const raw = await call({ to: escrow, data: encodeStatus() });
+  const raw = await call({ to: escrow, data: encodeStatus(), block: deps.blockTag || "latest" });
   return decodeStatus(raw);
 }
 
@@ -395,13 +395,14 @@ export async function orderDeadlines(escrow, deps = {}) {
   // THE SAME READER SEAM AS orderStatus: the deadline must be read by the wallet that will sign, not by a second
   // provider.
   const call = deps.call || readContract;
+  const block = deps.blockTag || "latest";
   const [raw1, rawH, rawReadyBy] = await Promise.all([
-    call({ to: escrow, data: encodeT1() }),
-    call({ to: escrow, data: encodeTermsHash() }),
+    call({ to: escrow, data: encodeT1(), block }),
+    call({ to: escrow, data: encodeTermsHash(), block }),
     // THE READY-MARK DEADLINE IS READ HERE TOO: without it the screen cannot say that the person is already in
     // the dead zone (the mark is closed, the claim is open, refunding is not open yet) - and that is exactly
     // where the deal hangs silently.
-    call({ to: escrow, data: encodeRead("readyBy") }),
+    call({ to: escrow, data: encodeRead("readyBy"), block }),
   ]);
   // An empty eth_call response means there is NO CODE at the address: the contract is not deployed. This happens
   // when the createOrder transaction did not go through (for example the wallet rejected it over the fee) while
@@ -433,7 +434,8 @@ export async function orderLiveSlots(escrow, deps = {}) {
   if (!escrow) throw new SdkError("bad-input", { field: "escrow" });
   const keys = ["edPointLocker", "edPointClaimer", "edViewPointLocker", "commitHalfLocker", "commitHalfClaimer"];
   try {
-    const raws = await Promise.all(keys.map((k) => call({ to: escrow, data: encodeRead(k) })));
+    const block = deps.blockTag || "latest";
+    const raws = await Promise.all(keys.map((k) => call({ to: escrow, data: encodeRead(k), block })));
     const slots = {};
     keys.forEach((k, i) => { slots[k] = decodeBytes32(raws[i], k + "()"); });
     return { slots };
@@ -471,8 +473,9 @@ async function assertOrderOpen(escrow, what, deps) {
 async function assertActionWindow(escrow, what, deps, now = null) {
   if (typeof deps.blockTime !== "function") return;
   const call = deps.call || readContract;
+  const block = deps.blockTag || "latest";
   const [readyRaw, deadlines] = await Promise.all([
-    call({ to: escrow, data: encodeRead("ready") }),
+    call({ to: escrow, data: encodeRead("ready"), block }),
     orderDeadlines(escrow, deps),
   ]);
   const marked = BigInt(readyRaw) !== 0n;
