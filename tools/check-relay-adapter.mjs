@@ -10,7 +10,7 @@ import { CipherSuite, DhkemX25519HkdfSha256, HkdfSha256 } from "@hpke/core";
 import { Chacha20Poly1305 } from "@hpke/chacha20poly1305";
 import { keccak256, secp256k1 } from "../src/primitives.mjs";
 import { nodeFeaturesDigest } from "../src/relayFeatures.mjs";
-import { relayQuoteDigest } from "../src/relayQuote.mjs";
+import { relayQuoteDigest, relayRequestDigest } from "../src/relayQuote.mjs";
 import { quoteDigest, signQuoteDigest } from "../src/quoteEip712Spec.mjs";
 import { createQuotes } from "../src/quotes.mjs";
 import { recordInputOf } from "../src/swaps.mjs";
@@ -28,6 +28,11 @@ const hpkePublic = "0x" + Buffer.from(await suite.kem.serializePublicKey(hpke.pu
 const quotePrivate = Uint8Array.from({ length: 32 }, (_, i) => i + 1);
 const quoteKey = (() => {
   const publicKey = secp256k1.Point.BASE.multiply(BigInt("0x" + Buffer.from(quotePrivate).toString("hex"))).toBytes(false);
+  return "0x" + Buffer.from(keccak256(publicKey.slice(1)).slice(12)).toString("hex");
+})();
+const relayPrivate = Uint8Array.from({ length: 32 }, (_, i) => i + 33);
+const relayKey = (() => {
+  const publicKey = secp256k1.Point.BASE.multiply(BigInt("0x" + Buffer.from(relayPrivate).toString("hex"))).toBytes(false);
   return "0x" + Buffer.from(keccak256(publicKey.slice(1)).slice(12)).toString("hex");
 })();
 const provider = "0x" + "a1".repeat(20);
@@ -88,6 +93,12 @@ function signRelay(answer) {
     + Buffer.from(sig.slice(33, 65)).toString("hex")
     + (27 + sig[0]).toString(16);
 }
+function signRelayRequest(request) {
+  const sig = secp256k1.sign(relayRequestDigest(request), relayPrivate, { format: "recovered", prehash: false });
+  return "0x" + Buffer.from(sig.slice(1, 33)).toString("hex")
+    + Buffer.from(sig.slice(33, 65)).toString("hex")
+    + (27 + sig[0]).toString(16);
+}
 function answerFor(payload, { tamperProof = false, cashierAddress = cashier } = {}) {
   const orderTerm = payload.terms.order;
   const context = engine.orderContext.orderContextString(orderTerm);
@@ -141,15 +152,22 @@ function answerFor(payload, { tamperProof = false, cashierAddress = cashier } = 
     edViewPointLocker: ask ? payload.edViewPointClient : nodeSide.viewPoint,
     edViewPointClaimer: ask ? nodeSide.viewPoint : payload.edViewPointClient,
   };
+  const forwarded = {
+    type: "quote_request", version: 1, relayId: "test-relay", provider: payload.terms.maker,
+    session: "0x" + "01".repeat(32), requestId: "0x" + "02".repeat(32), counter: "1",
+    expiry: nowSec + 600, payload: payload._raw || JSON.stringify(payload), feeBps: "0",
+    feeRecipient: "0x" + "99".repeat(20),
+  };
+  forwarded.signature = signRelayRequest(forwarded);
   const answer = {
     type: "quote", version: 1, relayId: "test-relay", provider: payload.terms.maker,
     session: "0x" + "01".repeat(32), requestId: "0x" + "02".repeat(32), counter: "7",
-    requestHash: "0x" + "03".repeat(32), payload: JSON.stringify(inner), time: nowSec,
+    requestHash: "0x" + Buffer.from(relayRequestDigest(forwarded)).toString("hex"),
+    payload: JSON.stringify(inner), time: nowSec,
   };
   answer.signature = signRelay(answer);
   return {
-    version: 1, relay: "test-relay", offered: 1, forwarded: { relayId: "test-relay" },
-    answer,
+    version: 1, relay: "test-relay", offered: 1, forwarded, answer,
   };
 }
 
@@ -159,20 +177,21 @@ function relayFetch({ tamperProof = false, cashierAddress = cashier } = {}) {
     bodies,
     fetchImpl: async (url, init) => {
       if (String(url).endsWith("/v1/relay")) {
-        return { ok: true, status: 200, json: async () => ({ version: 1, relayId: "test-relay", feeRecipient: "0x" + "99".repeat(20), feeBps: "0" }) };
+        return { ok: true, status: 200, json: async () => ({ version: 1, relayId: "test-relay", relayKey, feeRecipient: "0x" + "99".repeat(20), feeBps: "0" }) };
       }
       const body = JSON.parse(init.body);
       bodies.push(body);
       const payload = JSON.parse(body.payload);
+      payload._raw = body.payload;
       return { ok: true, status: 200, json: async () => answerFor(payload, { tamperProof, cashierAddress }) };
     },
   };
 }
 
-function makeQuotes({ providerWord = provider, factoryWord = factory, cashierPin = cashier, denylist = null } = {}) {
+function makeQuotes({ providerWord = provider, factoryWord = factory, cashierPin = cashier, registryPin = null, denylist = null } = {}) {
   return createQuotes({
     denylist,
-    config: { settlement: { chain: { escrow: cashierPin ? { cashier: cashierPin } : {} } } },
+    config: { settlement: { chain: { escrow: { ...(cashierPin ? { cashier: cashierPin } : {}), ...(registryPin ? { registry: registryPin } : {}) } } } },
     now: () => nowSec * 1000,
     evmCall: async ({ data }) => {
       if (data.startsWith(providerSelector)) return word(providerWord);
@@ -243,6 +262,26 @@ try {
     ok("the relay answer exposes a start request");
   } else bad("start request: " + JSON.stringify(result.startRequest));
 } catch (error) { bad("valid adapter call failed: " + JSON.stringify(error && (error.code || error.message)) + " " + JSON.stringify(error && error.params)); }
+
+console.log("=== 1a) THE REGISTRY IS PINNED TO THE NETWORK ===");
+{
+  const foreign = makeQuotes({ registryPin: "0x" + "aa".repeat(20) });
+  try {
+    await call(foreign, { fetchImpl: relayFetch().fetchImpl });
+    bad("a foreign registry passed the pin");
+  } catch (error) {
+    if (error && error.code === "bad-input" && error.params && error.params.field === "features.registry") {
+      ok("a registry different from the network pin is refused");
+    } else bad("foreign registry gave " + JSON.stringify({ code: error && error.code, params: error && error.params }));
+  }
+  const pinned = makeQuotes({ registryPin: registry });
+  try {
+    await call(pinned, { fetchImpl: relayFetch().fetchImpl });
+    ok("the network's own registry is accepted");
+  } catch (error) {
+    bad("the pinned registry was refused: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
+  }
+}
 
 console.log("=== 2) THE BID SIDE KEEPS THE PROVIDER AS LOCKER ===");
 const bidOrder = { ...order, locker: provider, claimer: user };

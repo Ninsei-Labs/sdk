@@ -15,7 +15,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { keccak256, secp256k1 } from "../src/primitives.mjs";
 import { nodeFeaturesDigest } from "../src/relayFeatures.mjs";
 import { buildFirmRequest } from "../src/relayRequest.mjs";
-import { relayQuoteDigest } from "../src/relayQuote.mjs";
+import { relayQuoteDigest, relayRequestDigest, verifyRelayForwarded } from "../src/relayQuote.mjs";
 import { quoteDigest, signQuoteDigest } from "../src/quoteEip712Spec.mjs";
 import * as engine from "../src/engine.mjs";
 import { requestFirmQuote } from "../src/relayFirmClient.mjs";
@@ -32,6 +32,11 @@ const hpkePublic = "0x" + Buffer.from(await suite.kem.serializePublicKey(hpke.pu
 const quotePrivate = Uint8Array.from({ length: 32 }, (_, i) => i + 1);
 const quoteKey = (() => {
   const publicKey = secp256k1.Point.BASE.multiply(BigInt("0x" + Buffer.from(quotePrivate).toString("hex"))).toBytes(false);
+  return "0x" + Buffer.from(keccak256(publicKey.slice(1)).slice(12)).toString("hex");
+})();
+const relayPrivate = Uint8Array.from({ length: 32 }, (_, i) => i + 33);
+const relayKey = (() => {
+  const publicKey = secp256k1.Point.BASE.multiply(BigInt("0x" + Buffer.from(relayPrivate).toString("hex"))).toBytes(false);
   return "0x" + Buffer.from(keccak256(publicKey.slice(1)).slice(12)).toString("hex");
 })();
 const provider = "0x" + "a1".repeat(20);
@@ -144,6 +149,12 @@ function signRelay(answer) {
     + Buffer.from(sig.slice(33, 65)).toString("hex")
     + (27 + sig[0]).toString(16);
 }
+function signRelayRequest(request) {
+  const sig = secp256k1.sign(relayRequestDigest(request), relayPrivate, { format: "recovered", prehash: false });
+  return "0x" + Buffer.from(sig.slice(1, 33)).toString("hex")
+    + Buffer.from(sig.slice(33, 65)).toString("hex")
+    + (27 + sig[0]).toString(16);
+}
 function makeAnswer(source, {
   validUntil = null,
   factory = source.terms.order.factory,
@@ -212,16 +223,41 @@ function relayBody(answer) {
   return { version: 1, relay: "test-relay", offered: 1, forwarded: { relayId: "test-relay" }, answer };
 }
 
+// The fixture does not know the SDK's random HPKE envelope until the request reaches the fake transport. Build the
+// forwarded frame from the payload actually POSTed, recompute the answer's requestHash and re-sign the answer.
+function makeForwarded(payload, answer) {
+  const request = {
+    type: "quote_request", version: 1, relayId: "test-relay", provider: answer.provider,
+    session: "0x" + "01".repeat(32), requestId: "0x" + "02".repeat(32), counter: "1",
+    expiry: nowSec + 600, payload, feeBps: "0", feeRecipient: "0x" + "99".repeat(20),
+  };
+  request.signature = signRelayRequest(request);
+  return request;
+}
+
+function withForwarded(body, payload) {
+  const forwarded = makeForwarded(payload, body.answer);
+  const answer = { ...body.answer, requestHash: "0x" + Buffer.from(relayRequestDigest(forwarded)).toString("hex"), signature: null };
+  answer.signature = signRelay(answer);
+  return { ...body, forwarded, answer };
+}
+
 function fakeFetch({ ok = true, status = 200, body = null, error = null, relay = null } = {}) {
   const calls = [];
-  const info = relay || { version: 1, relayId: "test-relay", feeRecipient: "0x" + "99".repeat(20), feeBps: "0" };
+  const info = relay
+    ? { relayKey, ...relay }
+    : { version: 1, relayId: "test-relay", relayKey, feeRecipient: "0x" + "99".repeat(20), feeBps: "0" };
   return {
     calls,
     fetchImpl: async (url, init) => {
       calls.push({ url, init });
       if (String(url).endsWith("/v1/relay")) return { ok: true, status: 200, json: async () => info };
       if (error) throw error;
-      return { ok, status, json: async () => body };
+      let responseBody = body;
+      if (body && body.answer && body.forwarded && body.forwarded.relayId === body.relay && !body.forwarded.signature) {
+        responseBody = withForwarded(body, JSON.parse(init.body).payload);
+      }
+      return { ok, status, json: async () => responseBody };
     },
   };
 }
@@ -264,7 +300,7 @@ try {
     && typeof sentBody.payload === "string") {
     ok("the payload string and the partner label are sent exactly");
   } else bad("the request body changed: " + JSON.stringify(Object.keys(sentBody)));
-} catch (error) { bad("valid answer refused: " + JSON.stringify(error && (error.code || error.message))); }
+} catch (error) { bad("valid answer refused: " + JSON.stringify({ code: error && error.code, params: error && error.params, message: error && error.message })); }
 
 console.log("=== 1a2) THE PUBLISHED FEE MUST MATCH THE SIGNED QUOTE ===");
 {
@@ -418,6 +454,35 @@ console.log("=== 3c) MALFORMED ENVELOPE AND PUBLISHED FIELDS ARE NAMED ===");
   }
 }
 
+console.log("=== 3d) THE FORWARDED FRAME IS SIGNED, BOUND TO THE PAYLOAD AND HASHED ===");
+{
+  const payload = "forwarded-payload";
+  const provider = built.terms.maker;
+  const forwarded = makeForwarded(payload, { provider });
+  const requestHash = "0x" + Buffer.from(relayRequestDigest(forwarded)).toString("hex");
+  try {
+    verifyRelayForwarded({ forwarded, relayKey, payload, provider, requestHash });
+    ok("a valid forwarded frame verifies");
+  } catch (error) { bad("valid forwarded frame refused: " + JSON.stringify(error && (error.code || error.message))); }
+  for (const [label, call, why] of [
+    ["a different payload", () => verifyRelayForwarded({ forwarded, relayKey, payload: "other", provider, requestHash }), "forwarded-payload"],
+    ["a different provider", () => verifyRelayForwarded({ forwarded, relayKey, payload, provider: "0x" + "01".repeat(20), requestHash }), "forwarded-provider"],
+    ["a broken signature", () => verifyRelayForwarded({ forwarded: { ...forwarded, signature: "0x" + "00".repeat(65) }, relayKey, payload, provider, requestHash }), "forwarded-signature"],
+    ["a different request hash", () => verifyRelayForwarded({ forwarded, relayKey, payload, provider, requestHash: "0x" + "00".repeat(32) }), "forwarded-hash"],
+    ["a missing request hash", () => verifyRelayForwarded({ forwarded, relayKey, payload, provider, requestHash: "" }), "forwarded-hash"],
+    ["a missing relay key", () => verifyRelayForwarded({ forwarded, relayKey: null, payload, provider, requestHash }), "key"],
+  ]) {
+    try {
+      call();
+      bad(label + " passed");
+    } catch (error) {
+      const got = error && error.params && (error.params.why || error.params.field);
+      if (error && error.code === "quote-refused" && got === why) ok(label + " is refused");
+      else bad(label + " gave " + JSON.stringify({ code: error && error.code, params: error && error.params }));
+    }
+  }
+}
+
 console.log("=== 4) A TRANSPORT FAILURE IS NOT A REFUSAL ===");
 const transport = fakeFetch({ error: new Error("connection reset") });
 try {
@@ -434,12 +499,13 @@ const retryCalls = [];
 let retryAttempt = 0;
 const retryFetch = async (url, init) => {
   if (String(url).endsWith("/v1/relay")) {
-    return { ok: true, status: 200, json: async () => ({ version: 1, relayId: "test-relay", feeRecipient: "0x" + "99".repeat(20), feeBps: "0" }) };
+    return { ok: true, status: 200, json: async () => ({ version: 1, relayId: "test-relay", relayKey, feeRecipient: "0x" + "99".repeat(20), feeBps: "0" }) };
   }
   retryCalls.push(JSON.parse(init.body));
   retryAttempt += 1;
   if (retryAttempt === 1) throw Object.assign(new Error("timeout"), { name: "AbortError" });
-  return { ok: true, status: 200, json: async () => relayBody(makeAnswer(built)) };
+  const response = relayBody(makeAnswer(built));
+  return { ok: true, status: 200, json: async () => withForwarded(response, JSON.parse(init.body).payload) };
 };
 try {
   const result = await call({ fetchImpl: retryFetch });
@@ -448,7 +514,7 @@ try {
     && salts.length === 2 && salts.every((salt) => salt.toLowerCase() === order.salt.toLowerCase())) {
     ok("a timeout is retried automatically with the same salt");
   } else bad("the automatic retry changed the salt: " + JSON.stringify(salts));
-} catch (error) { bad("the automatic same-salt retry failed: " + JSON.stringify(error && (error.code || error.message))); }
+} catch (error) { bad("the automatic same-salt retry failed: " + JSON.stringify({ code: error && error.code, params: error && error.params, message: error && error.message })); }
 
 console.log("=== 4c) THE RELAY ORIGIN AND ID ARE REQUIRED ===");
 try {
