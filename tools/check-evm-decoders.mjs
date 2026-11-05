@@ -4,6 +4,7 @@
 // A mismatch used to surface later as "expected X, got 0xzz..." or, worse, as a comparison miss. The decoder is
 // the boundary: non-hex, an uppercase `0X` prefix, a short answer or extra words are named errors here.
 import { decodeBytes32, decodeStatus, decodeUint64 } from "../engine/evm/escrow.js";
+import { decodeAddress, decodeImplementationCodeHash } from "../engine/evm/factory.js";
 
 let pass = 0;
 const fails = [];
@@ -22,6 +23,11 @@ console.log("=== 1) EXACT ANSWERS DECODE ===");
   else bad("decodeStatus: " + JSON.stringify(decoded));
   if (decodeUint64("0x" + word("2a")) === 42) ok("a uint64 word decodes");
   else bad("decodeUint64 changed its input");
+  const addressWord = "0x" + "00".repeat(12) + "11".repeat(20);
+  if (decodeAddress(addressWord) === "0x" + "11".repeat(20)) ok("a predict() address word decodes");
+  else bad("decodeAddress: " + decodeAddress(addressWord));
+  if (decodeImplementationCodeHash(bytes32) === bytes32) ok("an implementationCodeHash word decodes");
+  else bad("decodeImplementationCodeHash changed its input");
 }
 
 console.log("=== 2) MALFORMED ANSWERS ARE REFUSED AT THE DECODER ===");
@@ -35,6 +41,11 @@ for (const [label, call] of [
   ["extra status words", () => decodeStatus(status + "00".repeat(32))],
   ["uppercase 0X status", () => decodeStatus("0X" + status.slice(2))],
   ["non-hex uint64", () => decodeUint64("0x" + "zz".repeat(32))],
+  ["uppercase 0X predict", () => decodeAddress("0X" + "11".repeat(32))],
+  ["short predict", () => decodeAddress("0x" + "11".repeat(31))],
+  ["extra predict words", () => decodeAddress("0x" + "11".repeat(33))],
+  ["non-hex code hash", () => decodeImplementationCodeHash("0x" + "zz".repeat(32))],
+  ["uppercase 0X code hash", () => decodeImplementationCodeHash("0X" + "11".repeat(32))],
 ]) {
   let refused = false;
   try { call(); } catch (error) { refused = error instanceof Error && !/^0x/i.test(String(error.message)); }

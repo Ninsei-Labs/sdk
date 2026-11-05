@@ -129,11 +129,18 @@ export function encodeCreateOrderAndFund(quote) {
   return FACTORY_METHODS.createOrderAndFund + quoteCallArgs(quote);
 }
 
+const strictWord = (returnedHex, what, words = 1) => {
+  if (typeof returnedHex !== "string" || !/^0x[0-9a-fA-F]*$/.test(returnedHex)) {
+    throw new Error("invalid " + what + ": " + returnedHex);
+  }
+  const hex = returnedHex.slice(2);
+  if (hex.length !== words * 64) throw new Error("short answer: " + returnedHex);
+  return hex.toLowerCase();
+};
+
 // predict() answer - one address in a 32-byte word.
 export function decodeAddress(returnedHex) {
-  const hex = String(returnedHex || "").replace(/^0x/, "");
-  if (hex.length < 64) throw new Error("short answer: " + returnedHex);
-  return "0x" + hex.slice(24, 64);
+  return "0x" + strictWord(returnedHex, "predict()").slice(24, 64);
 }
 
 
@@ -167,9 +174,7 @@ export function decodeImplementation(returnedHex) {
 
 // implementationCodeHash() - one bytes32 word.
 export function decodeImplementationCodeHash(returnedHex) {
-  const hex = String(returnedHex || "").replace(/^0x/, "");
-  if (hex.length < 64) throw new Error("short answer from implementationCodeHash(): " + returnedHex);
-  return "0x" + hex.slice(0, 64).toLowerCase();
+  return "0x" + strictWord(returnedHex, "implementationCodeHash()");
 }
 
 // VERDICT ON THE IMPLEMENTATION - the same three conditions the factory checks:
