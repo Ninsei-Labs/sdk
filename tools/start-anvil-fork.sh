@@ -37,6 +37,7 @@ done
 case "$NETWORK" in
   arbitrum-sepolia)
     CHAIN_ID="421614"
+    BLOCK_OFFSET="${BLOCK_OFFSET:-0}"
     if ((${#RPC_URLS[@]} == 0)); then
       RPC_URLS+=("${RPC_URL:-https://sepolia-rollup.arbitrum.io/rpc}")
     fi
@@ -61,7 +62,10 @@ case "$NETWORK" in
 esac
 
 if ! [[ "$PORT" =~ ^[0-9]+$ ]]; then echo "--port must be numeric" >&2; exit 2; fi
-if ! [[ "$BLOCK_OFFSET" =~ ^[0-9]+$ ]]; then echo "--block-offset must be numeric" >&2; exit 2; fi
+if [ -n "$BLOCK_OFFSET" ] && ! [[ "$BLOCK_OFFSET" =~ ^[0-9]+$ ]]; then
+  echo "--block-offset must be numeric" >&2
+  exit 2
+fi
 
 LOG="${TMPDIR:-/tmp}/anvil-$PORT.log"
 PID_FILE="${TMPDIR:-/tmp}/anvil-$PORT.pid"
