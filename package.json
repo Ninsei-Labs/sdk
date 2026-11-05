@@ -20,6 +20,7 @@
     "check:mirror": "node tools/check.mjs --only=mirror",
     "check:pack": "node tools/check.mjs --only=pack",
     "check:pack-teeth": "node tools/run-teeth-isolated.mjs tools/check-pack-teeth.mjs",
+    "check:action-state-teeth": "node tools/run-teeth-isolated.mjs tools/check-action-state-teeth.mjs",
     "check:secrets": "node tools/check.mjs --only=secrets",
     "check:vendor-bundles": "node tools/check.mjs --only=vendor-bundles",
     "check:dleq-vectors": "node tools/check-dleq-vectors.mjs",
