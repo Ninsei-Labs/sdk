@@ -124,6 +124,14 @@ for (const [label, changed] of [
 }
 
 console.log("=== 4) MALFORMED OR UNSIGNED FEATURES ARE REFUSED ===");
+{
+  const poisoned = { ...features, version: { toString: null } };
+  try { verifyNodeFeatures({ features: poisoned, terms }); bad("a non-primitive feature version passed"); }
+  catch (error) {
+    if (error && error.code === "bad-input") ok("a non-primitive feature version is a named refusal");
+    else bad("non-primitive feature version gave " + JSON.stringify(error && (error.code || error.constructor && error.constructor.name || error.message)));
+  }
+}
 const mutations = [
   ["another signature", { ...features, signature: "0x" + "00".repeat(65) }],
   ["another quote key", { ...features, quoteKey: "0x" + "03".repeat(20) }],

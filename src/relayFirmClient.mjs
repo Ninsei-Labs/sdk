@@ -17,7 +17,14 @@ const REFUSAL_CODES = new Set([
   "bad_request",
   "price_changed",
 ]);
-const sameRelay = (a, b) => String(a === undefined || a === null ? "" : a) === String(b === undefined || b === null ? "" : b);
+const wireText = (value, field) => {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "bigint") return String(value);
+  throw new SdkError("bad-input", { field });
+};
+const sameRelay = (a, b) => (a === undefined || a === null ? "" : wireText(a, "relay")) ===
+  (b === undefined || b === null ? "" : wireText(b, "relay"));
 
 /**
  * Request a firm quote from a relay.
@@ -89,7 +96,9 @@ export async function requestFirmQuote({
   }
 
   const answer = response.body && response.body.answer;
-  if (!response.body || Number(response.body.version) !== 1 || !answer) {
+  let envelopeVersion = null;
+  try { envelopeVersion = response.body ? Number(response.body.version) : null; } catch { envelopeVersion = null; }
+  if (!response.body || envelopeVersion !== 1 || !answer) {
     throw new SdkError("quote-refused", { step: "answer", why: "envelope" });
   }
   if (typeof response.body.relay !== "string" || !response.body.relay
@@ -105,18 +114,19 @@ export async function requestFirmQuote({
     features: request.features,
     request: built,
   });
-  const publishedRecipient = String(published.feeRecipient === undefined || published.feeRecipient === null ? "" : published.feeRecipient).toLowerCase();
-  const quoteRecipient = String(verified.quote.feeRecipient === undefined || verified.quote.feeRecipient === null ? "" : verified.quote.feeRecipient).toLowerCase();
+  const publishedRecipient = wireText(published.feeRecipient === undefined || published.feeRecipient === null ? "" : published.feeRecipient, "relay.feeRecipient").toLowerCase();
+  const quoteRecipient = wireText(verified.quote.feeRecipient === undefined || verified.quote.feeRecipient === null ? "" : verified.quote.feeRecipient, "quote.feeRecipient").toLowerCase();
   if (!publishedRecipient || publishedRecipient !== quoteRecipient) {
     throw new SdkError("quote-refused", { step: "fee", why: "fee-recipient" });
   }
-  if (!partner && String(published.feeBps) !== String(verified.quote.feeBps)) {
+  if (!partner && wireText(published.feeBps === undefined || published.feeBps === null ? "" : published.feeBps, "relay.feeBps") !==
+    wireText(verified.quote.feeBps === undefined || verified.quote.feeBps === null ? "" : verified.quote.feeBps, "quote.feeBps")) {
     throw new SdkError("quote-refused", { step: "fee", why: "fee-bps" });
   }
   // THE RELAY MUST NAME ITSELF. A missing id on GET /v1/relay is not "nothing to compare": the answer's relay
   // label would then be accepted without the one check that binds it.
   if (published.relayId === undefined || published.relayId === null
-    || String(published.relayId) !== String(response.body.relay)) {
+    || wireText(published.relayId, "relay.relayId") !== wireText(response.body.relay, "relay")) {
     throw new SdkError("quote-refused", { step: "relay-info", why: "relay" });
   }
   return {

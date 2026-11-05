@@ -291,7 +291,8 @@ export async function openRecoveryKeyFile(contents, passphrase = "") {
   }
   if (!envelope || envelope.v !== RECOVERY_KEY_ENVELOPE_VERSION || envelope.alg !== RECOVERY_KEY_ALG) throw failed("parse");
   for (const field of ["salt", "iv", "ciphertext"]) if (typeof envelope[field] !== "string" || !envelope[field]) throw failed("parse");
-  const iter = Number(envelope.iter);
+  let iter = null;
+  try { iter = Number(envelope.iter); } catch { iter = null; }
   if (!Number.isInteger(iter) || iter < ITER_MIN || iter > ITER_MAX) throw failed("parse");
   if (passphrase.length < 12) throw failed("passphrase");
 
@@ -363,12 +364,17 @@ function topicAddress(address) {
 }
 
 function decodeOrderLog(log) {
-  const topics = Array.isArray(log && log.topics) ? log.topics : [];
-  const topic0 = String(topics[0] || "").toLowerCase();
-  if (topics.length < 4 || !ORDER_CREATED_TOPICS.includes(topic0)) return null;
-  const data = String(log.data || "").replace(/^0x/, "");
+  if (!log || typeof log !== "object") return null;
+  const topics = Array.isArray(log.topics) ? log.topics : [];
+  if (topics.length < 4 || topics.some((topic) => typeof topic !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(topic))) return null;
+  const topic0 = topics[0].toLowerCase();
+  if (!ORDER_CREATED_TOPICS.includes(topic0)) return null;
+  if (typeof log.data !== "string" || !/^0x[0-9a-fA-F]*$/.test(log.data)) return null;
+  const data = log.data.slice(2);
   const modern = topic0 === ORDER_CREATED_TOPIC;
-  if (data.length < 64 * (modern ? 13 : 12)) return null;
+  if (data.length < 64 * (modern ? 13 : 12) || data.length % 64 !== 0) return null;
+  if (log.blockNumber !== undefined && log.blockNumber !== null && typeof log.blockNumber !== "number" && typeof log.blockNumber !== "string") return null;
+  if (log.logIndex !== undefined && log.logIndex !== null && typeof log.logIndex !== "number" && typeof log.logIndex !== "string") return null;
   const word = (i) => "0x" + data.slice(i * 64, (i + 1) * 64).toLowerCase();
   // THE FIELD OFFSETS MOVED WHEN `xmrAmount` JOINED THE EVENT. The old topic has no XMR amount; its orders fall
   // back to the clone read, and a caller can still tell why from `xmrAmountReason`.
@@ -390,7 +396,7 @@ function decodeOrderLog(log) {
     registry: "0x" + data.slice((9 + shift) * 64 + 24, (10 + shift) * 64),
     provider: "0x" + data.slice((10 + shift) * 64 + 24, (11 + shift) * 64),
     quoteKey: "0x" + data.slice((11 + shift) * 64 + 24, (12 + shift) * 64),
-    transactionHash: log.transactionHash || null,
+    transactionHash: typeof log.transactionHash === "string" ? log.transactionHash : null,
     blockNumber: log.blockNumber != null ? Number(log.blockNumber) : null,
     logIndex: log.logIndex != null ? Number(log.logIndex) : null,
   };
@@ -670,9 +676,11 @@ export async function findSwaps({ mnemonic, chainId, factory = null, factories =
     for (const log of logs) {
       const id = `${target.factory}:${log.address || ""}:${log.transactionHash || ""}:${log.logIndex ?? ""}`;
       if (seenLogs.has(id)) continue;
+      let order = null;
+      try { order = decodeOrderLog(log); } catch { order = null; }
+      if (!order) continue;
       seenLogs.add(id);
-      const order = decodeOrderLog(log);
-      if (order) orders.push({ ...order, factory: target.factory });
+      orders.push({ ...order, factory: target.factory });
     }
   }
   const orderKey = (order) => `${order.factory || ""}:${order.transactionHash || ""}:${order.logIndex ?? ""}`;

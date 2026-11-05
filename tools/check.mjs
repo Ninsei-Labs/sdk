@@ -2644,6 +2644,7 @@ const arrivalConsensusCheck = () => runScriptCheck("check-arrival-consensus.mjs"
 const arrivalRealCheck = () => runScriptCheck("check-arrival-real.mjs", "real arrival");
 const orderProofCheck = () => runScriptCheck("check-order-proof.mjs", "order proof");
 const fundingReceiptCheck = () => runScriptCheck("check-funding-receipt.mjs", "funding receipt");
+const evmDecodersCheck = () => runScriptCheck("check-evm-decoders.mjs", "evm decoders");
 const storageCheck = () => runScriptCheck("check-storage.mjs", "storage");
 const scanRangeCheck = () => runScriptCheck("check-scan-range.mjs", "scan range");
 const recoveryOpenCheck = () => runScriptCheck("check-recovery-open.mjs", "recovery open");
@@ -2727,6 +2728,7 @@ const CHECKS = {
   "dleq-vectors": dleqVectorsCheck,
   "swap-network": swapNetworkCheck,
   "funding-receipt": fundingReceiptCheck,
+  "evm-decoders": evmDecodersCheck,
   storage: storageCheck,
   "scan-range": scanRangeCheck,
   "recovery-open": recoveryOpenCheck,

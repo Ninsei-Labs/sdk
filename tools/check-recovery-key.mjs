@@ -63,6 +63,17 @@ export const recoveryKeyCheck = async () => {
   const encryptedOpened = await recovery.openRecoveryKeyFile(encrypted, "correct horse battery");
   check(encryptedOpened.mnemonic === WORDS, "the encrypted backup did not round-trip");
   check(encryptedOpened.createdAt === "2026-10-21T09:30:00.000Z", "the encrypted backup lost its sealed creation time");
+  {
+    const poisoned = JSON.parse(encrypted);
+    poisoned.iter = { toString: null };
+    try {
+      await recovery.openRecoveryKeyFile(JSON.stringify(poisoned), "correct horse battery");
+      check(false, "a non-primitive iter was accepted");
+    } catch (error) {
+      check(error && error.code === "recovery-failed" && error.params && error.params.stage === "parse",
+        "a non-primitive iter is a named parse refusal");
+    }
+  }
   const storage = memory();
   recovery.saveRecoveryKey(storage, generated);
   check(recovery.loadRecoveryKey(storage)?.mnemonic === generated.mnemonic, "the key did not round-trip through the store");
@@ -83,6 +94,13 @@ export const recoveryKeyCheck = async () => {
   const all = await recovery.findSwaps({ mnemonic: WORDS, chainId: CHAIN, factory,
     evmLogs: async (request) => { allCalls.push(request); return [v2Log, foreign]; } });
   check(all.swaps.length === 1 && allCalls.length === 1 && all.complete === true, "a full log read did not return exactly the v2 order");
+
+  {
+    const broken = { ...v2Log, data: "0xzz", topics: [TOPIC, v2Log.topics[1], v2Log.topics[2], v2Log.topics[3]] };
+    const mixed = await recovery.findSwaps({ mnemonic: WORDS, chainId: CHAIN, factory,
+      evmLogs: async () => [broken, v2Log] });
+    check(mixed.swaps.length === 1 && mixed.swaps[0].side === "locker", "one malformed log hid the key's own order");
+  }
 
   // A CHAIN CAN HAVE MORE THAN ONE FACTORY. Searching only the newest hides every older order; the result keeps
   // each order's own factory and the commitments are derived with that factory, not with the last one in the list.

@@ -145,7 +145,7 @@ function signRelay(answer) {
     + (27 + sig[0]).toString(16);
 }
 function makeAnswer(source, {
-  validUntil = nowSec + 3600,
+  validUntil = null,
   factory = source.terms.order.factory,
   fee = "0",
   relayId = "test-relay",
@@ -154,6 +154,9 @@ function makeAnswer(source, {
 } = {}) {
   const nodeHalf = { commitHalf: "0x" + "77".repeat(32), edPoint: "0x" + "88".repeat(32), proof: { synthetic: true } };
   const ask = source.terms.side === "ask";
+  const until = validUntil === null
+    ? Math.min(nowSec + 3600, Number(source.terms.order.readyBy) - 60)
+    : validUntil;
   const quote = {
     provider: source.terms.maker,
     quoteKey,
@@ -171,7 +174,7 @@ function makeAnswer(source, {
     feeBps: "0",
     fee,
     feeRecipient: "0x" + "99".repeat(20),
-    validUntil: String(validUntil),
+    validUntil: String(until),
     nonce: "1",
     xmrAmount: source.terms.xmrAmount,
     claimTip: source.terms.claimTip,
@@ -342,6 +345,26 @@ try {
 } catch (error) {
   if (error && error.code === "quote-expired") ok("an expired quote is refused");
   else bad("wrong expiry code: " + JSON.stringify(error && (error.code || error.message)));
+}
+const lateValidity = makeAnswer(built, { validUntil: Number(built.terms.order.readyBy) });
+try {
+  await call({ fetchImpl: fakeFetch({ body: relayBody(lateValidity) }).fetchImpl });
+  bad("a quote whose validUntil reaches readyBy passed");
+} catch (error) {
+  if (error && error.code === "quote-refused" && error.params && error.params.why === "validity") {
+    ok("a quote whose validUntil reaches readyBy is refused");
+  } else bad("wrong validity code: " + JSON.stringify(error && (error.code || error.message)));
+}
+{
+  const poisoned = makeAnswer(built);
+  poisoned.version = { toString: null };
+  try {
+    await call({ fetchImpl: fakeFetch({ body: relayBody(poisoned) }).fetchImpl });
+    bad("a non-primitive answer version passed");
+  } catch (error) {
+    if (error && error.code === "bad-input") ok("a non-primitive answer version is a named refusal");
+    else bad("non-primitive answer version gave " + JSON.stringify(error && (error.code || error.constructor && error.constructor.name || error.message)));
+  }
 }
 for (const [label, answer, why] of [
   ["a foreign relay id", makeAnswer(built, { relayId: "other-relay" }), "relay"],

@@ -116,7 +116,7 @@ function answerFor(payload, { tamperProof = false, cashierAddress = cashier } = 
     feeBps: "0",
     fee: "0",
     feeRecipient: "0x" + "99".repeat(20),
-    validUntil: String(nowSec + 3600),
+    validUntil: String(orderTerm.readyBy - 60),
     nonce: "1",
     xmrAmount: payload.terms.xmrAmount,
     claimTip: payload.terms.claimTip,
