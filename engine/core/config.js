@@ -378,7 +378,7 @@ export const CHAINS = [
     // INTERFACE's fee cashier, named in quotes. implementationCodeHash: the escrow implementation the factory
     // carries, checked against the chain. deploymentBlock: the height the factory was created at; a log search for
     // its orders starts here, not at zero, because public RPCs cap a log query at about 10M blocks.
-    escrow: { address: "0x245d3a4ac4b98d713f6c5130b56cd5d550f8cefe", mode: "live", deploymentBlock: 326005419, cashier: "0x40515449159EfbCb5eF5eB9e2E08ba432E150a1C", implementationCodeHash: "0x7020a1017adbb4d4ce4710f7c632d48a5469a6f3076608e77d5675dee125653c" },
+    escrow: { address: "0x245d3a4ac4b98d713f6c5130b56cd5d550f8cefe", mode: "live", deploymentBlock: 326005419, cashier: "0x40515449159EfbCb5eF5eB9e2E08ba432E150a1C", registry: "0x92191dc3517e15db6468628b1a493576728a9798", implementationCodeHash: "0x7020a1017adbb4d4ce4710f7c632d48a5469a6f3076608e77d5675dee125653c" },
     tokens: [
       // Test USDC (Circle): decimals 6 and symbol "USDC" verified on chain by the same node.
       { symbol: "USDC", address: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d", decimals: 6, usd: 1, cls: "ar-token-usdc" },

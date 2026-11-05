@@ -37,5 +37,5 @@ Do not add a test that only raises the count. Add the smallest case that fails f
 
 `tools/check-guard-teeth.mjs` proves the action-window guards (unreadable clock, claim margin, simulation), the
 full-width sell commitment, the sell-watch claim-open report, the claim-sender policy, the reverted-receipt refusal,
-the proof-to-commitment binding, the sale order comparison and the cashier pin. Each removal reddens its named check
-with its own reason. Further guards must follow the same shape.
+the proof-to-commitment binding, the sale order comparison, the forwarded relay frame, the network registry pin and
+the cashier pin. Each removal reddens its named check with its own reason. Further guards must follow the same shape.

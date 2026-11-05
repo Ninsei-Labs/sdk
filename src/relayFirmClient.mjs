@@ -6,7 +6,7 @@
 import { SdkError } from "./errors.mjs";
 import { createHttp } from "./http.mjs";
 import { buildFirmRequest } from "./relayRequest.mjs";
-import { verifyFirmAnswer } from "./relayQuote.mjs";
+import { verifyFirmAnswer, verifyRelayForwarded } from "./relayQuote.mjs";
 
 const REFUSAL_CODES = new Set([
   "compliance",
@@ -109,6 +109,16 @@ export async function requestFirmQuote({
     throw new SdkError("quote-refused", { step: "answer", why: "relay" });
   }
 
+  // THE RELAY'S OWN FORWARDED FRAME IS SIGNED AND BOUND TO THE CLIENT'S EXACT PAYLOAD. Checking it here, before
+  // the answer is used, closes the gap where a relay changed the forwarded payload/provider but returned a valid
+  // answer for another request.
+  verifyRelayForwarded({
+    forwarded: response.body.forwarded,
+    relayKey: published.relayKey,
+    payload: built.payload,
+    provider: request.features.provider,
+    requestHash: answer.requestHash === undefined || answer.requestHash === null ? "" : answer.requestHash,
+  });
   const verified = verifyFirmAnswer({
     answer,
     features: request.features,

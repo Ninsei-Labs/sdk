@@ -866,6 +866,14 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
       const registry = String(features.registry || "").toLowerCase();
       if (!/^0x[0-9a-f]{40}$/.test(maker) || maker === ZERO_ADDRESS) fail("bad-input", { field: "features.provider" });
       if (!/^0x[0-9a-f]{40}$/.test(registry) || registry === ZERO_ADDRESS) fail("bad-input", { field: "features.registry" });
+      // THE REGISTRY IS A PROPERTY OF THE NETWORK, NOT OF THE FEATURES THAT ARRIVED WITH THE QUOTE. A relay that
+      // names its own registry can authorise its own maker. The pinned value comes from the network config; a
+      // network without a pinned registry keeps the old path until it is deployed.
+      const pinnedRegistry = config && config.settlement && config.settlement.chain &&
+        config.settlement.chain.escrow && config.settlement.chain.escrow.registry;
+      if (pinnedRegistry && !sameText(registry, pinnedRegistry)) {
+        fail("bad-input", { field: "features.registry", why: "not-the-network-registry" });
+      }
       // THE FEATURES' HPKE KEY AND FRAME KEY BELONG TO THE REGISTERED MAKER. Check the registry mapping BEFORE
       // sealing any view material to the HPKE key: a dishonest relay could otherwise hand us its own key, read both
       // view halves and swap in its own node half. The answer's registry check later is not a substitute for this

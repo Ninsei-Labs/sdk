@@ -85,6 +85,66 @@ export function relayQuoteDigest(answer) {
   return keccak256(concat(Uint8Array.from([0x19, 0x01]), relayQuoteDomainSeparator(), relayQuoteStructHash(answer)));
 }
 
+export const RELAY_REQUEST_TYPE =
+  "QuoteRequest(string relayId,address provider,bytes32 session,bytes32 requestId,uint64 counter,uint64 expiry,string payload,uint256 feeBps,address feeRecipient)";
+
+export function relayRequestStructHash(request) {
+  if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "forwarded" });
+  return keccak256(concat(
+    keccak256(utf8(RELAY_REQUEST_TYPE)),
+    wordString(request.relayId, "forwarded.relayId"),
+    wordAddress(request.provider, "forwarded.provider"),
+    wordBytes32(request.session, "forwarded.session"),
+    wordBytes32(request.requestId, "forwarded.requestId"),
+    wordUint(request.counter, "forwarded.counter"),
+    wordUint(request.expiry, "forwarded.expiry"),
+    wordString(request.payload, "forwarded.payload"),
+    wordUint(request.feeBps, "forwarded.feeBps"),
+    wordAddress(request.feeRecipient, "forwarded.feeRecipient"),
+  ));
+}
+
+export function relayRequestDigest(request) {
+  return keccak256(concat(Uint8Array.from([0x19, 0x01]), relayQuoteDomainSeparator(), relayRequestStructHash(request)));
+}
+
+/**
+ * THE FORWARDED REQUEST IS THE RELAY'S OWN SIGNED FRAME. The answer's `requestHash` is the digest of this
+ * object; without recomputing it, a relay could forward a different payload or maker while returning a
+ * correctly signed answer. The client always passes the answer's hash; a missing value becomes an empty
+ * string and fails the comparison.
+ *
+ * The frame's expiry and counter are not checked here. A fresh salt per request binds the payload, so a
+ * replayed old frame fails the payload comparison; the hash comparison then rejects a substituted one.
+ */
+export function verifyRelayForwarded({ forwarded, relayKey, payload, provider, requestHash = null } = {}) {
+  if (!forwarded || typeof forwarded !== "object" || forwarded.type !== "quote_request" ||
+      wireNumber(forwarded.version, "forwarded.version") !== 1) {
+    throw new SdkError("quote-refused", { step: "answer", why: "forwarded" });
+  }
+  if (!/^0x[0-9a-fA-F]{40}$/.test(String(relayKey || ""))) {
+    throw new SdkError("quote-refused", { step: "relay-info", why: "key" });
+  }
+  if (wireText(forwarded.payload === undefined || forwarded.payload === null ? "" : forwarded.payload,
+    "forwarded.payload") !== payload) {
+    throw new SdkError("quote-refused", { step: "answer", why: "forwarded-payload" });
+  }
+  if (!same(forwarded.provider, provider)) {
+    throw new SdkError("quote-refused", { step: "answer", why: "forwarded-provider" });
+  }
+  const recovered = recoverAddress(relayRequestDigest(forwarded), forwarded.signature);
+  if (recovered === null || recovered !== String(relayKey).toLowerCase()) {
+    throw new SdkError("quote-refused", { step: "answer", why: "forwarded-signature" });
+  }
+  if (requestHash !== null && requestHash !== undefined) {
+    const digest = hex(relayRequestDigest(forwarded));
+    if (!same(digest, requestHash)) {
+      throw new SdkError("quote-refused", { step: "answer", why: "forwarded-hash" });
+    }
+  }
+  return forwarded;
+}
+
 const hex = (bytes) => {
   let out = "0x";
   for (const byte of bytes) out += byte.toString(16).padStart(2, "0");

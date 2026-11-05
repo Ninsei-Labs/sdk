@@ -59,6 +59,7 @@ const chainConfig = (chain) => ({
   escrow: chain.escrow ? {
     address: chain.escrow.address || null,
     mode: chain.escrow.mode || null,
+    registry: chain.escrow.registry || null,
     deploymentBlock: Number.isSafeInteger(chain.escrow.deploymentBlock) ? chain.escrow.deploymentBlock : null,
   } : null,
 });

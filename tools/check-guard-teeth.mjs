@@ -85,6 +85,18 @@ const cases = [
     wants: "another amount",
   },
   {
+    check: "relay-http", source: "src/relayQuote.mjs",
+    name: "the forwarded provider binding is removed",
+    from: "if (!same(forwarded.provider, provider)) {", to: "if (false) {",
+    wants: "a different provider",
+  },
+  {
+    check: "relay-adapter", source: "src/quotes.mjs",
+    name: "the registry pin is removed",
+    from: "if (pinnedRegistry && !sameText(registry, pinnedRegistry)) {", to: "if (false) {",
+    wants: "foreign registry",
+  },
+  {
     check: "relay-adapter", source: "src/quotes.mjs",
     name: "a foreign cashier is accepted",
     from: "if (got !== pin) fail(\"quote-cashier-mismatch\", { step, got: got || null, want: pin });",
