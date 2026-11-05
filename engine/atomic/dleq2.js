@@ -448,7 +448,12 @@ export function createDleq2({ ed25519, secp256k1, keccak256, sha3_512, randomByt
       if (nextPhase !== phase) { phase = nextPhase; count = 0; }
       count += 1;
       if (typeof options.onProgress === "function") options.onProgress(step.value);
-      const every = phase === "sum" ? 16 : 4;
+      // VERIFY CHUNKS ARE SHORTER THAN PROOF CHUNKS: one verification step is more expensive than one
+      // proof bit, and a 50 ms turn is already visible as a stutter. The caller can raise it when it has a
+      // larger budget; the default keeps the page within a frame or two.
+      const every = phase === "sum" ? 16
+        : (Number.isSafeInteger(options.verifyChunkBits) && options.verifyChunkBits > 0
+          ? Math.min(options.verifyChunkBits, BITS) : 2);
       if (count % every === 0) await nextTurn(options.yieldTo);
     }
   }

@@ -22,7 +22,7 @@ import { orderQuoteMissingFields, recoverOrderQuoteKey } from "./quoteEip712.mjs
 import { claimGasGiftWei } from "../engine/evm/claimGas.js";
 import { parseXmr } from "../engine/core/xmrAmount.js";
 import { takerHalvesV2, recoverySaltOf } from "./recovery-key.mjs";
-import { acceptCounterparty, buildOwnSideFromHalvesChunked, jointAddress } from "./order.mjs";
+import { acceptCounterpartyChunked, buildOwnSideFromHalvesChunked, jointAddress } from "./order.mjs";
 import { requestFirmQuote } from "./relayFirmClient.mjs";
 // THE CHAIN READ NEEDED TO ASK THE REGISTRY WHO OWNS THE KEY. The selector is COMPUTED from the signature, not
 // remembered: a single wrong hex digit would call another function and return a zero address - and a zero
@@ -974,7 +974,7 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
       // point must be the one the quote commits to. For ask that is the claimer's commitment; for bid the node
       // half is the locker's and carries its own commitment. This is the same engine check the swap path uses.
       const nodeHalf = result.nodeHalf;
-      acceptCounterparty({
+      await acceptCounterpartyChunked({
         context: own.context,
         side: own.side,
         counterparty: side === "ask"

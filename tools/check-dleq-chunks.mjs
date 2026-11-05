@@ -4,6 +4,7 @@
 // The chunked entry points must be the same proof, not a weaker parallel path: a chunked proof has to verify
 // synchronously, and a chunked verdict has to agree with the synchronous one. The yield count is the evidence
 // that the arithmetic really gives the event loop a turn instead of merely calling a progress callback.
+import { readFileSync } from "node:fs";
 import { ed25519, secp256k1, keccak256, sha3_512, randomBytes } from "../src/primitives.mjs";
 import { createDleq2 } from "../engine/atomic/dleq2.js";
 import { createOrderBuilder } from "../engine/atomic/order.js";
@@ -90,6 +91,25 @@ console.log("=== 2) THE CHUNKED ORDER STEP USES THE SAME PROOF ===");
   } catch (error) {
     bad("chunked order step failed: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
   }
+}
+
+console.log("=== 3) THE INTERFACE ENTRY POINTS USE THE CHUNKED STEP ===");
+{
+  // A CHUNKED PROOF WITH A SYNCHRONOUS VERIFY IS STILL A FREEZE. These are the browser-facing calls that
+  // must move together: quotes.firmRelay and swaps.start. The check is on the call, not on the implementation,
+  // because the implementation was already correct before either caller used it.
+  const quotes = readFileSync(new URL("../src/quotes.mjs", import.meta.url), "utf8");
+  const swaps = readFileSync(new URL("../src/swaps.mjs", import.meta.url), "utf8");
+  const flow = readFileSync(new URL("../src/swap-flow.mjs", import.meta.url), "utf8");
+  if (/await\s+acceptCounterpartyChunked\s*\(/.test(quotes) && !/\bacceptCounterparty\s*\(/.test(quotes)) {
+    ok("quotes.firmRelay verifies the counterparty in chunks");
+  } else bad("quotes.firmRelay still calls the synchronous acceptance");
+  if (/await\s+orderStepChunked\s*\(/.test(swaps) && !/\borderStep\s*\(/.test(swaps)) {
+    ok("swaps.start runs the whole order step in chunks");
+  } else bad("swaps.start still calls the synchronous order step");
+  if (/orderStepChunked|buildOwnSideChunked/.test(flow)) {
+    ok("the atomic flow uses the chunked builders");
+  } else bad("the atomic flow is back on a synchronous builder");
 }
 
 console.log("");

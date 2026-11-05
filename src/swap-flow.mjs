@@ -162,7 +162,9 @@ export async function runAtomicOrder({
     // paint while the same engine builder does the arithmetic.
     const chunkOptions = {
       onBit: (bit, total) => say("proof", `proving DLEQ proof: ${bit} of ${total} bits`),
-      onProgress: (step) => say("verify", `verifying DLEQ proof: ${step.done} of ${step.total}`),
+      onProgress: (step) => say("verify", step.phase === "sum"
+        ? `summing commitments: ${step.done} of ${step.total}`
+        : `verifying DLEQ proof: ${step.done} of ${step.total}`),
     };
     const mine = await buildSide(order, chunkOptions);
     say("half", "side-ready");
