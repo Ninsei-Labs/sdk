@@ -373,6 +373,7 @@ function decodeOrderLog(log) {
   const data = log.data.slice(2);
   const modern = topic0 === ORDER_CREATED_TOPIC;
   if (data.length < 64 * (modern ? 13 : 12) || data.length % 64 !== 0) return null;
+  if (log.transactionHash !== undefined && log.transactionHash !== null && typeof log.transactionHash !== "string") return null;
   if (log.blockNumber !== undefined && log.blockNumber !== null && typeof log.blockNumber !== "number" && typeof log.blockNumber !== "string") return null;
   if (log.logIndex !== undefined && log.logIndex !== null && typeof log.logIndex !== "number" && typeof log.logIndex !== "string") return null;
   const word = (i) => "0x" + data.slice(i * 64, (i + 1) * 64).toLowerCase();
@@ -674,7 +675,11 @@ export async function findSwaps({ mnemonic, chainId, factory = null, factories =
       logs = await readLogs(evmLogs, { ...base, topics: [ORDER_CREATED_TOPICS] });
     }
     for (const log of logs) {
-      const id = `${target.factory}:${log.address || ""}:${log.transactionHash || ""}:${log.logIndex ?? ""}`;
+      if (!log || typeof log !== "object") continue;
+      const logAddress = typeof log.address === "string" ? log.address : "";
+      const logTx = typeof log.transactionHash === "string" ? log.transactionHash : "";
+      const logIndex = typeof log.logIndex === "number" || typeof log.logIndex === "string" ? log.logIndex : "";
+      const id = `${target.factory}:${logAddress}:${logTx}:${logIndex}`;
       if (seenLogs.has(id)) continue;
       let order = null;
       try { order = decodeOrderLog(log); } catch { order = null; }

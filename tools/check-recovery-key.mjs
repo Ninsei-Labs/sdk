@@ -97,8 +97,9 @@ export const recoveryKeyCheck = async () => {
 
   {
     const broken = { ...v2Log, data: "0xzz", topics: [TOPIC, v2Log.topics[1], v2Log.topics[2], v2Log.topics[3]] };
+    const poisonedTx = { ...v2Log, transactionHash: { toString: null } };
     const mixed = await recovery.findSwaps({ mnemonic: WORDS, chainId: CHAIN, factory,
-      evmLogs: async () => [broken, v2Log] });
+      evmLogs: async () => [broken, poisonedTx, v2Log] });
     check(mixed.swaps.length === 1 && mixed.swaps[0].side === "locker", "one malformed log hid the key's own order");
   }
 
