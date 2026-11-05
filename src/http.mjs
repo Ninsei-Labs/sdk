@@ -60,7 +60,10 @@ export function createHttp({ apiBase, fetchImpl = null, timeoutMs = 20_000 }) {
         const res = await impl(apiBase + path, init);
         if (!res || typeof res.ok !== "boolean") throw new SdkError("server-unavailable", { why: "bad-response" });
         let parsed = null;
-        try { parsed = await res.json(); } catch { parsed = null; }
+        // A BODY CUT BY THE TIMEOUT IS NOT AN EMPTY ANSWER. Returning null made a broken response look like a
+        // service that answered with no data; the caller then reported the wrong refusal.
+        try { parsed = await res.json(); }
+        catch { throw new SdkError("server-unavailable", { why: "body" }); }
         return { ok: res.ok, status: res.status, body: parsed };
       } catch (error) {
         if (error instanceof SdkError) throw error;
