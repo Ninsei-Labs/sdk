@@ -145,7 +145,7 @@ function signRelay(answer) {
     + (27 + sig[0]).toString(16);
 }
 function makeAnswer(source, {
-  validUntil = nowSec + 3600,
+  validUntil = null,
   factory = source.terms.order.factory,
   fee = "0",
   relayId = "test-relay",
@@ -154,6 +154,9 @@ function makeAnswer(source, {
 } = {}) {
   const nodeHalf = { commitHalf: "0x" + "77".repeat(32), edPoint: "0x" + "88".repeat(32), proof: { synthetic: true } };
   const ask = source.terms.side === "ask";
+  const until = validUntil === null
+    ? Math.min(nowSec + 3600, Number(source.terms.order.readyBy) - 60)
+    : validUntil;
   const quote = {
     provider: source.terms.maker,
     quoteKey,
@@ -171,7 +174,7 @@ function makeAnswer(source, {
     feeBps: "0",
     fee,
     feeRecipient: "0x" + "99".repeat(20),
-    validUntil: String(validUntil),
+    validUntil: String(until),
     nonce: "1",
     xmrAmount: source.terms.xmrAmount,
     claimTip: source.terms.claimTip,
@@ -343,6 +346,26 @@ try {
   if (error && error.code === "quote-expired") ok("an expired quote is refused");
   else bad("wrong expiry code: " + JSON.stringify(error && (error.code || error.message)));
 }
+const lateValidity = makeAnswer(built, { validUntil: Number(built.terms.order.readyBy) });
+try {
+  await call({ fetchImpl: fakeFetch({ body: relayBody(lateValidity) }).fetchImpl });
+  bad("a quote whose validUntil reaches readyBy passed");
+} catch (error) {
+  if (error && error.code === "quote-refused" && error.params && error.params.why === "validity") {
+    ok("a quote whose validUntil reaches readyBy is refused");
+  } else bad("wrong validity code: " + JSON.stringify(error && (error.code || error.message)));
+}
+{
+  const poisoned = makeAnswer(built);
+  poisoned.version = { toString: null };
+  try {
+    await call({ fetchImpl: fakeFetch({ body: relayBody(poisoned) }).fetchImpl });
+    bad("a non-primitive answer version passed");
+  } catch (error) {
+    if (error && error.code === "bad-input") ok("a non-primitive answer version is a named refusal");
+    else bad("non-primitive answer version gave " + JSON.stringify(error && (error.code || error.constructor && error.constructor.name || error.message)));
+  }
+}
 for (const [label, answer, why] of [
   ["a foreign relay id", makeAnswer(built, { relayId: "other-relay" }), "relay"],
   ["a fee that does not match the rate", makeAnswer(built, { fee: "1" }), "fee"],
@@ -366,6 +389,33 @@ try {
 } catch (error) {
   if (error && error.code === "quote-refused" && error.params && error.params.why === "relay") ok("a forwarded relay mismatch is refused");
   else bad("wrong forwarded relay code: " + JSON.stringify(error && (error.code || error.message)));
+}
+
+console.log("=== 3c) MALFORMED ENVELOPE AND PUBLISHED FIELDS ARE NAMED ===");
+{
+  const envelope = relayBody(makeAnswer(built));
+  envelope.version = { toString: null };
+  try {
+    await call({ fetchImpl: fakeFetch({ body: envelope }).fetchImpl });
+    bad("a non-primitive envelope version passed");
+  } catch (error) {
+    if (error && error.code === "quote-refused" && error.params && error.params.why === "envelope") ok("a non-primitive envelope version is a named refusal");
+    else bad("non-primitive envelope version gave " + JSON.stringify(error && (error.code || error.message)));
+  }
+  for (const [label, patch, partner] of [
+    ["fee recipient", { feeRecipient: { toString: null } }, "partner-a"],
+    ["fee rate", { feeBps: { toString: null } }, null],
+    ["relay id", { relayId: { toString: null } }, "partner-a"],
+  ]) {
+    const relay = { version: 1, relayId: "test-relay", feeRecipient: "0x" + "99".repeat(20), feeBps: "0", ...patch };
+    try {
+      await call({ partner, fetchImpl: fakeFetch({ body: relayBody(makeAnswer(built)), relay }).fetchImpl });
+      bad("a non-primitive published " + label + " passed");
+    } catch (error) {
+      if (error && error.code === "bad-input") ok("a non-primitive published " + label + " is a named refusal");
+      else bad("non-primitive published " + label + " gave " + JSON.stringify(error && (error.code || error.message)));
+    }
+  }
 }
 
 console.log("=== 4) A TRANSPORT FAILURE IS NOT A REFUSAL ===");

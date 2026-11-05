@@ -15,7 +15,19 @@ const DOMAIN_TYPE = "EIP712Domain(string name,string version)";
 const DOMAIN_NAME = "Ninsei Relay";
 const DOMAIN_VERSION = "1";
 
-const utf8 = (value) => new TextEncoder().encode(String(value));
+const wireText = (value, field) => {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "bigint") return String(value);
+  throw new SdkError("bad-input", { field });
+};
+const wireNumber = (value, field) => {
+  let n = null;
+  try { n = Number(value); } catch { n = null; }
+  if (!Number.isFinite(n)) throw new SdkError("bad-input", { field });
+  return n;
+};
+const utf8 = (value, field = "text") => new TextEncoder().encode(wireText(value, field));
 const concat = (...arrays) => {
   const total = arrays.reduce((n, a) => n + a.length, 0);
   const out = new Uint8Array(total);
@@ -24,7 +36,7 @@ const concat = (...arrays) => {
   return out;
 };
 const hexBytes = (value, field, width) => {
-  const text = String(value === undefined || value === null ? "" : value).replace(/^0x/, "");
+  const text = wireText(value === undefined || value === null ? "" : value, field).replace(/^0x/, "");
   if (!new RegExp("^[0-9a-fA-F]{" + width * 2 + "}$").test(text)) throw new SdkError("bad-input", { field });
   const out = new Uint8Array(width);
   for (let i = 0; i < width; i += 1) out[i] = parseInt(text.slice(i * 2, i * 2 + 2), 16);
@@ -44,19 +56,19 @@ const wordUint = (value, field) => {
   for (let i = 31; i >= 0 && n > 0n; i -= 1) { out[i] = Number(n & 0xffn); n >>= 8n; }
   return out;
 };
-const wordString = (value) => keccak256(utf8(value === undefined || value === null ? "" : value));
+const wordString = (value, field) => keccak256(utf8(value === undefined || value === null ? "" : value, field));
 
 export function relayQuoteStructHash(answer) {
   if (!answer || typeof answer !== "object") throw new SdkError("bad-input", { field: "answer" });
   return keccak256(concat(
     keccak256(utf8(RELAY_QUOTE_TYPE)),
-    wordString(answer.relayId),
+    wordString(answer.relayId, "answer.relayId"),
     wordAddress(answer.provider, "answer.provider"),
     wordBytes32(answer.session, "answer.session"),
     wordBytes32(answer.requestId, "answer.requestId"),
     wordUint(answer.counter, "answer.counter"),
     wordBytes32(answer.requestHash, "answer.requestHash"),
-    wordString(answer.payload),
+    wordString(answer.payload, "answer.payload"),
     wordUint(answer.time, "answer.time"),
   ));
 }
@@ -79,7 +91,7 @@ const hex = (bytes) => {
   return out;
 };
 function recoverAddress(digest, signature) {
-  const sig = String(signature || "").replace(/^0x/, "");
+  const sig = wireText(signature === undefined || signature === null ? "" : signature, "signature").replace(/^0x/, "");
   if (!/^[0-9a-fA-F]{130}$/.test(sig)) return null;
   let v = parseInt(sig.slice(128, 130), 16);
   if (v >= 27) v -= 27;
@@ -97,7 +109,7 @@ function recoverAddress(digest, signature) {
 
 // The outer frame: signed by the quote key in the relay domain.
 export function verifyRelayQuoteFrame(answer, quoteKey) {
-  if (!answer || typeof answer !== "object" || answer.type !== "quote" || Number(answer.version) !== 1) {
+  if (!answer || typeof answer !== "object" || answer.type !== "quote" || wireNumber(answer.version, "answer.version") !== 1) {
     throw new SdkError("quote-refused", { step: "answer", why: "frame" });
   }
   const recovered = recoverAddress(relayQuoteDigest(answer), answer.signature);
@@ -108,7 +120,7 @@ export function verifyRelayQuoteFrame(answer, quoteKey) {
 }
 
 const ZERO = "0x" + "00".repeat(20);
-const lower = (value) => String(value === undefined || value === null ? "" : value).toLowerCase();
+const lower = (value) => wireText(value === undefined || value === null ? "" : value, "field").toLowerCase();
 const same = (a, b) => lower(a) === lower(b);
 
 function checkOrderQuote(quote, terms, nowSec) {
@@ -143,9 +155,14 @@ function checkOrderQuote(quote, terms, nowSec) {
     throw new SdkError("quote-refused", { step: "answer", why: "fee" });
   }
   if (fee !== (amount * BigInt(bps)) / 10000n) throw new SdkError("quote-refused", { step: "answer", why: "fee" });
-  const validUntil = Number(quote.validUntil);
+  const validUntil = wireNumber(quote.validUntil, "quote.validUntil");
   if (!Number.isSafeInteger(validUntil) || validUntil <= nowSec) {
     throw new SdkError("quote-expired", { step: "answer", validUntil: quote.validUntil });
+  }
+  const readyBy = wireNumber(order.readyBy, "order.readyBy");
+  const t1 = wireNumber(order.t1, "order.t1");
+  if (!Number.isSafeInteger(readyBy) || !Number.isSafeInteger(t1) || readyBy >= t1 || validUntil >= readyBy) {
+    throw new SdkError("quote-refused", { step: "answer", why: "validity", field: "validUntil" });
   }
 }
 
@@ -164,7 +181,7 @@ export function verifyFirmAnswer({ answer, features, request, now = null } = {})
   if (!payload || typeof payload !== "object" || !payload.quote) {
     throw new SdkError("quote-refused", { step: "answer", why: "payload" });
   }
-  if (payload.contextVersion !== "ninsei-order-v3" || Number(payload.quoteVersion) !== 10) {
+  if (payload.contextVersion !== "ninsei-order-v3" || wireNumber(payload.quoteVersion, "payload.quoteVersion") !== 10) {
     throw new SdkError("quote-refused", { step: "answer", why: "version" });
   }
   if (!same(payload.factory, request.terms.order.factory)) {

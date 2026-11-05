@@ -449,7 +449,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       catch (error) {
         // AN EMPTY status() ANSWER IS A SUCCESSFUL READ OF AN ADDRESS WITH NO CONTRACT, not an unreadable chain.
         // Anything else leaves `onChain` null and the record pending: a failed read must never authorise a resend.
-        if (/short status\(\) answer/.test(String((error && error.message) || error))) onChain = { isFunded: false, absent: true };
+        if (/short .*status\(\)/.test(String((error && error.message) || error))) onChain = { isFunded: false, absent: true };
         else onChain = null;
       }
     }

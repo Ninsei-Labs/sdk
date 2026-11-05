@@ -142,26 +142,31 @@ export function encodeRead(name) {
   return sel;
 }
 
+const strictWord = (returnedHex, what, words) => {
+  if (typeof returnedHex !== "string" || !/^0x[0-9a-fA-F]*$/.test(returnedHex)) {
+    throw new Error("invalid " + what + ": " + returnedHex);
+  }
+  const hex = returnedHex.slice(2);
+  if (hex.length !== words * 64) throw new Error("short answer " + what + ": " + returnedHex);
+  return hex.toLowerCase();
+};
+
 // Parse a bytes32 answer: one word.
 export function decodeBytes32(returnedHex, what = "value") {
-  const hex = String(returnedHex || "").replace(/^0x/, "");
-  if (hex.length < 64) throw new Error("short answer " + what + ": " + returnedHex);
-  return "0x" + hex.slice(0, 64).toLowerCase();
+  return "0x" + strictWord(returnedHex, what, 1);
 }
 
 // Parse the t1() answer: one word, uint64 inside uint256.
 export function decodeUint64(returnedHex, what = "value") {
-  const hex = String(returnedHex || "").replace(/^0x/, "");
-  if (hex.length < 64) throw new Error("short answer " + what + ": " + returnedHex);
-  const v = BigInt("0x" + hex.slice(0, 64));
+  const hex = strictWord(returnedHex, what, 1);
+  const v = BigInt("0x" + hex);
   if (v > 18446744073709551615n) throw new Error("answer " + what + " does not fit in uint64: " + v);
   return Number(v);
 }
 
 // Parse the status() answer: four 32-byte words - three flags and the balance.
 export function decodeStatus(returnedHex) {
-  const hex = String(returnedHex || "").replace(/^0x/, "");
-  if (hex.length < 256) throw new Error("short status() answer: " + returnedHex);
+  const hex = strictWord(returnedHex, "status()", 4);
   const word = (i) => hex.slice(i * 64, (i + 1) * 64);
   return {
     isFunded: BigInt("0x" + word(0)) !== 0n,

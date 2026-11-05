@@ -42,7 +42,19 @@ export const NODE_FEATURES_FIELDS = [
   ["nonce", "bytes32"],
 ];
 
-const utf8 = (value) => new TextEncoder().encode(String(value));
+const wireText = (value, field) => {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "bigint") return String(value);
+  throw new SdkError("bad-input", { field });
+};
+const wireNumber = (value, field) => {
+  let n = null;
+  try { n = Number(value); } catch { n = null; }
+  if (!Number.isFinite(n)) throw new SdkError("bad-input", { field });
+  return n;
+};
+const utf8 = (value, field = "text") => new TextEncoder().encode(wireText(value, field));
 const concat = (...arrays) => {
   const total = arrays.reduce((n, a) => n + a.length, 0);
   const out = new Uint8Array(total);
@@ -51,7 +63,7 @@ const concat = (...arrays) => {
   return out;
 };
 const hexBytes = (value, field, width) => {
-  const text = String(value === undefined || value === null ? "" : value).replace(/^0x/, "");
+  const text = wireText(value === undefined || value === null ? "" : value, field).replace(/^0x/, "");
   if (!new RegExp("^[0-9a-fA-F]{" + width * 2 + "}$").test(text)) {
     throw new SdkError("bad-input", { field });
   }
@@ -68,13 +80,13 @@ const numberWord = (value, field, bits) => {
   return out;
 };
 const addressWord = (value, field) => {
-  const text = String(value === undefined || value === null ? "" : value).trim();
+  const text = wireText(value === undefined || value === null ? "" : value, field).trim();
   if (!/^(0x)?[0-9a-fA-F]{40}$/.test(text)) throw new SdkError("bad-input", { field });
   const out = new Uint8Array(32);
   out.set(hexBytes(text, field, 20), 12);
   return out;
 };
-const stringWord = (value) => keccak256(utf8(value === undefined || value === null ? "" : value));
+const stringWord = (value, field) => keccak256(utf8(value === undefined || value === null ? "" : value, field));
 const arrayWord = (values, field, hashOf) => {
   if (!Array.isArray(values)) throw new SdkError("bad-input", { field });
   const parts = values.map((value) => hashOf(value));
@@ -85,7 +97,7 @@ function firmWindowHash(window) {
   if (!window || typeof window !== "object") throw new SdkError("bad-input", { field: "firmWindows" });
   const parts = [keccak256(utf8(FIRM_WINDOW_TYPE))];
   for (const [field, type] of FIRM_WINDOW_FIELDS) {
-    parts.push(type === "string" ? stringWord(window[field]) : numberWord(window[field], "firmWindows." + field, 32));
+    parts.push(type === "string" ? stringWord(window[field], "firmWindows." + field) : numberWord(window[field], "firmWindows." + field, 32));
   }
   return keccak256(concat(...parts));
 }
@@ -94,11 +106,11 @@ export function nodeFeaturesStructHash(features) {
   if (!features || typeof features !== "object") throw new SdkError("bad-input", { field: "features" });
   const parts = [keccak256(utf8(NODE_FEATURES_TYPE))];
   for (const [field, type] of NODE_FEATURES_FIELDS) {
-    if (type === "string") parts.push(stringWord(features[field]));
+    if (type === "string") parts.push(stringWord(features[field], "features." + field));
     else if (type === "address") parts.push(addressWord(features[field], "features." + field));
     else if (type === "bytes32") parts.push(hexBytes(features[field], "features." + field, 32));
     else if (type === "uint64") parts.push(numberWord(features[field], "features." + field, 64));
-    else if (type === "string[]") parts.push(arrayWord(features[field], "features." + field, (value) => stringWord(value)));
+    else if (type === "string[]") parts.push(arrayWord(features[field], "features." + field, (value) => stringWord(value, "features." + field)));
     else if (type === "FirmWindow[]") parts.push(arrayWord(features[field], "features." + field, firmWindowHash));
     else throw new SdkError("bad-input", { field: "features." + field });
   }
@@ -124,7 +136,7 @@ const bytesToHex = (bytes) => {
 };
 
 function recoverAddress(digest, signature) {
-  const sig = String(signature || "").replace(/^0x/, "");
+  const sig = wireText(signature === undefined || signature === null ? "" : signature, "signature").replace(/^0x/, "");
   if (!/^[0-9a-fA-F]{130}$/.test(sig)) return null;
   let v = parseInt(sig.slice(128, 130), 16);
   if (v >= 27) v -= 27;
@@ -147,16 +159,16 @@ function recoverAddress(digest, signature) {
  */
 export function verifyNodeFeatures({ features, terms = null } = {}) {
   if (!features || typeof features !== "object") throw new SdkError("bad-input", { field: "features" });
-  if (features.type !== "node_features" || Number(features.version) !== 1) {
+  if (features.type !== "node_features" || wireNumber(features.version, "features.version") !== 1) {
     throw new SdkError("quote-refused", { step: "features", why: "version" });
   }
   const digest = nodeFeaturesDigest(features);
   const recovered = recoverAddress(digest, features.signature);
-  const quoteKey = String(features.quoteKey || "").toLowerCase();
+  const quoteKey = wireText(features.quoteKey === undefined || features.quoteKey === null ? "" : features.quoteKey, "features.quoteKey").toLowerCase();
   if (recovered === null || recovered !== quoteKey) {
     throw new SdkError("quote-refused", { step: "features", why: "signature" });
   }
-  const hpkeKey = String(features.hpkeKey || "").replace(/^0x/, "").toLowerCase();
+  const hpkeKey = wireText(features.hpkeKey === undefined || features.hpkeKey === null ? "" : features.hpkeKey, "features.hpkeKey").replace(/^0x/, "").toLowerCase();
   if (!/^[0-9a-f]{64}$/.test(hpkeKey) || /^0+$/.test(hpkeKey)) {
     throw new SdkError("quote-refused", { step: "features", why: "hpke-key" });
   }
@@ -164,8 +176,8 @@ export function verifyNodeFeatures({ features, terms = null } = {}) {
     throw new SdkError("quote-refused", { step: "features", why: "windows" });
   }
   if (terms) {
-    if (String(features.provider || "").toLowerCase() !== String(terms.maker || "").toLowerCase()
-      || String(features.registry || "").toLowerCase() !== String(terms.registry || "").toLowerCase()) {
+    if (wireText(features.provider === undefined || features.provider === null ? "" : features.provider, "features.provider").toLowerCase() !== String(terms.maker || "").toLowerCase()
+      || wireText(features.registry === undefined || features.registry === null ? "" : features.registry, "features.registry").toLowerCase() !== String(terms.registry || "").toLowerCase()) {
       throw new SdkError("quote-refused", { step: "features", why: "identity" });
     }
     const market = String(terms.market || "");
