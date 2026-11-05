@@ -1,9 +1,11 @@
 // THE CLAIM TIP CHECK (sdk#18): a quote's tip is sized by the claim, and an unmeasured base fee is refused.
 import { claimGasGiftWei } from "../engine/evm/claimGas.js";
-import { claimTipVerdict, createQuotes } from "../src/quotes.mjs";
+import { claimPriorityFeeOfBlock, claimTipVerdict, createQuotes } from "../src/quotes.mjs";
+import { readFileSync } from "node:fs";
 import { SDK_VERSION } from "../src/version.mjs";
 import { primitives } from "../src/primitives.mjs";
 import { quoteDigest, signQuoteDigest } from "../src/quoteEip712Spec.mjs";
+import { orderContextString } from "../engine/atomic/orderContext.js";
 
 export const claimTipCheck = async () => {
   const problems = [];
@@ -24,6 +26,19 @@ export const claimTipCheck = async () => {
   check(unknown.ok === false && unknown.code === "quote-tip-unchecked", "an unmeasured base fee was not refused");
   const unreadable = claimTipVerdict({ claimTipWei: "not-a-number", baseFeeWei: base });
   check(unreadable.ok === false && unreadable.code === "quote-tip-unreadable", "an unreadable tip was not refused");
+
+  // THE PRIORITY FEE HAS ONE RULE FOR SALE, FIRM AND FIRMRELAY. An explicit field wins; a plain RPC block with only
+  // gasPrice derives the priority above the base fee; an unreadable or absent pair means zero, never a guess.
+  check(String(claimPriorityFeeOfBlock({ priorityFeePerGas: 7n })) === "7", "an explicit priority fee was not used");
+  check(String(claimPriorityFeeOfBlock({ maxPriorityFeePerGas: 8n })) === "8", "maxPriorityFeePerGas was not used");
+  check(String(claimPriorityFeeOfBlock({ baseFeePerGas: 10n, gasPrice: 15n })) === "5", "gasPrice did not yield the priority fee");
+  check(String(claimPriorityFeeOfBlock({ baseFeePerGas: 10n, gasPrice: 8n })) === "0", "a gasPrice below base yielded a negative fee");
+  check(String(claimPriorityFeeOfBlock({ baseFeePerGas: 10n })) === "0", "a missing priority field did not fall back to zero");
+  // A SITE THAT FORGETS THE HELPER IS THE REGRESSION THIS GUARD EXISTS FOR. All three tip checks must call it; a
+  // copy of the source is read here because the typed API cannot see which branch produced a quote.
+  const quotesSource = readFileSync(new URL("../src/quotes.mjs", import.meta.url), "utf8");
+  const helperCalls = (quotesSource.match(/priorityFeeOfBlock\(block\)/g) || []).length;
+  check(helperCalls >= 3, "only " + helperCalls + " of the three tip checks use the shared priority-fee rule");
 
   // THE MAKER'S VIEW HALF TRAVELS TOP-LEVEL. A quote request built from the recovery key must not leave the node to
   // choose its own view half; the field is captured before the (deliberately refused) answer.
@@ -85,6 +100,29 @@ export const claimTipCheck = async () => {
     .catch((error) => error);
   check(mismatched && mismatched.code === "quote-refused" && mismatched.params && mismatched.params.why === "not-the-signed-tip",
     "a ticket whose shown tip differed from the signed one was not refused");
+
+  // A DIRECT FIRM QUOTE TAKES THE SAME PRIORITY-AWARE TIP CHECK. The quote is signed with the real EIP-712 code; the
+  // block carries only an explicit priority field, which is the case the old base-fee-only check refused.
+  {
+    const quote = quoteFor(l1Estimate);
+    const order = {
+      chainId: quote.chainId, factory: quote.factory, locker: quote.locker, claimer: quote.claimer,
+      amount: quote.amount, readyBy: quote.readyBy, t1: quote.t1, salt: quote.salt,
+    };
+    quote.context = orderContextString(order);
+    quote.signature = signQuoteDigest({ crypto: primitives, digest: quoteDigest({ crypto: primitives, quote }), privateKey: signerKey });
+    const word = (address) => "0x" + "00".repeat(12) + address.replace(/^0x/, "");
+    let chainCalls = 0;
+    const direct = createQuotes({
+      config: { route: () => "/order-quote" },
+      http: { async tryJson() { return { ok: true, body: { ok: true, quote } }; } },
+      evmBlock: async () => ({ baseFeePerGas: baseL1, priorityFeePerGas: priorityL1 }),
+      evmCall: async () => (chainCalls++ === 0 ? word(quote.provider) : word(quote.factory)),
+    });
+    const acceptedFirm = await direct.firm({ providerId: "p", order }).catch((error) => error);
+    check(acceptedFirm && acceptedFirm.provider === quote.provider,
+      "a direct firm quote at the priority-aware estimate was refused: " + (acceptedFirm && acceptedFirm.code));
+  }
 
   notes.push("a tip is bounded by twice the SDK's own estimate; zero and an unmeasured base fee behave");
   notes.push("the maker view half is sent with the firm request and is not invented when absent");
