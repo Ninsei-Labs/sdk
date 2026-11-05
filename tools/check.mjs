@@ -2668,6 +2668,7 @@ const typesConsumerCheck = () => {
   return { note: problems.length ? "TypeScript consumer failed" : "TypeScript consumer compiles", problems, notes: [] };
 };
 const quoteBindingCheck = () => runScriptCheck("check-quote-binding.mjs", "quote binding");
+const dleqChunksCheck = () => runScriptCheck("check-dleq-chunks.mjs", "dleq chunks");
 const securityInvariantsCheck = () => runScriptCheck("check-security-invariants.mjs", "security invariants");
 const lifecycleLocalCheck = () => runScriptCheck("check-lifecycle-local.mjs", "local lifecycle");
 const CHECKS = {
@@ -2725,6 +2726,7 @@ const CHECKS = {
   "quote-rank": quoteRankCheck,
   "settlement-profiles": settlementProfilesCheck,
   "dleq-vectors": dleqVectorsCheck,
+  "dleq-chunks": dleqChunksCheck,
   "swap-network": swapNetworkCheck,
   "funding-receipt": fundingReceiptCheck,
   "evm-decoders": evmDecodersCheck,

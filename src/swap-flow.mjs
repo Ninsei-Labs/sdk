@@ -36,7 +36,7 @@ import { declinedFromLogs, logReaderOf, blockBoundaryOf, DECLINED_TOPIC0 } from 
 // browser worker shipped its own copy of the crypto bundle. Its verifySide checked the DLEQ equation but not
 // that the proven point matched the quote's commitment; the package no longer needs a second build of the same
 // primitives.
-import { buildOwnSide, orderStep } from "./order.mjs";
+import { buildOwnSideChunked, orderStepChunked } from "./order.mjs";
 
 // THE ENGINE SURFACES, TAKEN THROUGH THE ONE SEAM (./engine.mjs) - exactly as the rest of the core does.
 const { chainById, DEFAULT_CHAIN, MONERO } = engine.config;
@@ -81,8 +81,8 @@ export async function runAtomicOrder({
   // substitution is only in checks.
   deps = {},
 }) {
-  const buildSide = deps.buildOwnSide || buildOwnSide;
-  const stepOrder = deps.orderStep || orderStep;
+  const buildSide = deps.buildOwnSide || buildOwnSideChunked;
+  const stepOrder = deps.orderStep || orderStepChunked;
   const fundLive = deps.fundOrderLive || fundOrderLive;
   const askQuote = deps.requestOrderQuote || requestOrderQuote;
   const factory = escrowFactoryAddress(chainSlug);
@@ -158,7 +158,13 @@ export async function runAtomicOrder({
     const orderContext = orderContextString(order);
 
     say("half", "side");
-    const mine = buildSide(order, (bit, total) => say("proof", `proving DLEQ proof: ${bit} of ${total} bits`));
+    // THE PROOF AND THE VERIFICATION YIELD BETWEEN CHUNKS. `runAtomicOrder` is already async, so the browser can
+    // paint while the same engine builder does the arithmetic.
+    const chunkOptions = {
+      onBit: (bit, total) => say("proof", `proving DLEQ proof: ${bit} of ${total} bits`),
+      onProgress: (step) => say("verify", `verifying DLEQ proof: ${step.done} of ${step.total}`),
+    };
+    const mine = await buildSide(order, chunkOptions);
     say("half", "side-ready");
 
     // The counterparty stand-in. Honestly: only a real counterparty with its own key gives a guarantee; a
@@ -203,9 +209,10 @@ export async function runAtomicOrder({
     // TOGETHER WITH IT, the fact is checked that the proven ed25519 point IS THE VERY ONE the contract will
     // receive: without that check a correct proof would guarantee nothing about the chain.
     say("verify", "dleq");
-    const step = stepOrder({
+    const step = await stepOrder({
       order, side: mine.side, counterparty: counter, standIn: !quote,
       network: xmrNetwork || (chain.monero && chain.monero.networkType) || MONERO.networkType,
+      options: chunkOptions,
     });
     const accepted = step.counterparty;
 

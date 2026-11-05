@@ -22,7 +22,7 @@ import { orderQuoteMissingFields, recoverOrderQuoteKey } from "./quoteEip712.mjs
 import { claimGasGiftWei } from "../engine/evm/claimGas.js";
 import { parseXmr } from "../engine/core/xmrAmount.js";
 import { takerHalvesV2, recoverySaltOf } from "./recovery-key.mjs";
-import { acceptCounterparty, buildOwnSideFromHalves, jointAddress } from "./order.mjs";
+import { acceptCounterparty, buildOwnSideFromHalvesChunked, jointAddress } from "./order.mjs";
 import { requestFirmQuote } from "./relayFirmClient.mjs";
 // THE CHAIN READ NEEDED TO ASK THE REGISTRY WHO OWNS THE KEY. The selector is COMPUTED from the signature, not
 // remembered: a single wrong hex digit would call another function and return a zero address - and a zero
@@ -938,7 +938,7 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
       }
       const derived = takerHalvesV2({ mnemonic, chainId, factory: order.factory, salt });
       const derivation = { kind: "salt-v2", salt };
-      const own = buildOwnSideFromHalves(order, { spendHalf: derived.spendHalf, viewHalf: derived.viewHalf });
+      const own = await buildOwnSideFromHalvesChunked(order, { spendHalf: derived.spendHalf, viewHalf: derived.viewHalf });
       const xa = secp256k1.Point.fromHex(own.side.proof.XA);
       const clientHalf = {
         commitHalf: bytesToHexQ(keccak256(xa.toBytes(false).slice(1))),

@@ -138,26 +138,58 @@ export function buildOwnSide(order, onBit) {
 }
 
 /**
+ * The same side, with the proof yielding between chunks. The synchronous `buildOwnSide` remains the entry for
+ * callers that cannot await; both drain the same engine builder.
+ */
+export async function buildOwnSideChunked(order, options = {}) {
+  const context = contextOf(order);
+  const side = await builder().newSideChunked(context, false, options);
+  return { context, side, spendPoint: norm(side.pub.ed), viewPoint: norm(side.viewPub), encPub: norm(side.enc.pub) };
+}
+
+/**
  * OUR SIDE FROM HALVES WE ALREADY HAVE - the one recovery key case. A random side would be a second secret,
  * which is exactly what one key removes. The proof is still bound to this order and built by the same engine
  * builder; only the source of the two numbers changes.
  */
-export function buildOwnSideFromHalves(order, { spendHalf, viewHalf } = {}) {
-  const context = contextOf(order);
-  const b = builder();
+function knownHalves(builderInstance, { spendHalf, viewHalf } = {}) {
   const scalar = (value, name) => {
     const n = BigInt(value);
-    if (n <= 0n || n >= BigInt(b.halves.LIMIT)) throw new SdkError("bad-input", { field: name });
+    if (n <= 0n || n >= BigInt(builderInstance.halves.LIMIT)) throw new SdkError("bad-input", { field: name });
     return n;
   };
   const half = scalar(spendHalf, "spendHalf");
   const view = scalar(viewHalf, "viewHalf");
-  const pub = b.halves.publicHalves(half);
-  const viewPub = b.halves.publicHalves(view).ed;
-  const encPair = b.enc.recipientKeyPair();
-  const proof = b.dleq.prove(half, context);
+  return {
+    half, view,
+    pub: builderInstance.halves.publicHalves(half),
+    viewPub: builderInstance.halves.publicHalves(view).ed,
+    encPair: builderInstance.enc.recipientKeyPair(),
+  };
+}
+
+function sideFromKnown({ half, view, pub, viewPub, encPair }, proof) {
   const side = { half, pub, viewHalf: view, viewPub, enc: encPair, proof, standIn: false };
-  return { context, side, spendPoint: norm(pub.ed), viewPoint: norm(viewPub), encPub: norm(encPair.pub) };
+  return { side, spendPoint: norm(pub.ed), viewPoint: norm(viewPub), encPub: norm(encPair.pub) };
+}
+
+export function buildOwnSideFromHalves(order, { spendHalf, viewHalf } = {}) {
+  const context = contextOf(order);
+  const b = builder();
+  const inputs = knownHalves(b, { spendHalf, viewHalf });
+  const proof = b.dleq.prove(inputs.half, context);
+  const { side, spendPoint, viewPoint, encPub } = sideFromKnown(inputs, proof);
+  return { context, side, spendPoint, viewPoint, encPub };
+}
+
+/** The same known-halves side, with the DLEQ proof yielding between chunks. */
+export async function buildOwnSideFromHalvesChunked(order, { spendHalf, viewHalf } = {}, options = {}) {
+  const context = contextOf(order);
+  const b = builder();
+  const inputs = knownHalves(b, { spendHalf, viewHalf });
+  const proof = await b.dleq.proveChunked(inputs.half, context, options);
+  const { side, spendPoint, viewPoint, encPub } = sideFromKnown(inputs, proof);
+  return { context, side, spendPoint, viewPoint, encPub };
 }
 
 /**
@@ -167,7 +199,7 @@ export function buildOwnSideFromHalves(order, { spendHalf, viewHalf } = {}) {
  * against its point. The sandbox stand-in is built here too and marked: it must not be passed off as a real
  * provider.
  */
-export function acceptCounterparty({ context, side = null, counterparty = null, standIn = false }) {
+function acceptedCounterparty({ context, side = null, counterparty = null, standIn = false, mock = null }) {
   let accepted = null;
   if (counterparty && typeof counterparty === "object") {
     const pub = counterparty.pub && typeof counterparty.pub === "object" ? counterparty.pub : {};
@@ -193,13 +225,13 @@ export function acceptCounterparty({ context, side = null, counterparty = null, 
   } else if (standIn === true) {
     // THE STAND-IN IS COMPUTED IN THE SAME CONTEXT AS THE ORDER: the string gets nothing appended. The same path
     // as the flow (sdk/src/swap-flow.mjs, buildOwnSide) and the check - otherwise what would be checked is
-    // not what the page runs on.
-    const mock = builder().newSide(context, true);
-    accepted = { proof: sameFormAsPoint(mock.proof), edPub: norm(mock.pub.ed), viewPoint: norm(mock.viewPub),
-      viewHalf: mock.viewHalf, half: mock.half,
+    // not what the page runs on. A chunked caller passes the mock it already built.
+    const built = mock || builder().newSide(context, true);
+    accepted = { proof: sameFormAsPoint(built.proof), edPub: norm(built.pub.ed), viewPoint: norm(built.viewPub),
+      viewHalf: built.viewHalf, half: built.half,
       // THE STAND-IN DOES CARRY A COMMITMENT: it is derived from the half it just built, by the same formula
       // the contract uses. The proof check below is therefore the real one, not a path that skips it.
-      commitHalfClaimer: norm(builder().halfCommitment(mock.half)), sealed: null, providerId: null, standIn: true, mock };
+      commitHalfClaimer: norm(builder().halfCommitment(built.half)), sealed: null, providerId: null, standIn: true, mock: built };
   } else {
     throw new SdkError("bad-input", { field: "counterparty" });
   }
@@ -214,8 +246,25 @@ export function acceptCounterparty({ context, side = null, counterparty = null, 
   // flow the half arrives from the chain via the commit/reveal mechanism, so a locked package honestly answers
   // with a refusal rather than passing itself off as a working key handover.
   const ownEncPriv = accepted.sealed && side && side.enc ? side.enc.priv : null;
+  return { accepted, ownEncPriv };
+}
+
+export function acceptCounterparty({ context, side = null, counterparty = null, standIn = false }) {
+  const { accepted, ownEncPriv } = acceptedCounterparty({ context, side, counterparty, standIn });
   let verdict = null;
   try { verdict = builder().verifySide({ proof: accepted.proof, pub: { ed: accepted.edPub }, commitHalfClaimer: accepted.commitHalfClaimer }, context, accepted.sealed, ownEncPriv); }
+  catch { throw new SdkError("bad-input", { field: "counterparty" }); }
+  if (!verdict || verdict.ok !== true) {
+    throw new SdkError("quote-refused", { step: "proof", why: verdict && verdict.reason ? "rejected" : "unknown" });
+  }
+  return accepted;
+}
+
+export async function acceptCounterpartyChunked({ context, side = null, counterparty = null, standIn = false, options = {} }) {
+  const mock = (counterparty || standIn !== true) ? null : await builder().newSideChunked(context, true, options);
+  const { accepted, ownEncPriv } = acceptedCounterparty({ context, side, counterparty, standIn, mock });
+  let verdict = null;
+  try { verdict = await builder().verifySideChunked({ proof: accepted.proof, pub: { ed: accepted.edPub }, commitHalfClaimer: accepted.commitHalfClaimer }, context, accepted.sealed, ownEncPriv, options); }
   catch { throw new SdkError("bad-input", { field: "counterparty" }); }
   if (!verdict || verdict.ok !== true) {
     throw new SdkError("quote-refused", { step: "proof", why: verdict && verdict.reason ? "rejected" : "unknown" });
@@ -228,20 +277,23 @@ export function acceptCounterparty({ context, side = null, counterparty = null, 
  * joint address. It hands out the fields the record and the recovery file are assembled from; NOT A SINGLE empty
  * value: an address is not assembled without the other's point, and that is a refusal, not an empty string.
  */
-export function orderStep({ order, side = null, counterparty = null, standIn = false, network = null }) {
-  const context = contextOf(order);
-  const own = side
+function ownSideOf({ order, side, context }) {
+  return side
     ? { context, side, spendPoint: norm(side.pub && side.pub.ed), viewPoint: norm(side.viewPub),
         encPub: norm(side.enc && side.enc.pub ? side.enc.pub : null) }
     : buildOwnSide(order);
+}
+
+function checkOwnSide(own) {
   const lack = [];
   if (own.side.half === undefined || own.side.half === null) lack.push("half");
   if (own.side.viewHalf === undefined || own.side.viewHalf === null) lack.push("viewHalf");
   if (!isPoint(own.spendPoint)) lack.push("spendPoint");
   if (!isPoint(own.viewPoint)) lack.push("viewPoint");
   if (lack.length) throw new SdkError("bad-input", { field: "side", missing: lack });
+}
 
-  const other = acceptCounterparty({ context: own.context, side: own.side, counterparty, standIn });
+function orderStepResult({ own, other, network }) {
   const otherViewPoint = other.viewPoint || (other.viewHalf ? norm(builder().pointOf(other.viewHalf)) : null);
   if (!otherViewPoint) throw new SdkError("bad-input", { field: "counterparty", missing: ["viewPoint"] });
 
@@ -278,4 +330,26 @@ export function orderStep({ order, side = null, counterparty = null, standIn = f
       network: network || null,
     },
   };
+}
+
+export function orderStep({ order, side = null, counterparty = null, standIn = false, network = null }) {
+  const context = contextOf(order);
+  const own = ownSideOf({ order, side, context });
+  checkOwnSide(own);
+  const other = acceptCounterparty({ context: own.context, side: own.side, counterparty, standIn });
+  return orderStepResult({ own, other, network });
+}
+
+/**
+ * THE CHUNKED ORDER STEP. Same steps and same result object as `orderStep`, but the proof and the verification
+ * yield to the event loop. It exists for a browser that must keep painting; it is not a second rule set.
+ */
+export async function orderStepChunked({ order, side = null, counterparty = null, standIn = false, network = null, options = {} }) {
+  const context = contextOf(order);
+  const own = side
+    ? ownSideOf({ order, side, context })
+    : await buildOwnSideChunked(order, options);
+  checkOwnSide(own);
+  const other = await acceptCounterpartyChunked({ context: own.context, side: own.side, counterparty, standIn, options });
+  return orderStepResult({ own, other, network });
 }

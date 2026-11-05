@@ -33,6 +33,12 @@ implementation just built: a fixture derived from the request cannot see a servi
 
 Do not add a test that only raises the count. Add the smallest case that fails for the right reason.
 
+## Long CPU paths in the interface
+
+A proof or verifier that runs in the page needs a chunked entry point that yields to the event loop, not only a
+progress callback: a callback cannot repaint while the arithmetic holds the thread. The synchronous and chunked
+entries must be the same implementation, and the check must see the yields and the same verdict from both.
+
 ## Current teeth
 
 `tools/check-guard-teeth.mjs` proves the action-window guards (unreadable clock, claim margin, simulation), the
