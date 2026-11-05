@@ -124,9 +124,15 @@ try {
 
     console.log("=== 4) THE RELATIVE ASSETS THE ENGINE IMPORTS ARE IN THE TARBALL ===");
     const installed = join(consumer, "node_modules", "@ninsei-labs", "sdk");
-    for (const rel of ["assets/vendors/atomic/atomic-browser.js", "assets/vendors/monero/monero-js-browser.js", "engine/atomic/order-worker.js", "index.d.ts"]) {
+    for (const rel of ["assets/vendors/monero/monero-js-browser.js", "engine/atomic/order.js", "index.d.ts"]) {
       if (existsSync(join(installed, rel))) ok(rel + " is present");
       else bad(rel + " is missing from the installed package");
+    }
+    // THE SECOND CRYPTO PATH IS GONE, NOT JUST UNUSED. A worker or its vendored bundle reappearing in the tarball
+    // would bring back a verifier that does not check the knowledge proofs.
+    for (const rel of ["assets/vendors/atomic/atomic-browser.js", "engine/atomic/order-worker.js", "engine/atomic/order-client.js"]) {
+      if (!existsSync(join(installed, rel))) ok(rel + " is not shipped");
+      else bad(rel + " is still shipped");
     }
   }
 } finally {

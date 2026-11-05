@@ -25,9 +25,9 @@ export * as recoveryFile from "../engine/recovery/recoveryFile.js";
 export * as halves from "../engine/atomic/halves.js";
 export * as orderContext from "../engine/atomic/orderContext.js";
 export * as order from "../engine/atomic/order.js";
-// HALF TRANSFER: the byte format and opening are the very same ones the page worker uses
-// (www/js/atomic/order-worker.js). The core keeps no copy of the format: the commitment is computed over those
-// exact bytes, and a second copy would silently drift from the calldata.
+// HALF TRANSFER: the byte format and opening are the very same ones the engine's order builder uses. The core
+// keeps no copy of the format: the commitment is computed over those exact bytes, and a second copy would
+// silently drift from the calldata.
 export * as halfenc from "../engine/atomic/halfenc.js";
 // The engine's EVM layer: talking to the chain (order terms, sending, reading) - through this seam.
 export * as evm from "../engine/evm/index.js";
@@ -37,9 +37,9 @@ export * as evm from "../engine/evm/index.js";
 export * as dex from "../engine/evm/dex.js";
 // THE DEAL ENGINE NO LONGER LIVES IN www/js (#32, wave 3): the order flow moved into the package
 // (sdk/src/swap-flow.mjs) and is declared in sdk/index.d.ts. The page reaches it through the bridge, so the
-// mirror no longer carries core/swap-flow.js - what stays in the seam is the ORDER CLIENT (the half worker),
-// the ORDER QUOTE source and the shared CLAIM GAS LIMIT that the moved flow reads through this same seam.
-export * as orderClient from "../engine/atomic/order-client.js";
+// mirror no longer carries core/swap-flow.js - what stays in the seam is the ORDER QUOTE source and the shared
+// CLAIM GAS LIMIT that the moved flow reads through this same seam. The order side is built by engine/atomic/order.js.
+
 export * as rfqSource from "../engine/core/rfqSource.js";
 export * as claimGas from "../engine/evm/claimGas.js";
 export * as escrow from "../engine/evm/escrow.js";

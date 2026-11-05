@@ -20,8 +20,8 @@ import { swapAddressFromHalves, watchViewSeedHex } from "../monero/swapKeys.js";
 // carries HALVES, and has NO full spend key: each side has only its half, the second is revealed on chain at ETH
 // claim. So a v3 file builds a VIEWING wallet; spending becomes possible only after the reveal.
 //
-// deps is needed for testability: in the browser the libraries come from the vendored bundle (loaded dynamically,
-// as a static bundle import would break Node runs), in tests they are passed in.
+// deps is needed for testability: the SDK passes its own primitives here, and tests pass their own. There is no
+// second browser bundle for this branch.
 export async function restoreWalletFromPayload(payload, deps = {}) {
   const { warnings } = validatePayload(payload);
   const m = payload.moneroWallet;
@@ -70,14 +70,14 @@ export async function restoreFromHalves(payload, warnings = [], deps = {}) {
   const libs = deps.halves && deps.addressFromKeys
     ? { halves: deps.halves, addressFromKeys: deps.addressFromKeys, keccak256: deps.keccak256 }
     : await (async () => {
-        const vendor = await import("../../assets/vendors/atomic/atomic-browser.js?v=2c038c56");
+        // THE SDK'S OWN PRIMITIVES, NOT A SECOND BROWSER BUNDLE. The five names are the same @noble packages
+        // the package already ships, and a separate build of them was exactly the duplicated crypto path this
+        // recovery branch used to keep alive.
+        const { primitives } = await import("../../src/primitives.mjs");
         const { createHalves } = await import("../atomic/halves.js");
         const { addressFromKeys } = await import("../monero/address.js");
-        const halves = createHalves({
-          ed25519: vendor.ed25519, secp256k1: vendor.secp256k1,
-          keccak256: vendor.keccak256, randomBytes: vendor.randomBytes,
-        });
-        return { halves, addressFromKeys, keccak256: vendor.keccak256 };
+        const halves = createHalves(primitives);
+        return { halves, addressFromKeys, keccak256: primitives.keccak256 };
       })();
   if (!libs.keccak256) throw new Error("no keccak256: the address cannot be checked without it");
 

@@ -49,7 +49,7 @@ export interface NinseiOptions {
    * from the node on the CI contour.
    */
   xmrNetwork: "mainnet" | "stagenet" | "testnet" | "fakechain";
-  /** Where to load workers and WASM from (order-worker, the Monero bundles). Default "/". */
+  /** Where to load the Monero bundles from. Default "/". */
   assetsBase?: string;
   /** Storage for unfinished swaps and sessions. Default - a localStorage adapter, if present. */
   storage?: StorageAdapter;
