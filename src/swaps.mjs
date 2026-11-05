@@ -35,9 +35,9 @@ import {
 } from "./recovery-key.mjs";
 // THE XMR ARRIVAL CHECK ON TWO NODES (issue #85) - IN THE CORE, from the same mirrored rule and block parser.
 import * as xmrArrival from "./xmr-arrival.mjs";
-// THE MAKER'S DECLINE (issue #40): the escrow's `Declined` event and the node's `declined` + `compliance` status
-// are TWO independent sources of the same state, and either one is enough. The detectors and the neutral
-// vocabulary live in one module, so this file names the state instead of re-reading the two.
+// THE MAKER'S DECLINE (issue #40): the escrow's `Declined` event is the decision. The node's `declined` +
+// `compliance` status is an observation on the wire, not a second source this file trusts; the detectors and the
+// neutral vocabulary live in one module, so this file names the state instead of re-reading either.
 import { declineOf, logReaderOf, blockBoundaryOf, DECLINED_TOPIC0, DECLINED_TERMINAL, DECLINED_CODE } from "./decline.mjs";
 
 // THE ENGINE'S SETTLEMENT KINDS -> THE CONTRACT'S CODES: THE KEY IS THE KIND THE ENGINE REALLY WRITES.
@@ -74,7 +74,13 @@ const TERMINAL = {
   [DECLINED_TERMINAL]: DECLINED_TERMINAL,
 };
 
-const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+const num = (v) => {
+  // NULL/UNDEFINED/EMPTY IS NOT ZERO. `Number(null)` is 0, which made every unknown amount look measured as empty;
+  // a missing number is a missing fact and the state/interface must see null.
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
 
 // THE SERVICE'S NAMED STATE FOR FUNDS THAT ARE ON THE ADDRESS BUT BARRED BY THE TRANSACTION'S unlock_time
 // (app/store.mjs, app/watcher.mjs; the rule itself is app/indexer.mjs, unlockStateOf). "Has the XMR arrived" is
@@ -236,11 +242,16 @@ export function toState(swap) {
     // WHAT HAS ALREADY MOVED ON THE SWAP - the two signs the removal prompt warns about. Computed HERE from the
     // record: the screen must not reach into it for them.
     funds: {
-      receivedXmr: num(d.xmrAmount && d.xmrAmount.seen) ?? 0,
+      // UNKNOWN IS NULL, NOT ZERO. Zero is a measured empty amount; an absent field is a different fact and the
+      // interface must be able to show a dash instead of claiming that nothing arrived. The engine's xmrView
+      // materialises a zero when it has no session, so the evidence is checked before its `seen`.
+      receivedXmr: (swap.xmrSession !== null && swap.xmrSession !== undefined)
+        || (swap.xmr && (swap.xmr.received !== undefined || swap.xmr.arrived !== undefined))
+        ? num(d.xmrAmount && d.xmrAmount.seen) : null,
       escrowLocked: !!(swap.escrow && (swap.escrow.fundTx || swap.escrow.secret)),
     },
-    pay: { token: swap.payToken || "eth", amount: num(swap.payAmount) ?? 0 },
-    get: { xmr: num(swap.xmrAmount) ?? 0 },
+    pay: { token: swap.payToken || "eth", amount: num(swap.payAmount) },
+    get: { xmr: num(swap.xmrAmount) },
     step: active.code,
     steps,
     deadlines: {
@@ -1373,7 +1384,8 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       //
       // THE DECLINE IS ASKED WITH TWO INDEPENDENT SOURCES AND EITHER ONE ENDS THE WAIT:
       //   * THE CHAIN - the escrow's own `Declined` event, through the same log reader the rest of the core uses;
-      //   * THE WIRE - the status the service answers with (`declined` with the code `compliance`).
+      //   * THE WIRE - the status the service answers with is an observation, not a decision; it never writes the
+      //     decline.
       // A CHAIN READ THAT FAILS is neither a decline nor a refusal of the swap: the wait goes on and the wire may
       // still answer. What the chain read did is carried out with the result (`chain.checked` / `chain.error`), so
       // a broken reader is visible instead of silent.

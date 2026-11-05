@@ -2108,6 +2108,17 @@ export const declineCheck = async () => {
     problems.push(`a live swap was given a terminal state: ${JSON.stringify({ terminal: liveState.terminal, settled: liveState.settled })}`);
   }
 
+  // UNKNOWN IS NOT ZERO. A record without an amount must make the state say null, not claim that nothing arrived or
+  // that the swap is worth zero; the interface can then show a dash instead of a false number.
+  const unknown = declineRecord(engine);
+  unknown.payAmount = null;
+  unknown.xmrAmount = null;
+  engine.swap.saveSwap(unknown);
+  const unknownState = await swapsMod.toState(engine.swap.getSwap(unknown.id));
+  if (unknownState.funds.receivedXmr !== null || unknownState.pay.amount !== null || unknownState.get.xmr !== null) {
+    problems.push(`an unknown amount became a number: ${JSON.stringify({ received: unknownState.funds.receivedXmr, pay: unknownState.pay.amount, get: unknownState.get.xmr })}`);
+  }
+
   // (h) WHAT THE APP IS TOLD, AND WHAT IT IS DELIBERATELY NOT TOLD. Exactly the declared fields, no key anywhere
   // that would carry a reason, a category or a provider, and the node's code unchanged.
   const verdicts = { fromEvent, fromChain: chainOutcome, fromRecord: reloadOutcome };

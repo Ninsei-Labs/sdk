@@ -801,6 +801,8 @@ export const KNOWN_FACTORY_CODES = {
   // contracts-testnet-2026.11.04, factory deployed at 0x245d3a4ac4b98d713f6c5130b56cd5d550f8cefe.
   // The factory has no immutables; this hash is reproducible from that release's source.
   "arbitrum-sepolia": ["0x1fdfa1c922f660506243cab4c889aa83e22ce27d818bac9c5e4ecbccbdd04906"],
+  // Arbitrum One is deliberately absent until its factory address and build hash are known. A guessed pin is
+  // weaker than no policy; the gap is tracked with the deployment work, not filled silently here.
 };
 
 export function knownFactoryCodesFor(chainOrId) {

@@ -1303,8 +1303,8 @@ export interface RecoveryFile {
 export interface SwapState {
   readonly id: string;
   readonly direction: "buy" | "sell";
-  readonly pay: { readonly token: string; readonly amount: number };
-  readonly get: { readonly xmr: number };
+  readonly pay: { readonly token: string; readonly amount: number | null };
+  readonly get: { readonly xmr: number | null };
   /** The current step's code. The texts are the interface's. */
   readonly step: StepCode;
   /** All steps in the order of passage: what is done, what is running now, what failed. */
@@ -1361,7 +1361,7 @@ export interface SwapState {
   /** The swap has a settlement record: the list splits live from settled by THIS flag, not by the phase's text. */
   readonly settled: boolean;
   /** WHAT HAS ALREADY MOVED: the sum seen at the address and whether the record holds a lock or a secret. */
-  readonly funds: { readonly receivedXmr: number; readonly escrowLocked: boolean };
+  readonly funds: { readonly receivedXmr: number | null; readonly escrowLocked: boolean };
 }
 
 export interface StepState {

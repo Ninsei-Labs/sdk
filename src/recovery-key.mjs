@@ -247,6 +247,10 @@ export async function createRecoveryKeyFile({ mnemonic, createdAt, passphrase = 
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const header = {
+    // THE ENCRYPTED FILE NAMES ITSELF TOO. The plain file has its magic line; without a `kind` the JSON backup was
+    // indistinguishable from any other ciphertext object. It is outside the AAD (which carries the same constant),
+    // so older files without it still open.
+    kind: "ninsei-recovery-key",
     v: RECOVERY_KEY_ENVELOPE_VERSION,
     alg: RECOVERY_KEY_ALG,
     iter: RECOVERY_KEY_ITER,
@@ -289,7 +293,8 @@ export async function openRecoveryKeyFile(contents, passphrase = "") {
   } catch {
     throw failed("parse");
   }
-  if (!envelope || envelope.v !== RECOVERY_KEY_ENVELOPE_VERSION || envelope.alg !== RECOVERY_KEY_ALG) throw failed("parse");
+  if (!envelope || (envelope.kind !== undefined && envelope.kind !== "ninsei-recovery-key")
+      || envelope.v !== RECOVERY_KEY_ENVELOPE_VERSION || envelope.alg !== RECOVERY_KEY_ALG) throw failed("parse");
   for (const field of ["salt", "iv", "ciphertext"]) if (typeof envelope[field] !== "string" || !envelope[field]) throw failed("parse");
   let iter = null;
   try { iter = Number(envelope.iter); } catch { iter = null; }
@@ -403,9 +408,9 @@ function decodeOrderLog(log) {
   };
 }
 
-// THE CLONE CARRIES THE ORDER, INCLUDING THE XMR AMOUNT. OrderCreated does not repeat `xmrAmount`, and the clone
-// has no getter for it, but word 18 of the condition blob is in its code. Read it only from a clone of the exact
-// shape: a contract of another size is not this order and must not yield a guessed number.
+// THE CLONE CARRIES THE ORDER, INCLUDING THE XMR AMOUNT. The legacy OrderCreated has no `xmrAmount`; the modern
+// event carries it, while a clone has no getter, but word 18 of the condition blob is in its code. Read the clone
+// only from the exact shape: a contract of another size is not this order and must not yield a guessed number.
 const CLONE_CODE_BYTES = 877;
 const XMR_AMOUNT_WORD = 18;
 const CLONE_PROXY_BYTES = 45;

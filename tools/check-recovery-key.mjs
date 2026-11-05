@@ -60,6 +60,7 @@ export const recoveryKeyCheck = async () => {
   check(plainOpened.mnemonic === WORDS, "the plain backup did not round-trip");
   check(plainOpened.createdAt === "2026-10-21T00:00:00.000Z", "the plain backup lost its header date");
   const encrypted = await recovery.createRecoveryKeyFile({ mnemonic: WORDS, createdAt: "2026-10-21T09:30:00.000Z", passphrase: "correct horse battery" });
+  check(JSON.parse(encrypted).kind === "ninsei-recovery-key", "the encrypted backup has no readable kind header");
   const encryptedOpened = await recovery.openRecoveryKeyFile(encrypted, "correct horse battery");
   check(encryptedOpened.mnemonic === WORDS, "the encrypted backup did not round-trip");
   check(encryptedOpened.createdAt === "2026-10-21T09:30:00.000Z", "the encrypted backup lost its sealed creation time");
