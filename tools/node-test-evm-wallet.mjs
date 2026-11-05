@@ -25,8 +25,8 @@
 // dynamic import and only inside the key-loading function.
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import keccakPkg from "keccak256";
-import { SdkError } from "../errors.mjs";
-import { config as engineConfig } from "../engine.mjs";
+import { SdkError } from "../src/errors.mjs";
+import { config as engineConfig } from "../src/engine.mjs";
 
 const keccak256 = (bytes) => new Uint8Array(keccakPkg(Buffer.from(bytes)));
 

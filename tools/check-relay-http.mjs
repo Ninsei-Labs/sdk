@@ -418,6 +418,17 @@ try {
   else bad("missing relay id returned " + JSON.stringify(error && (error.code || error.message)));
 }
 
+console.log("=== 4d) A BODY CUT BY A TIMEOUT IS NOT AN EMPTY RELAY ===");
+try {
+  await call({ fetchImpl: async (url) => String(url).endsWith("/v1/relay")
+    ? { ok: true, status: 200, json: async () => { throw new Error("cut"); } }
+    : { ok: true, status: 200, json: async () => ({}) } });
+  bad("a cut relay body passed as an empty answer");
+} catch (error) {
+  if (error && error.code === "server-unavailable" && error.params && error.params.why === "body") ok("a cut body is a named transport refusal");
+  else bad("cut body returned " + JSON.stringify(error && (error.code || error.message)));
+}
+
 console.log("=== 5) BREAKING RUN: A DROPPED REFUSAL CODE IS CAUGHT ===");
 {
   const sourcePath = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "relayFirmClient.mjs");
