@@ -104,7 +104,7 @@ function rpcFor(txByHost) {
 const address = "stagenet-address-for-the-fixture";
 const spendPub = G.multiply(SPEND).toHex();
 
-async function run({ nodes, txByHost, expectedAtomic = AMOUNT, minConfirmations = 10 }) {
+async function run({ nodes, txByHost, expectedAtomic = AMOUNT, minConfirmations = 10, txid = TXID }) {
   const verdict = await verifyArrival({
     nodes,
     address,
@@ -113,7 +113,7 @@ async function run({ nodes, txByHost, expectedAtomic = AMOUNT, minConfirmations 
     expectedAtomic,
     minConfirmations,
     fromHeight: 100,
-    txid: TXID,
+    txid,
     fetch: rpcFor(txByHost),
   });
   return verdict;
@@ -136,6 +136,83 @@ console.log("=== 1) TWO HONEST NODES AGREE ===");
   else bad("confirmations: " + verdict.confirmations);
   if (verdict.checked && verdict.checked.length === 2 && verdict.checked.every((r) => Number(r.height) > 0)) ok("an answered witness carries its height");
   else bad("checked heights: " + (verdict.checked || []).map((r) => r.height).join(","));
+}
+
+console.log("=== 1a0) A DUST TRANSFER BEFORE THE FULL PAYOUT IS NOT THE ARRIVAL ===");
+{
+  const DUST_ID = "d".repeat(64);
+  const dust = fixture({ amount: 1n });
+  const full = fixture();
+  const rpc = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (body.method === "get_info") return { ok: true, json: async () => ({ result: { height: 121, synchronized: true } }) };
+    if (body.method === "get_block") return { ok: true, json: async () => ({ result: { block_header: { hash: BLOCK_HASH }, tx_hashes: [DUST_ID, TXID] } }) };
+    return { ok: true, json: async () => ({
+      txs: [{ tx_hash: DUST_ID, block_height: 100, confirmations: 21 }, { tx_hash: TXID, block_height: 100, confirmations: 21 }],
+      txs_as_json: [JSON.stringify(dust), JSON.stringify(full)],
+    }) };
+  };
+  const verdict = await verifyArrival({
+    nodes: [{ url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" }],
+    address, viewSecret: VIEW, spendPub, expectedAtomic: AMOUNT, minConfirmations: 10,
+    fromHeight: 100, txid: DUST_ID, fetch: rpc,
+  });
+  if (verdict.seen === true && verdict.state === "arrived" && verdict.txid === TXID && verdict.amountAtomic === AMOUNT.toString()) {
+    ok("the full payout wins over an earlier dust transfer named by the hint");
+  } else bad("dust before payout: " + JSON.stringify(verdict, (k, v) => typeof v === "bigint" ? v.toString() : v));
+}
+
+console.log("=== 1a0b) A DUST TRANSFER IN ANOTHER BLOCK DOES NOT HIDE THE FULL PAYOUT ===");
+{
+  const DUST_ID = "d".repeat(64);
+  const dust = fixture({ amount: 1n });
+  const full = fixture();
+  const rpc = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (body.method === "get_info") return { ok: true, json: async () => ({ result: { height: 121, synchronized: true } }) };
+    if (body.method === "get_block") {
+      const height = Number(body.params.height);
+      const hashes = height === 100 ? [DUST_ID] : height === 105 ? [TXID] : [];
+      return { ok: true, json: async () => ({ result: { block_header: { hash: String(height).padStart(64, "0") }, tx_hashes: hashes } }) };
+    }
+    const hash = String(body.txs_hashes[0]);
+    return { ok: true, json: async () => ({
+      txs: [{ tx_hash: hash, block_height: hash === DUST_ID ? 100 : 105, confirmations: hash === DUST_ID ? 21 : 16 }],
+      txs_as_json: [JSON.stringify(hash === DUST_ID ? dust : full)],
+    }) };
+  };
+  const verdict = await verifyArrival({
+    nodes: [{ url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" }],
+    address, viewSecret: VIEW, spendPub, expectedAtomic: AMOUNT, minConfirmations: 10,
+    fromHeight: 100, txid: null, fetch: rpc,
+  });
+  if (verdict.seen === true && verdict.state === "arrived" && verdict.txid === TXID && verdict.height === 105) {
+    ok("the full payout in a later block wins over earlier dust");
+  } else bad("cross-block dust: " + JSON.stringify(verdict, (k, v) => typeof v === "bigint" ? v.toString() : v));
+}
+
+console.log("=== 1a0c) AN UNLOCKED FULL PAYOUT WINS OVER A LOCKED FULL PAYOUT ===");
+{
+  const LOCKED_ID = "e".repeat(64);
+  const locked = fixture({ unlockTime: 999 });
+  const full = fixture();
+  const rpc = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (body.method === "get_info") return { ok: true, json: async () => ({ result: { height: 121, synchronized: true } }) };
+    if (body.method === "get_block") return { ok: true, json: async () => ({ result: { block_header: { hash: BLOCK_HASH }, tx_hashes: [LOCKED_ID, TXID] } }) };
+    return { ok: true, json: async () => ({
+      txs: [{ tx_hash: LOCKED_ID, block_height: 100, confirmations: 21 }, { tx_hash: TXID, block_height: 100, confirmations: 21 }],
+      txs_as_json: [JSON.stringify(locked), JSON.stringify(full)],
+    }) };
+  };
+  const verdict = await verifyArrival({
+    nodes: [{ url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" }],
+    address, viewSecret: VIEW, spendPub, expectedAtomic: AMOUNT, minConfirmations: 10,
+    fromHeight: 100, txid: null, fetch: rpc,
+  });
+  if (verdict.seen === true && verdict.state === "arrived" && verdict.txid === TXID) {
+    ok("the unlocked full payout wins over a locked full payout");
+  } else bad("locked vs unlocked: " + JSON.stringify(verdict, (k, v) => typeof v === "bigint" ? v.toString() : v));
 }
 
 console.log("=== 1a) A FAILED NODE IS NAMED, AND ONE COMPLETE WALK IS STILL PENDING ===");
