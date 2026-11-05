@@ -370,7 +370,7 @@ export function sellWatchTimeoutMs({ configuredMs = 1_200_000, readyBySec = null
   return Math.max(configured, (readyAt - now + SELL_WATCH_MARGIN_SEC) * 1000);
 }
 
-export function createSwaps({ preflight, http, createRecord, mode = null, xmrNetwork = null, call = null, now = null, store = engine.store,
+export function createSwaps({ preflight, http, createRecord, mode = null, xmrNetwork = null, call = null, now = null, evmBlock = null, store = engine.store,
   // THE PATHS AND LIMITS ARE BROUGHT BY THE CONFIGURATION: the "server" step's paths are named by names (config.route),
   // and the timeout and rate of the watch polling - in config.limits. Without the configuration the step answers with a
   // code rather than following invented paths.
@@ -393,6 +393,27 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
   // substitute your own. Otherwise the lock step could not be checked beyond predicting the address - and "the address
   // from the receipt" would remain an argument on trust, not a verified property.
   const reader = typeof call === "function" ? call : engine.evm.readContract;
+  // ONE BLOCK FOR THE SELL GATE. A block read is a seam like the contract read: `evmBlock` from the interface
+  // wins, then the wallet's own provider. The number pins every escrow read below to the same state; the
+  // timestamp is the chain's clock, not the device's.
+  const chainSnapshot = async (wallet = null) => {
+    let block = null;
+    if (typeof evmBlock === "function") {
+      block = await evmBlock("latest");
+    } else if (wallet && typeof wallet.driver === "function") {
+      const provider = wallet.driver();
+      if (provider && typeof provider.request === "function") {
+        const tag = await provider.request({ method: "eth_blockNumber" });
+        if (typeof tag === "string" && /^0x[0-9a-f]+$/i.test(tag)) {
+          block = await provider.request({ method: "eth_getBlockByNumber", params: [tag, false] });
+        }
+      }
+    }
+    const number = block && Number(block.number);
+    const timestamp = block && Number(block.timestamp);
+    if (!Number.isSafeInteger(number) || number < 0 || !Number.isFinite(timestamp) || timestamp <= 0) return null;
+    return { blockTag: "0x" + number.toString(16), timestamp };
+  };
   // THE SAME RULE FOR THE LOGS: one reader per facade, chosen once.
   const logReader = logReaderOf(chainLogs);
   // MARKING READY GOES THROUGH THE SAME READ SEAM as the lock: checking the slots and signing must go one way,
@@ -658,27 +679,37 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
   // A SELL SENDS XMR ONLY INTO AN ESCROW THE CHAIN ALREADY HOLDS. The relay answer proves the maker signed the
   // terms; it does not prove that the maker funded them. Read the escrow itself (code, status, slots and
   // deadlines), compare the slots with the halves this offer verified, and refuse before `send-xmr`.
-  async function sellEscrowGate(escrow, expect) {
+  async function sellEscrowGate(escrow, expect, wallet = null) {
     if (!escrow || !expect) throw new SdkError("bad-input", { field: "escrow" });
+    let snapshot = null;
+    try { snapshot = await chainSnapshot(wallet); }
+    catch (e) { throw new SdkError("quote-refused", { step: "send-xmr", why: "block-unreadable" }); }
+    // Compatibility with a caller that has neither a wallet nor a block seam: the reads still go to `latest`,
+    // and the deadline falls back to the documented `now` seam. A live sell carries one of the two.
+    const gate = { call: reader, blockTag: snapshot ? snapshot.blockTag : "latest" };
+    const chainNow = snapshot ? snapshot.timestamp : Math.floor((typeof now === "function" ? now() : Date.now()) / 1000);
     let status = null;
-    try { status = await flow.orderStatus(escrow, { call: reader }); }
+    try { status = await flow.orderStatus(escrow, gate); }
     catch (e) { throw new SdkError("quote-refused", { step: "send-xmr", why: "escrow-unreadable" }); }
     if (!status || status.isFunded !== true || status.isClaimed === true || status.isRefunded === true) {
       throw new SdkError("quote-refused", { step: "send-xmr", why: "escrow-not-open" });
     }
     let deadlines = null;
-    try { deadlines = await flow.orderDeadlines(escrow, { call: reader }); }
+    try { deadlines = await flow.orderDeadlines(escrow, gate); }
     catch (e) { throw new SdkError("quote-refused", { step: "send-xmr", why: "deadline-unreadable" }); }
     if (Number(deadlines.readyBy) !== Number(expect.readyBy) || Number(deadlines.t1) !== Number(expect.t1)) {
       throw new SdkError("quote-refused", { step: "send-xmr", why: "terms-mismatch" });
     }
-    // Leave time for the XMR to be sent and confirmed before the maker's ready mark closes. The lead is a
-    // node setting (`limits.sellReadyLeadSec`), not a second protocol constant.
-    const leadSec = Number(limitOf("sellReadyLeadSec", 600));
-    if (Math.floor(Date.now() / 1000) + leadSec >= Number(deadlines.readyBy)) {
+    // Leave time for the XMR to be sent and confirmed before the maker's ready mark closes. The lead follows the
+    // confirmation setting; an explicit `limits.sellReadyLeadSec` can override it for a stand.
+    const confirmations = Math.max(1, Number(limitOf("xmrConfirmations", 10)));
+    const blockTimeSec = Math.max(1, Number(limitOf("xmrBlockTimeSec", 120)));
+    const configuredLead = Number(limitOf("sellReadyLeadSec", 0));
+    const leadSec = Number.isFinite(configuredLead) && configuredLead > 0 ? configuredLead : confirmations * blockTimeSec;
+    if (chainNow + leadSec >= Number(deadlines.readyBy)) {
       throw new SdkError("quote-refused", { step: "send-xmr", why: "deadline-too-close" });
     }
-    try { await flow.assertOrderSlots(escrow, expect, "send-xmr", { call: reader }); }
+    try { await flow.assertOrderSlots(escrow, expect, "send-xmr", gate); }
     catch (e) {
       if (e && e.code === "contract-reverted") throw e;
       throw new SdkError("quote-refused", { step: "send-xmr", why: "slots-unreadable" });
@@ -1513,7 +1544,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
           || !same(existing.escrow && existing.escrow.moneroAddress, offer.jointAddress)) {
           throw new SdkError("quote-refused", { step: "sell-record", why: "offer-changed" });
         }
-        await sellEscrowGate((existing.escrow && existing.escrow.address) || offer.escrow, existing.expect || null);
+        await sellEscrowGate((existing.escrow && existing.escrow.address) || offer.escrow, existing.expect || null, request.wallet);
         return { id: existing.id, side: "sell", escrow: (existing.escrow && existing.escrow.address) || offer.escrow,
           address: (existing.escrow && existing.escrow.moneroAddress) || offer.jointAddress,
           xmrAmount: (existing.escrow && existing.escrow.xmrAmount) || quote.xmrAmount,
@@ -1612,7 +1643,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       // from the escrow/deadline/slot gate must remove it again; otherwise the interface lists send-xmr for an
       // order the SDK never checked.
       try {
-        await sellEscrowGate(offer.escrow, swap.expect);
+        await sellEscrowGate(offer.escrow, swap.expect, request.wallet);
       } catch (error) {
         try { engine.swap.forgetSwap(swap.id, store); } catch { /* the gate's refusal is the actionable one */ }
         throw error;

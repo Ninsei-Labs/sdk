@@ -295,7 +295,7 @@ export function createNinsei(options) {
     // THE PATHS, THE POLL TIMINGS AND THE PASS GO INTO THE START: without the configuration the "server" step
     // would not know where to knock, and without the pass there is nothing to present to the service (and that
     // is a refusal with a CODE, not an invented path).
-    swaps: createSwaps({ preflight, http, mode: o.mode, xmrNetwork: o.xmrNetwork, call: o.evmCall, now: o.now || null, store,
+    swaps: createSwaps({ preflight, http, mode: o.mode, xmrNetwork: o.xmrNetwork, call: o.evmCall, now: o.now || null, evmBlock: o.evmBlock || null, store,
       // THE LOG SEAM FOR THE DECLINE CHECK: the watch asks the escrow for its `Declined` event on every tick, so
       // a declined order stops the wait at once instead of running to `xmr-timeout`.
       logs: o.evmLogs || null,
