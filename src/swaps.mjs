@@ -1030,9 +1030,8 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       // values: the DLEQ proof would then be bound to nothing.
       const orderContext = contextOf(request.order);
 
-      // THE KEY RECORD, THE NUMBER AND THE SIDE. A key is made once and kept through the SDK's store; the
-      // number is reserved before the order is built, and it is retired only after the order exists on chain.
-      // No per-swap file is assembled on this path.
+      // THE KEY RECORD AND THE SIDE. A key is made once and kept through the SDK's store; this path uses the
+      // per-order salt, and no per-swap file is assembled here.
       let recovery = null;
       {
         const storage = store.storage();

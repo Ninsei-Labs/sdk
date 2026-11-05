@@ -851,7 +851,7 @@ export function nativeOf(chainId) {
 
 // A network's WRAPPED native token (WETH/WBNB...), or null. It is what the liquidity leg settles (KyberSwap Limit
 // Order trades ERC20 against ERC20 and cannot deliver native) and what the native leg sells to buy native coin: the
-// engine's composed route (www/js/evm/asyncExec.js) turns the token into this wrapped token first, then into native.
+// engine's composed route (the package provider layer) turns the token into this wrapped token first, then into native.
 export function wrappedNativeOf(chainId) {
   const c = chainById(chainId);
   return (c.tokens || []).find((t) => t && t.peg === "native") || null;

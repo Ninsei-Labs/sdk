@@ -840,7 +840,10 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
         let block = null;
         try { block = await evmBlock("latest"); } catch { fail("quote-tip-unchecked", { step: "claimTip", why: "block-read-failed" }); }
         const baseFeeWei = block && (block.baseFeePerGas !== undefined ? block.baseFeePerGas : block.baseFeeWei);
-        const verdict = claimTipVerdict({ claimTipWei: quote.claimTip, baseFeeWei });
+        const priorityFeeWei = block && (block.priorityFeePerGas !== undefined
+          ? block.priorityFeePerGas : block.maxPriorityFeePerGas);
+        const verdict = claimTipVerdict({ claimTipWei: quote.claimTip, baseFeeWei,
+          priorityFeeWei: priorityFeeWei === undefined || priorityFeeWei === null ? 0 : priorityFeeWei });
         if (!verdict.ok) fail(verdict.code, { step: "claimTip", ...verdict });
       }
       return quote;
@@ -1079,7 +1082,10 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
         let block = null;
         try { block = await evmBlock("latest"); } catch { fail("quote-tip-unchecked", { step: "claimTip", why: "block-read-failed" }); }
         const baseFeeWei = block && (block.baseFeePerGas !== undefined ? block.baseFeePerGas : block.baseFeeWei);
-        const verdict = claimTipVerdict({ claimTipWei: quote.claimTip, baseFeeWei });
+        const priorityFeeWei = block && (block.priorityFeePerGas !== undefined
+          ? block.priorityFeePerGas : block.maxPriorityFeePerGas);
+        const verdict = claimTipVerdict({ claimTipWei: quote.claimTip, baseFeeWei,
+          priorityFeeWei: priorityFeeWei === undefined || priorityFeeWei === null ? 0 : priorityFeeWei });
         if (!verdict.ok) fail(verdict.code, { step: "claimTip", ...verdict });
       }
       // THE SIGNED XMR AMOUNT TRAVELS WITH THE ORDER TERMS. `swaps.start` records its order as given, and the

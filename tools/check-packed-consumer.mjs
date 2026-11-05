@@ -130,7 +130,8 @@ try {
     }
     // THE SECOND CRYPTO PATH IS GONE, NOT JUST UNUSED. A worker or its vendored bundle reappearing in the tarball
     // would bring back a verifier that does not check the knowledge proofs.
-    for (const rel of ["assets/vendors/atomic/atomic-browser.js", "engine/atomic/order-worker.js", "engine/atomic/order-client.js"]) {
+    for (const rel of ["assets/vendors/atomic/atomic-browser.js", "engine/atomic/order-worker.js", "engine/atomic/order-client.js",
+      "engine/evm/asyncExec.js", "engine/evm/asyncLegs.js"]) {
       if (!existsSync(join(installed, rel))) ok(rel + " is not shipped");
       else bad(rel + " is still shipped");
     }

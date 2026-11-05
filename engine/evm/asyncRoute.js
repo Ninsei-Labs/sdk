@@ -18,7 +18,7 @@
 // refuses native as an order asset). So a wrapped provider is NEVER chosen as the sole provider for a native need:
 // it is a LIQUIDITY leg, and the route to native is a COMPOSITION of two orders - the liquidity leg (token -> WETH)
 // and a native leg on a native-capable provider (WETH -> native coin, CoW). The choice returns a route record or a
-// composition; the composition is EXECUTED in evm/asyncExec.js, which pays the second leg's own fee out of the
+// composition; the composition is EXECUTED by the package provider layer, which pays the second leg's own fee out of the
 // reserve so the person is not sent into a composition that leaves them short of the deposit.
 //
 // IT MIRRORS THE PACKAGE'S PROVIDER LAYER ON PURPOSE. The move to async lives in the SDK package
