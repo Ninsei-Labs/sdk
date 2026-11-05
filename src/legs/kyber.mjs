@@ -229,6 +229,29 @@ export async function kyberUnsignedOrder({ params, chainId = null, fetchImpl = n
   if (typeNames !== expectedNames) return refusal("kyber-bad-response", { where: "sign-message", field: "types" });
   const missing = kyberOrderMissingFields(message);
   if (missing.length) return refusal("kyber-bad-response", { where: "sign-message", missing });
+  // THE SERVICE MUST SIGN THE ORDER WE ASKED FOR. A receiver, maker or asset it chooses for us is a valid order
+  // for someone else; compare every field the request fixed before the typed data reaches the wallet.
+  const addresses = ["maker", "makerAsset", "takerAsset", "receiver"];
+  for (const field of addresses) {
+    if (String(message[field] || "").toLowerCase() !== String(params[field] || "").toLowerCase()) {
+      return refusal("kyber-bad-response", { where: "sign-message", field });
+    }
+  }
+  for (const field of ["makingAmount", "takingAmount"]) {
+    if (String(message[field]) !== String(params[field])) {
+      return refusal("kyber-bad-response", { where: "sign-message", field });
+    }
+  }
+  // A REQUEST THAT LIMITS WHO MAY FILL THE ORDER MUST NOT BE WIDENED. The signed field is one address; zero means
+  // anyone. When the request fixed a list, the service must name one of its members (a narrower choice is fine,
+  // "anyone" is not).
+  const allowed = params.allowedSenders === undefined || params.allowedSenders === null
+    ? null
+    : (Array.isArray(params.allowedSenders) ? params.allowedSenders : [params.allowedSenders])
+      .map((value) => String(value || "").toLowerCase());
+  if (allowed && allowed.length && !allowed.includes(String(message.allowedSender || "").toLowerCase())) {
+    return refusal("kyber-bad-response", { where: "sign-message", field: "allowedSender" });
+  }
   let digest;
   try {
     digest = kyberOrderDigestHex({ order: message, chainId: id, contract });
