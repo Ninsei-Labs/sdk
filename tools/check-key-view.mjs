@@ -11,7 +11,7 @@ import { buildOwnSideFromHalves } from "../src/order.mjs";
 import { primitives } from "../src/primitives.mjs";
 import { quoteDigest, signQuoteDigest } from "../src/quoteEip712Spec.mjs";
 import { halfCommitmentHex } from "../engine/atomic/orderHalfCommit.js";
-import { loadState, memoryStorage, setStorage } from "../engine/core/store.js";
+import { loadState, memoryStorage, saveState, setStorage } from "../engine/core/store.js";
 import { FACTORY_METHODS, ORDER_CREATED_TOPIC } from "../engine/evm/factory.js";
 import { encodeStatus } from "../engine/evm/escrow.js";
 import { takerHalvesV2 } from "../src/recovery-key.mjs";
@@ -172,6 +172,29 @@ console.log("=== 1d2b) A RETRY WITHOUT AN ORDER ID FINDS THE SALT-KEYED PENDING 
   if (predicted && second.result && second.result.step === "xmr-incoming" && second.result.escrow === predicted && second.sent === 0) {
     ok("the salt identifies the pending record when the relay answer has no order id");
   } else bad("salt-keyed retry: " + JSON.stringify({ predicted, step: second.result && second.result.step, escrow: second.result && second.result.escrow, sent: second.sent, code: second.result && second.result.code }));
+}
+
+console.log("=== 1d2c) A STALE not-sent RECORD IS CLEARED WHEN THE ESCROW IS NOT FUNDED ===");
+{
+  const first = await startWith(derived.makerViewHalf, order.salt);
+  const state = loadState();
+  const record = Object.values((state && state.swaps) || {})[0];
+  const predicted = record && record.escrow && record.escrow.address;
+  if (!record || !predicted) bad("stale not-sent fixture: " + JSON.stringify({ code: first.result && first.result.code }));
+  else {
+    record.fundingPending = true;
+    record.escrow = { ...record.escrow, fundingPending: true, fundingReason: "not-sent" };
+    delete record.escrow.fundTx;
+    delete record.fundTx;
+    saveState(state);
+    const pad = (v) => "0x" + String(v).replace(/^0x/, "").toLowerCase().padStart(64, "0");
+    const created = { address: order.factory, topics: [ORDER_CREATED_TOPIC, pad(predicted), pad(order.locker), pad(order.claimer)],
+      data: "0x" + "00".repeat(12 * 32) };
+    const second = await startPending({ fresh: false, receipt: { status: "0x1", logs: [created], blockNumber: 11 } });
+    if (second.result && second.result.step === "xmr-incoming" && second.result.escrow === predicted && second.sent === 1) {
+      ok("a not-sent record with an unfunded escrow is cleared and the retry sends once");
+    } else bad("stale not-sent retry: " + JSON.stringify({ step: second.result && second.result.step, escrow: second.result && second.result.escrow, predicted, sent: second.sent, code: second.result && second.result.code }));
+  }
 }
 
 console.log("=== 1d3) A FUNDED STATUS RESCUES A MISSING RECEIPT ===");
