@@ -66,6 +66,41 @@ console.log("=== 1) A CHUNKED PROOF IS THE SAME PROOF ===");
   } else bad("tampered proof: " + JSON.stringify({ syncBroken, chunkedBroken }));
 }
 
+console.log("=== 1a) DEFAULTS, A CONFIGURABLE VERIFY BUDGET, AND A MALFORMED PROOF ===");
+{
+  // DEFAULT CHUNK SIZES ARE A REAL PATH: a caller that passes only `yieldTo` must still get the same proof and real
+  // turns. This is not a synthetic option combination; it is the shape a browser uses when it does not tune chunks.
+  let defaultTurns = 0, defaultBits = 0, defaultPrepares = 0;
+  const defaultProof = await dleq.proveChunked(X, CONTEXT, {
+    yieldTo: async () => { defaultTurns += 1; await new Promise((resolve) => setTimeout(resolve, 0)); },
+    onBit: (bit, total) => { if (bit === total) defaultBits = bit; },
+    onPrepare: () => { defaultPrepares += 1; },
+  });
+  const defaultVerdict = dleq.verify(defaultProof, CONTEXT);
+  if (defaultVerdict.ok === true && defaultBits === dleq.BITS && defaultPrepares > 0 && defaultTurns > 20) {
+    ok("the default chunk sizes produce a proof the synchronous verifier accepts");
+  } else bad("default chunked proof: " + JSON.stringify({ ok: defaultVerdict.ok, defaultBits, defaultPrepares, defaultTurns }));
+
+  // THE VERIFY BUDGET IS PART OF THE CONTRACT. A caller with a smaller frame budget can ask for one step per turn;
+  // the verdict must not change, and the loop must actually yield more often than the default.
+  let budgetTurns = 0;
+  const budgetVerdict = await dleq.verifyChunked(proof, CONTEXT, {
+    verifyChunkBits: 1,
+    yieldTo: async () => { budgetTurns += 1; await new Promise((resolve) => setTimeout(resolve, 0)); },
+  });
+  if (budgetVerdict.ok === true && budgetTurns >= dleq.BITS) {
+    ok("verifyChunkBits: 1 keeps the verdict and yields once per proof bit");
+  } else bad("verify budget: " + JSON.stringify({ ok: budgetVerdict.ok, budgetTurns }));
+
+  // A PROOF WITH THE WRONG NUMBER OF PARTS IS REFUSED BEFORE ANY ARITHMETIC. A short or long list used to prove a
+  // different statement; the chunked verifier must return the same named refusal as the synchronous one.
+  const shortProof = { ...proof, proofs: proof.proofs.slice(0, -1) };
+  const shortVerdict = await dleq.verifyChunked(shortProof, CONTEXT, { yieldTo: async () => {} });
+  if (shortVerdict.ok === false && /parts/.test(String(shortVerdict.reason))) {
+    ok("a proof with the wrong number of parts is refused by the chunked verifier");
+  } else bad("short proof: " + JSON.stringify(shortVerdict));
+}
+
 console.log("=== 2) THE CHUNKED ORDER STEP USES THE SAME PROOF ===");
 {
   const half = X;
