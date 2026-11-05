@@ -154,6 +154,28 @@ try {
     "status, deadlines and slots were read at one block");
 }
 
+// THE WALLET'S PROVIDER IS THE OTHER PATH TO THE SAME SNAPSHOT. No `evmBlock` seam: the block number comes from
+// the EIP-1193 provider the wallet handed over, and the same tag goes to every escrow read.
+{
+  const provider = {
+    request: async ({ method }) => {
+      if (method === "eth_blockNumber") return "0x7b";
+      if (method === "eth_getBlockByNumber") return { number: "0x7b", timestamp: order.readyBy - 3_000 };
+      throw new Error("unexpected provider method " + method);
+    },
+  };
+  const wallet = { driver: () => provider };
+  const walletGate = createSwaps({ config: {}, call: read });
+  try {
+    const result = await walletGate.startSell({ offer: { ...gateOffer, escrow: "0x" + "fc".repeat(20),
+      quote: { ...gateOffer.quote, id: "oq_gate_wallet" }, jointAddress: "5" + "E".repeat(94) },
+      recoveryKey: mnemonic, wallet, onRecoveryKey: accept });
+    check(result.next === "send-xmr", "the wallet provider supplies the one-block gate");
+  } catch (error) {
+    check(false, "wallet provider gate failed: " + JSON.stringify(error && (error.code || error.message)));
+  }
+}
+
 try {
   const slotsRead = gateRead(1, { [encodeRead("commitHalfLocker")]: bytes("0x" + "00".repeat(32)) });
   const wrongSlots = createSwaps({ config: {}, call: slotsRead });

@@ -1109,6 +1109,11 @@ export interface SellStartRequest {
   readonly passphrase?: string;
   /** Asked when the key is new or not yet confirmed. Returning anything but `true` refuses before `send-xmr`. */
   onRecoveryKey?(file: RecoveryFile): Promise<boolean>;
+  /**
+   * The EVM wallet whose provider supplies the block number and timestamp for the one-block escrow gate.
+   * Optional: without it the gate falls back to `latest` and the facade clock. The same wallet that will claim.
+   */
+  readonly wallet?: Pick<WalletAdapter, "driver">;
 }
 
 export interface SellStart {
