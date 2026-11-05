@@ -1,0 +1,152 @@
+#!/usr/bin/env node
+// THE PROOF AND THE VERIFIER KEEP THE PAGE ALIVE.
+//
+// The chunked entry points must be the same proof, not a weaker parallel path: a chunked proof has to verify
+// synchronously, and a chunked verdict has to agree with the synchronous one. The yield count is the evidence
+// that the arithmetic really gives the event loop a turn instead of merely calling a progress callback.
+import { readFileSync } from "node:fs";
+import { ed25519, secp256k1, keccak256, sha3_512, randomBytes } from "../src/primitives.mjs";
+import { createDleq2 } from "../engine/atomic/dleq2.js";
+import { createOrderBuilder } from "../engine/atomic/order.js";
+import { contextOf, orderStepChunked } from "../src/order.mjs";
+
+const dleq = createDleq2({ ed25519, secp256k1, keccak256, sha3_512, randomBytes });
+const orderBuilder = createOrderBuilder({ ed25519, secp256k1, keccak256, sha3_512, randomBytes });
+const X = 12345678901234567890n;
+const now = Math.floor(Date.now() / 1000);
+const ORDER = {
+  chainId: 421614, factory: "0x" + "11".repeat(20), locker: "0x" + "22".repeat(20),
+  claimer: "0x" + "33".repeat(20), amount: "1000000000000000000",
+  readyBy: now + 7200, t1: now + 14400, salt: "0x" + "44".repeat(32),
+};
+const CONTEXT = contextOf(ORDER);
+let proof = null;
+let pass = 0;
+const fails = [];
+const ok = (message) => { pass += 1; console.log("  ok    " + message); };
+const bad = (message) => { fails.push(message); console.log("  FAIL  " + message); };
+
+console.log("=== 1) A CHUNKED PROOF IS THE SAME PROOF ===");
+{
+  let turns = 0;
+  let prepares = 0;
+  let lastBit = 0;
+  proof = await dleq.proveChunked(X, CONTEXT, {
+    chunkBits: 4,
+    prepareChunkBits: 8,
+    yieldTo: async () => { turns += 1; await new Promise((resolve) => setTimeout(resolve, 0)); },
+    onPrepare: () => { prepares += 1; },
+    onBit: (bit, total) => { if (bit === total) lastBit = bit; },
+  });
+  if (proof.proofs.length === dleq.BITS && proof.pokA && proof.pokB && lastBit === dleq.BITS) {
+    ok("the chunked proof has every bit, both knowledge proofs and a final progress value");
+  } else bad("chunked proof shape: " + JSON.stringify({ bits: proof.proofs.length, lastBit, pokA: !!proof.pokA, pokB: !!proof.pokB }));
+  if (turns >= 20 && prepares >= dleq.BITS) {
+    ok("preparation and proof actually yield to the event loop");
+  } else bad("yield evidence: turns=" + turns + " prepares=" + prepares);
+  const sync = dleq.verify(proof, CONTEXT);
+  if (sync.ok === true) ok("the synchronous verifier accepts the chunked proof");
+  else bad("synchronous verify refused the chunked proof: " + JSON.stringify(sync));
+  let chunkedTurns = 0;
+  let finalProgress = 0;
+  const chunked = await dleq.verifyChunked(proof, CONTEXT, {
+    yieldTo: async () => { chunkedTurns += 1; await new Promise((resolve) => setTimeout(resolve, 0)); },
+    onProgress: (step) => { if (step && step.phase === "verify") finalProgress = step.done; },
+  });
+  if (chunked.ok === true && chunkedTurns >= 20 && finalProgress === dleq.BITS) {
+    ok("the chunked verifier accepts the same proof and yields to the event loop");
+  } else bad("chunked verify: " + JSON.stringify({ chunked, chunkedTurns, finalProgress }));
+
+  const broken = JSON.parse(JSON.stringify(proof));
+  broken.proofs[0].sig.eA = "0x" + "00".repeat(32);
+  const syncBroken = dleq.verify(broken, CONTEXT);
+  const chunkedBroken = await dleq.verifyChunked(broken, CONTEXT, { yieldTo: async () => {} });
+  if (syncBroken.ok === false && chunkedBroken.ok === false) {
+    ok("a tampered proof is refused by both verifier paths");
+  } else bad("tampered proof: " + JSON.stringify({ syncBroken, chunkedBroken }));
+}
+
+console.log("=== 1a) DEFAULTS, A CONFIGURABLE VERIFY BUDGET, AND A MALFORMED PROOF ===");
+{
+  // DEFAULT CHUNK SIZES ARE A REAL PATH: a caller that passes only `yieldTo` must still get the same proof and real
+  // turns. This is not a synthetic option combination; it is the shape a browser uses when it does not tune chunks.
+  let defaultTurns = 0, defaultBits = 0, defaultPrepares = 0;
+  const defaultProof = await dleq.proveChunked(X, CONTEXT, {
+    yieldTo: async () => { defaultTurns += 1; await new Promise((resolve) => setTimeout(resolve, 0)); },
+    onBit: (bit, total) => { if (bit === total) defaultBits = bit; },
+    onPrepare: () => { defaultPrepares += 1; },
+  });
+  const defaultVerdict = dleq.verify(defaultProof, CONTEXT);
+  if (defaultVerdict.ok === true && defaultBits === dleq.BITS && defaultPrepares > 0 && defaultTurns > 20) {
+    ok("the default chunk sizes produce a proof the synchronous verifier accepts");
+  } else bad("default chunked proof: " + JSON.stringify({ ok: defaultVerdict.ok, defaultBits, defaultPrepares, defaultTurns }));
+
+  // THE VERIFY BUDGET IS PART OF THE CONTRACT. A caller with a smaller frame budget can ask for one step per turn;
+  // the verdict must not change, and the loop must actually yield more often than the default.
+  let budgetTurns = 0;
+  const budgetVerdict = await dleq.verifyChunked(proof, CONTEXT, {
+    verifyChunkBits: 1,
+    yieldTo: async () => { budgetTurns += 1; await new Promise((resolve) => setTimeout(resolve, 0)); },
+  });
+  if (budgetVerdict.ok === true && budgetTurns >= dleq.BITS) {
+    ok("verifyChunkBits: 1 keeps the verdict and yields once per proof bit");
+  } else bad("verify budget: " + JSON.stringify({ ok: budgetVerdict.ok, budgetTurns }));
+
+  // A PROOF WITH THE WRONG NUMBER OF PARTS IS REFUSED BEFORE ANY ARITHMETIC. A short or long list used to prove a
+  // different statement; the chunked verifier must return the same named refusal as the synchronous one.
+  const shortProof = { ...proof, proofs: proof.proofs.slice(0, -1) };
+  const shortVerdict = await dleq.verifyChunked(shortProof, CONTEXT, { yieldTo: async () => {} });
+  if (shortVerdict.ok === false && /parts/.test(String(shortVerdict.reason))) {
+    ok("a proof with the wrong number of parts is refused by the chunked verifier");
+  } else bad("short proof: " + JSON.stringify(shortVerdict));
+}
+
+console.log("=== 2) THE CHUNKED ORDER STEP USES THE SAME PROOF ===");
+{
+  const half = X;
+  const pub = orderBuilder.halves.publicHalves(half);
+  const viewHalf = X + 7n;
+  const viewPub = orderBuilder.halves.publicHalves(viewHalf).ed;
+  const enc = orderBuilder.enc.recipientKeyPair();
+  const side = { half, pub, viewHalf, viewPub, enc, proof, standIn: false };
+  const counterparty = {
+    proof, edPointClaimer: pub.ed, viewHalfClaimer: viewHalf,
+    commitHalfClaimer: orderBuilder.halfCommitment(half),
+  };
+  let turns = 0;
+  try {
+    const step = await orderStepChunked({
+      order: ORDER, side, counterparty, network: "stagenet",
+      options: { yieldTo: async () => { turns += 1; await new Promise((resolve) => setTimeout(resolve, 0)); } },
+    });
+    if (step.wallet.address && step.wallet.commitHalfLocker && step.side.half === half
+      && step.counterparty.commitHalfClaimer === counterparty.commitHalfClaimer && turns >= 20) {
+      ok("the chunked order step verifies the same proof, builds the address and yields");
+    } else bad("chunked order step: " + JSON.stringify({ address: !!step.wallet.address, turns }));
+  } catch (error) {
+    bad("chunked order step failed: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
+  }
+}
+
+console.log("=== 3) THE INTERFACE ENTRY POINTS USE THE CHUNKED STEP ===");
+{
+  // A CHUNKED PROOF WITH A SYNCHRONOUS VERIFY IS STILL A FREEZE. These are the browser-facing calls that
+  // must move together: quotes.firmRelay and swaps.start. The check is on the call, not on the implementation,
+  // because the implementation was already correct before either caller used it.
+  const quotes = readFileSync(new URL("../src/quotes.mjs", import.meta.url), "utf8");
+  const swaps = readFileSync(new URL("../src/swaps.mjs", import.meta.url), "utf8");
+  const flow = readFileSync(new URL("../src/swap-flow.mjs", import.meta.url), "utf8");
+  if (/await\s+acceptCounterpartyChunked\s*\(/.test(quotes) && !/\bacceptCounterparty\s*\(/.test(quotes)) {
+    ok("quotes.firmRelay verifies the counterparty in chunks");
+  } else bad("quotes.firmRelay still calls the synchronous acceptance");
+  if (/await\s+orderStepChunked\s*\(/.test(swaps) && !/\borderStep\s*\(/.test(swaps)) {
+    ok("swaps.start runs the whole order step in chunks");
+  } else bad("swaps.start still calls the synchronous order step");
+  if (/orderStepChunked|buildOwnSideChunked/.test(flow)) {
+    ok("the atomic flow uses the chunked builders");
+  } else bad("the atomic flow is back on a synchronous builder");
+}
+
+console.log("");
+console.log(fails.length ? "FAILED: " + fails.length + " (passed " + pass + ")" : "dleq chunks: " + pass + " checks passed.");
+if (fails.length) process.exit(1);

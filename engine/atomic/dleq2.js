@@ -138,8 +138,23 @@ export function createDleq2({ ed25519, secp256k1, keccak256, sha3_512, randomByt
   const encP = (p) => hexBytes(p.toHex());
   const encS = (s) => hexBytes(bigToHex(s));
 
+  // THE SAME WORK, TWO WAYS TO DRAIN IT. The synchronous entry points drain the iterator immediately; the
+  // chunked entry points await between steps so a browser can paint. There is one implementation of the
+  // arithmetic, not a second "async" copy of it.
+  function drain(iterator) {
+    let step = iterator.next();
+    while (!step.done) step = iterator.next();
+    return step.value;
+  }
+  const nextTurn = async (yieldTo) => {
+    if (typeof yieldTo === "function") return await yieldTo();
+    if (globalThis.scheduler && typeof globalThis.scheduler.yield === "function") return await globalThis.scheduler.yield();
+    return await new Promise((resolve) => setTimeout(resolve, 0));
+  };
+
   // Per-bit commitments: C_i = b_i*G + r_i*G', with sum(r_i*2^i) = 0, so sum(C_i*2^i) = x*G.
-  function commitments(curve, x) {
+  // The iterator yields after every bit; the chunked caller decides how many yields make one turn.
+  function* commitmentsSteps(curve, x) {
     const rs = [], cs = [];
     let sum = 0n, pow = 1n;
     for (let i = 0; i < BITS; i++) {
@@ -153,20 +168,26 @@ export function createDleq2({ ed25519, secp256k1, keccak256, sha3_512, randomByt
       }
       const b = bit(x, i);
       cs.push(addP(mul(curve, b), mul(curve, rs[i], curve.Galt)));
+      yield i + 1;
     }
     return { rs, cs };
   }
+  function commitments(curve, x) { return drain(commitmentsSteps(curve, x)); }
   function modInv(a, m) {
     let [old_r, r] = [a % m, m], [old_s, s] = [1n, 0n];
     while (r !== 0n) { const q = old_r / r; [old_r, r] = [r, old_r - q * r]; [old_s, s] = [s, old_s - q * s]; }
     if (old_r !== 1n) throw new Error("modInv: not invertible");
     return ((old_s % m) + m) % m;
   }
-  function sumCommitments(curve, cs) {
+  function* sumCommitmentsSteps(curve, cs) {
     let sum = cs[0];
-    for (let i = 1; i < cs.length; i++) sum = addP(sum, mul(curve, 2n ** BigInt(i) % curve.order, cs[i]));
+    for (let i = 1; i < cs.length; i++) {
+      sum = addP(sum, mul(curve, 2n ** BigInt(i) % curve.order, cs[i]));
+      yield { phase: "sum", done: i, total: cs.length };
+    }
     return sum;
   }
+  function sumCommitments(curve, cs) { return drain(sumCommitmentsSteps(curve, cs)); }
 
   // OR proof "commitment to 0 or to 1" for one bit, on both curves at once.
   //
@@ -221,13 +242,21 @@ export function createDleq2({ ed25519, secp256k1, keccak256, sha3_512, randomByt
     return mul(curve, s).equals(addP(R, mPublic(curve, X, e)));
   }
 
-  // STEP 1. PREPARATION. Computed SEQUENTIALLY and whole: commitments depend on the running sum, so this step is
-  // not split. Per-bit data is prepared here - exactly what step 2 needs: the bit, its commitments and its
-  // randomness. THE HALF IS NO LONGER HERE, and that is the key property.
-  function prepareProof(x, context) {
+  // STEP 1. PREPARATION. The commitments depend on the running sum, so the order of the arithmetic is fixed;
+  // the iterator yields between bits, which is enough for the chunked caller to keep the page alive. Per-bit
+  // data is prepared here - exactly what step 2 needs: the bit, its commitments and its randomness. THE HALF IS
+  // NO LONGER HERE, and that is the key property.
+  function* prepareProofSteps(x, context) {
     x = typeof x === "bigint" ? x : BigInt(x);
     const XA = mul(curves.A, x), XB = mul(curves.B, x);
-    const cA = commitments(curves.A, x), cB = commitments(curves.B, x);
+    yield { phase: "prepare", done: 0, total: BITS };
+    const itA = commitmentsSteps(curves.A, x), itB = commitmentsSteps(curves.B, x);
+    for (let i = 0; i < BITS; i++) {
+      const a = itA.next(), b = itB.next();
+      if (a.done || b.done) throw new Error("prepareProof: commitments ended early");
+      yield { phase: "prepare", done: i + 1, total: BITS };
+    }
+    const cA = itA.next().value, cB = itB.next().value;
     const bits = [];
     for (let i = 0; i < BITS; i++) {
       bits.push({
@@ -237,12 +266,27 @@ export function createDleq2({ ed25519, secp256k1, keccak256, sha3_512, randomByt
         rA: bigToHex(cA.rs[i]), rB: bigToHex(cB.rs[i]),
       });
     }
+    yield { phase: "know", done: BITS, total: BITS };
     return {
       XA: enc(XA), XB: enc(XB), context: String(context == null ? "" : context),
       pokA: knowledgeProof(curves.A, x, XA, context, "A"),
       pokB: knowledgeProof(curves.B, x, XB, context, "B"),
       bits,
     };
+  }
+  function prepareProof(x, context) { return drain(prepareProofSteps(x, context)); }
+  async function prepareProofChunked(x, context, options = {}) {
+    const chunkBits = Number.isSafeInteger(options.chunkBits) && options.chunkBits > 0
+      ? Math.min(options.chunkBits, BITS) : 8;
+    const it = prepareProofSteps(x, context);
+    let seen = 0;
+    for (;;) {
+      const step = it.next();
+      if (step.done) return step.value;
+      seen += 1;
+      if (typeof options.onPrepare === "function") options.onPrepare(step.value);
+      if (seen % chunkBits === 0) await nextTurn(options.yieldTo);
+    }
   }
 
   // STEP 2. PROVE ONE BIT. Called on the prepared data, self-contained, knowing neither the half nor other bits.
@@ -282,6 +326,29 @@ export function createDleq2({ ed25519, secp256k1, keccak256, sha3_512, randomByt
     return assembleProof(prepared, parts);
   }
 
+  // THE CHUNKED PROOF IS THE SAME PROOF, WITH TURNS. Preparation and every bit come from the iterators above;
+  // this function only decides when to give the event loop a chance to paint. The page stays responsive while
+  // the arithmetic is still the one implementation.
+  async function proveChunked(x, context, options = {}) {
+    const chunkBits = Number.isSafeInteger(options.chunkBits) && options.chunkBits > 0
+      ? Math.min(options.chunkBits, BITS) : 4;
+    const prepared = await prepareProofChunked(x, context, {
+      chunkBits: Number.isSafeInteger(options.prepareChunkBits) && options.prepareChunkBits > 0
+        ? options.prepareChunkBits : 8,
+      yieldTo: options.yieldTo,
+      onPrepare: options.onPrepare,
+    });
+    const parts = [];
+    for (let i = 0; i < BITS; i++) {
+      parts.push(proveBit(prepared.bits[i], prepared.context));
+      if ((i + 1) % chunkBits === 0 || i === BITS - 1) {
+        if (typeof options.onBit === "function") options.onBit(i + 1, BITS);
+        await nextTurn(options.yieldTo);
+      }
+    }
+    return assembleProof(prepared, parts);
+  }
+
   // STRICT SUBGROUP CHECK, NOT JUST SMALL ORDER. The old edition checked [8]*P != 0: it rejected a purely
   // small-order point but let a point with a small COMPONENT through, so a degenerate equality passed. Strict:
   // [l]*P = 0. secp256k1 is not checked: cofactor 1, the whole group is prime order.
@@ -295,7 +362,7 @@ export function createDleq2({ ed25519, secp256k1, keccak256, sha3_512, randomByt
   // FORM IS CHECKED BEFORE COUNTING. The old loop ran over the received list length: a short proof proved
   // ANOTHER representation, a long one burned check time. An honest path always sends exactly BITS parts. An
   // unparsable field returns a refusal, not an exception: the caller must get {ok:false}, not crash.
-  function verify(proof, context, options = {}) {
+  function* verifySteps(proof, context, options = {}) {
     if (!proof || typeof proof !== "object") return { ok: false, reason: "proof: an object is expected" };
     if (typeof proof.XA !== "string" || typeof proof.XB !== "string") return { ok: false, reason: "proof: no XA or XB" };
     if (!Array.isArray(proof.proofs)) return { ok: false, reason: "proof: no parts list" };
@@ -332,8 +399,10 @@ export function createDleq2({ ed25519, secp256k1, keccak256, sha3_512, randomByt
     } catch (e) {
       return { ok: false, reason: "proof: " + String((e && e.message) || e) };
     }
-    if (!sumCommitments(curves.A, csA).equals(XA)) return { ok: false, reason: "the commitment sum does not give X on secp256k1" };
-    if (!sumCommitments(curves.B, csB).equals(XB)) return { ok: false, reason: "the commitment sum does not give X on ed25519" };
+    const sumA = yield* sumCommitmentsSteps(curves.A, csA);
+    if (!sumA.equals(XA)) return { ok: false, reason: "the commitment sum does not give X on secp256k1" };
+    const sumB = yield* sumCommitmentsSteps(curves.B, csB);
+    if (!sumB.equals(XB)) return { ok: false, reason: "the commitment sum does not give X on ed25519" };
     for (let i = 0; i < proof.proofs.length; i++) {
       const item = proof.proofs[i];
       try {
@@ -361,9 +430,32 @@ export function createDleq2({ ed25519, secp256k1, keccak256, sha3_512, randomByt
       } catch (e) {
         return { ok: false, reason: "bit " + i + ": fields are unparsable (" + String((e && e.message) || e) + ")" };
       }
+      yield { phase: "verify", done: i + 1, total: proof.proofs.length };
     }
     return { ok: true };
   }
+  function verify(proof, context, options = {}) { return drain(verifySteps(proof, context, options)); }
 
-  return { BITS, curves, prove, verify, prepareProof, proveBit, assembleProof, torsionFree };
+  // THE CHUNKED VERIFIER IS THE SAME VERIFIER, WITH TURNS. The sum and the bit loop are the expensive parts;
+  // the phase-aware chunk keeps the browser paint budget without adding a second verification path.
+  async function verifyChunked(proof, context, options = {}) {
+    const it = verifySteps(proof, context, options);
+    let phase = null, count = 0;
+    for (;;) {
+      const step = it.next();
+      if (step.done) return step.value;
+      const nextPhase = step.value && step.value.phase ? step.value.phase : null;
+      if (nextPhase !== phase) { phase = nextPhase; count = 0; }
+      count += 1;
+      if (typeof options.onProgress === "function") options.onProgress(step.value);
+      // VERIFY CHUNKS ARE SHORTER THAN PROOF CHUNKS: one verification step is more expensive than one
+      // proof bit, and a 50 ms turn is already visible as a stutter. The caller can raise it when it has a
+      // larger budget; the default keeps the page within a frame or two.
+      const every = phase === "sum" ? 16
+        : (Number.isSafeInteger(options.verifyChunkBits) && options.verifyChunkBits > 0
+          ? Math.min(options.verifyChunkBits, BITS) : 2);
+      if (count % every === 0) await nextTurn(options.yieldTo);
+    }
+  }
+  return { BITS, curves, prove, proveChunked, verify, verifyChunked, prepareProof, prepareProofChunked, proveBit, assembleProof, torsionFree };
 }

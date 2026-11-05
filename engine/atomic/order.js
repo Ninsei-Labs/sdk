@@ -42,13 +42,24 @@ export function createOrderBuilder({ ed25519, secp256k1, keccak256, sha3_512, ra
     return { half, pub, viewHalf, viewPub, enc: encPair, proof, standIn };
   }
 
+  // THE CHUNKED SIDE IS THE SAME SIDE, WITH TURNS. The halves and the encryption key are cheap; only the DLEQ
+  // proof is chunked, through the same generator the synchronous path drains.
+  async function newSideChunked(orderContext, standIn = false, options = {}) {
+    const half = halves.newHalf();
+    const pub = halves.publicHalves(half);
+    const viewHalf = halves.newHalf();
+    const viewPub = halves.publicHalves(viewHalf).ed;
+    const encPair = enc.recipientKeyPair();
+    const proof = await dleq.proveChunked(half, orderContext, options);
+    return { half, pub, viewHalf, viewPub, enc: encPair, proof, standIn };
+  }
+
   // Checking the counterparty side IS conditions (1) and (2): its proof, and - if an envelope is given - opening
   // ITS envelope with OUR private key and verifying against ITS public point.
   //
   // KEY ROLES ARE FUNDAMENTAL HERE, and the first version mixed them up: it opened the envelope with the
   // counterparty's own key (which we do not have - the envelope is addressed to them). That check could never pass.
-  function verifySide(side, orderContext, sealedPayloadBytes, ownEncPriv) {
-    const proofOk = dleq.verify(side.proof, orderContext);
+  function verifySideAfterProof(side, orderContext, sealedPayloadBytes, ownEncPriv, proofOk) {
     if (!proofOk.ok) return { ok: false, reason: "counterparty DLEQ failed: " + proofOk.reason };
     // THE PROVEN POINT MUST BE THE ONE THAT GOES INTO THE ORDER, and this check was missing. A proof confirms that
     // ONE scalar stands behind a pair of points, but not that the proven ed25519 point is the one the joint address
@@ -89,6 +100,13 @@ export function createOrderBuilder({ ed25519, secp256k1, keccak256, sha3_512, ra
       if (!opened.ok) return { ok: false, reason: "the counterparty envelope does not confirm the half: " + opened.reason };
     }
     return { ok: true };
+  }
+  function verifySide(side, orderContext, sealedPayloadBytes, ownEncPriv) {
+    return verifySideAfterProof(side, orderContext, sealedPayloadBytes, ownEncPriv, dleq.verify(side.proof, orderContext));
+  }
+  async function verifySideChunked(side, orderContext, sealedPayloadBytes, ownEncPriv, options = {}) {
+    const proofOk = await dleq.verifyChunked(side.proof, orderContext, options);
+    return verifySideAfterProof(side, orderContext, sealedPayloadBytes, ownEncPriv, proofOk);
   }
 
   // The envelope with our half, encrypted to the counterparty key: what goes to them and to the contract.
@@ -134,5 +152,5 @@ export function createOrderBuilder({ ed25519, secp256k1, keccak256, sha3_512, ra
     });
   }
 
-  return { halves, dleq, enc, newSide, verifySide, sealFor, openFrom, jointAddressPoint, pointOf, jointAddress, halfCommitment };
+  return { halves, dleq, enc, newSide, newSideChunked, verifySide, verifySideChunked, sealFor, openFrom, jointAddressPoint, pointOf, jointAddress, halfCommitment };
 }

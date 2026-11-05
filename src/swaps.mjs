@@ -13,7 +13,7 @@ import * as engine from "./engine.mjs";
 import * as recordModule from "./record.mjs";
 // The order: our own side is built by the engine's builder, the counterparty's side is verified and accepted, and
 // the joint address is assembled from the halves. There are no formulas of our own in the core - see order.mjs.
-import { buildOwnSideFromHalves, contextOf, halfHex, norm, normalizeCounterpartyView, orderStep } from "./order.mjs";
+import { buildOwnSideFromHalvesChunked, contextOf, halfHex, norm, normalizeCounterpartyView, orderStepChunked } from "./order.mjs";
 // Locking the funds: sending goes through the already-finished step (`lock.send`), the wallet is an adapter from outside.
 import * as lock from "./lock.mjs";
 import * as flow from "./swap-flow.mjs";
@@ -1062,7 +1062,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         if (salt !== orderSalt) throw new SdkError("bad-input", { field: "recoverySalt", why: "order-salt" });
         const derived = takerHalvesV2({ mnemonic: key.mnemonic, chainId, factory: request.order.factory, salt });
         recovery = { storage, key, salt, derivation: "salt-v2", newKey: !saved || saved.backupConfirmed !== true };
-        keySide = buildOwnSideFromHalves(request.order, { spendHalf: derived.spendHalf, viewHalf: derived.viewHalf }).side;
+        keySide = (await buildOwnSideFromHalvesChunked(request.order, { spendHalf: derived.spendHalf, viewHalf: derived.viewHalf })).side;
         // THE MAKER'S VIEW HALF IS DERIVED FROM THE KEY, NOT CHOSEN BY THE NODE. Without this binding a
         // signed quote could carry another view half; the funded address would differ from the one the twelve
         // words rebuild, and `sweep.fromOrder` would refuse after the funds were locked.
@@ -1105,7 +1105,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       // go red (and rightly so). There is no second build of the side here.
       let builtSide = null;
       if (!record.swapWallet) {
-        const step = orderStep({
+        const step = await orderStepChunked({
           order: request.order, side: made.side || null, counterparty: request.counterparty || null,
           standIn: mode !== "live", network: (record.swap.moneroNetwork || xmrNetwork || null),
         });
@@ -1584,7 +1584,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       try { salt = recoverySaltOf(offer.recovery && offer.recovery.salt ? offer.recovery.salt : order.salt); }
       catch { throw new SdkError("bad-input", { field: "offer.recovery" }); }
       const derived = takerHalvesV2({ mnemonic: key.mnemonic, chainId, factory: order.factory, salt });
-      const own = buildOwnSideFromHalves(order, { spendHalf: derived.spendHalf, viewHalf: derived.viewHalf });
+      const own = await buildOwnSideFromHalvesChunked(order, { spendHalf: derived.spendHalf, viewHalf: derived.viewHalf });
       // THE OFFER MUST NAME THE HALF THIS KEY ACTUALLY PRODUCES. The relay already checked the proof; the record
       // needs the same point and commitment, otherwise a later claim would reveal a half the escrow rejects.
       const ownCommit = (() => {
