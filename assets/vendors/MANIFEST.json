@@ -2,16 +2,12 @@
   "version": 1,
   "note": "Pinned browser bundles. A change to one of these files must be accompanied by a matching SHA-256 here and a rebuild of the page's asset registry.",
   "bundles": {
-    "atomic/atomic-browser.js": {
-      "sha256": "2c038c56d94d63a6445b2496dfd7ba77508965f8c4fe608c9d6610b6dc30501c",
-      "source": "www/js/atomic + @noble/curves + @noble/hashes"
-    },
     "monero/monero-js-browser.js": {
       "sha256": "05c682ea514db089b3f872e4e8eee3d526e7131079bdb3871dad57d201db7e89",
       "source": "monero-js"
     },
     "sdk/sdk-browser.js": {
-      "sha256": "be10404970030c805bbf489ed8920c24db852bb2fce7be3d7609dd4c6f5c1ed7",
+      "sha256": "fa7dc71aee8e4882a1a8f1d37dc6bc3e9f5348625ea9fb2320caf6ca5d8c687c",
       "source": "sdk/src (facade, adapters, recovery)"
     },
     "walletconnect/wc-browser.js": {

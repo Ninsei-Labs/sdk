@@ -599,8 +599,6 @@ export async function sdkAddressNetwork(address) {
 //     modules, and the screen gets them through the seam, not by a second road into the engine;
 //   * networkFromShape/networkLabel - the Monero address shape and its name: the same format module the core
 //     mirrors (there is no second prefix table);
-//   * createOrderWorker - the atomic-swap halves worker: the cryptography lives in one place and is called by a
-//     worker so the main thread does not freeze;
 //   * createSwap/createReverseSwap/activeSwaps - the RECORD of the demo and reverse deal (the record is kept by
 //     the engine; the core exposes its STATE via swaps.list/swaps.progress).
 //   * createSwapWallet - THE FORM'S DEAL WALLET (state between screens, ui/formState.js): the page wallet with
@@ -614,11 +612,10 @@ import { orderGasReservePlan } from "../evm/gasReserve.js";
 import { quoteDexOut, dexLegVerdict } from "../evm/dex.js";
 import { toWei } from "../evm/funding.js";
 import { cachedFeeTerms, feeWeiFor, ensureFeeTerms } from "../evm/fees.js";
-import { createOrderWorker } from "../atomic/order-client.js";
 import { activeSwaps, createSwap, createReverseSwap } from "../core/swap.js";
 
 export { evm, networkFromShape };
 export * as swapCore from "../core/swap.js";
 export * as moneroNode from "../monero/node.js";
-export { networkLabel, probeMode, createSwapWallet, amountInputValue, refreshChainPrices, priceLabel, orderGasReservePlan, quoteDexOut, dexLegVerdict, toWei, cachedFeeTerms, feeWeiFor, ensureFeeTerms, createOrderWorker, activeSwaps, createSwap, createReverseSwap };
+export { networkLabel, probeMode, createSwapWallet, amountInputValue, refreshChainPrices, priceLabel, orderGasReservePlan, quoteDexOut, dexLegVerdict, toWei, cachedFeeTerms, feeWeiFor, ensureFeeTerms, activeSwaps, createSwap, createReverseSwap };
 

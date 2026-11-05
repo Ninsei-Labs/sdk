@@ -4,21 +4,21 @@
 // the UI called a simulation while the funding module waited for ready-made sealedCommitment and sealedHalf. Now
 // the order is fixed here, and there is no step that can be skipped by accident:
 //
-//   1) build your own side (the half + the proof) - in the WORKER, so the page does not freeze;
+//   1) build your own side (the half + the proof) with the engine's order builder;
 //   2) assemble the counterparty's side (in the demo - a local stand-in, marked standIn);
 //   3) CHECK the counterparty against the single mandatory condition - the DLEQ proof in the context of THIS
 //      order (there is no envelope in the scheme any more, doc 27) - before any locking: after it, that would no
 //      longer help. The item "the envelope that confirms the half" left together with the envelope itself;
-//   4) obtain commitments on BOTH halves: our own is computed by the worker over our half (only the hash goes
-//      out), the counterparty's commitment arrives in the quote. There is no longer any need to encrypt the half
+//   4) obtain commitments on BOTH halves: our own is computed from our half, the counterparty's commitment
+//      arrives in the quote. There is no longer any need to encrypt the half
 //      and hand it to the counterparty: it is revealed on-chain at settlement (claim/refund);
 //   5) and only now put the money in: with ONE createOrderAndFund transaction that creates the escrow together
 //      with the money (the "lock" step below). The former name lock(sealedHalf) lied twice here: the contract has
 //      no such function - the payable constructor moves the money - and there is no envelope in the order. Nor
 //      does the escrow have a separate funding function: an order is either born with money or not born at all.
 //
-// THE CRYPTOGRAPHY LIVES UNDER www/js/atomic/* (mirrored as ../engine/atomic/*) AND IS CALLED ONLY THROUGH THE
-// WORKER. There is no crypto here - here is the order.
+// THE CRYPTOGRAPHY LIVES UNDER www/js/atomic/* (mirrored as ../engine/atomic/*) AND IS CALLED ONLY THROUGH
+// THE IN-PROCESS ORDER BUILDER. There is no crypto here - here is the order.
 //
 // WHY IT IS IN THE PACKAGE NOW. The page used to import this module straight from www/js/core/swap-flow.js; the
 // core (www/js, mirrored under ../engine/) was the second home of the deal flow. That is exactly the debt
@@ -32,6 +32,11 @@ import * as engine from "./engine.mjs";
 // reported in. It is its own module because TWO surfaces ask the same question (this flow and the swaps watch)
 // and a second implementation of the same event would be a second truth about it.
 import { declinedFromLogs, logReaderOf, blockBoundaryOf, DECLINED_TOPIC0 } from "./decline.mjs";
+// THE ORDER SIDE IS BUILT IN-PROCESS, by the same engine builder the record and the facade use. The old
+// browser worker shipped its own copy of the crypto bundle. Its verifySide checked the DLEQ equation but not
+// that the proven point matched the quote's commitment; the package no longer needs a second build of the same
+// primitives.
+import { buildOwnSide, orderStep } from "./order.mjs";
 
 // THE ENGINE SURFACES, TAKEN THROUGH THE ONE SEAM (./engine.mjs) - exactly as the rest of the core does.
 const { chainById, DEFAULT_CHAIN, MONERO } = engine.config;
@@ -42,9 +47,8 @@ const {
 } = engine.escrow;
 // THE COUNTERPARTY GUARDS: whether a stand-in may be signed on this chain.
 const { liveOrderSlotsVerdict, counterpartyVerdict } = engine.guards;
-// THE HALF WORKER, THE ORDER CONTEXT, THE ORDER QUOTE AND THE SHARED CLAIM GAS LIMIT - all through the mirror,
-// so the page and the package never keep a second copy of these rules.
-const { createOrderWorker } = engine.orderClient;
+// THE ORDER CONTEXT, THE ORDER QUOTE AND THE SHARED CLAIM GAS LIMIT - all through the mirror, so the page and
+// the package never keep a second copy of these rules.
 const { orderContextString } = engine.orderContext;
 const { requestOrderQuote, checkOrderQuoteShape } = engine.rfqSource;
 const { CLAIM_GAS_LIMIT } = engine.claimGas;
@@ -72,15 +76,13 @@ export async function runAtomicOrder({
   chainSlug, locker, claimer, amountWei, amountLabel, providerId = null,
   xmrNetwork = null,
   claimWindowSeconds = 3600, readyWindowSeconds = 14400, salt: providedSalt, onStage,
-  // THE SUBSTITUTION POINTS FOR THE SAKE OF THE CHECK, and they are not decoration. The live flow could be
-  // neither run in a check nor covered otherwise: it requires a browser Worker and a signature in the wallet.
-  // Because of that two defects in a row appeared in it that neither the syntax nor the suite could see: the
-  // signature did not accept the mandatory fields, and after the fix a reference to a variable outside its scope
-  // remained - such things are visible only in operation. The defaults here are real: substitution is only in
-  // checks.
+  // THE SUBSTITUTION POINTS FOR THE SAKE OF THE CHECK, and they are not decoration. The live flow reaches a
+  // wallet and a chain; the check drives the same sequence with synthetic sides. The defaults here are real:
+  // substitution is only in checks.
   deps = {},
 }) {
-  const makeWorker = deps.createOrderWorker || createOrderWorker;
+  const buildSide = deps.buildOwnSide || buildOwnSide;
+  const stepOrder = deps.orderStep || orderStep;
   const fundLive = deps.fundOrderLive || fundOrderLive;
   const askQuote = deps.requestOrderQuote || requestOrderQuote;
   const factory = escrowFactoryAddress(chainSlug);
@@ -124,9 +126,8 @@ export async function runAtomicOrder({
   // commitments and BOTH public ed25519 points, and the half is published by the settlement itself
   // (claim/refund). The secret that used to be placed in the recovery file is now MY HALF: it is exactly what is
   // needed to claim the XMR.
-  const worker = makeWorker();
   const say = (stage, detail) => onStage?.(stage, detail);
-  try {
+  {
     // THE QUOTE FIRST, THEN YOUR OWN SIDE. The order of steps is set by the fact that the claimer is named by the
     // provider: the half binding includes the claimer's address, so our own half must be computed over the
     // context that is already fully known. It used to be the other way round, and the provider got an order with
@@ -157,7 +158,7 @@ export async function runAtomicOrder({
     const orderContext = orderContextString(order);
 
     say("half", "side");
-    const mine = await worker.buildSide(orderContext, say);
+    const mine = buildSide(order, (bit, total) => say("proof", `proving DLEQ proof: ${bit} of ${total} bits`));
     say("half", "side-ready");
 
     // The counterparty stand-in. Honestly: only a real counterparty with its own key gives a guarantee; a
@@ -193,9 +194,7 @@ export async function runAtomicOrder({
       // THE STAND-IN IS COMPUTED OVER THE SAME CONTEXT AS THE ORDER. It used to append ":counterparty" to the
       // string, and that turned the check into a ritual: the stand-in's proof was bound to a different string,
       // that is, to nothing. Now exactly the path a real provider would take is checked.
-      const mock = await worker.buildSide(orderContext);
-      counter = { proof: mock.proof, edPub: mock.pub.ed, mock, viewHalf: mock.viewHalf, viewPoint: mock.viewPub,
-        commitHalfClaimer: (await worker.halfCommitment(mock.half)).commitment };
+      counter = null;
     }
     // THE COUNTERPARTY CHECK REMAINS ONE AND IT IS THE MAIN ONE: the DLEQ proof in the context of this order.
     // It confirms that both public points stand for ONE scalar - that is, that the half declared for the Monero
@@ -204,16 +203,17 @@ export async function runAtomicOrder({
     // TOGETHER WITH IT, the fact is checked that the proven ed25519 point IS THE VERY ONE the contract will
     // receive: without that check a correct proof would guarantee nothing about the chain.
     say("verify", "dleq");
-    const verdict = await worker.verifyCounterparty(orderContext, {
-      proof: counter.proof, edPub: counter.edPub, commitHalfClaimer: counter.commitHalfClaimer,
-    }, null);
-    if (!verdict.ok) throw new SdkError("quote-refused", { step: "proof", why: "rejected" });
+    const step = stepOrder({
+      order, side: mine.side, counterparty: counter, standIn: !quote,
+      network: xmrNetwork || (chain.monero && chain.monero.networkType) || MONERO.networkType,
+    });
+    const accepted = step.counterparty;
 
-    // COMMITMENTS ON BOTH HALVES: our own is computed in the worker (only the hash goes out), the counterparty's
-    // either arrived in the quote or is computed over the stand-in's half. Exactly these values are checked by
-    // the contract in claim and refund and are included in termsHash.
-    const commitHalfLocker = (await worker.halfCommitment(mine.half)).commitment;
-    const commitHalfClaimer = counter.commitHalfClaimer || (await worker.halfCommitment(counter.mock.half)).commitment;
+    // COMMITMENTS ON BOTH HALVES: our own and the counterparty's are the ones the proof was verified against,
+    // by the same builder the contract and the recovery file use. Exactly these values are checked by the
+    // contract in claim and refund and are included in termsHash.
+    const commitHalfLocker = step.wallet.commitHalfLocker;
+    const commitHalfClaimer = step.wallet.commitHalfClaimer;
 
     // THE SHARED MONERO ADDRESS - FROM THE HALVES, AND IT IS COMPUTED BEFORE THE MONEY IS LOCKED. The address used
     // to be assembled from the maker's seed, that is, from the FULL key on its side: that is a custodial scheme,
@@ -223,16 +223,12 @@ export async function runAtomicOrder({
     // We compute it BEFORE funding on purpose: the address is derived from the same points that will go into the
     // contract, and if it cannot be assembled (the counterparty has neither a point nor a view half), we must
     // learn about it before the user signs the deposit.
-    const otherViewPoint = counter.viewPoint || (counter.viewHalf ? (await worker.pointOf(counter.viewHalf)).ed : null);
+    const otherViewPoint = step.wallet.otherViewPoint;
     if (!otherViewPoint) {
       throw new SdkError("quote-refused", { step: "view-half" });
     }
     say("address", "joint-address");
-    const joint = await worker.jointAddress({
-      ownSpendHalf: mine.half, ownViewHalf: mine.viewHalf,
-      otherSpendPoint: counter.edPub, otherViewPoint,
-      network: xmrNetwork || (chain.monero && chain.monero.networkType) || MONERO.networkType,
-    });
+    const joint = { address: step.wallet.address, spendPub: step.wallet.spendPub, viewPub: step.wallet.viewPub };
 
     // THE COUNTERPARTY STAND-IN ON A LIVE NETWORK IS A REFUSAL, NOT A SIGNATURE (the auditor's finding, review_02
     // section 6.3 and block D1, item 5). Without a provider the counterparty side is assembled locally, the proof
@@ -271,10 +267,10 @@ export async function runAtomicOrder({
       // The ed25519 points go into the order explicitly: the other side assembles the shared address from them
       // and checks the proof EXACTLY against the on-chain fields, not against what arrived in the quote (doc 27
       // section 11).
-      edPointLocker: mine.pub.ed, edPointClaimer: counter.edPub,
+      edPointLocker: step.own.spendPoint, edPointClaimer: accepted.edPub,
       // THE DEPOSITOR'S VIEW POINT: from it the claimer assembles the address FROM THE ORDER FIELDS. Without it
       // it does not know where to send the XMR - and learns about it only after the money is deposited.
-      edViewPointLocker: mine.viewPub,
+      edViewPointLocker: step.own.viewPoint,
       salt,                        // our swap salt: see funding.js
       amountLabel,                 // the ready amount string for the label: formatting lives in the UI
       amountWei,
@@ -296,19 +292,19 @@ export async function runAtomicOrder({
       feeWei: (funded && funded.feeWei) || 0n,
       feeTotalWei: (funded && funded.feeTotalWei) || null,
       feeBps: (funded && funded.feeBps) || 0,
-      half: mine.half,
-      counterHalf: standIn ? counter.mock.half : null,
+      half: step.side.half,
+      counterHalf: standIn ? accepted.half : null,
       // THE VIEW HALVES: our own and the counterparty's. Without them the address cannot be assembled and the
       // version 3 recovery file cannot be filled in, and without the file the user will not claim the XMR after
       // losing the tab.
-      viewHalf: mine.viewHalf,
+      viewHalf: step.side.viewHalf,
       commitHalfLocker,
       commitHalfClaimer,
-      edPointLocker: mine.pub.ed,
-      edPointClaimer: counter.edPub,
+      edPointLocker: step.own.spendPoint,
+      edPointClaimer: accepted.edPub,
       // THE DEPOSITOR'S VIEW POINT goes into the record: without it there is nothing to compare the chain slot
       // edViewPointLocker against before signing - and it is part of the address the claimer will see.
-      edViewPointLocker: mine.viewPub,
+      edViewPointLocker: step.own.viewPoint,
       // THE COUNTERPARTY'S VIEW HALF: the stand-in has it, a real provider does NOT, and this is a known gap of
       // the protocol, not a trifle: without its view half the shared Monero address cannot be assembled. While
       // the address in the application is built the previous way, the path does not break, but a quote under the
@@ -316,7 +312,7 @@ export async function runAtomicOrder({
       // ONE KIND OF HALF ON THE OUTPUT, and this is not pedantry: the stand-in's half is a number, the provider's
       // arrives as a string, and the consumer (the recovery file and the sweep) must not guess which it was
       // given. Next to the spend half, which is also a number.
-      counterViewHalf: standIn ? counter.mock.viewHalf : BigInt(counter.viewHalf),
+      counterViewHalf: accepted.viewHalf === null || accepted.viewHalf === undefined ? null : BigInt(accepted.viewHalf),
       counterViewPoint: otherViewPoint,
       // THE SHARED ADDRESS: where the maker sends the XMR. Nobody can spend from it before the half is revealed.
       moneroAddress: joint.address,
@@ -329,8 +325,6 @@ export async function runAtomicOrder({
       // order_ref is empty (the regular payout does not reach the order).
       quoteId: (quote && quote.id) || null,
     };
-  } finally {
-    worker.stop();
   }
 }
 

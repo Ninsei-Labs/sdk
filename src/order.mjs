@@ -192,7 +192,7 @@ export function acceptCounterparty({ context, side = null, counterparty = null, 
     };
   } else if (standIn === true) {
     // THE STAND-IN IS COMPUTED IN THE SAME CONTEXT AS THE ORDER: the string gets nothing appended. The same path
-    // as the page (sdk/src/swap-flow.mjs: worker.buildSide) and the flow check - otherwise what would be checked is
+    // as the flow (sdk/src/swap-flow.mjs, buildOwnSide) and the check - otherwise what would be checked is
     // not what the page runs on.
     const mock = builder().newSide(context, true);
     accepted = { proof: sameFormAsPoint(mock.proof), edPub: norm(mock.pub.ed), viewPoint: norm(mock.viewPub),

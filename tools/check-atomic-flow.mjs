@@ -3,11 +3,12 @@
 //
 // `runAtomicOrder` is the sequence the page runs: build our side, ask/verify the counterparty, compute both
 // commitments, assemble the joint address, then fund once. There was no check that CALLED it: every guard tested a
-// piece below it. The deps seam exists for exactly this, so the worker and the funding call are stand-ins; what is
-// tested is the sequence and the values passed across its boundaries.
+// piece below it. The deps seam exists for exactly this, so the order side and the funding call are stand-ins; what
+// is tested is the sequence and the values passed across its boundaries.
 //
 // Run: node tools/check-atomic-flow.mjs
 import { runAtomicOrder } from "../src/swap-flow.mjs";
+import { SdkError } from "../src/errors.mjs";
 
 const ZERO = "0x" + "00".repeat(32);
 const LOCKER = "0x" + "11".repeat(20);
@@ -18,24 +19,30 @@ const fails = [];
 const ok = (m) => { pass += 1; console.log("  ok    " + m); };
 const bad = (m) => { fails.push(m); console.log("  FAIL  " + m); };
 
-function worker({ reject = false } = {}) {
-  let sides = 0;
+function orderSide({ reject = false } = {}) {
+  const side = {
+    half: 1n, pub: { ed: "0x" + "01".repeat(32) }, viewHalf: 11n,
+    viewPub: "0x" + "0b".repeat(32), enc: { pub: "0x" + "0c".repeat(32) },
+    proof: { XA: "0x" + "01".repeat(32), XB: "0x" + "01".repeat(32) }, standIn: true,
+  };
+  const own = { spendPoint: side.pub.ed, viewPoint: side.viewPub, encPub: side.enc.pub };
+  const accepted = {
+    edPub: "0x" + "02".repeat(32), viewHalf: 12n, half: 2n,
+    commitHalfClaimer: "0x" + "bb".repeat(32),
+  };
   return {
-    buildSide() {
-      sides += 1;
-      const half = sides === 1 ? 1n : 2n;
+    buildOwnSide: () => ({ context: "synthetic", side, ...own }),
+    orderStep: () => {
+      if (reject) throw new SdkError("quote-refused", { step: "proof", why: "synthetic" });
       return {
-        half, pub: { ed: "0x" + half.toString(16).padStart(64, "0") }, viewHalf: half + 10n,
-        viewPub: "0x" + (half + 10n).toString(16).padStart(64, "0"),
-        enc: { pub: "0x" + (half + 20n).toString(16).padStart(64, "0") },
-        proof: { XA: "0x" + half.toString(16).padStart(64, "0"), XB: "0x" + half.toString(16).padStart(64, "0") },
-        standIn: true,
+        own, side, counterparty: accepted,
+        wallet: {
+          address: "synthetic-monero-address", spendPub: "0x" + "cc".repeat(32),
+          viewPub: "0x" + "dd".repeat(32), otherViewPoint: "0x" + "0d".repeat(32),
+          commitHalfLocker: "0x" + "aa".repeat(32), commitHalfClaimer: accepted.commitHalfClaimer,
+        },
       };
     },
-    async verifyCounterparty() { return reject ? { ok: false, reason: "synthetic refusal" } : { ok: true }; },
-    async halfCommitment(half) { return { commitment: "0x" + (half === 1n ? "aa" : "bb").repeat(32) }; },
-    async jointAddress() { return { address: "synthetic-monero-address", spendPub: "0x" + "cc".repeat(32), viewPub: "0x" + "dd".repeat(32) }; },
-    stop() {},
   };
 }
 
@@ -52,7 +59,7 @@ console.log("=== 1) THE FULL SEQUENCE FUNDS ONCE WITH THE BOUND VALUES ===");
   const result = await runAtomicOrder({
     chainSlug: "arbitrum-sepolia", locker: LOCKER, claimer: CLAIMER, amountWei: 10n ** 18n, amountLabel: "1 ETH",
     deps: {
-      createOrderWorker: () => worker(),
+      ...orderSide(),
       fundOrderLive: async (request) => { calls.push(request); return funding()(request); },
     },
   }).catch((error) => error);
@@ -74,7 +81,7 @@ console.log("=== 2) A REFUSED COUNTERPARTY DOES NOT REACH FUNDING ===");
   const result = await runAtomicOrder({
     chainSlug: "arbitrum-sepolia", locker: LOCKER, claimer: CLAIMER, amountWei: 10n ** 18n, amountLabel: "1 ETH",
     deps: {
-      createOrderWorker: () => worker({ reject: true }),
+      ...orderSide({ reject: true }),
       fundOrderLive: async () => { funded += 1; return {}; },
     },
   }).catch((error) => error);
@@ -87,7 +94,7 @@ console.log("=== 3) A MISSING CLAIMER IS NAMED BEFORE ANY WORK ===");
 {
   const result = await runAtomicOrder({
     chainSlug: "arbitrum-sepolia", locker: LOCKER, amountWei: 10n ** 18n,
-    deps: { createOrderWorker: () => worker(), fundOrderLive: async () => ({}) },
+    deps: { ...orderSide(), fundOrderLive: async () => ({}) },
   }).catch((error) => error);
   if (result && result.code === "bad-input" && result.params && result.params.field === "claimer") ok("a missing claimer -> bad-input, field claimer");
   else bad("missing claimer: " + JSON.stringify(result && (result.code || result)));

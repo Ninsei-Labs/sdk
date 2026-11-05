@@ -1,10 +1,9 @@
 // ATOMIC SWAP PRIMITIVES - FROM THE SAME npm PACKAGES AS THE PAGE BUNDLE.
 //
-// The bundle entry point (tools/atomic-browser-entry.mjs) hands the page exactly five names: ed25519, secp256k1,
-// keccak256, sha3_512, randomBytes. The order-side build modules (www/js/atomic/order.js) do NOT import them
-// themselves - they arrive as parameters. That is what lets the SDK expose the same primitives from the same
-// packages instead of dragging a hashed build artefact into the core: a package never has a "version with a
-// different cache".
+// The order builder takes exactly five names: ed25519, secp256k1, keccak256, sha3_512, randomBytes. The
+// order-side build modules (www/js/atomic/order.js) do NOT import them themselves - they arrive as parameters.
+// That is what lets the SDK use the same primitives from the same packages instead of dragging a hashed build
+// artefact into the core: a package never has a "version with a different cache".
 //
 // WHY EXACTLY THESE PACKAGES, AND NOT JUST ANY. keccak256 and sha3_512 are DIFFERENT functions, and they must
 // not be confused: the commitment for a half is computed with keccak256 (exactly as Solidity does it), while the

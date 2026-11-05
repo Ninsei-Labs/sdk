@@ -132,7 +132,7 @@ export function createSwap(input, store = null) {
 //
 // WHAT THE REVERSE DEAL DOES DIFFERENTLY. On the buy flow the PAGE funds the escrow, and the counterparty's half
 // is only learned after settlement. On the sell flow the PROVIDER funds the escrow, the page merely requests the
-// order, and it computes ITS OWN halves (atomic/order-worker.js, newMakerMaterial). So fields are named by side:
+// order, and it computes ITS OWN halves (atomic/order.js, newMakerMaterial). So fields are named by side:
 // our half is `half`, and the DEPOSITOR's (provider's) point and view half are counterSpendPoint/counterView*.
 // The page does not know the depositor's SPEND half and must not: the contract publishes it on settlement, and
 // only then does the sweep of our own XMR open up (see refundHalfRevealed).
