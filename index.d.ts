@@ -1057,7 +1057,8 @@ export interface AutoRefundDeps {
 /** What the client's own refund decided: refunded, waiting, still time, or the XMR is there. */
 export interface AutoRefundVerdict {
   readonly refunded: boolean;
-  readonly state: "refunded" | "waiting" | "claim-window" | "arrival-pending" | "arrived";
+  readonly state: "refunded" | "waiting" | "claim-window" | "arrival-pending" | "arrived" |
+    "arrival-underpaid" | "arrival-locked";
   readonly hash?: string | null;
   readonly leftSec: number;
   readonly needSec?: number;
