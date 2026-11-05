@@ -422,11 +422,19 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
   // A START THAT ENDED WITH A SENT TRANSACTION AND NO RECEIPT IS RESUMED, NOT RESENT. The transaction hash and the
   // predicted escrow are kept on the record; a retry of the same quote reads that receipt instead of building a
   // second side and sending a second deposit.
-  const pendingFundingOf = (quoteId) => {
+  const pendingFundingOf = (quoteId, salt) => {
     const id = String(quoteId || "");
-    if (!id) return null;
-    return records().find((swap) => String(swap.orderQuoteId || "") === id &&
-      (swap.fundingPending === true || (swap.escrow && swap.escrow.fundingPending === true))) || null;
+    const saltHex = String(salt || "").replace(/^0x/i, "").toLowerCase();
+    if (!id && !saltHex) return null;
+    return records().find((swap) => {
+      if (!(swap.fundingPending === true || (swap.escrow && swap.escrow.fundingPending === true))) return false;
+      if (id && String(swap.orderQuoteId || "") === id) return true;
+      // THE RELAY ANSWER MAY CARRY NO ORDER ID. The salt is the client's own binding to the same escrow: it is
+      // written into the terms and the predicted address is derived from it, so it identifies the pending record
+      // without inventing an id or asking the factory again.
+      const recordedSalt = String((swap.escrow && swap.escrow.salt) || swap.recoverySalt || "").replace(/^0x/i, "").toLowerCase();
+      return Boolean(saltHex && recordedSalt === saltHex);
+    }) || null;
   };
   async function resumePendingFunding(record, request) {
     const swap = record.swap || record;
@@ -437,7 +445,23 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
     // so its own status() is asked before the start is left pending forever. A failed read is not "not funded".
     let onChain = null;
     if (escrowRecord.address) {
-      try { onChain = await flow.orderStatus(escrowRecord.address, { call: reader }); } catch { onChain = null; }
+      try { onChain = await flow.orderStatus(escrowRecord.address, { call: reader }); }
+      catch (error) {
+        // AN EMPTY status() ANSWER IS A SUCCESSFUL READ OF AN ADDRESS WITH NO CONTRACT, not an unreadable chain.
+        // Anything else leaves `onChain` null and the record pending: a failed read must never authorise a resend.
+        if (/short status\(\) answer/.test(String((error && error.message) || error))) onChain = { isFunded: false, absent: true };
+        else onChain = null;
+      }
+    }
+    // A PROCESS THAT DIED BETWEEN THE PRE-SEND RECORD AND THE WALLET CALL LEFT "not-sent" BEHIND. The chain was
+    // read and the escrow is not funded, so no transaction can be in flight: clear the mark and let the caller
+    // build the same salt/address again. If the read failed, the record stays pending - never resend blind.
+    if (!txHash && onChain && !onChain.isFunded && escrowRecord.fundingReason === "not-sent") {
+      delete swap.fundingPending;
+      swap.escrow = { ...escrowRecord, fundingPending: false, fundingReason: "send-not-started" };
+      try { engine.swap.saveSwap(swap, store); }
+      catch { throw new SdkError("storage-unavailable", { step: "save-pending" }); }
+      return null;
     }
     if (!txHash && !(onChain && onChain.isFunded)) {
       return { id: swap.id || null, escrow: escrowRecord.address || null,
@@ -903,8 +927,13 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       // RESUME BEFORE ANY NEW SIDE OR SEND. The previous start may have sent the deposit and lost the receipt;
       // reusing its hash is the only way to learn the escrow without a second payment.
       const quoteForResume = (request.orderQuote && request.orderQuote.id) || (request.quote && request.quote.id) || null;
-      const pendingRecord = pendingFundingOf(quoteForResume);
-      if (pendingRecord) return await resumePendingFunding(pendingRecord, request);
+      const saltForResume = request.recoverySalt || (request.order && request.order.salt) ||
+        (request.orderQuote && request.orderQuote.salt) || null;
+      const pendingRecord = pendingFundingOf(quoteForResume, saltForResume);
+      if (pendingRecord) {
+        const resumed = await resumePendingFunding(pendingRecord, request);
+        if (resumed) return resumed;
+      }
       // A NEW START USES A PER-ORDER SALT. When the caller brings no `recoverySalt`, the order's own salt is the
       // client salt; a missing salt is drawn here and written into the order before its context is built.
       if (request.recoverySalt === undefined || request.recoverySalt === null) {
@@ -1152,9 +1181,30 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         }
       }
       lockRequest.quote = request.orderQuote || null;
+      // THE PENDING RECORD EXISTS BEFORE THE SEND, NOT AFTER THE RECEIPT WAIT. If the receipt arrives late (or the
+      // process dies while waiting), a retry must find the predicted escrow and read it instead of asking for a
+      // second deposit. `fundOrder` calls this after its state guard and immediately before `eth_sendTransaction`.
+      const notePredicted = async ({ escrow: predicted, salt }) => {
+        if (!predicted || !/^0x[0-9a-fA-F]{40}$/.test(String(predicted))) return;
+        const escrowRecord = record.swap.escrow && typeof record.swap.escrow === "object" ? record.swap.escrow : {};
+        record.swap.fundingPending = true;
+        record.swap.escrow = { ...escrowRecord, address: predicted, salt: salt || escrowRecord.salt || null,
+          fundingPending: true, fundingReason: "not-sent" };
+        try { engine.swap.saveSwap(record.swap, store); }
+        catch { throw new SdkError("storage-unavailable", { step: "save-pending" }); }
+      };
       let funded = null;
-      try { funded = await lock.send(lockRequest, wallet, { call: reader }); }
+      try { funded = await lock.send(lockRequest, wallet, { call: reader, onPredicted: notePredicted }); }
       catch (error) {
+        // A REJECTION BEFORE BROADCAST MUST NOT LEAVE THE SWAP STUCK IN funding-pending. The pre-send record exists
+        // for a process that dies while the send is in flight; an explicit wallet refusal is the other case, and the
+        // retry has to be allowed to sign again. A transaction that was already mined is caught by the escrow's own
+        // state guard; one still in the mempool is not, and the resend can revert and cost gas - never a second deposit.
+        if (record.swap.escrow && record.swap.escrow.fundingReason === "not-sent") {
+          delete record.swap.fundingPending;
+          record.swap.escrow = { ...record.swap.escrow, fundingPending: false, fundingReason: "send-rejected" };
+          try { engine.swap.saveSwap(record.swap, store); } catch { /* the pending record stays; never resend blind */ }
+        }
         if (error && typeof error.code === "string") throw error;
         throw new SdkError("server-unavailable", { step: "lock" });
       }

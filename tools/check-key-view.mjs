@@ -11,7 +11,7 @@ import { buildOwnSideFromHalves } from "../src/order.mjs";
 import { primitives } from "../src/primitives.mjs";
 import { quoteDigest, signQuoteDigest } from "../src/quoteEip712Spec.mjs";
 import { halfCommitmentHex } from "../engine/atomic/orderHalfCommit.js";
-import { memoryStorage, setStorage } from "../engine/core/store.js";
+import { loadState, memoryStorage, saveState, setStorage } from "../engine/core/store.js";
 import { FACTORY_METHODS, ORDER_CREATED_TOPIC } from "../engine/evm/factory.js";
 import { encodeStatus } from "../engine/evm/escrow.js";
 import { takerHalvesV2 } from "../src/recovery-key.mjs";
@@ -43,8 +43,9 @@ const bad = (m) => { fails.push(m); console.log("  FAIL  " + m); };
 async function startWith(view, salt = order.salt, extra = {}, autoSalt = false) {
   setStorage(memoryStorage());
   let sent = 0;
+  let atSend = null;
   const wallet = { chainId: async () => order.chainId, address: async () => order.locker,
-    send: async () => { sent += 1; throw Object.assign(new Error("stop before broadcast"), { code: "wallet-rejected" }); },
+    send: async () => { sent += 1; atSend = loadState(); throw Object.assign(new Error("stop before broadcast"), { code: "wallet-rejected" }); },
     receipt: async () => null };
   const counterparty = { proof: maker.side.proof, edPointClaimer: maker.spendPoint,
     commitHalfClaimer: quote.commitHalfClaimer, ...extra };
@@ -56,7 +57,7 @@ async function startWith(view, salt = order.salt, extra = {}, autoSalt = false) 
   const result = await createSwaps({ mode: "live", xmrNetwork: "stagenet", logs: async () => [],
     call: async ({ data }) => (data.startsWith(FACTORY_METHODS.predict) ? "0x" + "0".repeat(24) + "88".repeat(20) : "0x"),
   }).start(request).catch((error) => error);
-  return { result, sent };
+  return { result, sent, atSend };
 }
 
 console.log("=== 0) A SELL START IS REFUSED BEFORE ANY WALLET ===");
@@ -105,7 +106,7 @@ console.log("=== 1c) A SALT THE QUOTE DID NOT CARRY IS REFUSED ===");
   else bad("salt mismatch: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
 }
 
-async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 }, funded = false } = {}) {
+async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 }, funded = false, withId = true } = {}) {
   if (fresh) setStorage(memoryStorage());
   let sent = 0;
   const wallet = { chainId: async () => order.chainId, address: async () => order.locker,
@@ -113,7 +114,7 @@ async function startPending({ fresh = true, receipt = { status: "0x1", logs: [],
     receipt: async () => receipt };
   const counterparty = { proof: maker.side.proof, edPointClaimer: maker.spendPoint,
     commitHalfClaimer: quote.commitHalfClaimer, viewHalfClaimer: derived.makerViewHalf };
-  const request = { quote: { id: "q", chain: "arbitrum-sepolia", asset: "ETH", amount: 1, size: 1 }, order, orderQuote: quote,
+  const request = { quote: { ...(withId ? { id: "q" } : {}), chain: "arbitrum-sepolia", asset: "ETH", amount: 1, size: 1 }, order, orderQuote: quote,
     counterparty, recoveryKey: WORDS, recoverySalt: order.salt, receiveTo: "synthetic-xmr-destination",
     restoreHeight: 100, wallet, onRecoveryKey: async () => true };
   const fundedStatus = "0x" + [1, 0, 0, 0].map((value) => BigInt(value).toString(16).padStart(64, "0")).join("");
@@ -134,6 +135,19 @@ console.log("=== 1d) A RECEIPT WITHOUT THE EVENT IS NOT xmr-incoming ===");
   } else bad("pending funding: " + JSON.stringify({ step: result && result.step, txHash: result && result.txHash, sent }));
 }
 
+console.log("=== 1d1) THE PENDING RECORD IS WRITTEN BEFORE THE SEND ===");
+{
+  const { result, sent, atSend } = await startWith(derived.makerViewHalf, order.salt);
+  const atSendRecords = Object.values((atSend && atSend.swaps) || {});
+  const atSendPending = atSendRecords.find((item) => item && item.fundingPending === true);
+  const after = Object.values((loadState() && loadState().swaps) || {}).some((item) => item && item.fundingPending === true);
+  if (result && result.code === "wallet-rejected" && sent === 1 && atSendPending && atSendPending.escrow &&
+      atSendPending.escrow.fundingReason === "not-sent" &&
+      /^0x8{40}$/i.test(String(atSendPending.escrow.address || "")) && !after) {
+    ok("the pending record exists at send time and a rejected wallet clears it for a retry");
+  } else bad("pre-send record: " + JSON.stringify({ code: result && result.code, sent, atSend: atSendPending && atSendPending.escrow, after }));
+}
+
 console.log("=== 1d2) A RETRY READS THE SAME HASH AND DOES NOT SEND AGAIN ===");
 {
   const first = await startPending();
@@ -145,6 +159,42 @@ console.log("=== 1d2) A RETRY READS THE SAME HASH AND DOES NOT SEND AGAIN ===");
   if (predicted && second.result && second.result.step === "xmr-incoming" && second.result.escrow === predicted && second.sent === 0) {
     ok("the retry reads the pending hash, saves the escrow and sends nothing");
   } else bad("pending retry: " + JSON.stringify({ ctor: second.result && second.result.constructor && second.result.constructor.name, keys: second.result && Object.keys(second.result), code: second.result && second.result.code, msg: second.result && second.result.message, sent: second.sent }));
+}
+
+console.log("=== 1d2b) A RETRY WITHOUT AN ORDER ID FINDS THE SALT-KEYED PENDING RECORD ===");
+{
+  const first = await startPending();
+  const predicted = first.result && first.result.escrow;
+  const pad = (v) => "0x" + String(v).replace(/^0x/, "").toLowerCase().padStart(64, "0");
+  const created = { address: order.factory, topics: [ORDER_CREATED_TOPIC, pad(predicted), pad(order.locker), pad(order.claimer)],
+    data: "0x" + "00".repeat(12 * 32) };
+  const second = await startPending({ fresh: false, withId: false, receipt: { status: "0x1", logs: [created], blockNumber: 11 } });
+  if (predicted && second.result && second.result.step === "xmr-incoming" && second.result.escrow === predicted && second.sent === 0) {
+    ok("the salt identifies the pending record when the relay answer has no order id");
+  } else bad("salt-keyed retry: " + JSON.stringify({ predicted, step: second.result && second.result.step, escrow: second.result && second.result.escrow, sent: second.sent, code: second.result && second.result.code }));
+}
+
+console.log("=== 1d2c) A STALE not-sent RECORD IS CLEARED WHEN THE ESCROW IS NOT FUNDED ===");
+{
+  const first = await startWith(derived.makerViewHalf, order.salt);
+  const state = loadState();
+  const record = Object.values((state && state.swaps) || {})[0];
+  const predicted = record && record.escrow && record.escrow.address;
+  if (!record || !predicted) bad("stale not-sent fixture: " + JSON.stringify({ code: first.result && first.result.code }));
+  else {
+    record.fundingPending = true;
+    record.escrow = { ...record.escrow, fundingPending: true, fundingReason: "not-sent" };
+    delete record.escrow.fundTx;
+    delete record.fundTx;
+    saveState(state);
+    const pad = (v) => "0x" + String(v).replace(/^0x/, "").toLowerCase().padStart(64, "0");
+    const created = { address: order.factory, topics: [ORDER_CREATED_TOPIC, pad(predicted), pad(order.locker), pad(order.claimer)],
+      data: "0x" + "00".repeat(12 * 32) };
+    const second = await startPending({ fresh: false, receipt: { status: "0x1", logs: [created], blockNumber: 11 } });
+    if (second.result && second.result.step === "xmr-incoming" && second.result.escrow === predicted && second.sent === 1) {
+      ok("a not-sent record with an unfunded escrow is cleared and the retry sends once");
+    } else bad("stale not-sent retry: " + JSON.stringify({ step: second.result && second.result.step, escrow: second.result && second.result.escrow, predicted, sent: second.sent, code: second.result && second.result.code }));
+  }
 }
 
 console.log("=== 1d3) A FUNDED STATUS RESCUES A MISSING RECEIPT ===");
