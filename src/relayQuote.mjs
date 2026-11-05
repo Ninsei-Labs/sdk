@@ -111,7 +111,11 @@ export function relayRequestDigest(request) {
 /**
  * THE FORWARDED REQUEST IS THE RELAY'S OWN SIGNED FRAME. The answer's `requestHash` is the digest of this
  * object; without recomputing it, a relay could forward a different payload or maker while returning a
- * correctly signed answer. `requestHash` is checked when the caller has it.
+ * correctly signed answer. The client always passes the answer's hash; a missing value becomes an empty
+ * string and fails the comparison.
+ *
+ * The frame's expiry and counter are not checked here. A fresh salt per request binds the payload, so a
+ * replayed old frame fails the payload comparison; the hash comparison then rejects a substituted one.
  */
 export function verifyRelayForwarded({ forwarded, relayKey, payload, provider, requestHash = null } = {}) {
   if (!forwarded || typeof forwarded !== "object" || forwarded.type !== "quote_request" ||
