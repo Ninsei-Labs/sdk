@@ -391,6 +391,33 @@ try {
   else bad("wrong forwarded relay code: " + JSON.stringify(error && (error.code || error.message)));
 }
 
+console.log("=== 3c) MALFORMED ENVELOPE AND PUBLISHED FIELDS ARE NAMED ===");
+{
+  const envelope = relayBody(makeAnswer(built));
+  envelope.version = { toString: null };
+  try {
+    await call({ fetchImpl: fakeFetch({ body: envelope }).fetchImpl });
+    bad("a non-primitive envelope version passed");
+  } catch (error) {
+    if (error && error.code === "quote-refused" && error.params && error.params.why === "envelope") ok("a non-primitive envelope version is a named refusal");
+    else bad("non-primitive envelope version gave " + JSON.stringify(error && (error.code || error.message)));
+  }
+  for (const [label, patch, partner] of [
+    ["fee recipient", { feeRecipient: { toString: null } }, "partner-a"],
+    ["fee rate", { feeBps: { toString: null } }, null],
+    ["relay id", { relayId: { toString: null } }, "partner-a"],
+  ]) {
+    const relay = { version: 1, relayId: "test-relay", feeRecipient: "0x" + "99".repeat(20), feeBps: "0", ...patch };
+    try {
+      await call({ partner, fetchImpl: fakeFetch({ body: relayBody(makeAnswer(built)), relay }).fetchImpl });
+      bad("a non-primitive published " + label + " passed");
+    } catch (error) {
+      if (error && error.code === "bad-input") ok("a non-primitive published " + label + " is a named refusal");
+      else bad("non-primitive published " + label + " gave " + JSON.stringify(error && (error.code || error.message)));
+    }
+  }
+}
+
 console.log("=== 4) A TRANSPORT FAILURE IS NOT A REFUSAL ===");
 const transport = fakeFetch({ error: new Error("connection reset") });
 try {
