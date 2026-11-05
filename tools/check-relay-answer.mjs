@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { keccak256, secp256k1 } from "../src/primitives.mjs";
 import { relayQuoteDigest, verifyFirmAnswer, verifyRelayQuoteFrame } from "../src/relayQuote.mjs";
+import { verifyCounterparty } from "../src/order.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = JSON.parse(readFileSync(join(here, "fixtures", "relay-answer.json"), "utf8"));
@@ -49,7 +50,30 @@ try {
   } else bad("verified quote: " + JSON.stringify(verified.quote));
 } catch (error) { bad("valid answer refused: " + JSON.stringify(error && (error.code || error.params || error.message))); }
 
-console.log("=== 3) A CHANGED FIELD IS REFUSED ===");
+console.log("=== 3) EACH SIDE CARRIES A REAL KNOWLEDGE PROOF ===");
+const proofSide = (half) => ({
+  pub: { ed: half.edPoint },
+  commitHalfClaimer: half.commitHalf,
+  proof: half.proof,
+});
+for (const [label, half] of [["client", fixture.request.clientHalf], ["node", JSON.parse(answer.payload).nodeHalf]]) {
+  try {
+    verifyCounterparty({ side: proofSide(half), order: fixture.request.terms.order });
+    ok(`the ${label} side proves knowledge of one half in this order context`);
+  } catch (error) {
+    bad(`${label} proof: ` + JSON.stringify(error && (error.code || error.message)));
+  }
+}
+const brokenProof = JSON.parse(JSON.stringify(proofSide(JSON.parse(answer.payload).nodeHalf)));
+brokenProof.proof.pokA = "0x" + "00".repeat(64);
+try {
+  verifyCounterparty({ side: brokenProof, order: fixture.request.terms.order });
+  bad("a broken knowledge proof passed");
+} catch {
+  ok("a broken knowledge proof is refused");
+}
+
+console.log("=== 4) A CHANGED FIELD IS REFUSED ===");
 for (const [label, change] of [
   ["a changed provider", { provider: "0x" + "01".repeat(20) }],
   ["a changed signature", { signature: "0x" + "00".repeat(65) }],
