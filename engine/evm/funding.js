@@ -213,7 +213,7 @@ async function waitReceipt(receiptReader, hash, { tries = 12, delayMs = 1500 } =
 
 // The full funding path. Steps are returned outward so the interface can show each one: predict is a free call,
 // createOrder and lock are transactions in the user's wallet.
-export async function fundOrder({ factory, locker, claimer, commitHalfLocker, commitHalfClaimer, edPointLocker, edPointClaimer, edViewPointLocker, salt: providedSalt, amountWei, amountLabel, claimWindowSeconds, readyWindowSeconds, readyBy, t1, quote, call, send, receipt, onStep }) {
+export async function fundOrder({ factory, locker, claimer, commitHalfLocker, commitHalfClaimer, edPointLocker, edPointClaimer, edViewPointLocker, salt: providedSalt, amountWei, amountLabel, claimWindowSeconds, readyWindowSeconds, readyBy, t1, quote, call, send, receipt, onStep, onPredicted }) {
   if (!factory) throw new Error("no escrow factory address set for this network");
   if (!locker) throw new Error("no EVM wallet connected: there is nobody to deposit");
   if (!claimer) throw new Error("the order recipient (claimer) is not set");
@@ -286,7 +286,6 @@ export async function fundOrder({ factory, locker, claimer, commitHalfLocker, co
   }
   const escrowState = escrowStateVerdict({ status: stateRead.status, error: stateRead.error, address: escrow });
   if (escrowState.blocks) throw new Error("signature not started: " + escrowState.reason);
-
   // 2) ONE TRANSACTION: creating the order TOGETHER with the deposit.
   //
   // It used to be two steps (createOrder, then lock) with two defects, both seen live: the wallet estimated the
@@ -314,6 +313,10 @@ export async function fundOrder({ factory, locker, claimer, commitHalfLocker, co
   // WHICH FACTORY DOOR THE DEPOSIT GOES THROUGH. There is ONE path: createOrderAndFund, where the wallet that
   // sends the transaction becomes the locker. The sender may not change the order terms - the quote signature
   // covers THE SAME digest the escrow checks.
+  // THE PREDICTED ADDRESS IS WRITTEN TO THE CALLER'S RECORD BEFORE THE TRANSACTION. A receipt can take longer than
+  // the process that sent it; a record saved only after the wait leaves nothing to resume from, and the retry asks
+  // for a second deposit. The callback runs after every refusal and immediately before the send.
+  if (typeof onPredicted === "function") await onPredicted({ escrow, salt, terms });
   const createData = encodeCreateOrderAndFund(quoteEnc);
   const createHash = await send({
     to: factory,

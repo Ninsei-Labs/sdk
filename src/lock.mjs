@@ -98,6 +98,7 @@ export async function send(request, wallet, deps = {}) {
     return await evm.fundOrder({
       ...canonical,
       call: reader,
+      onPredicted: deps.onPredicted,
       send: (tx) => wallet.send({ ...tx, chainId: canonical.chainId, from: canonical.locker }),
       // NORMALISING THE RECEIPT ARGUMENT'S SHAPE - HERE, AT THE CORE'S BOUNDARY, NOT AT EVERY CALLER.
       //
