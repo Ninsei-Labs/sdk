@@ -64,13 +64,15 @@ for (const [label, half] of [["client", fixture.request.clientHalf], ["node", JS
     bad(`${label} proof: ` + JSON.stringify(error && (error.code || error.message)));
   }
 }
-const brokenProof = JSON.parse(JSON.stringify(proofSide(JSON.parse(answer.payload).nodeHalf)));
-brokenProof.proof.pokA = "0x" + "00".repeat(64);
-try {
-  verifyCounterparty({ side: brokenProof, order: fixture.request.terms.order });
-  bad("a broken knowledge proof passed");
-} catch {
-  ok("a broken knowledge proof is refused");
+for (const field of ["pokA", "pokB"]) {
+  const brokenProof = JSON.parse(JSON.stringify(proofSide(JSON.parse(answer.payload).nodeHalf)));
+  brokenProof.proof[field] = "0x" + "00".repeat(64);
+  try {
+    verifyCounterparty({ side: brokenProof, order: fixture.request.terms.order });
+    bad(`a broken ${field} passed`);
+  } catch {
+    ok(`a broken ${field} is refused`);
+  }
 }
 
 console.log("=== 4) A CHANGED FIELD IS REFUSED ===");
