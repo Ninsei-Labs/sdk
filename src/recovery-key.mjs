@@ -637,7 +637,7 @@ async function recoveredStartHeight(order, { evmBlockTime, moneroTip, moneroBloc
  */
 export async function findSwaps({ mnemonic, chainId, factory = null, factories = null, address = null, evmLogs,
   fromBlock = null, deploymentBlock = null, toBlock = "latest",
-  evmBlockTime = null, evmCode = null, moneroTip = null, moneroBlockTimestamp = null,
+  evmBlockTime = null, evmBlockTimes = null, evmCode = null, moneroTip = null, moneroBlockTimestamp = null,
   xmrNodes = null, moneroNetwork = null, fetchImpl = globalThis.fetch } = {}) {
   // FACTORY HISTORY IS PART OF THE SEARCH. A chain can have more than one factory after a contract change;
   // searching only the newest one hides every older order. Callers may pass `factories` as addresses or as
@@ -720,6 +720,23 @@ export async function findSwaps({ mnemonic, chainId, factory = null, factories =
   // EACH FOUND ORDER CARRIES THE MONERO HEIGHT ITS WITHDRAWAL MAY START FROM. The rule lives here, not in a
   // page: a widget and the recovery page must not derive two different answers from one chain.
   const cache = new Map();
+  let readBlockTime = evmBlockTime;
+  if (typeof evmBlockTimes === "function") {
+    const blocks = [...new Set(found.map((order) => order.blockNumber).filter((block) => block !== null && block !== undefined))];
+    let timestamps;
+    try {
+      timestamps = blocks.length ? await evmBlockTimes(blocks) : new Map();
+      if (!timestamps || typeof timestamps.get !== "function") throw new Error("block-time-read");
+    } catch {
+      timestamps = new Map(blocks.map((block) => [block, new Error("block-time-read")]));
+    }
+    // Never fall back to per-order RPC after the caller chose a batch, including failed or missing items.
+    readBlockTime = async (block) => {
+      const value = timestamps.get(block);
+      if (value !== null && value !== undefined && typeof value !== "number") throw new Error("block-time-read");
+      return value;
+    };
+  }
   let tip = moneroTip;
   let header = moneroBlockTimestamp;
   let readersReason = "no-height-readers";
@@ -738,7 +755,7 @@ export async function findSwaps({ mnemonic, chainId, factory = null, factories =
     order.payTokenReason = "not-on-chain";
   }
   for (const order of found) {
-    Object.assign(order, await recoveredStartHeight(order, { evmBlockTime, moneroTip: tip, moneroBlockTimestamp: header, cache, readersReason }));
+    Object.assign(order, await recoveredStartHeight(order, { evmBlockTime: readBlockTime, moneroTip: tip, moneroBlockTimestamp: header, cache, readersReason }));
   }
   // THE XMR AMOUNT COMES FROM THE EVENT IN THE CURRENT FACTORY. The previous event has no field; those orders fall
   // back to the clone read, where word 18 is read only from a clone of the exact shape. This is data, not a
