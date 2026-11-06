@@ -21,6 +21,7 @@ import * as engine from "./engine.mjs";
 import { orderQuoteMissingFields, recoverOrderQuoteKey } from "./quoteEip712.mjs";
 import { claimGasGiftWei } from "../engine/evm/claimGas.js";
 import { parseXmr } from "../engine/core/xmrAmount.js";
+import { xmrAmountVerdict } from "./xmrAmountPolicy.mjs";
 import { takerHalvesV2, recoverySaltOf } from "./recovery-key.mjs";
 import { acceptCounterpartyChunked, buildOwnSideFromHalvesChunked, jointAddress } from "./order.mjs";
 import { requestFirmQuote } from "./relayFirmClient.mjs";
@@ -586,8 +587,9 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
       if (saleRequest && saleRequest.claimer && quote.claimer && String(saleRequest.claimer).toLowerCase() !== String(quote.claimer).toLowerCase()) {
         fail("quote-refused", { step: "order-sell", why: "claimer-not-bound" });
       }
-      // THE XMR THE CALLER ASKED FOR IS THE XMR THE QUOTE SIGNED. A ticket is paid against the signed `xmrAmount`;
-      // accepting a different requested amount shows one figure and settles another.
+      // THE XMR THE CALLER ASKED FOR IS THE XMR THE QUOTE SIGNED - OR BETTER. A direct sale ticket is the ask
+      // side (the client buys XMR): a signed amount above the request is accepted, one below it is refused. The
+      // ETH amount stays exact: it is part of the proof context.
       const requestedXmr = saleRequest && (saleRequest.xmr !== undefined ? saleRequest.xmr
         : (saleRequest.xmrAmount !== undefined ? saleRequest.xmrAmount : null));
       if (requestedXmr !== null && requestedXmr !== undefined) {
@@ -601,7 +603,7 @@ export function createQuotes({ config, http, now = () => Date.now(), evmCall = n
         let signedAtomic = null;
         try { signedAtomic = quote.xmrAmount === undefined || quote.xmrAmount === null || quote.xmrAmount === ""
           ? null : BigInt(String(quote.xmrAmount)); } catch { signedAtomic = null; }
-        if (signedAtomic === null || wanted === null || wanted !== signedAtomic) {
+        if (signedAtomic === null || wanted === null || !xmrAmountVerdict({ side: "ask", requested: wanted, signed: signedAtomic }).ok) {
           fail("quote-refused", { step: "order-sell", why: "xmr-amount" });
         }
       }
