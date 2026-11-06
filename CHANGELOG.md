@@ -1,3 +1,7 @@
+## 0.57.2 — 2026-11-06
+
+- Re-release of 0.57.0 after the publish job rejected the local tarball path. `0.57.1` was tagged but not published; there are no API changes from 0.57.0, and the package content and generated deployment pins are unchanged.
+
 ## 0.57.0 — 2026-11-06
 
 - Deployment pins are generated from `deployments/<vm>/<network>.json` into `engine/core/deployments.generated.js`; `CHAINS` and `KNOWN_FACTORY_CODES` read them. The SDK exports `DEPLOYMENTS`, `DEPLOYMENT_CHAINS`, `DEPLOYMENT_VMS` and `deploymentFor` (network id, CAIP-2 or EVM chain id, with no fallback to another network).
