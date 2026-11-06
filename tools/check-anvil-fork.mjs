@@ -14,11 +14,13 @@ import { halfCommitmentHex } from "../engine/atomic/orderHalfCommit.js";
 import { encodeCreateOrderAndFund, encodePredict, decodeAddress, ORDER_CREATED_TOPIC } from "../engine/evm/factory.js";
 import { ed25519, keccak256, secp256k1 } from "../src/primitives.mjs";
 import { quoteDigest, signQuoteDigest } from "../src/quoteEip712Spec.mjs";
+import { deploymentFor } from "../engine/core/config.js";
 
 const RPC = process.env.ANVIL_RPC || "http://127.0.0.1:8545";
-const FACTORY = (process.env.ANVIL_FACTORY || "0x245d3a4ac4b98d713f6c5130b56cd5d550f8cefe").toLowerCase();
-const REGISTRY = (process.env.ANVIL_REGISTRY || "0x92191dc3517e15db6468628b1a493576728a9798").toLowerCase();
-const CASHIER = (process.env.ANVIL_CASHIER || "0x40515449159EfbCb5eF5eB9e2E08ba432E150a1C").toLowerCase();
+const PIN = deploymentFor("arbitrum-sepolia").escrow;
+const FACTORY = (process.env.ANVIL_FACTORY || PIN.address).toLowerCase();
+const REGISTRY = (process.env.ANVIL_REGISTRY || PIN.registry).toLowerCase();
+const CASHIER = (process.env.ANVIL_CASHIER || PIN.cashier).toLowerCase();
 // THE PROVIDER IS BORN WITH THE RUN. A committed private key, even Anvil's public default, trips push
 // protection; this key signs the quote and Anvil impersonates its address for the registry and decline calls.
 const PROVIDER_KEY = "0x" + randomBytes(32).toString("hex");

@@ -70,6 +70,7 @@
     "check:factory-selectors": "node tools/check-factory-selectors.mjs",
     "check:fee-estimate": "node tools/check-fee-estimate.mjs",
     "check:deadline-scale": "node tools/check-deadline-scale.mjs",
+    "check:deployment-pins": "node tools/check-deployment-pins.mjs",
     "check:node-probe": "node tools/check-node-probe.mjs",
     "check:recovery-key": "node tools/check.mjs --only=recovery-key",
     "check:recovery-open": "node tools/check-recovery-open.mjs",

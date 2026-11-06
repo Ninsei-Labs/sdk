@@ -17,6 +17,7 @@ import { recordInputOf } from "../src/swaps.mjs";
 import * as engine from "../src/engine.mjs";
 import { buildOwnSideFromHalves } from "../src/order.mjs";
 import { createRecoveryKey, takerHalvesV2 } from "../src/recovery-key.mjs";
+import { deploymentFor } from "../engine/core/config.js";
 
 const suite = new CipherSuite({
   kem: new DhkemX25519HkdfSha256(),
@@ -39,7 +40,7 @@ const provider = "0x" + "a1".repeat(20);
 const registry = "0x" + "c3".repeat(20);
 const user = "0x" + "b2".repeat(20);
 const factory = "0x" + "11".repeat(20);
-const cashier = "0x40515449159EfbCb5eF5eB9e2E08ba432E150a1C";
+const cashier = deploymentFor("arbitrum-sepolia").escrow.cashier;
 const predictedEscrow = "0x" + "dd".repeat(20);
 const nowSec = Math.floor(Date.now() / 1000);
 const mnemonic = createRecoveryKey().mnemonic;

@@ -2,6 +2,9 @@
 // Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
 // Everything below this header is identical to the source.
 
+// VM-neutral deployment pins generated from deployments/<vm>/<network>.json. No address table is copied below.
+import { DEPLOYMENTS, DEPLOYMENT_CHAINS, DEPLOYMENT_VMS, deploymentFor } from "./deployments.generated.js";
+
 // Demo configuration. Every number a user sees lives here. Values come from the litepaper and are marked as demo data in the UI.
 //
 // Networks and tokens are one CHAINS structure: each network has its own native token, its own accepted tokens and
@@ -363,22 +366,10 @@ export const CHAINS = [
     explorerName: "arbiscan (sepolia)",
     gasUsd: 0.01,
     routeType: "atomic",
-    // THE DEMO'S MAIN NETWORK: the Ninsei escrow factory and the interface's fee cashier live here. The current
-    // contract version (contracts-testnet-2026.11.04) is a FACT, not an intention:
-    //   factory 0x245d3a4ac4b98d713f6c5130b56cd5d550f8cefe (height 326005419,
-    //   transaction 0xf62f54cbb0c236edc467652fce8c746c903a5d0ab4ecdd492649d57a92862296);
-    //   cashier 0x40515449159EfbCb5eF5eB9e2E08ba432E150a1C (created in the factory constructor);
-    //   registry 0x92191dc3517e15db6468628b1a493576728a9798 (this release deploys it);
-    //   implementation 0xF88658b53FcB965E580638bbFe048E8f587d6D11, codehash
-    //   0x7020a1017adbb4d4ce4710f7c632d48a5469a6f3076608e77d5675dee125653c.
-    // `OrderCreated` carries xmrAmount; the SDK reads it from the event. PREVIOUS factory before this version:
-    // 0x6ab0ef3aa67b022d4007550e7556108537debb55 (height 325677796, cashier
-    // 0x6c6c6da6392a92b8b9c69b3ec234d524cdcfcb57).
-    // mode: "live" - order creation TOGETHER WITH THE MONEY in one transaction (createOrderAndFund). cashier: the
-    // INTERFACE's fee cashier, named in quotes. implementationCodeHash: the escrow implementation the factory
-    // carries, checked against the chain. deploymentBlock: the height the factory was created at; a log search for
-    // its orders starts here, not at zero, because public RPCs cap a log query at about 10M blocks.
-    escrow: { address: "0x245d3a4ac4b98d713f6c5130b56cd5d550f8cefe", mode: "live", deploymentBlock: 326005419, cashier: "0x40515449159EfbCb5eF5eB9e2E08ba432E150a1C", registry: "0x92191dc3517e15db6468628b1a493576728a9798", implementationCodeHash: "0x7020a1017adbb4d4ce4710f7c632d48a5469a6f3076608e77d5675dee125653c" },
+    // THE DEPLOYMENT PIN COMES FROM deployments/evm/<network>.json, generated into deployments.generated.js.
+    // A redeploy changes that manifest, not this file: address, cashier, registry, implementation code hash
+    // and the factory's birth block all move together.
+    escrow: deploymentFor("arbitrum-sepolia").escrow,
     tokens: [
       // Test USDC (Circle): decimals 6 and symbol "USDC" verified on chain by the same node.
       { symbol: "USDC", address: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d", decimals: 6, usd: 1, cls: "ar-token-usdc" },
@@ -795,15 +786,15 @@ export function allowedProvidersFor(chainOrId) {
 // THE LIST OF KNOWN FACTORY BUILDS - INTERFACE POLICY, next to allowedProviders. The value is the extcodehash
 // (keccak256 of the code) of a factory the interface will accept: the factory comes from the PROVIDER REGISTRY
 // record, and its code is compared against this list. Empty for a network = no policy (the factory must still be
-// named by the record and match the signed quote). Filled at deploy: the factory has no immutables, so one build
-// gives the same hash to anyone who deployed it - a provider's own factory lands in the same list.
-export const KNOWN_FACTORY_CODES = {
-  // contracts-testnet-2026.11.04, factory deployed at 0x245d3a4ac4b98d713f6c5130b56cd5d550f8cefe.
-  // The factory has no immutables; this hash is reproducible from that release's source.
-  "arbitrum-sepolia": ["0x1fdfa1c922f660506243cab4c889aa83e22ce27d818bac9c5e4ecbccbdd04906"],
-  // Arbitrum One is deliberately absent until its factory address and build hash are known. A guessed pin is
-  // weaker than no policy; the gap is tracked with the deployment work, not filled silently here.
-};
+// named by the record and match the signed quote). Filled from the generated deployment pins, per network; a
+// provider's own factory on the same build lands in the same list because the factory has no immutables.
+export const KNOWN_FACTORY_CODES = Object.freeze(Object.fromEntries(
+  Object.values(DEPLOYMENTS)
+    .filter((deployment) => deployment.status === "live" && deployment.knownFactoryCodes.length > 0)
+    .map((deployment) => [deployment.network, [...deployment.knownFactoryCodes]]),
+));
+
+export { DEPLOYMENTS, DEPLOYMENT_CHAINS, DEPLOYMENT_VMS, deploymentFor };
 
 export function knownFactoryCodesFor(chainOrId) {
   const id = typeof chainOrId === "string" ? chainOrId : chainOrId && chainOrId.id;
