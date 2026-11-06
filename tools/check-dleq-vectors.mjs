@@ -124,6 +124,24 @@ if (BigInt("0x" + boundary.x) !== (1n << 252n)) problems.push("kat-05 does not c
   const torsion = clone(base.proof);
   torsion.XB = "0100000000000000000000000000000000000000000000000000000000000000";
   if (dleq.verify(torsion, base.context).ok) fail("torsion", "an order-2 XB was accepted");
+  // THE IDENTITY IS A FORBIDDEN SUBJECT, NOT A ZERO INTERMEDIATE. A manufactured proof of the identity would let a
+  // side omit its half from the joint spend point.
+  for (const [name, identity] of [
+    ["identity-B", (() => { const p = clone(base.proof); p.XB = primitives.ed25519.Point.ZERO.toHex(); return p; })()],
+  ]) {
+    const verdict = dleq.verify(identity, base.context);
+    if (verdict.ok) fail(name, "the identity subject was accepted");
+    else if (!/identity/.test(verdict.reason)) fail(name, "refusal does not name the identity: " + verdict.reason);
+  }
+  // The secp256k1 point at infinity has no valid compressed/uncompressed encoding in @noble, so an XA identity is
+  // refused by the parser rather than reaching an identity branch. Pin that refusal instead of inventing an encoding.
+  {
+    const identityA = clone(base.proof);
+    identityA.XA = "00";
+    const verdict = dleq.verify(identityA, base.context);
+    if (verdict.ok) fail("identity-A", "an unparsable XA identity was accepted");
+    else if (!/unparsable/.test(verdict.reason)) fail("identity-A", "refusal is not the parser's: " + verdict.reason);
+  }
   for (const [name, value] of [["null", null], ["empty", {}], ["short", { ...clone(base.proof), proofs: base.proof.proofs.slice(1) }]]) {
     try { if (dleq.verify(value, base.context).ok) fail("malformed-" + name, "accepted"); }
     catch (error) { fail("malformed-" + name, "threw: " + error.message); }

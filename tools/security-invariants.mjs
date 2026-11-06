@@ -56,8 +56,8 @@ export const SECURITY_INVARIANTS = [
   {
     id: "ARRIVAL-01",
     statement: "An XMR arrival is counted only against the signed amount and the agreed confirmation rule; locked funds are not an arrival.",
-    files: ["src/xmr-arrival.mjs", "src/swaps.mjs"],
-    checks: ["tools/check-arrival-consensus.mjs", "tools/check-arrival-real.mjs"],
+    files: ["src/xmr-arrival.mjs", "src/swaps.mjs", "engine/monero/scan.js"],
+    checks: ["tools/check-arrival-consensus.mjs", "tools/check-arrival-real.mjs", "tools/check-arrival-extra-keys.mjs"],
   },
   {
     id: "ADAPTER-01",

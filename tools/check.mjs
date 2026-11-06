@@ -2646,6 +2646,7 @@ const sellWatchCheck = () => runScriptCheck("check-sell-watch.mjs", "sell watch"
 const sellStartCheck = () => runScriptCheck("check-sell-start.mjs", "sell start");
 const arrivalConsensusCheck = () => runScriptCheck("check-arrival-consensus.mjs", "arrival consensus");
 const arrivalRealCheck = () => runScriptCheck("check-arrival-real.mjs", "real arrival");
+const arrivalExtraKeysCheck = () => runScriptCheck("check-arrival-extra-keys.mjs", "extra keys");
 const orderProofCheck = () => runScriptCheck("check-order-proof.mjs", "order proof");
 const fundingReceiptCheck = () => runScriptCheck("check-funding-receipt.mjs", "funding receipt");
 const evmDecodersCheck = () => runScriptCheck("check-evm-decoders.mjs", "evm decoders");
@@ -2720,6 +2721,7 @@ const CHECKS = {
   "sell-start": sellStartCheck,
   "arrival-consensus": arrivalConsensusCheck,
   "arrival-real": arrivalRealCheck,
+  "arrival-extra-keys": arrivalExtraKeysCheck,
   "order-proof": orderProofCheck,
   "sweep-window": sweepWindowCheck,
   "sweep-order": sweepFromOrderCheck,

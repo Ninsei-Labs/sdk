@@ -247,9 +247,13 @@ export async function restoreWallet(request = {}) {
           why: e && e.params && e.params.why ? e.params.why : null,
         };
       }
-      // THE KEY IMAGES OF THE WALLET, CHECKED AT THE NODE. `scanTxs` finds an output; whether the chain already
-      // spent it is a separate fact, and the caller must not sign on a guess. A failed scan has no images to ask for.
-      if (windowReport.used && requestWindow.nodeUrl && typeof driver.getKeyImages === "function") {
+      // THE KEY IMAGES OF THE WALLET, CHECKED AT THE NODE - ONLY WHEN THE CALLER EXPLICITLY TRUSTS THAT NODE.
+      // Key images are linkable: a third-party daemon can tie them to the visitor's connection and recognise later
+      // spends. The window path must not leak them by default. A trusted-node caller opts in with
+      // `window.trustedNode: true`; otherwise the pass reports spent status as unavailable and the full-scan path
+      // (which uses the wallet's own spent check) remains available.
+      if (windowReport.used && requestWindow.nodeUrl && requestWindow.trustedNode === true
+          && typeof driver.getKeyImages === "function") {
         try {
           const exported = await driver.getKeyImages();
           const images = Array.isArray(exported) ? exported
@@ -273,7 +277,7 @@ export async function restoreWallet(request = {}) {
         } catch { windowReport.spent = null; windowReport.spentWhy = "check-failed"; }
       } else if (windowReport.used && requestWindow.nodeUrl) {
         windowReport.spent = null;
-        windowReport.spentWhy = "no-key-images";
+        windowReport.spentWhy = requestWindow.trustedNode === true ? "no-key-images" : "untrusted-node";
       }
       // A WINDOW WITH COINS IS THE ANSWER. A window with none falls through to the full scan unless the caller
       // explicitly turned the fallback off.

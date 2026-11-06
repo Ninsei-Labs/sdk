@@ -1,4 +1,4 @@
-// Forked from github.com/athanorlabs/go-dleq/secp256k1/curve.go (MIT).
+// Forked from github.com/athanorlabs/go-dleq/secp256k1/curve.go (LGPL-3.0-only; see LICENSE-GO-DLEQ).
 // ORACLE patches, kept minimal and marked:
 //   - NewCurveLegacyLE(): the SDK reads the SHA3-512 digest least-significant
 //     first before reducing mod n; the reference reads it big-endian. The

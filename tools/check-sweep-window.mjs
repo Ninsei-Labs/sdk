@@ -54,7 +54,7 @@ export const sweepWindowCheck = async () => {
   const nodeCalls = [];
   withImages.wallet.driver().getKeyImages = async () => [{ getHex: () => "aa" }, { getHex: () => "bb" }];
   const spent = await restoreWallet({ wallet: withImages.wallet, fromHeight: 100,
-    window: { txHashes: ["a"], toHeight: 110, tipHeight: 900, nodeUrl: "https://node.example" },
+    window: { txHashes: ["a"], toHeight: 110, tipHeight: 900, nodeUrl: "https://node.example", trustedNode: true },
     fetchImpl: async (url, options) => { nodeCalls.push([url, JSON.parse(options.body)]); return { ok: true, json: async () => ({ spent_status: [false, true] }) }; },
   });
   check(spent.window && spent.window.spent === 1 && spent.window.keyImages === 2,
@@ -62,6 +62,23 @@ export const sweepWindowCheck = async () => {
   check(nodeCalls.length === 1 && nodeCalls[0][0].endsWith("/is_key_image_spent"), "the key images were not checked at the node");
   check(spent.scanComplete === true && spent.scanIncompleteReason === undefined,
     `a window with spent status was reported incomplete: ${JSON.stringify({ complete: spent.scanComplete, reason: spent.scanIncompleteReason })}`);
+  notes.push("an explicitly trusted node may receive key images for the spent check");
+
+  // KEY IMAGES ARE LINKABLE. Without an explicit trusted-node opt-in the SDK must not send them at all, even when
+  // the wallet exposes them and the caller supplied a node URL; the missing spent check is named, not guessed.
+  const untrusted = fake({ balance: 5n });
+  let untrustedCalls = 0;
+  untrusted.wallet.driver().getKeyImages = async () => [{ getHex: () => "aa" }];
+  const withheld = await restoreWallet({ wallet: untrusted.wallet, fromHeight: 100,
+    window: { txHashes: ["a"], toHeight: 110, tipHeight: 900, nodeUrl: "https://node.example" },
+    fetchImpl: async () => { untrustedCalls += 1; return { ok: true, json: async () => ({ spent_status: [true] }) }; },
+  });
+  check(untrustedCalls === 0, "key images were sent to a node that was not declared trusted");
+  check(withheld.window && withheld.window.spent === null && withheld.window.spentWhy === "untrusted-node",
+    `an untrusted node reported ${JSON.stringify(withheld.window)}`);
+  check(withheld.scanComplete === false && withheld.scanIncompleteReason === "spent-status-unavailable",
+    `an untrusted window reported ${JSON.stringify({ complete: withheld.scanComplete, reason: withheld.scanIncompleteReason })}`);
+  notes.push("key images stay in the wallet unless the node is explicitly trusted");
 
   const noScan = fake({ balance: 5n, scanTxs: false });
   const skipped = await restoreWallet({ wallet: noScan.wallet, fromHeight: 100,

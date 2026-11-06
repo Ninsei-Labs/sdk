@@ -39,5 +39,5 @@ The corpus uses fixed witnesses, contexts and DRBG seeds; proofs are regenerated
 
 ## Provenance
 
-The Go tree is derived from `AthanorLabs/go-dleq` (MIT) and the review harness in `dleq-review`. The Rust verifier (Rust 1.99 or newer)
+The Go tree is derived from `AthanorLabs/go-dleq` (LGPL-3.0-only; see `LICENSE-GO-DLEQ`) and the review harness in `dleq-review`. The Rust verifier (Rust 1.99 or newer)
 is the review's from-spec verifier. Keep the copyright/licence notices when editing either tree.

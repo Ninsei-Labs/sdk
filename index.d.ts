@@ -1473,6 +1473,11 @@ export interface SweepRestoreRequest {
     readonly toHeight: number;
     readonly tipHeight: number;
     readonly fallback?: boolean;
+    /**
+     * EXPLICIT PERMISSION TO SEND KEY IMAGES TO `nodeUrl` for the spent check. Absent/false: key images never leave
+     * the wallet in the window path, and the result names `spentWhy: "untrusted-node"` with an incomplete scan.
+     */
+    readonly trustedNode?: boolean;
   };
   /** The fetch used for `get_block`; absent - the global fetch. */
   readonly fetchImpl?: typeof fetch;

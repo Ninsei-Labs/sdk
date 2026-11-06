@@ -51,6 +51,13 @@ export function notices() {
       });
     }
   }
+  // THE DLEQ PORT IS PART OF THE PACKAGE, NOT AN NPM DEPENDENCY. `pnpm licenses list` cannot see it, so its
+  // licence text is carried explicitly; a consumer of the published package receives the LGPL text with the rest.
+  rows.push({
+    name: "go-dleq", versions: [], license: "LGPL-3.0-only",
+    repository: "https://github.com/athanorlabs/go-dleq/tree/d6fd7c03e213683cbb286d4d5bbba1c7e7e1cfe1",
+    files: [{ name: "LICENSE", text: textOf(join(ROOT, "test", "dleq-oracle", "LICENSE-GO-DLEQ")) }],
+  });
   rows.sort((a, b) => a.name.localeCompare(b.name) || a.versions.join(",").localeCompare(b.versions.join(",")));
   const seen = new Set();
   const unique = rows.filter((row) => {
