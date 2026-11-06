@@ -4,11 +4,15 @@ name: WalletConnect vendor
 # lock and fails on any difference. Draft pull requests are skipped like the main CI: review comes first.
 on:
   pull_request:
+    # `ready_for_review` is not part of the default types: without it, marking a draft ready would not start the
+    # workflow. The job below still skips every draft run.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - assets/vendors/walletconnect/**
       - assets/vendors/MANIFEST.json
       - tools/vendors/walletconnect/**
       - tools/check-walletconnect-build.mjs
+      - tools/check-walletconnect-build-teeth.mjs
       - .github/workflows/walletconnect-vendor.yml
   push:
     branches: [main]
@@ -17,6 +21,7 @@ on:
       - assets/vendors/MANIFEST.json
       - tools/vendors/walletconnect/**
       - tools/check-walletconnect-build.mjs
+      - tools/check-walletconnect-build-teeth.mjs
       - .github/workflows/walletconnect-vendor.yml
   workflow_dispatch:
 
@@ -37,6 +42,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      - name: Set up pnpm (from packageManager)
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
@@ -49,7 +57,7 @@ jobs:
         run: npm ci
 
       - name: Rebuild and compare the bundle
-        run: npm run check:walletconnect-build
+        run: pnpm run check:walletconnect-build
 
       - name: Show that the comparison can fail
-        run: npm run check:walletconnect-build-teeth
+        run: pnpm run check:walletconnect-build-teeth
