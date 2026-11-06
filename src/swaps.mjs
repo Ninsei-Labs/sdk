@@ -13,7 +13,7 @@ import * as engine from "./engine.mjs";
 import * as recordModule from "./record.mjs";
 // The order: our own side is built by the engine's builder, the counterparty's side is verified and accepted, and
 // the joint address is assembled from the halves. There are no formulas of our own in the core - see order.mjs.
-import { buildOwnSideFromHalvesChunked, contextOf, halfHex, norm, normalizeCounterpartyView, orderStepChunked } from "./order.mjs";
+import { buildOwnSideFromHalvesKnown, contextOf, halfHex, norm, normalizeCounterpartyView, orderStepChunked } from "./order.mjs";
 // Locking the funds: sending goes through the already-finished step (`lock.send`), the wallet is an adapter from outside.
 import * as lock from "./lock.mjs";
 import * as flow from "./swap-flow.mjs";
@@ -21,7 +21,7 @@ import { fundingReceiptVerdict } from "../engine/evm/funding.js";
 import { vmOfChain, legFor } from "./legs/index.mjs";
 // THE VIEW HALVES - from the core's primitives: the sum of two halves is the key the wallet sees incoming payments
 // with. There is no arithmetic of the core's own here either (see order.mjs) - we use the same halves builder.
-import { keccak256, primitives, secp256k1 } from "./primitives.mjs";
+import { primitives } from "./primitives.mjs";
 import { probeMoneroNode } from "./probes.mjs";
 // MARKING READY - A FINISHED STEP, NOT A SECOND IMPLEMENTATION OF IT: it requires the order expectations and checks
 // the slots against the chain BEFORE signing (actions.markReady). The watch must call exactly it, otherwise "we saw
@@ -1072,7 +1072,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         if (salt !== orderSalt) throw new SdkError("bad-input", { field: "recoverySalt", why: "order-salt" });
         const derived = takerHalvesV2({ mnemonic: key.mnemonic, chainId, factory: request.order.factory, salt });
         recovery = { storage, key, salt, derivation: "salt-v2", newKey: !saved || saved.backupConfirmed !== true };
-        keySide = (await buildOwnSideFromHalvesChunked(request.order, { spendHalf: derived.spendHalf, viewHalf: derived.viewHalf })).side;
+        keySide = buildOwnSideFromHalvesKnown(request.order, { spendHalf: derived.spendHalf, viewHalf: derived.viewHalf }).side;
         // THE MAKER'S VIEW HALF IS DERIVED FROM THE KEY, NOT CHOSEN BY THE NODE. Without this binding a
         // signed quote could carry another view half; the funded address would differ from the one the twelve
         // words rebuild, and `sweep.fromOrder` would refuse after the funds were locked.
@@ -1595,15 +1595,12 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       try { salt = recoverySaltOf(offer.recovery && offer.recovery.salt ? offer.recovery.salt : order.salt); }
       catch { throw new SdkError("bad-input", { field: "offer.recovery" }); }
       const derived = takerHalvesV2({ mnemonic: key.mnemonic, chainId, factory: order.factory, salt });
-      const own = await buildOwnSideFromHalvesChunked(order, { spendHalf: derived.spendHalf, viewHalf: derived.viewHalf });
+      const own = buildOwnSideFromHalvesKnown(order, { spendHalf: derived.spendHalf, viewHalf: derived.viewHalf });
       // THE OFFER MUST NAME THE HALF THIS KEY ACTUALLY PRODUCES. The relay already checked the proof; the record
       // needs the same point and commitment, otherwise a later claim would reveal a half the escrow rejects.
-      const ownCommit = (() => {
-        try {
-          const point = secp256k1.Point.fromHex(own.side.proof.XA);
-          return "0x" + Array.from(keccak256(point.toBytes(false).slice(1)), (b) => b.toString(16).padStart(2, "0")).join("");
-        } catch { return null; }
-      })();
+      // THE COMMITMENT COMES FROM THE HALF, NOT FROM A SECOND PROOF. `buildOwnSideFromHalvesKnown` derives it with
+      // the same builder the contract mirrors; the side carries no proof because the firm answer already did.
+      const ownCommit = own.commitHalf;
       // THE WHOLE COMMITMENT, NOT ITS LOW 160 BITS. `findSwaps` compares all 32 bytes, so a bid whose high 96 bits
       // differ would be invisible to a words-only search while `startSell` accepted it.
       const fullHex = (v) => String(v || "").replace(/^0x/, "").toLowerCase();

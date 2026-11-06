@@ -142,6 +142,11 @@ console.log("=== 3) THE INTERFACE ENTRY POINTS USE THE CHUNKED STEP ===");
   if (/await\s+orderStepChunked\s*\(/.test(swaps) && !/\borderStep\s*\(/.test(swaps)) {
     ok("swaps.start runs the whole order step in chunks");
   } else bad("swaps.start still calls the synchronous order step");
+  // THE SECOND PROOF IS NOT BUILT. start and startSell already hold the verified side; they need points, the
+  // view point and the commitment, not another ~3 s prove whose result is never sent.
+  if (/buildOwnSideFromHalvesKnown/.test(swaps) && !/buildOwnSideFromHalvesChunked/.test(swaps)) {
+    ok("start and startSell reuse the known-halves side without a second proof");
+  } else bad("a known-halves path builds the DLEQ proof again");
   if (/orderStepChunked|buildOwnSideChunked/.test(flow)) {
     ok("the atomic flow uses the chunked builders");
   } else bad("the atomic flow is back on a synchronous builder");
