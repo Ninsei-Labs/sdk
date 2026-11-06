@@ -374,10 +374,11 @@ export function createDleq2({ ed25519, secp256k1, keccak256, sha3_512, randomByt
     let XA, XB, csA, csB;
     try {
       XA = P(curves.A, proof.XA); XB = P(curves.B, proof.XB);
-      // THE SUBJECT MUST NOT BE THE IDENTITY. A proof of the identity can be manufactured without contributing a
-      // half, and the joint spend point would silently lose this side; Monero/relay spec 12.10 forbids it. Check
-      // before the knowledge proofs and the bit loop, while valid zero INTERMEDIATE terms stay legal.
-      if (XA.equals(curves.A.P.ZERO) || XB.equals(curves.B.P.ZERO)) {
+      // THE SUBJECT MUST NOT BE THE EDWARDS IDENTITY. A proof of the identity can be manufactured without
+      // contributing a half, and the joint spend point would silently lose this side; Monero/relay spec 12.10
+      // forbids it. The secp256k1 side needs no separate branch: @noble refuses the point-at-infinity encoding, so
+      // an XA identity is refused as unparsable before this check.
+      if (XB.equals(curves.B.P.ZERO)) {
         return { ok: false, reason: "proof: the subject point is the identity" };
       }
       if (!torsionFree(curves.B, XB)) return { ok: false, reason: "proof: XB is not in the prime-order subgroup" };

@@ -133,6 +133,15 @@ if (BigInt("0x" + boundary.x) !== (1n << 252n)) problems.push("kat-05 does not c
     if (verdict.ok) fail(name, "the identity subject was accepted");
     else if (!/identity/.test(verdict.reason)) fail(name, "refusal does not name the identity: " + verdict.reason);
   }
+  // The secp256k1 point at infinity has no valid compressed/uncompressed encoding in @noble, so an XA identity is
+  // refused by the parser rather than reaching an identity branch. Pin that refusal instead of inventing an encoding.
+  {
+    const identityA = clone(base.proof);
+    identityA.XA = "00";
+    const verdict = dleq.verify(identityA, base.context);
+    if (verdict.ok) fail("identity-A", "an unparsable XA identity was accepted");
+    else if (!/unparsable/.test(verdict.reason)) fail("identity-A", "refusal is not the parser's: " + verdict.reason);
+  }
   for (const [name, value] of [["null", null], ["empty", {}], ["short", { ...clone(base.proof), proofs: base.proof.proofs.slice(1) }]]) {
     try { if (dleq.verify(value, base.context).ok) fail("malformed-" + name, "accepted"); }
     catch (error) { fail("malformed-" + name, "threw: " + error.message); }
