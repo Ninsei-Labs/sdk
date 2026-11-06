@@ -8,7 +8,7 @@
     },
     "walletconnect/wc-browser.js": {
       "sha256": "fb64f27c1ec026811fe72bfff06da1f997bbf720569ea73be87818e2c5847eec",
-      "source": "@walletconnect"
+      "source": "tools/vendors/walletconnect (build from c466583)"
     }
   }
 }
