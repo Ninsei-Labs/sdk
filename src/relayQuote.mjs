@@ -6,6 +6,7 @@
 import { SdkError } from "./errors.mjs";
 import { keccak256, secp256k1 } from "./primitives.mjs";
 import { recoverOrderQuoteKey } from "./quoteEip712.mjs";
+import { xmrAmountVerdict } from "./xmrAmountPolicy.mjs";
 import * as engine from "./engine.mjs";
 
 export const RELAY_QUOTE_TYPE =
@@ -195,7 +196,6 @@ function checkOrderQuote(quote, terms, nowSec) {
     ["readyBy", String(order.readyBy)],
     ["t1", String(order.t1)],
     ["salt", order.salt],
-    ["xmrAmount", String(terms.xmrAmount)],
     ["claimTip", String(terms.claimTip)],
     ["provider", terms.maker],
     ["registry", terms.registry],
@@ -203,6 +203,10 @@ function checkOrderQuote(quote, terms, nowSec) {
   for (const [field, want] of pairs) {
     if (!same(quote[field], want)) throw new SdkError("quote-refused", { step: "answer", why: "field", field });
   }
+  // THE XMR SIDE IS ALLOWED TO BE BETTER, NOT WORSE. `ask` may sign at least the requested amount; `bid` may sign
+  // at most it. The ETH `amount` above stays exact because it is part of the proof context.
+  const xmr = xmrAmountVerdict({ side: terms.side, requested: terms.xmrAmount, signed: quote.xmrAmount });
+  if (!xmr.ok) throw new SdkError("quote-refused", { step: "answer", why: "field", field: "xmrAmount" });
   if (same(quote.feeRecipient, ZERO)) {
     throw new SdkError("quote-refused", { step: "answer", why: "fee-recipient" });
   }

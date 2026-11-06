@@ -108,11 +108,19 @@ console.log("=== 5) THE ENVELOPE IS THE REQUEST, NOT THE OUTER OBJECT ===");
   else bad("a foreign claimer in the envelope returned " + (foreign && (foreign.code || "a ticket")));
 }
 
-console.log("=== 6) THE REQUESTED XMR MUST BE THE SIGNED XMR ===");
+console.log("=== 6) THE REQUESTED XMR MUST BE THE SIGNED XMR - OR BETTER ===");
 {
-  const got = await callSale({ saleRequest: { claimer: makeQuote().claimer, xmr: 2 } }).catch((e) => e);
-  if (got && got.code === "quote-refused" && got.params && got.params.why === "xmr-amount") ok("a different requested XMR is refused");
-  else bad("a different requested XMR returned " + (got && (got.code || "a ticket")));
+  const requested = 2_000_000_000_000n;
+  const request = () => ({ claimer: makeQuote().claimer, xmrAmount: String(requested) });
+  const exact = await callSale({ quote: makeQuote({ xmrAmount: String(requested) }), saleRequest: request() }).catch((e) => e);
+  if (exact && exact.ok === true) ok("an exact signed XMR amount is accepted");
+  else bad("an exact signed XMR amount was refused: " + (exact && exact.code));
+  const better = await callSale({ quote: makeQuote({ xmrAmount: String(requested + 1n) }), saleRequest: request() }).catch((e) => e);
+  if (better && better.ok === true) ok("a signed XMR amount above the request is accepted on an ask");
+  else bad("a better signed XMR amount was refused: " + (better && better.code));
+  const worse = await callSale({ quote: makeQuote({ xmrAmount: String(requested - 1n) }), saleRequest: request() }).catch((e) => e);
+  if (worse && worse.code === "quote-refused" && worse.params && worse.params.why === "xmr-amount") ok("a signed XMR amount below the request is refused");
+  else bad("a worse signed XMR amount returned " + (worse && (worse.code || "a ticket")));
 }
 
 console.log("=== 7) THE RETURNED ORDER IS COMPARED WITH THE SIGNED FIELDS ===");

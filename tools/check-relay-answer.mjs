@@ -11,6 +11,7 @@ import { dirname, join } from "node:path";
 import { keccak256, secp256k1 } from "../src/primitives.mjs";
 import { relayQuoteDigest, verifyFirmAnswer, verifyRelayQuoteFrame } from "../src/relayQuote.mjs";
 import { verifyCounterparty } from "../src/order.mjs";
+import { xmrAmountVerdict } from "../src/xmrAmountPolicy.mjs";
 import { buildRelayAnswerFixture } from "./gen-relay-answer.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -72,6 +73,42 @@ try {
     ok("the inner quote is bound to the terms and its signature");
   } else bad("verified quote: " + JSON.stringify(verified.quote));
 } catch (error) { bad("valid answer refused: " + JSON.stringify(error && (error.code || error.params || error.message))); }
+
+console.log("=== 2b) A BETTER XMR AMOUNT IS ACCEPTED, A WORSE ONE IS REFUSED ===");
+{
+  const withXmr = (xmrAmount) => ({
+    ...request,
+    terms: { ...request.terms, xmrAmount },
+  });
+  const better = verifyFirmAnswer({
+    answer, features, now: fixture.now,
+    request: withXmr("999999999999"),
+  });
+  if (better && better.quote.xmrAmount === fixture.request.terms.xmrAmount) ok("an ask accepts a signed amount above the request");
+  else bad("an ask refused a better signed amount");
+  try {
+    verifyFirmAnswer({ answer, features, now: fixture.now, request: withXmr("1000000000001") });
+    bad("an ask accepted a signed amount below the request");
+  } catch (error) {
+    if (error && error.code === "quote-refused" && error.params && error.params.field === "xmrAmount") ok("an ask refuses a signed amount below the request");
+    else bad("an ask refused a worse amount with " + JSON.stringify(error && (error.code || error.params || error.message)));
+  }
+  const cases = [
+    ["ask equal", "ask", "1000000000000", "1000000000000", true],
+    ["ask better", "ask", "1000000000000", "1000000000001", true],
+    ["ask worse", "ask", "1000000000001", "1000000000000", false],
+    ["bid equal", "bid", "1000000000000", "1000000000000", true],
+    ["bid better", "bid", "1000000000001", "1000000000000", true],
+    ["bid worse", "bid", "1000000000000", "1000000000001", false],
+    ["unreadable", "ask", "not-a-number", "1000000000000", false],
+    ["unknown side", "sideways", "1000000000000", "1000000000000", false],
+  ];
+  for (const [label, side, requested, signed, want] of cases) {
+    const got = xmrAmountVerdict({ side, requested, signed }).ok;
+    if (got === want) ok(`${label}: ${got ? "accepted" : "refused"}`);
+    else bad(`${label}: got ${got}, expected ${want}`);
+  }
+}
 
 console.log("=== 3) EACH SIDE CARRIES A REAL KNOWLEDGE PROOF ===");
 const proofSide = (half) => ({
