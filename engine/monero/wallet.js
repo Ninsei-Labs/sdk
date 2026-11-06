@@ -18,19 +18,6 @@ import { addressFromKeys } from "./address.js";
 import * as moneroMnemonic from "./mnemonic.js";
 import * as moneroKeys from "./keys.js";
 
-const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-
-function base58(bytes) {
-  let num = 0n;
-  for (const b of bytes) num = num * 256n + BigInt(b);
-  let out = "";
-  while (num > 0n) {
-    out = B58[Number(num % 58n)] + out;
-    num /= 58n;
-  }
-  return out;
-}
-
 // A pseudo-address for mock mode: the right length (95) and network prefix, but WITHOUT a checksum.
 // The UI always marks it as mock, so nobody sends XMR there.
 

@@ -5,7 +5,7 @@
 // package: mnemonic encoding/checksum, seed reduction, spend/view keys, the subaddress formula and the address
 // encoder. A drift here is a different wallet, not a cosmetic change.
 //
-// Run: node tools/check-monero-keys.mjs
+// Run: node tools/check.mjs --only=monero-keys (the check is registered in the battery)
 import { addressFromKeys, checkAddress } from "../engine/monero/address.js";
 import { createSwapWallet } from "../engine/monero/wallet.js";
 import * as mnemonic from "../engine/monero/mnemonic.js";
@@ -21,6 +21,8 @@ const PUBLIC_SPEND = "ca4a448c3fc4d04945da9fdf920976c05e9bbe3d8cebb1858ea44d587c
 const PUBLIC_VIEW = "88c1ef1bf8b7575ea2a8ccbc0bbde2d1b5e00da2980097a8b1a51e6d09f707ae";
 const SUB_SPEND = "b4c4701686dfd7cac7450f31333730de09ca61179fdecf244dc3793f8c7cc86e";
 const SUB_VIEW = "15061ca226c8d7656c6fff68ab7444c803c2ec00aefde1b929fb097df026b3cd";
+const SUB_ACCOUNT_SPEND = "a7e310bddf060161a29e968e0cdf00b360ecf6a7f057d7c8ef5900330b8182e8";
+const SUB_ACCOUNT_VIEW = "f40788bc3dda62f8b652e490cc8633257dac962806ff8685d5b5387c3602f039";
 const MAINNET = "49HjJN4ZbLjDFqe3Mus7mPZBE6Q27cRGtPLfyuNejGdYZhvke36zj1xGq5kDCbSCXbc5TLTR7vygzVDYTcgFURLaLe4Gdds";
 const MAINNET_SUB = "89JZu9GXu4zavCrprHJBhqe93rCDYAXGS75C8qoi1DKuKQwCfbZMM3tHxwH5H7Mx5ZaTPoHrEcTBEXyKiHYt47L6Q8ar72s";
 const STAGENET = "59VmPCyXEwqDFqe3Mus7mPZBE6Q27cRGtPLfyuNejGdYZhvke36zj1xGq5kDCbSCXbc5TLTR7vygzVDYTcgFURLaLe9FA9B";
@@ -49,6 +51,10 @@ export const moneroKeysCheck = async () => {
   const sub = wallet.subaddress(1, 0);
   pw(sub.publicSpendKey, SUB_SPEND, "subaddress spend key");
   pw(sub.publicViewKey, SUB_VIEW, "subaddress view key");
+  // The account index is the major part of the SubAddr hash; this pins its order against a regression.
+  const subAccount = wallet.subaddress(0, 1);
+  pw(subAccount.publicSpendKey, SUB_ACCOUNT_SPEND, "account subaddress spend key");
+  pw(subAccount.publicViewKey, SUB_ACCOUNT_VIEW, "account subaddress view key");
 
   const mainnet = addressFromKeys({ network: "mainnet", spendPub: PUBLIC_SPEND, viewPub: PUBLIC_VIEW }, { keccak256 });
   const mainnetSub = addressFromKeys({ network: "mainnet", kind: "subaddress", spendPub: SUB_SPEND, viewPub: SUB_VIEW }, { keccak256 });
