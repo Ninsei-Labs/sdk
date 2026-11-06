@@ -1,6 +1,5 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/monero/address.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
+// SDK ENGINE MODULE - the demo's sdk/ mirror copies this file byte for byte (tools/build-sdk-engine.mjs).
+// The page's own www/js module is a separate copy; edit this package source and regenerate the mirror.
 
 // Monero address checks and assembly: format + real checksum + network prefixes.
 // A detail easy to get wrong: Monero has its OWN base58 - block-based (8 bytes -> 11 chars, the remainder last).
@@ -8,7 +7,10 @@
 // '1' can be just a digit. So bs58 does not fit and base58 is implemented numerically below.
 // Without the checksum a typo in the payout address looks valid, and in an atomic swap that means lost money.
 // Network prefixes (official): mainnet 18 plain, 19 with payment id, 42 subaddress.
-// The vendored monero-js knows ONLY mainnet, so we have our own encoder: the library gives public keys, we build the string.
+// The package owns the block-wise Monero base58 and checksum encoder; keys come from engine/monero/keys.js, not
+// from a vendored browser bundle.
+
+import { keccak256 } from "../../src/primitives.mjs";
 
 const BLOCK_CHARS = 11;
 
@@ -64,22 +66,6 @@ export function networkFromShape(addr) {
 
 export function isStagenetShaped(addr) {
   return networkFromShape(addr) === "stagenet";
-}
-
-let lib = null;
-let libFailed = false;
-
-async function loadLib() {
-  if (lib) return lib;
-  if (libFailed) return null;
-  try {
-    const mod = await import("../../assets/vendors/monero/monero-js-browser.js?v=05c682ea");
-    lib = mod.default || mod;
-    return lib;
-  } catch {
-    libFailed = true;
-    return null;
-  }
 }
 
 // The Monero-base58 alphabet (same as Bitcoin, different encoding rules).
@@ -187,12 +173,15 @@ function hexToBytes(hex, expectedBytes, label) {
   return out;
 }
 
-// Assembly of the address from public keys: deps = { keccak256 } (in the browser, from the monero-js bundle).
-// bs58 is not needed: Monero base58 is block-based and numeric, see the comment at base58ToBlock.
+// Assembly of the address from public keys: deps = { keccak256 }. bs58 is not needed: Monero base58 is block-based
+// and numeric, see the comment at base58ToBlock.
 export function addressFromKeys({ network, kind = "primary", spendPub, viewPub, paymentId }, deps) {
   if (!deps?.keccak256) throw new Error("addressFromKeys needs { keccak256 }");
   const payload = addressPayload({ network, kind, spendPub, viewPub, paymentId });
-  const digest = Uint8Array.from(deps.keccak256(deps.Buffer ? deps.Buffer.from(payload) : payload));
+  // The injected hash may be the `keccak256` npm package (it only accepts a Buffer); the package's own primitive
+  // takes a Uint8Array. The optional Buffer keeps both call styles working.
+  const input = deps.Buffer ? deps.Buffer.from(payload) : payload;
+  const digest = Uint8Array.from(deps.keccak256(input));
   const full = new Uint8Array(payload.length + 4);
   full.set(payload, 0);
   full.set(digest.slice(0, 4), payload.length);
@@ -211,18 +200,13 @@ export async function checkAddress(addr, opts = {}) {
   if (opts.expectNetwork && shape && shape !== opts.expectNetwork) {
     return { ok: false, reason: `This is a ${shape} address, but the swap runs on ${opts.expectNetwork}` };
   }
-  const l = await loadLib();
-  if (!l) {
-    return { ok: true, verified: false, network: shape, reason: "Format looks valid (checksum check unavailable: monero-js bundle is not built)" };
-  }
   try {
     const bytes = decodeMoneroBase58(a);
     const payloadLen = bytes.length - 4;
     if (payloadLen < 65) throw new Error("Address is too short");
     const payload = bytes.slice(0, payloadLen);
     const checksum = bytes.slice(payloadLen);
-    // keccak256 from the bundle needs Buffer: it does not take Uint8Array
-    const digest = Uint8Array.from(l.keccak256(l.Buffer.from(payload)));
+    const digest = Uint8Array.from(keccak256(payload));
     const match = checksum.length === 4 && checksum.every((b, i) => b === digest[i]);
     if (!match) {
       // The demo mock addresses (wallet.js, mock mode) intentionally have no checksum: the UI marks them as fake,
@@ -242,9 +226,7 @@ export async function checkAddress(addr, opts = {}) {
   }
 }
 
-// Helper for code that has already loaded the bundle: build an address of the right network from wallet keys.
+// Build an address of the right network from wallet keys.
 export async function addressForNetwork({ network, kind = "primary", spendPub, viewPub }) {
-  const l = await loadLib();
-  if (!l) throw new Error("monero-js bundle is not available");
-  return addressFromKeys({ network, kind, spendPub, viewPub }, { keccak256: l.keccak256, Buffer: l.Buffer });
+  return addressFromKeys({ network, kind, spendPub, viewPub }, { keccak256 });
 }

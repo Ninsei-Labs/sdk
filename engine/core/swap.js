@@ -219,7 +219,7 @@ export function halvesWalletOf(swap) {
   if (!e.half || !e.viewHalf || !e.counterViewHalf || !e.moneroAddress) return null;
   return {
     source: "halves",
-    library: "monero-js",
+    library: "ninsei-monero-keys",
     network: e.moneroNetwork || MONERO.networkType,
     address: e.moneroAddress,
     subaddress: null,

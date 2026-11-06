@@ -1,5 +1,6 @@
 ## 0.57.2 — 2026-11-06
 
+- Monero mnemonic, key and subaddress derivation now comes from the package's own `engine/monero/mnemonic.js` and `engine/monero/keys.js` over `@noble/curves`; the vendored `monero-js` browser bundle and its licence copy are gone. Address building and checksum checks no longer load a vendor at runtime. The pinned mnemonic, spend/view key, subaddress and address vectors are unchanged.
 - Re-release of 0.57.0 after the publish job rejected the local tarball path. `0.57.1` was tagged but not published; there are no API changes from 0.57.0, and the package content and generated deployment pins are unchanged.
 
 ## 0.57.0 — 2026-11-06

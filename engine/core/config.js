@@ -862,9 +862,8 @@ export function tokenById(idOrChainId, symbolMaybe) {
 }
 
 
-// The demo's Monero network. networkType=mainnet because monero-js (the vendored mnemonic/key/address library)
-// supports only mainnet address prefixes (see the vendored readme). The monero-ts mode (WebAssembly wallet2) also
-// handles stagenet.
+// The demo's Monero network. The package's own Monero key module supports the mainnet, stagenet and testnet
+// address prefixes. The monero-ts mode (WebAssembly wallet2) also handles stagenet.
 // The order recipient (claimer) for TESTS on test networks.
 //
 // IMPORTANT: the contract requires locker and claimer to differ, so a payment address must not be given here -
@@ -992,7 +991,7 @@ export const DEMO = {
   defaultSpeed: 60,
   scenarios: ["happy", "maker_no_lock", "user_no_ready", "maker_stall"],
   defaultScenario: "happy",
-  // There is no wallet mode any more: keys in the demo are computed by monero-js, the only path (the WASM wallet
+  // There is no wallet mode any more: keys are derived by the package's own Monero module, the only path (the WASM wallet
   // monero-ts moved to the separate sweep domain - its own policy and COOP/COEP).
   // mock - confirmations by a sim timer; live - by the real Monero mainnet height
   chainModes: ["mock", "live"],
