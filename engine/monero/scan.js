@@ -144,17 +144,72 @@ export function derivedOutputKey(derivation, outputIndex, spendPubHex) {
 
 // Helper: the tx public key sits in the transaction extra, tag 0x01, 32 bytes. We read extra as is - the same
 // parse the wallet does. extra arrives from the node as a BYTE ARRAY (not hex), so both forms are accepted.
-export function txPublicKeyFromExtra(extra) {
-  const b = Array.isArray(extra) ? Uint8Array.from(extra) : hexToBytes(extra);
-  let i = 0;
-  while (i < b.length) {
-    const tag = b[i];
-    if (tag === 0x01) return bytesToHex(b.subarray(i + 1, i + 33));
-    if (tag === 0x02) { i += 1 + b[i + 1]; continue; }          // nonce
-    if (tag === 0x00) { i += 1 + b[i + 1]; continue; }          // additional public key
-    return null;                                                 // unknown tag: we do not guess
+//
+// MONERO'S EXTRA IS A TAGGED SEQUENCE, NOT A FIXED LAYOUT. The tags we must know here:
+//   0x00 padding      - a run of zero bytes (the tag itself is one of them), no length field;
+//   0x01 public key   - 32 bytes;
+//   0x02 nonce        - varint length, then that many bytes;
+//   0x03 merge mining - a length-prefixed string holding varint depth + 32-byte hash;
+//   0x04 additional   - varint count, then count * 32-byte public keys, ONE PER OUTPUT INDEX.
+// The old parser treated 0x00 as an additional key and skipped it with `1 + b[i+1]`, and it stopped at 0x04.
+// A subaddress payment in a mixed transaction then looked absent: the main key does not derive that output.
+function readExtraVarint(bytes, at) {
+  let value = 0n;
+  let shift = 0n;
+  let i = at;
+  for (let count = 0; count < 10 && i < bytes.length; count++) {
+    const byte = bytes[i++];
+    value |= BigInt(byte & 0x7f) << shift;
+    if ((byte & 0x80) === 0) return { value, next: i };
+    shift += 7n;
   }
   return null;
+}
+
+/** The transaction keys in `extra`: the main key(s) and the per-output additional keys (tag 0x04). */
+export function txKeysFromExtra(extra) {
+  const b = Array.isArray(extra) ? Uint8Array.from(extra) : hexToBytes(extra);
+  const txPublicKeys = [];
+  const additionalPublicKeys = [];
+  let i = 0;
+  while (i < b.length) {
+    const tag = b[i++];
+    if (tag === 0x00) {
+      // Padding is a run of zeros; the next non-zero byte is the next tag (or the end).
+      while (i < b.length && b[i] === 0x00) i++;
+      continue;
+    }
+    if (tag === 0x01) {
+      if (i + 32 > b.length) break;
+      txPublicKeys.push(bytesToHex(b.subarray(i, i + 32)));
+      i += 32;
+      continue;
+    }
+    if (tag === 0x02 || tag === 0x03) {
+      const size = readExtraVarint(b, i);
+      if (!size || size.value > BigInt(b.length - size.next)) break;
+      i = size.next + Number(size.value);
+      continue;
+    }
+    if (tag === 0x04) {
+      const count = readExtraVarint(b, i);
+      if (!count || count.value > BigInt(Math.floor((b.length - count.next) / 32))) break;
+      i = count.next;
+      for (let n = 0; n < Number(count.value); n++) {
+        additionalPublicKeys.push(bytesToHex(b.subarray(i, i + 32)));
+        i += 32;
+      }
+      continue;
+    }
+    // An unknown tag is not a guess: stop before it and use only what was parsed unambiguously.
+    break;
+  }
+  return { txPublicKeys, additionalPublicKeys };
+}
+
+/** The first tx public key in `extra`, or null. Kept for callers that only need the primary key. */
+export function txPublicKeyFromExtra(extra) {
+  return txKeysFromExtra(extra).txPublicKeys[0] || null;
 }
 
 // Amount and mask decryption. THE ENCODING IS CHOSEN BY THE RingCT TYPE, not by a boolean:
@@ -201,20 +256,32 @@ export function decodeMask(ecdhMaskHex, scalarLE, rctType) {
 }
 
 // MAIN: parse a transaction and return OUR outputs (their indices, keys and amounts).
-// txView - { txPublicKey, vout: [{key, index}], ecdhAmounts: [...], ecdhMasks: [...], outPk: [...], rctVersion }
-export function findOurOutputs({ txPublicKey, viewSecretHex, spendPubHex, outputs, ecdhAmounts = [], ecdhMasks = [], outPk = [], rctVersion = 2 }) {
-  if (!txPublicKey) throw new Error("the transaction has no public key (extra tag 0x01) - nothing to parse");
+// txView - { txPublicKey(s), additionalPublicKeys, vout: [{key, index}], ecdhAmounts: [...], ecdhMasks: [...], outPk: [...], rctVersion }
+//
+// ADDITIONAL KEYS ARE PER OUTPUT, NOT PER TRANSACTION. A transaction paying several subaddresses carries tag 0x04:
+// key i belongs to output i. Trying only the main key misses those outputs; trying every additional key against
+// every output would be wrong in the other direction and can match another recipient's output. The main key is
+// tried first, then this output's own additional key, exactly as the wallet does.
+export function findOurOutputs({ txPublicKey = null, txPublicKeys = null, additionalPublicKeys = [], viewSecretHex, spendPubHex, outputs, ecdhAmounts = [], ecdhMasks = [], outPk = [], rctVersion = 2 }) {
+  const primaryKeys = Array.isArray(txPublicKeys) ? txPublicKeys.filter(Boolean)
+    : (txPublicKey ? [txPublicKey] : []);
+  const additional = Array.isArray(additionalPublicKeys) ? additionalPublicKeys : [];
+  if (!primaryKeys.length && !additional.length) throw new Error("the transaction has no public key (extra tag 0x01/0x04) - nothing to parse");
   // The key form is tried EXPLICITLY; the winner's name goes up so the log shows what was used. If none matched,
   // the first meaningful form is returned, not nothing.
   const usable = viewSecretCandidates(viewSecretHex).filter(([, v]) => v !== null);
   const first = usable[0] || ["unparsed", null];
   for (const [form, secret] of usable) {
-    const derivation = keyDerivation(txPublicKey, secret);
+    const primaryDerivations = primaryKeys.map((key) => keyDerivation(key, secret));
     const found = [];
     for (const o of outputs) {
-      const scalar = hashToScalar(derivation, varint(o.index));
-      const derived = derivedOutputKey(derivation, o.index, spendPubHex);
-      if (derived.toLowerCase() === String(o.key).toLowerCase()) {
+      // The main keys first, then only THIS output's additional key.
+      const candidates = primaryDerivations.slice();
+      if (additional[o.index]) candidates.push(keyDerivation(additional[o.index], secret));
+      for (const derivation of candidates) {
+        const scalar = hashToScalar(derivation, varint(o.index));
+        const derived = derivedOutputKey(derivation, o.index, spendPubHex);
+        if (derived.toLowerCase() !== String(o.key).toLowerCase()) continue;
         // The amount decryption uses THIS output's SCALAR, least-significant first.
         const amount = ecdhAmounts[o.index] ? decodeAmount(ecdhAmounts[o.index], scalarToBytesLE(scalar), rctVersion) : null;
         // THE COMMITMENT CHECK: outPk[i] = mask*G + amount*H. A node can flip a bit of the encrypted amount
@@ -230,13 +297,14 @@ export function findOurOutputs({ txPublicKey, viewSecretHex, spendPubHex, output
             amountVerified = amountMaskCommitment(amount, mask).toLowerCase() === String(outPk[o.index]).replace(/^0x/, "").toLowerCase();
           } catch { amountVerified = false; }
         }
-        found.push({ index: o.index, key: o.key, amountAtomic: amount, maskAtomic: mask, amountVerified });
+        found.push({ index: o.index, key: o.key, amountAtomic: amount, maskAtomic: mask, amountVerified, derivation: bytesToHex(derivation) });
+        break;                                   // one derivation per output; a later key cannot make it ours twice
       }
     }
-    if (found.length) return { derivation: bytesToHex(derivation), outputs: found, viewKeyForm: form };
+    if (found.length) return { derivation: found[0].derivation, outputs: found, viewKeyForm: form };
   }
   return {
-    derivation: first[1] === null ? null : bytesToHex(keyDerivation(txPublicKey, first[1])),
+    derivation: first[1] === null || !primaryKeys.length ? null : bytesToHex(keyDerivation(primaryKeys[0], first[1])),
     outputs: [],
     viewKeyForm: first[0],
   };
@@ -335,8 +403,10 @@ export async function fetchTransactions(daemonUrl, hashes, fetchImpl = globalThi
 // is taken as a number, LE-hex or BE-hex. The result carries viewKeyForm: the form name that matched.
 export function matchTransaction(tx, watched, { height = null, tipHeight = null, nowSec = null } = {}) {
   const out = [];
-  const txPublicKey = txPublicKeyFromExtra(tx.extra);
-  if (!txPublicKey) return out;                       // no key in extra - nothing to look at
+  // BOTH KEY LISTS ARE PART OF THE TRANSACTION. A subaddress output carries its own key under tag 0x04; using only
+  // `txPublicKeyFromExtra` drops exactly those outputs.
+  const keys = txKeysFromExtra(tx.extra);
+  if (!keys.txPublicKeys.length && !keys.additionalPublicKeys.length) return out;
   // WHETHER THE OUTPUT IS LOCKED IS DECIDED HERE, ONCE PER TRANSACTION: all its outputs carry one unlock_time.
   // A normal transaction (unlock_time = 0) goes as before; the height comes from the block holding the transfer.
   const blockHeight = height === null || height === undefined ? (tx.block_height ?? null) : height;
@@ -354,7 +424,8 @@ export function matchTransaction(tx, watched, { height = null, tipHeight = null,
   const rctVersion = (tx.rct_signatures || {}).type || 2;
   for (const w of watched) {
     const r = findOurOutputs({
-      txPublicKey, viewSecretHex: w.viewSecret, spendPubHex: w.spendPub,
+      txPublicKeys: keys.txPublicKeys, additionalPublicKeys: keys.additionalPublicKeys,
+      viewSecretHex: w.viewSecret, spendPubHex: w.spendPub,
       outputs, ecdhAmounts, ecdhMasks, outPk, rctVersion: Number(rctVersion) || 1,
     });
     if (r.outputs.length) out.push({ address: w.address, index: w.index ?? null, outputs: r.outputs, derivation: r.derivation, viewKeyForm: r.viewKeyForm, unlockTime: Number(tx.unlock_time) || 0, unlock });
