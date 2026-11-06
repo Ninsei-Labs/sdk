@@ -63,3 +63,48 @@ export declare const CHAINS: readonly Chain[];
 export declare const DEX_CHAINS: readonly string[];
 export declare const DEFAULT_CHAIN: string;
 export declare const ASYNC_ROUTE_PROVIDERS: Readonly<Record<string, AsyncRouteProvider>>;
+
+/** One contract/program artifact in a deployment manifest. */
+export interface DeploymentArtifact {
+  readonly role: string;
+  readonly kind: string;
+  readonly address: string;
+  readonly addressFormat: string;
+  readonly codeHash?: string;
+  readonly hashKind?: string;
+  readonly tx: { readonly kind: string; readonly value: string };
+}
+
+/** A VM-neutral deployment pin. Only the EVM artifacts are generated today. */
+export interface DeploymentPin {
+  readonly vm: string;
+  readonly network: string;
+  readonly caip2: string;
+  readonly chainRef: string;
+  readonly status: "live" | "simulated" | "retired";
+  readonly release: {
+    readonly tag: string | null;
+    readonly commit: string | null;
+    readonly toolchain: string | null;
+    readonly deployedAt: string | null;
+  };
+  readonly anchor: { readonly kind: string; readonly value: string };
+  readonly artifacts: Readonly<Record<string, DeploymentArtifact>>;
+  /** EVM compatibility view used by `ChainConfig.escrow`. */
+  readonly escrow: {
+    readonly address: string;
+    readonly mode: string | null;
+    readonly deploymentBlock: number;
+    readonly cashier: string;
+    readonly registry: string;
+    readonly implementationCodeHash: string;
+  };
+  readonly knownFactoryCodes: readonly string[];
+}
+
+export declare const DEPLOYMENTS: Readonly<Record<string, DeploymentPin>>;
+export declare const DEPLOYMENT_CHAINS: readonly string[];
+export declare const DEPLOYMENT_VMS: readonly string[];
+export declare function deploymentFor(
+  chainOrId: string | number | { readonly id?: string; readonly network?: string; readonly caip2?: string } | null,
+): DeploymentPin | null;

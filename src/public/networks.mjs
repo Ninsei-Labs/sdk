@@ -6,4 +6,13 @@
 //
 // Names only: the engine owns the values. Nothing here is re-implemented.
 
-export { ASYNC_ROUTE_PROVIDERS, CHAINS, DEFAULT_CHAIN, DEX_CHAINS } from "../../engine/core/config.js";
+export {
+  ASYNC_ROUTE_PROVIDERS,
+  CHAINS,
+  DEFAULT_CHAIN,
+  DEX_CHAINS,
+  DEPLOYMENTS,
+  DEPLOYMENT_CHAINS,
+  DEPLOYMENT_VMS,
+  deploymentFor,
+} from "../../engine/core/config.js";

@@ -16,13 +16,15 @@
 //   IMPLEMENTATION_CODEHASH  expected bytes32 (default: the same release)
 import { keccak256 } from "../src/primitives.mjs";
 import { decodeAddress } from "../engine/evm/factory.js";
+import { deploymentFor } from "../engine/core/config.js";
 
+const PIN = deploymentFor("arbitrum-sepolia");
 const RPC = process.env.RPC_URL || "https://sepolia-rollup.arbitrum.io/rpc";
-const FACTORY = (process.env.FACTORY || "0x245d3a4ac4b98d713f6c5130b56cd5d550f8cefe").toLowerCase();
-const CASHIER = (process.env.CASHIER || "0x40515449159EfbCb5eF5eB9e2E08ba432E150a1C").toLowerCase();
+const FACTORY = (process.env.FACTORY || PIN.escrow.address).toLowerCase();
+const CASHIER = (process.env.CASHIER || PIN.escrow.cashier).toLowerCase();
 const EXPECTED_CODEHASH = (process.env.IMPLEMENTATION_CODEHASH
-  || "0x7020a1017adbb4d4ce4710f7c632d48a5469a6f3076608e77d5675dee125653c").toLowerCase();
-const CHAIN_ID = 421614;
+  || PIN.escrow.implementationCodeHash).toLowerCase();
+const CHAIN_ID = Number(PIN.chainRef);
 
 let pass = 0;
 const fails = [];
