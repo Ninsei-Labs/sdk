@@ -74,6 +74,8 @@
     "check:node-probe": "node tools/check-node-probe.mjs",
     "check:recovery-key": "node tools/check.mjs --only=recovery-key",
     "check:monero-keys": "node tools/check.mjs --only=monero-keys",
+    "check:walletconnect-build": "node tools/check-walletconnect-build.mjs",
+    "check:walletconnect-build-teeth": "node tools/check-walletconnect-build-teeth.mjs",
     "check:recovery-open": "node tools/check-recovery-open.mjs",
     "check:contract-vectors": "node tools/check-contract-vectors.mjs",
     "check:live-contract": "node tools/check-live-contract.mjs",
