@@ -1,3 +1,12 @@
+## 0.57.0 — 2026-11-06
+
+- Deployment pins are generated from `deployments/<vm>/<network>.json` into `engine/core/deployments.generated.js`; `CHAINS` and `KNOWN_FACTORY_CODES` read them. The SDK exports `DEPLOYMENTS`, `DEPLOYMENT_CHAINS`, `DEPLOYMENT_VMS` and `deploymentFor` (network id, CAIP-2 or EVM chain id, with no fallback to another network).
+- The Monero scanner reads tagged `tx_extra` (`0x01`–`0x04`) and per-output additional public keys (`0x04`), so a payment to a subaddress is not missed. DLEQ refuses an identity Edwards subject point and verification runs in yielding chunks.
+- `swaps.start` / `startSell` reuse the already-verified side instead of proving it a second time. Sweep sends key images only when the caller explicitly marks the node trusted (`window.trustedNode`), because key images are linkable.
+- Relay fixtures carry real DLEQ knowledge proofs, including a broken `pokB` refusal; the fixture generator is committed and byte-checked. Unknown swap amounts are `null`, not zero.
+- Accumulated quote, swap, refund, relay, factory and input-boundary fixes from the 0.56.1 line are included.
+- **License:** the package is now `(MIT AND LGPL-3.0-only)` because of the go-dleq port; the browser bundle carries the attribution.
+
 ## 0.56.1 — 2026-11-03
 
 - The provider settings search now includes the documented `rfq/` layout and has no duplicate candidates; the local file still outranks the production one.
