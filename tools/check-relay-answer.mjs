@@ -11,9 +11,11 @@ import { dirname, join } from "node:path";
 import { keccak256, secp256k1 } from "../src/primitives.mjs";
 import { relayQuoteDigest, verifyFirmAnswer, verifyRelayQuoteFrame } from "../src/relayQuote.mjs";
 import { verifyCounterparty } from "../src/order.mjs";
+import { buildRelayAnswerFixture } from "./gen-relay-answer.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixture = JSON.parse(readFileSync(join(here, "fixtures", "relay-answer.json"), "utf8"));
+const fixturePath = join(here, "fixtures", "relay-answer.json");
+const fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
 const answer = fixture.answer;
 const quoteKey = (() => {
   const privateKey = String(fixture.keys.quote).replace(/^0x/, "");
@@ -32,6 +34,13 @@ const fails = [];
 const ok = (message) => { pass += 1; console.log("  ok    " + message); };
 const bad = (message) => { fails.push(message); console.log("  FAIL  " + message); };
 const hex = (bytes) => "0x" + Buffer.from(bytes).toString("hex");
+
+console.log("=== 0) THE COMMITTED VECTOR IS REPRODUCIBLE ===");
+if (buildRelayAnswerFixture() === readFileSync(fixturePath, "utf8").replace(/\r\n/g, "\n")) {
+  ok("the generator reproduces the committed fixture byte for byte");
+} else {
+  bad("the fixture is stale; run node tools/gen-relay-answer.mjs --write");
+}
 
 console.log("=== 1) THE OUTER FRAME MATCHES THE VECTOR ===");
 if (hex(relayQuoteDigest(answer)) === fixture.answerExpected.digest) ok("the outer digest matches the relay vector");
