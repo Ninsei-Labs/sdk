@@ -30,6 +30,7 @@ import { lineCoverage, mergeRanges } from "./coverage-merge.mjs";
 import keccakPkg from "keccak256";
 // THE RECOVERY KEY CHECK (sdk#79): one key, its backup file and the salt-based on-chain search.
 import { recoveryKeyCheck } from "./check-recovery-key.mjs";
+import { moneroKeysCheck } from "./check-monero-keys.mjs";
 import { actionStateCheck } from "./check-action-state.mjs";
 import { vendorBundlesCheck } from "./check-vendor-bundles.mjs";
 import { refundWindowCheck } from "./check-refund-window.mjs";
@@ -2700,6 +2701,7 @@ const CHECKS = {
   terminal: terminalCheck,
   provider: providerCheck,
   "recovery-key": recoveryKeyCheck,
+  "monero-keys": moneroKeysCheck,
   "action-state": actionStateCheck,
   "vendor-bundles": vendorBundlesCheck,
   "refund-window": refundWindowCheck,

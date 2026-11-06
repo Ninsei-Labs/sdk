@@ -28,7 +28,7 @@ export async function restoreWalletFromPayload(payload, deps = {}) {
   const network = m.network || payload.moneroNetwork;
   if (payload.version >= 3) return await restoreFromHalves(payload, warnings, deps);
 
-  // The mnemonic is passed explicitly: monero-js checks its checksum and refuses a broken phrase
+  // The mnemonic is passed explicitly: engine/monero/mnemonic.js checks its checksum and refuses a broken phrase
   // (in wallet.js this is now an error, not a silent new-wallet generation).
   const wallet = await createSwapWallet({ seed: m.mnemonic, network });
 

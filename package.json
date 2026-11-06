@@ -73,6 +73,7 @@
     "check:deployment-pins": "node tools/check-deployment-pins.mjs",
     "check:node-probe": "node tools/check-node-probe.mjs",
     "check:recovery-key": "node tools/check.mjs --only=recovery-key",
+    "check:monero-keys": "node tools/check.mjs --only=monero-keys",
     "check:recovery-open": "node tools/check-recovery-open.mjs",
     "check:contract-vectors": "node tools/check-contract-vectors.mjs",
     "check:live-contract": "node tools/check-live-contract.mjs",

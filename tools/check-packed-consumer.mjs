@@ -124,7 +124,7 @@ try {
 
     console.log("=== 4) THE RELATIVE ASSETS THE ENGINE IMPORTS ARE IN THE TARBALL ===");
     const installed = join(consumer, "node_modules", "@ninsei-labs", "sdk");
-    for (const rel of ["assets/vendors/monero/monero-js-browser.js", "engine/atomic/order.js", "index.d.ts"]) {
+    for (const rel of ["engine/atomic/order.js", "index.d.ts"]) {
       if (existsSync(join(installed, rel))) ok(rel + " is present");
       else bad(rel + " is missing from the installed package");
     }
