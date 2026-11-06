@@ -248,6 +248,11 @@ total unknown.
 A failed settlement block-time read keeps the matched order: `findSwaps` returns `blockTime: null` with
 `startHeightReason: "block-time-read"` instead of throwing away every row.
 
+Pass `evmBlockTimes` to read the timestamps for every distinct matched block in one request. It receives the block
+numbers in first-seen order and returns a map; a `null` or missing entry is `no-block-time`, while an `Error` entry
+is `block-time-read`. When the batch seam is supplied it is the only timestamp reader: `evmBlockTime` is not called,
+even after a failed batch. Without the seam, the older `evmBlockTime` path stays in use.
+
 The retired backend no longer decides a swap: its watch row may observe money, but it cannot declare readiness or
 a decline; the client's two-node check and the escrow's own `Declined` event do.
 

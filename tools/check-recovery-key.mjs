@@ -208,6 +208,17 @@ export const recoveryKeyCheck = async () => {
     evmBlockTime: async () => { fallbackCalls += 1; return 1_000_000; } });
   check(fallback.swaps.length === 3 && fallbackCalls === 2 && fallback.swaps.every((row) => row.blockTime === 1_000_000),
     "omitting the bulk seam changed the singular reader/cache behavior");
+  {
+    // A LOG WITHOUT A BLOCK NUMBER IS NOT BLOCK ZERO. It keeps its row with a named reason and makes no batch call.
+    const withoutBlock = { ...v2Log };
+    delete withoutBlock.blockNumber;
+    let batchRead = false;
+    const missingBlock = await recovery.findSwaps({ mnemonic: WORDS, chainId: CHAIN, factory,
+      evmLogs: async () => [withoutBlock],
+      evmBlockTimes: async () => { batchRead = true; return new Map(); } });
+    check(missingBlock.swaps.length === 1 && missingBlock.swaps[0].startHeightReason === "no-block-number" && batchRead === false,
+      `a log without a block number invented block zero or made a batch call: ${missingBlock.swaps.length} order(s), reason ${missingBlock.swaps[0] && missingBlock.swaps[0].startHeightReason}, batch ${batchRead}`);
+  }
 
   const answer = (result) => async () => ({ ok: true, json: async () => ({ result }) });
   check(await startHeightFromNodes({ nodes: ["https://node.example"], network: "stagenet",
