@@ -157,6 +157,58 @@ export const recoveryKeyCheck = async () => {
   check(mixed.swaps.length === 2, `a failed block-time read dropped matched orders: ${mixed.swaps.length}`);
   check(failed && failed.startHeightReason === "block-time-read" && kept && kept.blockTime === 1_000_000, "a failed block-time read was not kept and named");
 
+  // The bulk seam sees only unique matched blocks; duplicates and failures never cause singular RPC reads.
+  const sameBlockLog = { ...secondLog, blockNumber: 100 };
+  const nextBlockLog = { ...secondLog, transactionHash: "0x" + "03".padStart(64, "0"), logIndex: 2 };
+  const bulkLogs = [v2Log, sameBlockLog, nextBlockLog];
+  const bulkCalls = [];
+  let singularCalls = 0;
+  const bulkRequest = { mnemonic: WORDS, chainId: CHAIN, factory, evmLogs: async () => bulkLogs,
+    evmBlockTime: async () => { singularCalls += 1; return 42; } };
+  const batched = await recovery.findSwaps({ ...bulkRequest,
+    evmBlockTimes: async (blocks) => { bulkCalls.push([...blocks]); return new Map([[100, 1_000_000], [101, 1_001_000]]); },
+    moneroTip: async () => 2_000, moneroBlockTimestamp: async (height) => 500 + height * 1_000 });
+  check(bulkCalls.length === 1 && JSON.stringify(bulkCalls[0]) === "[100,101]" && singularCalls === 0,
+    "bulk timestamps did not use one unique-block read with no singular fallback");
+  check(batched.swaps.length === 3 && batched.swaps.every((row) => row.startHeightReason === null &&
+    row.blockTime === (row.blockNumber === 100 ? 1_000_000 : 1_001_000) && row.startHeight === (row.blockNumber === 100 ? 939 : 940)),
+    "bulk timestamps changed start heights, timestamps or matched orders");
+  const itemFailure = await recovery.findSwaps({ ...bulkRequest,
+    evmBlockTimes: async () => new Map([[100, 1_000_000], [101, new Error("rpc down")]]) });
+  check(itemFailure.swaps.length === 3 && itemFailure.swaps.filter((row) => row.blockNumber === 100).every((row) => row.blockTime === 1_000_000) &&
+    itemFailure.swaps.find((row) => row.blockNumber === 101)?.startHeightReason === "block-time-read",
+    "one failed bulk item dropped orders or lost the named read failure");
+  for (const value of [null, undefined]) {
+    const missingTime = await recovery.findSwaps({ ...bulkRequest,
+      evmBlockTimes: async () => new Map([[100, 1_000_000], ...(value === null ? [[101, null]] : [])]) });
+    check(missingTime.swaps.length === 3 && missingTime.swaps.find((row) => row.blockNumber === 101)?.startHeightReason === "no-block-time",
+      "a missing/null bulk timestamp dropped an order or lost no-block-time");
+  }
+  const batchFailure = await recovery.findSwaps({ ...bulkRequest,
+    evmBlockTimes: async () => { throw new Error("batch down"); } });
+  check(batchFailure.swaps.length === 3 && batchFailure.swaps.every((row) => row.blockTime === null && row.startHeightReason === "block-time-read"),
+    "a whole batch failure dropped orders or lost block-time-read");
+  check(singularCalls === 0, "a failed/missing bulk timestamp fell back to a singular read");
+  const genesisTime = await recovery.findSwaps({ ...bulkRequest,
+    evmBlockTimes: async () => new Map([[100, 0], [101, Number.NaN]]) });
+  check(genesisTime.swaps.filter((row) => row.blockNumber === 100).every((row) => row.blockTime === 0) &&
+    genesisTime.swaps.find((row) => row.blockNumber === 101)?.startHeightReason === "no-block-time",
+    "zero or invalid bulk timestamps changed timestamp normalization");
+  const malformedBatch = await recovery.findSwaps({ ...bulkRequest, evmBlockTimes: async () => ({}) });
+  check(malformedBatch.swaps.length === 3 && malformedBatch.swaps.every((row) => row.startHeightReason === "block-time-read") && singularCalls === 0,
+    "a malformed batch response dropped orders or used singular fallback");
+  let emptyBatchCalls = 0;
+  const unmatched = { ...v2Log, data: "0x" + "00".repeat(192) };
+  const emptyBatch = await recovery.findSwaps({ ...bulkRequest, evmLogs: async () => [unmatched],
+    evmBlockTimes: async () => { emptyBatchCalls += 1; return new Map(); } });
+  check(emptyBatch.swaps.length === 0 && emptyBatchCalls === 0 && singularCalls === 0,
+    "no matched orders still triggered a timestamp read");
+  let fallbackCalls = 0;
+  const fallback = await recovery.findSwaps({ ...bulkRequest,
+    evmBlockTime: async () => { fallbackCalls += 1; return 1_000_000; } });
+  check(fallback.swaps.length === 3 && fallbackCalls === 2 && fallback.swaps.every((row) => row.blockTime === 1_000_000),
+    "omitting the bulk seam changed the singular reader/cache behavior");
+
   const answer = (result) => async () => ({ ok: true, json: async () => ({ result }) });
   check(await startHeightFromNodes({ nodes: ["https://node.example"], network: "stagenet",
     fetchImpl: answer({ height: 2234563, nettype: "stagenet", synchronized: true }) }) === 2234563, "the node height was not read");

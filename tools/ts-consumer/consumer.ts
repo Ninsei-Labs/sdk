@@ -10,7 +10,7 @@ import {
   type SwapsApi,
 } from "@ninsei-labs/sdk";
 import { moneroFeeEstimate, type FeeEstimateOk, type FeeEstimateRefusal } from "@ninsei-labs/sdk/xmr";
-import { createRecoveryKey, type RecoveryKey } from "@ninsei-labs/sdk/recovery";
+import { createRecoveryKey, findSwaps, type RecoveryKey } from "@ninsei-labs/sdk/recovery";
 import {
   evmWallet,
   localStorageAdapter,
@@ -49,3 +49,9 @@ export const testStorage: StorageAdapter = memoryAdapter();
 export const withdrawal = moneroWallet({ networkType: "stagenet", serverUri: "http://127.0.0.1:38081" });
 const moneroOptions: MoneroWalletAdapterOptions = { network: null, serverUri: null };
 export const monero: WalletAdapter = moneroWalletAdapter(moneroOptions);
+
+// The optional bulk timestamp seam accepts a readonly block list and preserves named per-item failures.
+export const findSwapsWithBulkTimes = (request: Parameters<typeof findSwaps>[0]) => findSwaps({
+  ...request,
+  evmBlockTimes: async (blocks) => new Map(blocks.map((block) => [block, block === 0 ? 0 : new Error("unreadable")])),
+});

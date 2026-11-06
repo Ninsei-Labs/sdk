@@ -334,7 +334,7 @@ export interface FoundSwap {
   readonly transactionHash: string | null;
   readonly blockNumber: number | null;
   readonly logIndex: number | null;
-  /** The settlement block timestamp in seconds, when the caller passed `evmBlockTime`; null otherwise. */
+  /** The settlement block timestamp in seconds, when read through `evmBlockTime` or `evmBlockTimes`; null otherwise. */
   readonly blockTime: number | null;
   /** The settlement asset of the escrow. Current contracts are native-only. */
   readonly settlementToken: "native";
@@ -436,6 +436,10 @@ export declare function findSwaps(request: {
   toBlock?: number | string;
   /** Reads the settlement block timestamp, in seconds: (blockNumber) -> seconds. */
   evmBlockTime?: (blockNumber: number) => Promise<number>;
+  /** Reads timestamps once for the unique matched block numbers, in first-seen order. Takes precedence over
+   * `evmBlockTime`; never falls back to it. Missing/null entries mean `no-block-time`; Error entries or a rejected
+   * batch mean `block-time-read`. Each matched order is retained, including items whose timestamp failed. */
+  evmBlockTimes?: (blockNumbers: readonly number[]) => Promise<ReadonlyMap<number, number | null | Error>>;
   /** Reads contract code: (address) -> 0x-hex. Used to read the XMR amount from an order clone. */
   evmCode?: (address: string) => Promise<string>;
   /** The Monero tip at the time of the search: () -> height. */
