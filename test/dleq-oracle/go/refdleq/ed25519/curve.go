@@ -1,4 +1,4 @@
-// Forked from github.com/athanorlabs/go-dleq/ed25519/curve.go (MIT).
+// Forked from github.com/athanorlabs/go-dleq/ed25519/curve.go (LGPL-3.0-only; see LICENSE-GO-DLEQ).
 // ORACLE patches, kept minimal and marked:
 //   - TorsionFree(): strict prime-subgroup check [l]P == identity, matching the
 //     SDK verifier's isTorsionFree(). [l] is computed as 252 doublings plus a

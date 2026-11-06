@@ -1,3 +1,6 @@
+The Go oracle in `go/` is derived from github.com/athanorlabs/go-dleq and is licensed LGPL-3.0-only; see
+`LICENSE-GO-DLEQ`. The Rust verifier and the remaining test harness are MIT under the text below.
+
 MIT License
 
 Copyright (c) 2026 Ninsei Labs

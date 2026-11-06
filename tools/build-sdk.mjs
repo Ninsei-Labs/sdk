@@ -35,6 +35,9 @@ await build({
   minify: true,
   define: { global: "globalThis" },
   plugins: [keepVendorsExternal],
+  // The bundle contains the go-dleq port, whose licence differs from the rest of the package. The banner is a legal
+  // comment esbuild preserves, so a consumer of the built file sees where the LGPL part and its text live.
+  banner: { js: "/*! @ninsei-labs/sdk includes a port of github.com/athanorlabs/go-dleq, licensed LGPL-3.0-only. See THIRD_PARTY_NOTICES.md. */" },
   logLevel: "info",
 });
 console.log("built:", OUT, "-", ((await stat(OUT)).size / 1024).toFixed(0), "KiB");

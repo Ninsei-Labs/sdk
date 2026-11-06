@@ -1,6 +1,6 @@
 package types
 
-// Forked from github.com/athanorlabs/go-dleq/types (MIT). Identical to upstream.
+// Forked from github.com/athanorlabs/go-dleq/types (LGPL-3.0-only; see LICENSE-GO-DLEQ). Identical to upstream.
 // The oracle patches live in the package that consumes this interface, not here.
 
 type Curve interface {

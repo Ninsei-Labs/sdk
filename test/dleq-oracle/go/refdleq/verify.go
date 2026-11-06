@@ -1,4 +1,4 @@
-// Forked from github.com/athanorlabs/go-dleq/verify.go (MIT).
+// Forked from github.com/athanorlabs/go-dleq/verify.go (LGPL-3.0-only; see LICENSE-GO-DLEQ).
 // ORACLE patches, kept minimal and marked:
 //   - Options (see prove.go): Bits, Context, SkipSignatures mirror the SDK;
 //     StrictTorsion adds the SDK's prime-subgroup checks on curve B.
