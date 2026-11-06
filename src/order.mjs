@@ -189,7 +189,21 @@ export async function buildOwnSideFromHalvesChunked(order, { spendHalf, viewHalf
   const inputs = knownHalves(b, { spendHalf, viewHalf });
   const proof = await b.dleq.proveChunked(inputs.half, context, options);
   const { side, spendPoint, viewPoint, encPub } = sideFromKnown(inputs, proof);
-  return { context, side, spendPoint, viewPoint, encPub };
+  return { context, side, spendPoint, viewPoint, encPub, commitHalf: norm(b.halfCommitment(inputs.half)) };
+}
+
+/**
+ * THE SAME LOCAL SIDE WITHOUT A SECOND PROOF. A path that already received a verified proof in the firm request
+ * (or in the quote) only needs this side's points, view point, encryption key and half for the record and the
+ * commitment. Running `prove` again costs ~3 s and its result is never sent. The returned side deliberately has
+ * `proof: null`: callers that need a proof must build it, not receive a plausible-looking empty object.
+ */
+export function buildOwnSideFromHalvesKnown(order, { spendHalf, viewHalf } = {}) {
+  const context = contextOf(order);
+  const b = builder();
+  const inputs = knownHalves(b, { spendHalf, viewHalf });
+  const { side, spendPoint, viewPoint, encPub } = sideFromKnown(inputs, null);
+  return { context, side, spendPoint, viewPoint, encPub, commitHalf: norm(b.halfCommitment(inputs.half)) };
 }
 
 /**

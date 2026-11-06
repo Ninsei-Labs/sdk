@@ -1,4 +1,4 @@
-// Forked from github.com/athanorlabs/go-dleq/prove.go (MIT).
+// Forked from github.com/athanorlabs/go-dleq/prove.go (LGPL-3.0-only; see LICENSE-GO-DLEQ).
 // ORACLE patches, kept minimal and marked:
 //   - Options{Bits, Context, SkipSignatures} selects the SDK behaviour. This
 //     fork has no reference-mode constructor; R-REF-1 cannot be selected.

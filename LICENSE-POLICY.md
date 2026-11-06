@@ -1,7 +1,7 @@
 # Dependency license policy
 
-The SDK is published as a public package under MIT. Its production dependency tree must stay compatible with
-that promise: a dependency with a copyleft, source-available, unknown or missing licence is a decision for a
+The SDK is published under `(MIT AND LGPL-3.0-only)`: the package is MIT except the DLEQ port described below.
+Its production dependency tree must stay compatible with that promise: a dependency with a copyleft, source-available, unknown or missing licence is a decision for a
 person, not something that enters a release by accident.
 
 ## Allowed licences
@@ -22,6 +22,13 @@ A production dependency may use one of these licences:
 An SPDX expression is read as written: `MIT OR Apache-2.0` is allowed when one branch is allowed, and
 `MIT AND ISC` is allowed when every branch is allowed. A `WITH` exception keeps the base licence's decision.
 `SEE LICENSE IN ...`, `UNLICENSED`, `UNKNOWN`, and every licence outside the list are refused.
+
+## The bundled go-dleq port
+
+`engine/atomic/dleq2.js` is a port of `github.com/athanorlabs/go-dleq` and is distributed under
+`LGPL-3.0-only`. It is not an npm dependency; `THIRD_PARTY_NOTICES.md` carries the upstream licence text and the
+browser bundle points at it. The rest of the SDK remains MIT. A change that replaces or removes the port must move
+the package licence expression, the notices and the bundle banner together.
 
 ## How the check runs
 

@@ -3,7 +3,9 @@
 // Everything below this header is identical to the source.
 
 // DLEQ ACROSS CURVES: a proof that one scalar stands behind points on secp256k1 and ed25519.
-// Ported from go-dleq (prove.go, verify.go) to @noble/curves.
+// Ported from go-dleq (prove.go, verify.go) to @noble/curves. The upstream project is
+// github.com/athanorlabs/go-dleq at d6fd7c03e213683cbb286d4d5bbba1c7e7e1cfe1 and is licensed LGPL-3.0-only; see
+// THIRD_PARTY_NOTICES.md. This file is distributed under LGPL-3.0-only; the rest of the package remains MIT.
 // THE CHALLENGE IS COMPUTED AS IN THE ORIGINAL: SHA3-512 and WIDE REDUCTION. The old edition used keccak256
 // (32 bytes) reduced mod the order, which was BIASED (~2^-128) and differed from the reference; named by the
 // audit and closed here. Now: a 64-byte hash, read LEAST-SIGNIFICANT first and reduced mod the order, exactly
@@ -372,6 +374,13 @@ export function createDleq2({ ed25519, secp256k1, keccak256, sha3_512, randomByt
     let XA, XB, csA, csB;
     try {
       XA = P(curves.A, proof.XA); XB = P(curves.B, proof.XB);
+      // THE SUBJECT MUST NOT BE THE EDWARDS IDENTITY. A proof of the identity can be manufactured without
+      // contributing a half, and the joint spend point would silently lose this side; Monero/relay spec 12.10
+      // forbids it. The secp256k1 side needs no separate branch: @noble refuses the point-at-infinity encoding, so
+      // an XA identity is refused as unparsable before this check.
+      if (XB.equals(curves.B.P.ZERO)) {
+        return { ok: false, reason: "proof: the subject point is the identity" };
+      }
       if (!torsionFree(curves.B, XB)) return { ok: false, reason: "proof: XB is not in the prime-order subgroup" };
     } catch (e) {
       return { ok: false, reason: "proof: XA or XB is unparsable (" + String((e && e.message) || e) + ")" };
