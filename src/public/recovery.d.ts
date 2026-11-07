@@ -420,6 +420,18 @@ export declare function readEscrowEvents(request: {
   toBlock?: number | string;
 }): Promise<EscrowEvent[]>;
 
+/**
+ * Read the same three settlement events without naming any escrow to the RPC.
+ *
+ * The request carries only the event topics and the block range; the caller filters the returned events by
+ * `escrow`. This is the privacy-preserving path for a recovery page.
+ */
+export declare function readEscrowEventsByTopic(request: {
+  evmLogs: (request: { topics: (string | null)[][]; fromBlock: number | string; toBlock: number | string }) => Promise<unknown[]>;
+  fromBlock?: number | string;
+  toBlock?: number | string;
+}): Promise<EscrowEvent[]>;
+
 /** Finds orders whose commitment was made from the key's halves. */
 export declare function findSwaps(request: {
   mnemonic: string;

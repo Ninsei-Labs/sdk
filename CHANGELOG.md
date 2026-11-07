@@ -1,3 +1,7 @@
+## Unreleased
+
+- `recovery.readEscrowEventsByTopic` reads `HalfRevealed`, `Ready` and `Declined` without an address filter, so a recovery page can scan by topic and filter by `escrow` locally. The existing `readEscrowEvents({ escrows, ... })` is unchanged.
+
 ## 0.57.2 — 2026-11-06
 
 - Monero mnemonic, key and subaddress derivation now comes from the package's own `engine/monero/mnemonic.js` and `engine/monero/keys.js` over `@noble/curves`; the vendored `monero-js` browser bundle and its licence copy are gone. Address building and checksum checks no longer load a vendor at runtime. The pinned mnemonic, spend/view key, subaddress and address vectors are unchanged.

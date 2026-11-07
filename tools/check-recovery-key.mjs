@@ -1,7 +1,7 @@
 // THE RECOVERY KEY CHECK: fixed v2 vectors, the backup file, and the salt-based on-chain search.
 import * as recovery from "../src/public/recovery.mjs";
 import { buildOwnSideFromHalves } from "../src/order.mjs";
-import { ESCROW_EVENT_TOPICS, readEscrowEvents } from "../src/recovery-key.mjs";
+import { ESCROW_EVENT_TOPICS, readEscrowEvents, readEscrowEventsByTopic } from "../src/recovery-key.mjs";
 import { startHeightFromNodes } from "../src/swaps.mjs";
 
 const WORDS = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
@@ -256,6 +256,29 @@ export const recoveryKeyCheck = async () => {
       "bulk events did not decode the revealed half");
     check(events[1].event === "Ready" && events[2].event === "Declined", "bulk events lost the ready or declined event");
     check(request && Array.isArray(request.address) && request.address[0] === escrow, "bulk events did not send the escrow list");
+  }
+  // THE SAME EVENTS WITHOUT NAMING ANY ESCROW. The privacy path asks for the three topics and the range; the
+  // decoder takes each escrow from log.address. Two escrows prove the local filter has something to filter.
+  {
+    const first = "0x" + "ac".repeat(20);
+    const second = "0x" + "bd".repeat(20);
+    const half = "0x" + "ce".repeat(32);
+    const words = (values) => "0x" + values.map((value) => BigInt(value).toString(16).padStart(64, "0")).join("");
+    const logs = [
+      { address: first, topics: [ESCROW_EVENT_TOPICS.halfRevealed], data: words([BigInt(half), 1]), blockNumber: 2, transactionHash: "0x" + "04".repeat(32), logIndex: 0 },
+      { address: second, topics: [ESCROW_EVENT_TOPICS.ready, "0x" + "0".repeat(24) + "33".repeat(20)], data: "0x", blockNumber: 1, transactionHash: "0x" + "05".repeat(32), logIndex: 0 },
+    ];
+    let request = null;
+    const events = await readEscrowEventsByTopic({ evmLogs: async (value) => { request = value; return logs; } });
+    check(request && !("address" in request), "the topic-only read sent an address filter");
+    check(events.length === 2 && events[0].escrow === second && events[1].escrow === first,
+      "topic-only events were not decoded or sorted");
+    check(events[1].event === "HalfRevealed" && events[1].half === half && events[1].byClaimer === true,
+      "topic-only events lost the revealed half");
+    let refused = null;
+    try { await readEscrowEventsByTopic({}); } catch (error) { refused = error; }
+    check(refused && refused.code === "bad-input" && refused.params && refused.params.field === "evmLogs",
+      "a topic-only read without a log seam was not refused");
   }
 
   notes.push("the v2 search uses the event salt, reads every log once, and derives the Monero start height");
