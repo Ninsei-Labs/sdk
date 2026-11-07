@@ -483,6 +483,26 @@ export async function readEscrowEvents({ escrows, evmLogs, fromBlock = "earliest
     fromBlock,
     toBlock,
   });
+  return decodeEscrowEvents(logs);
+}
+
+/**
+ * Read the same settlement events WITHOUT naming any escrow to the RPC.
+ *
+ * The three events carry the escrow in `log.address`, so a client that must not disclose which swaps belong to a
+ * visitor can ask for the topics over a block range and filter the returned events locally by `escrow`. The
+ * decoder is the same one `readEscrowEvents` uses; this function only builds a request without an address filter.
+ */
+export async function readEscrowEventsByTopic({ evmLogs, fromBlock = "earliest", toBlock = "latest" } = {}) {
+  const logs = await readLogs(evmLogs, {
+    topics: [[ESCROW_EVENT_TOPICS.halfRevealed, ESCROW_EVENT_TOPICS.ready, ESCROW_EVENT_TOPICS.declined]],
+    fromBlock,
+    toBlock,
+  });
+  return decodeEscrowEvents(logs);
+}
+
+function decodeEscrowEvents(logs) {
   const events = [];
   for (const log of logs) {
     if (!log || typeof log !== "object") continue;

@@ -200,6 +200,10 @@ another device or at another factory produce a different half and no number is r
 `derivation: "salt-v2"` and has no index. There is no range scan and no `max-index` result: every order in the logs is
 read once, and an unreadable log request is a refusal, not a partial answer.
 
+`readEscrowEventsByTopic` reads the same three settlement events (`HalfRevealed`, `Ready` and `Declined`) without
+an address filter: the caller receives every event in the block range and filters by `escrow`. This is the
+privacy-preserving path for a recovery page, because the RPC does not learn which escrows belong to the visitor.
+
 - `amount` — the escrow's **native** amount in wei;
 - `settlementToken: "native"` — what the escrow receives;
 - `xmrAmount` — the XMR side, read from the clone's condition word 18 when an `evmCode` reader is passed;
