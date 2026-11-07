@@ -1592,6 +1592,38 @@ export interface SweepFromOrderRequest {
   readonly passphrase?: string;
 }
 
+export interface SweepActionExpect {
+  readonly chainId: number;
+  readonly factory: string;
+  readonly locker: string;
+  readonly claimer: string;
+  /** The native escrow amount in wei, as a decimal string. */
+  readonly amount: string;
+  readonly readyBy: number;
+  readonly t1: number;
+  readonly salt: string;
+  readonly commitHalfLocker: string;
+  readonly commitHalfClaimer: string;
+  readonly edPointLocker: string;
+  readonly edPointClaimer: string;
+  readonly edViewPointLocker: string;
+}
+
+/**
+ * The ETH action the recovered half can authorize. It is derived from the same order and taker halves as the
+ * withdrawal payload; the caller still decides whether the action's window is open.
+ */
+export interface SweepAction {
+  readonly side: "locker" | "claimer";
+  readonly kind: "refund" | "claim";
+  readonly escrow: string;
+  /** The recovered taker's spend half, ready for `actions.refund` or `actions.claim`. */
+  readonly half: string;
+  readonly claimer: string;
+  /** The order expectations the action's slot check compares against the live escrow. */
+  readonly expect: SweepActionExpect;
+}
+
 export interface SweepFromOrderResult {
   /** The payload `buildPayload` produced; the same fields a recovery file carries. */
   readonly payload: unknown;
@@ -1599,6 +1631,13 @@ export interface SweepFromOrderResult {
   readonly contents: string;
   /** The joint Monero address built from the key and the order. */
   readonly address: string;
+  /** The refund or claim the recovered half authorizes. */
+  readonly side: SweepAction["side"];
+  readonly kind: SweepAction["kind"];
+  readonly escrow: string;
+  readonly half: string;
+  readonly claimer: string;
+  readonly expect: SweepActionExpect;
 }
 
 export interface SweepPlanRequest {

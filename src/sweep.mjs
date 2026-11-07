@@ -5,6 +5,7 @@
 // address, ask the app for the restore height (on the page it is taken by address) and say aloud what is missing
 // so the withdrawal can go. Funds do not move at this step.
 import { SdkError } from "./errors.mjs";
+import { actionMaterialOf } from "./sweep-action.mjs";
 import { primitives } from "./primitives.mjs";
 import * as engine from "./engine.mjs";
 import { restoreWallet } from "./sweep-restore.mjs";
@@ -129,10 +130,15 @@ const payloadFromOrder = async (request) => {
     receiveAddress: null,
     restoreHeight: Number(order.startHeight) > 0 ? Number(order.startHeight) : null,
   });
+  // THE ETH ACTION MATERIAL COMES FROM THE SAME DERIVATION. The half and the order expectations are what
+  // `actions.refund` / `actions.claim` need; returning them here keeps the page from rebuilding the order fields.
+  // A found order from `findSwaps` carries every field; an incomplete order is refused before a half can be used.
+  const action = actionMaterialOf({ order, chainId, half: halves.spendHalf });
   return {
     payload,
     contents: await engine.recoveryFile.createRecoveryFile(payload, passphrase),
     address: joint.address,
+    ...action,
   };
 };
 
