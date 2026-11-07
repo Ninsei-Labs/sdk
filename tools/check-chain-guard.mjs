@@ -9,6 +9,8 @@ import { evmWallet } from "../src/adapters/evm-wallet.mjs";
 import { createActions } from "../src/actions.mjs";
 import { send as fund } from "../src/lock.mjs";
 import * as engine from "../src/engine.mjs";
+import { halfCommitmentHex } from "../engine/atomic/orderHalfCommit.js";
+import { keccak256, secp256k1 } from "../src/primitives.mjs";
 
 export const chainGuardCheck = async () => {
   const want = 421614;
@@ -131,6 +133,9 @@ export const chainGuardCheck = async () => {
   {
     const claimer = "0x" + "55".repeat(20);
     const slot = "0x" + "11".repeat(32);
+    // THE CHAIN ANSWERS THE HALF'S OWN COMMITMENT: the claim compares the half with the escrow's commit before
+    // the wallet is asked, so a fake chain that answered a foreign word would stop the seam this case tests.
+    const commit = halfCommitmentHex(BigInt(slot), secp256k1, keccak256);
     const word = (value) => BigInt(value).toString(16).padStart(64, "0");
     const state = "0x" + [1, 0, 0, 0].map(word).join("");
     const call = async ({ data }) => {
@@ -138,10 +143,11 @@ export const chainGuardCheck = async () => {
       if (data === engine.escrow.encodeRead("ready")) return "0x" + word(1);
       if (data === engine.escrow.encodeRead("readyBy")) return "0x" + word(9999999999);
       if (data === engine.escrow.encodeT1()) return "0x" + word(99999999999);
+      if (data === engine.escrow.encodeRead("commitHalfClaimer")) return commit;
       return slot;
     };
     const expect = { chainId: 1, claimer, edPointLocker: slot, edPointClaimer: slot, edViewPointLocker: slot,
-      commitHalfLocker: slot, commitHalfClaimer: slot };
+      commitHalfLocker: slot, commitHalfClaimer: commit };
     const sent = [];
     const wallet = {
       address: async () => claimer,

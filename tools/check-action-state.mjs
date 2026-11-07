@@ -5,24 +5,34 @@
 // whether the action is still open.
 import { claimOrder, refundOrder, markReadyOrder } from "../src/swap-flow.mjs";
 import * as engine from "../src/engine.mjs";
+import { halfCommitmentHex } from "../engine/atomic/orderHalfCommit.js";
+import { keccak256, secp256k1 } from "../src/primitives.mjs";
 
 const { encodeStatus, encodeRead, encodeClaim, encodeRefund, encodeMarkReady } = engine.escrow;
 const slot = "0x" + "11".repeat(32);
+// THE HALF AND ITS COMMITMENT ARE ONE PAIR. The escrow compares the low 160 bits of keccak256(x||y) of half*G,
+// so the fixture computes the commitment with the same formula and lets the fake chain answer with it.
+const commit = halfCommitmentHex(BigInt(slot), secp256k1, keccak256);
 const word = (value) => BigInt(value).toString(16).padStart(64, "0");
 const status = (funded, claimed, refunded) => "0x" + [funded, claimed, refunded, 0].map(word).join("");
-const expect = { edPointLocker: slot, edPointClaimer: slot, edViewPointLocker: slot, commitHalfLocker: slot, commitHalfClaimer: slot };
+const expect = { edPointLocker: slot, edPointClaimer: slot, edViewPointLocker: slot, commitHalfLocker: commit, commitHalfClaimer: commit };
+// What every reader of a transaction will see: the half, left-padded to 32 bytes.
+const paddedHalf = slot.replace(/^0x/, "");
 const fake = ({ state = status(1, 0, 0), ready = 1, now = 1000, readyBy = 2000, t1 = 3000, clock = true, revertAction = null } = {}) => {
   const sent = [];
+  const calls = [];
   const call = async ({ data }) => {
+    calls.push({ data });
     if (revertAction && data === revertAction) throw new Error("execution reverted: simulation");
     if (data === encodeStatus()) return state;
     if (data === encodeRead("ready")) return "0x" + word(ready);
     if (data === encodeRead("readyBy")) return "0x" + word(readyBy);
+    if (data === encodeRead("commitHalfClaimer") || data === encodeRead("commitHalfLocker")) return commit;
     if (data === engine.escrow.encodeT1()) return "0x" + word(t1);
     if (data === engine.escrow.encodeTermsHash()) return slot;
     return slot;
   };
-  return { sent, call, deps: { call,
+  return { sent, calls, call, deps: { call,
     send: async (tx) => { sent.push(tx); return "0x" + "ab".repeat(32); },
     blockTime: async () => (clock ? now : null) } };
 };
@@ -108,16 +118,52 @@ export const actionStateCheck = async () => {
     if (got !== expected || f.sent.length) problems.push(`${name} inside the margin answered ${JSON.stringify(got)} and sent ${f.sent.length}`);
   }
 
-  // A SIMULATION REVERT MUST NOT BECOME A SENT TRANSACTION. The guards above are a subset of the contract's
-  // rules; the eth_call is the part that answers with the contract itself.
-  for (const [name, work, revertAction, ready] of [
-    ["claim", (deps) => claimOrder({ escrow: "0x" + "aa".repeat(20), halfClaimer: slot, expect, deps }), encodeClaim(slot), 1],
-    ["refund", (deps) => refundOrder({ escrow: "0x" + "aa".repeat(20), halfLocker: slot, expect, deps }), encodeRefund(slot), 0],
-    ["mark-ready", (deps) => markReadyOrder({ escrow: "0x" + "aa".repeat(20), expect, deps }), encodeMarkReady(), 0],
+  // A DRY RUN MUST NOT CARRY THE HALF (sdk#291). An `eth_call` of claim or refund goes to a public endpoint by
+  // default, so the half would reach the RPC operator while the escrow is still open and the ETH has not moved.
+  // The transaction itself still carries it: that is where the reveal happens.
+  for (const [name, work, ready] of [
+    ["claim", (deps) => claimOrder({ escrow: "0x" + "aa".repeat(20), halfClaimer: slot, expect, deps }), 1],
+    ["refund", (deps) => refundOrder({ escrow: "0x" + "aa".repeat(20), halfLocker: slot, expect, deps }), 0],
   ]) {
-    const f = fake({ ready, revertAction });
-    const got = await why(() => work(f.deps));
-    if (got !== "simulation" || f.sent.length) problems.push(`${name} simulation revert answered ${JSON.stringify(got)} and sent ${f.sent.length}`);
+    const f = fake({ ready });
+    const done = await work(f.deps);
+    if (!done || !done.hash) problems.push(`${name} with a matching half did not send`);
+    const leaked = f.calls.filter((entry) => String(entry.data).includes(paddedHalf));
+    if (leaked.length) problems.push(`${name}: ${leaked.length} read call(s) carried the half`);
+    const sent = f.sent.length === 1 ? String(f.sent[0].data) : "";
+    if (!sent.includes(paddedHalf)) problems.push(`${name} did not carry the half in its transaction`);
+    if (f.calls.some((entry) => entry.data === encodeClaim(slot) || entry.data === encodeRefund(slot))) {
+      problems.push(`${name} still simulated the action with the half`);
+    }
+  }
+
+  // THE ESCROW'S OWN COMPARISON, RUN LOCALLY: a foreign half and a value that is not a half both stop before the
+  // wallet is asked, and an unread commitment is a refusal, not a pass.
+  for (const [name, work, ready] of [
+    ["claim", (deps, half) => claimOrder({ escrow: "0x" + "aa".repeat(20), halfClaimer: half, expect, deps }), 1],
+    ["refund", (deps, half) => refundOrder({ escrow: "0x" + "aa".repeat(20), halfLocker: half, expect, deps }), 0],
+  ]) {
+    const foreign = fake({ ready });
+    const got = await why(() => work(foreign.deps, "0x" + "22".repeat(32)));
+    if (got !== "half-mismatch" || foreign.sent.length) problems.push(`${name} with a foreign half answered ${JSON.stringify(got)} and sent ${foreign.sent.length}`);
+    const malformed = fake({ ready });
+    const bad = await why(() => work(malformed.deps, "not-a-half"));
+    if (bad !== "bad-input" || malformed.sent.length) problems.push(`${name} with a malformed half answered ${JSON.stringify(bad)} and sent ${malformed.sent.length}`);
+  }
+  // WITHOUT EXPECTATIONS THERE IS NO SLOT CHECK, SO THE HALF READ IS THE ONLY GUARD LEFT: an unread commitment is
+  // a refusal, never a pass. With expectations the slot check answers first, and that answer is `slots-mismatch`.
+  {
+    const unreadable = fake({ ready: 0, revertAction: encodeRead("commitHalfLocker") });
+    const unread = await why(() => refundOrder({ escrow: "0x" + "aa".repeat(20), halfLocker: slot, deps: unreadable.deps }));
+    if (unread !== "slots-unreadable" || unreadable.sent.length) problems.push(`a refund without expectations and an unread commitment answered ${JSON.stringify(unread)} and sent ${unreadable.sent.length}`);
+  }
+
+  // A SIMULATION REVERT MUST NOT BECOME A SENT TRANSACTION. The mark carries no half, so its dry run stays: the
+  // guards above are a subset of the contract's rules, and the eth_call answers with the contract itself.
+  {
+    const f = fake({ ready: 0, revertAction: encodeMarkReady() });
+    const got = await why(() => markReadyOrder({ escrow: "0x" + "aa".repeat(20), expect, deps: f.deps }));
+    if (got !== "simulation" || f.sent.length) problems.push(`mark-ready simulation revert answered ${JSON.stringify(got)} and sent ${f.sent.length}`);
   }
 
   return { note: "claim, refund and mark-ready check the order and the chain clock before signing",
