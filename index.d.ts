@@ -1592,6 +1592,11 @@ export interface SweepFromOrderRequest {
   readonly passphrase?: string;
 }
 
+/**
+ * The order expectations the action's slot check compares against the live escrow. `amount`, `readyBy`, `t1`,
+ * `salt` and `factory` travel with the action for the caller's own window and context checks; the slot guard
+ * itself compares the points and commitments.
+ */
 export interface SweepActionExpect {
   readonly chainId: number;
   readonly factory: string;
@@ -1609,21 +1614,6 @@ export interface SweepActionExpect {
   readonly edViewPointLocker: string;
 }
 
-/**
- * The ETH action the recovered half can authorize. It is derived from the same order and taker halves as the
- * withdrawal payload; the caller still decides whether the action's window is open.
- */
-export interface SweepAction {
-  readonly side: "locker" | "claimer";
-  readonly kind: "refund" | "claim";
-  readonly escrow: string;
-  /** The recovered taker's spend half, ready for `actions.refund` or `actions.claim`. */
-  readonly half: string;
-  readonly claimer: string;
-  /** The order expectations the action's slot check compares against the live escrow. */
-  readonly expect: SweepActionExpect;
-}
-
 export interface SweepFromOrderResult {
   /** The payload `buildPayload` produced; the same fields a recovery file carries. */
   readonly payload: unknown;
@@ -1631,10 +1621,12 @@ export interface SweepFromOrderResult {
   readonly contents: string;
   /** The joint Monero address built from the key and the order. */
   readonly address: string;
-  /** The refund or claim the recovered half authorizes. */
-  readonly side: SweepAction["side"];
-  readonly kind: SweepAction["kind"];
+  /** The side of the recovered taker: a locker refunds, a claimer claims. */
+  readonly side: "locker" | "claimer";
+  /** The ETH action the recovered half authorizes. */
+  readonly kind: "refund" | "claim";
   readonly escrow: string;
+  /** The recovered taker's spend half, ready for `actions.refund` or `actions.claim`. */
   readonly half: string;
   readonly claimer: string;
   readonly expect: SweepActionExpect;

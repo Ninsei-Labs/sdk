@@ -2,6 +2,10 @@
 //
 // The page used to assemble the SDK's own payload from the order and the key. That rule is now here: the side,
 // the person's spend and view points, the other side's points, the joint address and the restore height.
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { createSweep } from "../src/sweep.mjs";
 import { createSwaps } from "../src/swaps.mjs";
 import { takerHalvesV2 } from "../src/recovery-key.mjs";
@@ -118,6 +122,29 @@ export const sweepFromOrderCheck = async () => {
   check(incomplete && incomplete.code === "bad-input" && incomplete.params && incomplete.params.field === "order" &&
     Array.isArray(incomplete.params.missing) && incomplete.params.missing.includes("amount"),
     "an order without the native amount still produced action material");
+
+  // BREAKING RUN: THE MISSING-AMOUNT REFUSAL IS THE GUARD THE CASE CLAIMS. A copy with the amount check removed must
+  // accept the same order; otherwise the refusal above came from something else and would survive the rule's removal.
+  const tmp = mkdtempSync(join(tmpdir(), "sdk-sweep-action-"));
+  try {
+    const source = readFileSync(new URL("../src/sweep-action.mjs", import.meta.url), "utf8");
+    const errorsUrl = new URL("../src/errors.mjs", import.meta.url).href;
+    const amountGuard = 'if (!amount || !INTEGER_RE.test(amount) || BigInt(amount) <= 0n) missing.push("amount");';
+    const mutated = source
+      .replace('from "./errors.mjs"', `from "${errorsUrl}"`)
+      .replace(amountGuard, "/* the amount guard is removed by the breaking run */");
+    check(!mutated.includes(amountGuard), "the breaking run could not find the amount guard");
+    const copy = join(tmp, "sweep-action.mjs");
+    writeFileSync(copy, mutated);
+    const mod = await import(pathToFileURL(copy).href + "?run=" + Date.now());
+    const broken = orderFor(halves, "locker");
+    delete broken.amount;
+    let accepted = null;
+    try { accepted = mod.actionMaterialOf({ order: broken, chainId: CHAIN, half: halves.spendHalf }); } catch { accepted = null; }
+    check(accepted && accepted.expect.amount === null, "removing the amount guard did not change the refusal");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 
   let missing = null;
   try {
