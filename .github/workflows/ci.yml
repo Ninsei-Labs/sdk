@@ -41,10 +41,26 @@ jobs:
 
       # ANVIL AND CAST COME FROM THE SAME PINNED FOUNDRY THE CONTRACT REPOSITORY USES. The fork check below needs
       # both; pinning here keeps the local run and CI on one node implementation.
-      - name: Set up Foundry (anvil and cast, pinned)
-        uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: v1.9.0
+      # FOUNDRYUP IS NOT USED. The toolchain action runs foundryup, whose installer resolves the `latest` release
+      # from GitHub; a 504 on that one URL stopped every SDK job. This downloads the exact release asset and
+      # checks its published SHA-256 before anything from it runs.
+      - name: Install the pinned Foundry release
+        env:
+          FOUNDRY_VERSION: v1.9.0
+          FOUNDRY_SHA256: 8d17599b42e3139f1a9c171be3798c4ed8e743ae17b84cc3435e57bf2a51ae99
+        run: |
+          set -eu
+          archive="foundry_${FOUNDRY_VERSION}_linux_amd64.tar.gz"
+          base="https://github.com/foundry-rs/foundry/releases/download/${FOUNDRY_VERSION}"
+          mkdir -p "$RUNNER_TEMP/foundry"
+          curl --fail --location --retry 5 --retry-all-errors --retry-delay 5 \
+            --connect-timeout 20 --max-time 300 \
+            --output "$RUNNER_TEMP/$archive" "$base/$archive"
+          printf '%s  %s\n' "$FOUNDRY_SHA256" "$RUNNER_TEMP/$archive" | sha256sum --check
+          tar --extract --gzip --file "$RUNNER_TEMP/$archive" --directory "$RUNNER_TEMP/foundry"
+          echo "$RUNNER_TEMP/foundry" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/foundry/anvil" --version
+          "$RUNNER_TEMP/foundry/cast" --version
 
       # --frozen-lockfile: the lock file is the input, not something CI may rewrite.
       - name: Install dependencies
