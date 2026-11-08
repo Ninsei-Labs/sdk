@@ -31,12 +31,10 @@ The supported versions, scope, response targets, safe-harbor rules and disclosur
 | `preflight` — the engine's guards, answering with codes | works |
 | `recovery.open` — parsing the recovery file | works |
 | `sim` — sandbox scenarios and time | works (applying to a swap — stage 2) |
-| `quotes.watch` | works: live indicative quotes, its own client; a snapshot carries the display fields (sides, networks, `why`, signature, age, maturity), and the size can be NAMED (`size`) |
-| `quotes.firm` | works: a signed, binding quote with a TTL; a refusal is a named code |
 | `quotes.firmRelay` | works: a firm quote through a relay, built from one recovery key; the node half is DLEQ-checked |
 | `swaps.list` / `swaps.get` | read state from storage (and after a page reload) |
 | `swaps.start` | holds the order: guards → recovery file and the person's confirmation → order → locking funds → **watching the Monero address**; no backend is required; returns the named state `step: "xmr-incoming"` |
-| `swaps.watch` | waits for XMR to arrive at the joint address with the same request as the page (`GET /swaps/{id}`): arrived — returns the fact (amount, confirmations, txid); did not wait — a refusal with the code `xmr-timeout`; already on the address but barred by `unlock_time` — a refusal with the code `xmr-locked` (the boundary is in `params.until`), and NO ready mark; the maker DECLINED the order — returns `SwapDeclinedWatch` (`declined: true`, `terminal: "declined"`, the node's own `code`), with every action off; with expectations and a wallet, places the ready mark after the arrival |
+| `swaps.watch` | waits for XMR at the joint address with the CLIENT's own check: `verify` carries the joint address, view secret, spend public key and witness nodes. Arrived — returns the fact (amount, confirmations, txid); did not wait — a refusal with `xmr-timeout`; funds barred by `unlock_time` — `xmr-locked`; the maker DECLINED — `SwapDeclinedWatch` (`declined: true`, `terminal: "declined"`), every action off; with expectations and a wallet, places the ready mark after the arrival |
 | `wallet.balances` | works: the native coin and tokens, in minimal units |
 
 What is not ready names itself with the code `not-implemented` with the fields `surface` and `stage`: an empty
@@ -81,7 +79,6 @@ import { createNinsei } from "@ninsei-labs/sdk";
 const sdk = createNinsei({
   settlement: { chain: "arbitrum-sepolia" },  // from sdk.config.chains; vm is taken from the registry
   xmrNetwork: "stagenet",
-  // apiBase: "https://your-service",   // only when you bring a backend; there is no default
   assetsBase: "/sdk/",
   mode: "live",                     // or "sim"
 });
@@ -171,26 +168,16 @@ interface shows its own neutral message.
 
 ## Quotes
 
+The SDK has one quote path: a relay. `quotes.firmRelay` derives the client half and both view points from one
+recovery key, sends one request, verifies the relay answer and the on-chain registry/factory binding, and returns
+the signed `orderQuote` with its `startRequest`. There is no direct node client, no quote book and no route table
+in the package; a host that needs an indicative book keeps it in the host.
+
 ```js
-const stop = sdk.quotes.watch({ direction: "buy", token: "eth", amount: 1 }, (s) => render(s));
-s.rate;        // the best offer's price: non-XMR coins per 1 XMR; null - there is no offer (this is not zero)
-s.xmr;         // how much XMR for the entered amount (buy) or how much the person gives (sell)
-s.sizeOk;      // does the size fall within the node's grid and range
-s.sizeCode;    // why it does not: below-min | above-max | bad-size | no-offer
-s.offers;      // all offers for the size; s.refused - rows that did not become offers
-s.best;        // the best for the requested volume and side, AS THE SERVICE NAMED IT (pair and node)
-stop();        // the last one to unsubscribe stops the polling
+const offer = await sdk.quotes.firmRelay({ relayUrl, features, order, side: "ask", recoveryKey, xmrAmount });
+offer.orderQuote;   // the signed quote the factory takes
+offer.startRequest; // quote, order, orderQuote, counterparty and recovery salt for swaps.start
 ```
-
-The size can be NAMED rather than derived: `watch({ direction, token, size }, cb)` — if the caller has already
-aligned the volume to the provider's grid, the core asks for EXACTLY that size. An offer row and a refusal row
-carry the pair's sides, both networks and the "named" marker, the provider's reason (`why`), the package's
-signature, the age (`ageMs`) and the maturity level (`finality`) — display fields, not a second computation.
-
-The price does not depend on volume: the volume is needed by the provider to say whether it takes such a size. So
-the size is computed from the person's amount and is snapped to the node's grid **down**, and a size outside the
-range is not aligned: it is the provider's refusal, and it arrives as a code. Indicative quotes commit to nothing;
-`quotes.firm` and `quotes.firmRelay` commit, and the relay path carries the maker's signed terms and its view half.
 
 ## Found orders and the paying token
 
@@ -263,9 +250,6 @@ a decline; the client's two-node check and the escrow's own `Declined` event do.
 Storage is a refusal, not a silent empty state: a failed read, corrupt JSON, a failed write or remove is
 `storage-unavailable` with a step. Every SDK instance gets its own store over the adapter it was given, so two
 clients with different adapters keep separate records and neither takes over the other's.
-
-Every body route the SDK sends carries `sdkVersion` from the package (`quotes.firm`, `quotes.sale` and the funding
-mark). The caller cannot override it with a different line.
 
 Funding is reported from the receipt, not from the send. A status-0 receipt is `contract-reverted`; a missing
 receipt, a receipt without `OrderCreated`, or an event from another factory is `funding-pending` with the transaction

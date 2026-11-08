@@ -175,7 +175,7 @@ const feeOf = async (wallet, signed) => {
   return /^\d+$/.test(text) ? text : null;
 };
 
-export function createSweep({ http, config, call = null }) {
+export function createSweep({ call = null }) {
   // THE NAME IS NEEDED BY THE OBJECT ITSELF: `run` calls `api.plan(...)` - the step order is held by the plan and
   // the withdrawal living in one object, not in two copies. During a manual merge of branches the object was left
   // unnamed, and the withdrawal failed with "api is not defined": not a refusal, but a breakdown. `node --check`

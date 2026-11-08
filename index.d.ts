@@ -35,8 +35,6 @@ export type EvmLogReader = (
 ) => Promise<readonly EvmLog[]>;
 
 export interface NinseiOptions {
-  /** The service's HTTP API base. Default is "/api" (the interface proxies it to our server). */
-  apiBase?: string;
   /**
    * The settlement network. `chain` is an identifier from `sdk.config.chains` (e.g. "arbitrum-sepolia", "solana").
    * `vm` may be omitted: it is taken from the network registry, and a foreign one cannot be substituted - a network
@@ -71,7 +69,7 @@ export interface NinseiOptions {
    */
   routing?: { prefer?: readonly string[] };
   /**
-   * ADDRESSES AND PATHS SUPPLIED FROM OUTSIDE. The default is our service and our explorers; the options are for
+   * READ-ONLY ADDRESSES SUPPLIED FROM OUTSIDE. The default is our explorers and RPC endpoints; the options are for
    * whoever runs the swap themselves. ADDRESSES ARE CONFIGURABLE, NOT CHECKS: the pre-signature guards stay enabled
    * under any configuration.
    */
@@ -79,11 +77,6 @@ export interface NinseiOptions {
     readonly explorer?: { readonly evmTx?: string; readonly evmAddr?: string; readonly evmName?: string; readonly xmrTx?: string };
     readonly rpc?: { readonly evm?: string; readonly monero?: string };
   };
-  /**
-   * Renaming API paths by name: { swaps, swap, evmSwaps, orderQuote, orderSell, revealedHalf, swept }.
-   * An unknown name is bad-input (a typo must not silently fall back to the default).
-   */
-  routes?: Readonly<Record<string, string>>;
   /**
    * READING THE CHAIN FROM OUTSIDE - a seam for whoever runs the SDK outside a browser. By default the chain is read
    * by the page's wallet (the engine's readContract), and in Node there is no such wallet: predict, the order state
@@ -149,7 +142,7 @@ export interface NinseiOptions {
    * THE INTERFACE'S ADDRESS DENYLIST (issue #16) - policy, not proof, next to allowedProviders. Addresses the
    * interface will not trade to or from, compared WITHOUT CASE. The SDK fetches nothing: the interface brings the
    * list in. An empty/absent list means "no check".
-   * Before `quotes.firm` the order's `locker` is checked (on a purchase the claimer is the node's own address, so
+   * Before a relay quote the order's `locker` is checked (on a purchase the claimer is the node's own address, so
    * it is deliberately not checked), and before `swaps.start` the ACTUAL sender - the address the funding will be
    * sent from (`eth_accounts[0]` read from the wallet adapter at the moment of sending on demand; the person may
    * have switched accounts). A barred address is refused with `address-denied` BEFORE any request. A node's own
@@ -157,15 +150,6 @@ export interface NinseiOptions {
    * address: the interface shows its own neutral message.
    */
   denylist?: readonly string[];
-  /**
-   * A PASS TO OUR SERVICE for the "server" step (recording the swap with us). Only a wallet can sign the sign-in
-   * message, and the wallet's role in the SDK is an adapter: windows and message signatures remain the interface's,
-   * and the core receives a READY pass through the same seam the interface obtains it with today
-   * (www/js/evm/auth.js, signIn).
-   * A missing option is not an error: the "server" step then names the app's refusal with a code (`server-refused`,
-   * 401), rather than going in blind.
-   */
-  serverAuth?: () => Promise<string | null> | string | null;
   /**
    * POLLING THE MONERO ADDRESS: the rate and the timeout for the XMR arrival. The defaults come from the engine's
    * settings (the page's rate `API.pollMs`; the timeout - `blockTimeReal x confirmTarget`, that is, the time to
@@ -251,17 +235,12 @@ export interface SdkConfig {
   /** The witness nodes for one Monero network; a network with no nodes answers an empty list. */
   nodesFor(network: string): readonly (XmrNode | string)[];
   readonly assetsBase: string;
-  readonly apiBase: string;
   readonly mode: "live" | "sim";
   /** Addresses already resolved: the default from the network registry, the override from the options. */
   readonly endpoints: {
     readonly explorer: { readonly evmTx: string | null; readonly evmAddr: string | null; readonly evmName: string | null; readonly xmrTx: string | null };
     readonly rpc: { readonly evm: string | null; readonly monero: string | null };
   };
-  /** Named API paths: name -> template, already with the overrides from the options. */
-  readonly routes: Readonly<Record<string, string>>;
-  /** Assemble a path by name and params (route("swept", { id })). An unknown name is bad-input. */
-  route(name: string, params?: Readonly<Record<string, string>>): string;
   /** The protocol's thresholds (windows, confirmations, limits) - data, not interface constants. */
   readonly limits: {
     readonly minAmount: number | null;
@@ -269,10 +248,6 @@ export interface SdkConfig {
     readonly stepAmount: number | null;
     readonly xmrConfirmTarget: number | null;
     readonly readyLeadWarnSec: number | null;
-    /** How often the SDK polls the market (from the engine's settings). */
-    readonly quotePollMs: number;
-    /** The timeout of a single request to the service. */
-    readonly httpTimeoutMs: number;
     /** How often the SDK polls the watch on the Monero address (an engine setting or the `watch` option). */
     readonly watchPollMs: number;
     /** How long the SDK waits for the XMR to arrive before answering with the code `xmr-timeout`. */
@@ -442,132 +417,12 @@ export interface Balance {
 
 // --- Quotes -------------------------------------------------------------------------------------
 
-export interface FirmQuoteRequest {
-  /** Who gives the quote. Without it there is no one to ask - this is not "the first one at hand". */
-  readonly providerId: string;
-  /** The order terms: how much, to whom, the deadlines, the salt. The context the signature is bound to is assembled from them. */
-  readonly order: Readonly<Record<string, unknown>>;
-  /**
-   * THE TAKER'S MAKER VIEW HALF, when the order was built from a recovery key. Sent top-level to the node; the quote
-   * must echo it, so the joint view key can be rebuilt from the twelve words.
-   */
-  readonly viewHalfClaimer?: string;
-}
-
 export interface QuotesApi {
-  /**
-   * Live indicative quotes. Returns an unsubscribe function.
-   * A snapshot arrives on every tick and contains only data. The last one to unsubscribe stops the polling.
-   */
-  watch(request: QuoteRequest, onSnapshot: (snapshot: QuoteSnapshot) => void): () => void;
-  /** The last snapshot without waiting: needed by whoever subscribed later than the first poll. */
-  snapshot(): QuoteSnapshot | null;
-  /** A binding quote with a TTL. A refusal comes as a code, not text. */
-  firm(offer: FirmOffer): Promise<Quote>;
   /**
    * A firm quote through a relay, built from one recovery key. The relay answer is verified against the
    * requested terms and the on-chain registry/factory binding before it is returned.
    */
   firmRelay(request: FirmRelayOffer): Promise<FirmRelayAnswer>;
-  /**
-   * A reverse-mode ticket: the maker sells XMR. The request is the node's `request` object; the answer carries the
-   * signed order quote and its claim tip, which is checked against the gas price before it is returned.
-   */
-  sale(request: Readonly<Record<string, unknown>>): Promise<Readonly<Record<string, unknown>>>;
-}
-
-export interface QuoteRequest {
-  readonly direction: "buy" | "sell";
-  /** A token identifier from config ("usdc", "usdt", "dai", ...). For a sell - what the user receives. */
-  readonly token?: string;
-  /** The size on the user's side: for a buy - how much they pay, for a sell - how much XMR they give. */
-  readonly amount?: number;
-  /**
-   * THE EXPLICIT REQUEST SIZE in units of `unit` (buy - XMR, sell - token). Needed by whoever has already aligned
-   * the volume to the provider's grid themselves: the core asks for EXACTLY this number rather than deriving the
-   * size from `amount` anew.
-   * Not set - the size is derived from `amount`, as before.
-   */
-  readonly size?: number;
-}
-
-export interface QuoteSnapshot {
-  readonly direction: "buy" | "sell";
-  readonly token: string;
-  /** The amount on the user's side, as they entered it: for a buy - in the token, for a sell - in XMR. */
-  readonly amount: number | null;
-  /** The size asked of the provider, in units of `unit`. The price does not depend on it: it is needed so the
-   * provider says whether it takes such a size. */
-  readonly size: number;
-  /** The unit of the size: XMR for a buy, the token for a sell. */
-  readonly unit: string | null;
-  /** The best offer's price: non-XMR coins per 1 XMR. null - there is no offer (and then it is not zero). */
-  readonly rate: number | null;
-  /** How much XMR for this size (buy) or how much XMR the person gives (sell). null - not computed. */
-  readonly xmr: number | null;
-  /** When the snapshot was received, milliseconds of the epoch. */
-  readonly at: number;
-  /** The provider node whose price is in the snapshot. */
-  readonly providerId: string | null;
-  /** The best offer for the requested volume and side, AS THE SERVICE NAMED IT. The core does not recompute it:
-   * these are response data by which the interface confirms its own "best" mark by pair and provider. */
-  readonly best: QuoteBest | null;
-  /** Is the size ready: the node's grid and range are data, not an interface check. */
-  readonly sizeOk: boolean;
-  /** Why the size is not ready: `bad-size`, `below-min`, `above-max`, `no-offer`. `null` - ready. */
-  readonly sizeCode: QuoteSizeCode;
-  /** The provider's packet number: liveness of the market is counted by it, not by the clock. */
-  readonly seq: number | null;
-  /** All offers for this size. Indicative: only `quotes.firm` binds. */
-  readonly offers: readonly QuoteOffer[];
-  /** Book rows that did not become offers, with the reason as a code: `malformed`, `disabled`, `stale`. */
-  readonly refused: readonly QuoteRefusal[];
-  /** Reference rates (the price benchmark), as the service returned them. Not a swap offer. */
-  readonly references: readonly QuoteReference[];
-  /** Are there offers and is the service's response alive. */
-  readonly ok: boolean;
-  /** Why there is no market: a code, no text. */
-  readonly error?: { readonly code: ErrorCode };
-}
-
-export type QuoteSizeCode = "bad-size" | "below-min" | "above-max" | "no-offer" | null;
-
-/** The best, as the service named it: the pair and the node. The core does not recompute the price. */
-export interface QuoteBest {
-  readonly providerId: string;
-  readonly pair: string;
-}
-
-export interface QuoteOffer {
-  readonly providerId: string;
-  readonly displayName: string | null;
-  readonly pair: string;
-  readonly asset: string | null;
-  readonly currency: string | null;
-  readonly rate: number;
-  readonly rateQuote: number;
-  /** The claim tip in native-token wei; a sale is ranked by the payout AFTER it. */
-  readonly claimTip: string;
-  readonly min: number | null;
-  readonly max: number | null;
-  readonly step: number | null;
-  readonly ttlMs: number | null;
-  readonly at: number | null;
-  readonly seq: number | null;
-  readonly finality: string | null;
-  /** The network of the XMR side and of the settlement side, as the quote named them. Not named - null, not our network. */
-  readonly assetNetwork: string | null;
-  readonly currencyNetwork: string | null;
-  readonly networkStated: boolean;
-  /** The networks were filled in by the receiver / not named at all - this is a fact about the quote, not "matched". */
-  readonly networksDerived: boolean;
-  readonly networksUnnamed: boolean;
-  /** The reason named by the provider, as is; the package's signature and key; the age by its own mark. */
-  readonly why: string | null;
-  readonly signature: string | null;
-  readonly keyId: string | null;
-  readonly ageMs: number | null;
-  readonly networks: { readonly asset: string | null; readonly currency: string | null; readonly stated: boolean };
 }
 
 /**
@@ -645,44 +500,6 @@ export interface RouteRefusalTables {
   readonly UNISWAPRELAY_REFUSAL_CODES: readonly RouteRefusalCode[];
 }
 
-export interface QuoteRefusal {
-  readonly providerId: string;
-  readonly displayName: string | null;
-  readonly pair: string;
-  readonly asset: string | null;
-  readonly currency: string | null;
-  readonly rate: number | null;
-  readonly rateQuote: number | null;
-  readonly min: number | null;
-  readonly max: number | null;
-  readonly step: number | null;
-  readonly ttlMs: number | null;
-  readonly at: number | null;
-  readonly seq: number | null;
-  readonly ageMs: number | null;
-  readonly assetNetwork: string | null;
-  readonly currencyNetwork: string | null;
-  readonly networkStated: boolean;
-  readonly code: "malformed" | "disabled" | "stale";
-  /** The reason named by the provider, as is: this is data, not our wording. */
-  readonly why: string | null;
-}
-
-export interface QuoteReference {
-  readonly source: string;
-  readonly value: number | null;
-  readonly at: number | null;
-}
-
-export interface FirmOffer {
-  /** Who gives the quote. Without it there is no one to ask. */
-  readonly providerId: string;
-  /** The order terms the signature is bound to. */
-  readonly order: Readonly<Record<string, unknown>>;
-  /** The taker's maker view half when the order was built from a recovery key. */
-  readonly viewHalfClaimer?: string;
-}
-
 export interface FirmRelayOffer {
   /** Relay origin, without the `/v1/quote` path. */
   readonly relayUrl: string;
@@ -735,25 +552,6 @@ export interface FirmRelayAnswer {
   readonly offered: number | null;
   readonly forwarded: Readonly<Record<string, unknown>> | null;
   readonly answer: Readonly<Record<string, unknown>>;
-}
-
-/**
- * A binding quote. The SDK does not reassemble the signature body: the signed fields are passed on as is - otherwise
- * the signature stops matching.
- */
-export interface Quote {
-  readonly id: string;
-  readonly direction: "buy" | "sell";
-  readonly providerId: string;
-  readonly chain: string;
-  readonly token: string;
-  readonly amount: number;
-  readonly xmr: number;
-  readonly rate: number;
-  /** The moment after which the quote must not be signed, milliseconds of the epoch. */
-  readonly expiresAt: number;
-  readonly receiveTo: string;
-  readonly signedPayload: unknown;
 }
 
 // --- Pre-signature checks -----------------------------------------------------------------------
@@ -812,7 +610,7 @@ export type CheckCode =
   | "unknown";
 
 /** The same as Quote, but a node response body is allowed too: the SDK does not reassemble the signed fields. */
-export type QuoteLike = Quote | (Record<string, unknown> & { signedPayload?: unknown });
+export type QuoteLike = Readonly<Record<string, unknown>> & { readonly signedPayload?: unknown };
 
 // --- Swaps --------------------------------------------------------------------------------------
 
@@ -881,16 +679,6 @@ export interface SwapsApi {
   /** Unfinished swaps after a page reload. */
   list(): Promise<readonly SwapState[]>;
   get(id: string): Promise<SwapState | null>;
-  /**
-   * THE SERVICE'S SWAP LIST, MERGED INTO THE LOCAL ONE. The path is the page's (www/js/evm/auth.js,
-   * loadServerSwaps: GET /api/evm-swaps), and the merge rule is the ENGINE'S (core/swap.js, addServerSwaps): a
-   * local record always wins, the service only adds what this browser does not have, and a record that came
-   * from the service is marked `source: "server"`. The pass is obtained by the interface and only presented by
-   * the core (the `serverAuth` seam): without it the service's own refusal comes as a code. `added` says how
-   * many records the merge brought in - the interface decides by it whether the list changed, instead of
-   * guessing.
-   */
-  sync(): Promise<SwapSync>;
   /**
    * REMOVE A RECORD FROM THE LOCAL LIST. The record leaves THIS store alone: on the service and in the
    * contract everything stays, so this is a tidy-up of the list, not a cancellation of the swap. `false` means
@@ -961,13 +749,6 @@ export interface SwapProgressView {
   readonly simulated: { readonly evm: boolean; readonly xmr: boolean };
   /** The terminal state (the record's settlement), or null while the swap is live. */
   readonly terminal: unknown;
-}
-
-/** The outcome of merging the service's list: how many rows the service gave, how many were new locally. */
-export interface SwapSync {
-  readonly ok: true;
-  readonly added: number;
-  readonly seen: number;
 }
 
 /** ONE WITNESS NODE: the address, and whose node it is (two nodes of one operator are one opinion). */
@@ -1077,8 +858,9 @@ export interface AutoRefundVerdict {
 }
 
 /**
- * THE OUTCOME OF A START: funds locked, the swap recorded with us, the address watch opened.
+ * THE OUTCOME OF A START: funds locked, the swap recorded locally, and the joint address returned.
  * There is NO XMR arrival here YET - the state is named (`step: "xmr-incoming"`), not passed off as completion.
+ * No backend watch is opened: the caller watches the chain with `swaps.watch` and its own `verify` inputs.
  */
 export interface SwapStart {
   readonly id: string | null;
@@ -1087,25 +869,6 @@ export interface SwapStart {
   /** The order's joint Monero address - the one the XMR arrives at. */
   readonly address: string;
   readonly step: "xmr-incoming";
-  readonly server: {
-    readonly marked: boolean;
-    /** The service's response code to the mark. */
-    readonly httpStatus: number;
-    /** What the service said about tying the quote to the escrow (its refusal does not abort the swap). */
-    readonly orderBinding: unknown;
-  };
-  readonly watch: {
-    readonly registered: boolean;
-    readonly httpStatus: number;
-    /** The watch record's identifier at the service: the state is queried by it. */
-    readonly id: string | null;
-    readonly address: string;
-    readonly status: string | null;
-    readonly expectedXmr: number;
-    readonly receivedXmr: number;
-    readonly confirmations: number;
-    readonly txids: readonly string[];
-  };
   /** The named next step: wait for the arrival. */
   readonly next: "watch";
 }
@@ -1169,7 +932,7 @@ export interface SellWatchResult {
 }
 
 export interface SwapWatchRequest {
-  /** The watch record's identifier at the service (from SwapStart.watch.id). */
+  /** The local swap record identifier. */
   readonly id: string;
   /** The escrow address for the ready mark (mandatory when `expect` and `wallet` are passed). */
   readonly escrow?: string;
@@ -1245,7 +1008,7 @@ export interface SwapWatch {
 }
 
 export interface StartRequest {
-  readonly quote: Quote;
+  readonly quote: QuoteLike;
   /**
    * THE ORDER TERMS - the context the DLEQ proof and the firm quote's signature are bound to
    * (`orderContext`, fields: chainId, factory, locker, claimer, amount, readyBy, t1, salt). The core ALSO builds our
@@ -1867,8 +1630,8 @@ export interface RecoveryApi {
   /** Parse the recovery file. Without the right passphrase - a refusal with a code, not an exception. */
   open(file: { readonly contents: string } | string, passphrase?: string): Promise<RecoveredWallet>;
   /**
-   * WHICH HEIGHT TO SCAN FROM, AND WHERE IT CAME FROM. The service's height wins when it knows one (it watches
-   * the address), the file's is the fallback, and no height is a named state - the person can type one.
+   * WHICH HEIGHT TO SCAN FROM. The height written into the file is the only source; no height is a named state -
+   * the person can type one.
    */
   restoreHeight(request: RestoreHeightRequest): Promise<RestoreHeightResult>;
 }
@@ -1882,12 +1645,12 @@ export interface RestoreHeightResult {
   readonly address: string | null;
   /** 0 when no source knows a height. */
   readonly height: number;
-  readonly source: "app" | "file" | "none";
+  readonly source: "file" | "none";
   readonly fileHeight: number;
   readonly appHeight: number;
-  /** Whether the service was asked at all (it is absent in a package without a service). */
+  /** Whether the retired service was asked. Always false: the SDK no longer carries that route. */
   readonly appAsked: boolean;
-  /** When `source` is "none": "unreachable" | "no-row" | "no-height". Null when a height was found. */
+  /** When `source` is "none": "no-height". Null when a height was found. */
   readonly appProblem: string | null;
 }
 
@@ -1927,7 +1690,7 @@ export type ErrorCode =
   | "quote-unavailable"
   | "quote-refused"
   /**
-   * An address on the interface's `denylist` refused BEFORE any request - the order's `locker` before `quotes.firm`,
+   * An address on the interface's `denylist` refused BEFORE any request - the order's `locker` before a relay quote,
    * or the actual sender before `swaps.start` (issue #16). Also names the node's own `denied-address` refusal as it
    * reaches the app: WITHOUT the node's `why` text and WITHOUT the address, so the interface shows its own message.
    */

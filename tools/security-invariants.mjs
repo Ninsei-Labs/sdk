@@ -15,13 +15,19 @@ export const SECURITY_INVARIANTS = [
     id: "QUOTE-POLICY-01",
     statement: "Factory and implementation code policy has one explicit semantic for absent, null, empty and populated lists.",
     files: ["src/quotes.mjs", "src/index.mjs", "src/factoryPolicy.mjs"],
-    checks: ["tools/check-sale-auth.mjs", "tools/check.mjs"],
+    checks: ["tools/check-relay-adapter.mjs", "tools/check.mjs"],
   },
   {
     id: "QUOTE-TTL-01",
-    statement: "A direct quote expiry is a safe integer in the future; zero, past, fractional and unsafe values are refused.",
+    statement: "A relay quote expiry is a safe integer in the future; an expired quote is refused with its own code.",
+    files: ["src/quotes.mjs", "src/relayFirmClient.mjs"],
+    checks: ["tools/check-relay-http.mjs", "tools/check-relay-adapter.mjs"],
+  },
+  {
+    id: "QUOTE-TIP-01",
+    statement: "A signed claim tip is bounded by the measured claim cost; a non-zero tip without a block read and a tip above the ceiling are named refusals.",
     files: ["src/quotes.mjs"],
-    checks: ["tools/check-quote-ttl.mjs"],
+    checks: ["tools/check-claim-tip.mjs", "tools/check-relay-adapter.mjs"],
   },
   {
     id: "DLEQ-01",

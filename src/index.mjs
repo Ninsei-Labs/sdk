@@ -1,7 +1,6 @@
 // THE SDK ENTRY POINT. Assembles the facades and holds rules common to all: no DOM, no texts, no windows.
 import { buildConfig } from "./config.mjs";
 import { factoryCodesForChain, implementationCodesForChain } from "./factoryPolicy.mjs";
-import { createHttp } from "./http.mjs";
 import { createQuotes } from "./quotes.mjs";
 import { createPreflight } from "./preflight.mjs";
 import { createRecovery } from "./recovery.mjs";
@@ -26,7 +25,6 @@ import { ERROR_CODES, ERROR_META, ERROR_SIDES, STEP_CODES, CHECK_CODES } from ".
 // value that looks like data. The stage number is named so the interface understands what to expect
 // (sdk/README.md, "Stages").
 const stageOf = {
-  "quotes.firm": 2,
   "swaps.start": 2,
   "swaps.list": 2,
   "swaps.get": 2,
@@ -57,16 +55,18 @@ const normalizeOptions = (options) => {
   }
   if (o.fetch !== undefined && typeof o.fetch !== "function") fail("bad-input", { field: "fetch" });
   if (o.now !== undefined && typeof o.now !== "function") fail("bad-input", { field: "now" });
+  // THE DIRECT-NODE OPTIONS ARE RETIRED, NOT SILENTLY IGNORED. A caller that still brings `apiBase`, `routes` or
+  // `serverAuth` is asking for a surface this release no longer carries; ignoring the field would make the old
+  // configuration look accepted while the request never happens.
+  for (const retired of ["apiBase", "routes", "serverAuth"]) {
+    if (o[retired] !== undefined) fail("bad-input", { field: retired, why: "retired" });
+  }
   if (o.routing !== undefined) {
     const r = o.routing;
     if (!r || typeof r !== "object" || (r.prefer !== undefined && !Array.isArray(r.prefer))) fail("bad-input", { field: "routing" });
   }
-  // PATHS AND ADDRESSES: the shape is checked here, the meaning - when the configuration is built (where the
-  // registry's defaults live). They must not be silently dropped: an override nobody knows about is worse than
-  // a refusal.
-  if (o.routes !== undefined && (!o.routes || typeof o.routes !== "object" || Array.isArray(o.routes))) {
-    fail("bad-input", { field: "routes" });
-  }
+  // PATHS AND ADDRESSES: only ADDRESSES remain configurable. The retired node routes are not part of the SDK any
+  // more; `endpoints` is checked here and resolved in the configuration.
   if (o.endpoints !== undefined && (!o.endpoints || typeof o.endpoints !== "object" || Array.isArray(o.endpoints))) {
     fail("bad-input", { field: "endpoints" });
   }
@@ -121,11 +121,6 @@ const normalizeOptions = (options) => {
   if (o.denylist !== undefined && o.denylist !== null) {
     if (!Array.isArray(o.denylist) || o.denylist.some((a) => typeof a !== "string")) fail("bad-input", { field: "denylist" });
   }
-  // A PASS TO OUR SERVICE - A SEAM FROM OUTSIDE, like the wallet: only a wallet can sign the sign-in message
-  // (www/js/evm/auth.js, signIn), and requiring it of the core would mean opening windows and signing messages
-  // inside the SDK. The core receives a ready pass and presents it. A missing pass is NOT an option error: the
-  // "server" step then answers with the app's refusal (401) under a named code.
-  if (o.serverAuth !== undefined && typeof o.serverAuth !== "function") fail("bad-input", { field: "serverAuth" });
   // YOUR OWN SWAP RECORD - A CAPABILITY, NOT A REQUIREMENT. By default the core builds the record and the order
   // side itself (record.mjs + order.mjs) and uses that side both for the record and for the lock terms. The
   // function is for whoever wants to bring THEIR OWN side; it must be a function, otherwise it is a typo, not a
@@ -143,17 +138,12 @@ const normalizeOptions = (options) => {
   return {
     settlement: { chain: settlement.chain, vm: settlement.vm },
     xmrNetwork: o.xmrNetwork,
-    apiBase: typeof o.apiBase === "string" && o.apiBase ? o.apiBase : null,
     assetsBase: typeof o.assetsBase === "string" && o.assetsBase ? o.assetsBase : "/",
     mode,
     storage: o.storage || null,
     fetch: o.fetch || null,
     now: o.now || null,
     routing: o.routing || null,
-    // PATHS AND ADDRESSES PASS ON AS THEY ARE: their meaning is worked out when the configuration is built,
-    // where the registry's defaults live. They must not be dropped here - an override nobody knows about is
-    // worse than a refusal.
-    routes: o.routes || null,
     endpoints: o.endpoints || null,
     nodes: o.nodes === undefined ? null : o.nodes,
     addNodes: o.addNodes === undefined ? null : o.addNodes,
@@ -165,7 +155,6 @@ const normalizeOptions = (options) => {
     knownFactoryCodes: o.knownFactoryCodes === undefined ? null : o.knownFactoryCodes,
     knownImplementationCodes: o.knownImplementationCodes === undefined ? null : o.knownImplementationCodes,
     denylist: o.denylist === undefined ? null : o.denylist,
-    serverAuth: o.serverAuth || null,
     watch: o.watch || null,
     createRecord: o.createRecord || null,
   };
@@ -176,15 +165,13 @@ export function createNinsei(options) {
   const config = buildConfig({
     settlement: o.settlement,
     xmrNetwork: o.xmrNetwork,
-    apiBase: o.apiBase,
     assetsBase: o.assetsBase,
     mode: o.mode,
     routing: o.routing,
-    routes: o.routes,
-  endpoints: o.endpoints,
-  watch: o.watch,
-  nodes: o.nodes,
-  addNodes: o.addNodes,
+    endpoints: o.endpoints,
+    watch: o.watch,
+    nodes: o.nodes,
+    addNodes: o.addNodes,
 });
   // THE NETWORK'S PINS REACH THE CORE. The bridge passed them explicitly; a caller with default options did not,
   // so the factory policy was null and the quote could name any factory. An explicit caller list still wins.
@@ -209,7 +196,6 @@ export function createNinsei(options) {
   // ONE CLIENT, ONE STORE - WITHOUT A PROCESS-WIDE EXCLUSIVE BINDING. Each facade gets a store over its own
   // adapter; two clients with different storages coexist and neither can take over the other's records.
   const store = engine.store.createStore(o.storage || engine.store.storage());
-  const http = createHttp({ apiBase: config.apiBase, fetchImpl: o.fetch, timeoutMs: config.limits.httpTimeoutMs });
   // THE CHAIN READ AND THE ALLOW-LIST GO INTO THE QUOTE CHECK: without the read the signature certifies itself,
   // so the same evmCall seam the lock and the actions use is handed to the quotes too.
   const providerAllowed = (() => {
@@ -220,12 +206,12 @@ export function createNinsei(options) {
     return (provider) => set.has(String(provider).toLowerCase());
   })();
   // THE DENYLIST IS LOWER-CASED ONCE HERE, so the comparison rule (case-insensitive membership) lives in ONE
-  // place and BOTH the quote check (`quotes.firm`) and the lock check (`swaps.start`) use it. An empty list is
+  // place and BOTH the quote check (`firmRelay`) and the lock check (`swaps.start`) use it. An empty list is
   // "no policy" (null), not an empty check.
   const denylist = Array.isArray(o.denylist) && o.denylist.length
     ? new Set(o.denylist.map((a) => String(a).toLowerCase()))
     : null;
-  const quotes = createQuotes({ config, http, now: o.now || (() => Date.now()), evmCall: o.evmCall || null,
+  const quotes = createQuotes({ config, now: o.now || (() => Date.now()), evmCall: o.evmCall || null,
     evmCode: o.evmCode || null, evmBlock: o.evmBlock || null,
     providerAllowed, knownFactoryCodes, knownImplementationCodes,
     denylist });
@@ -244,7 +230,7 @@ export function createNinsei(options) {
     config,
     wallet,
     preflight,
-    recovery: createRecovery({ http, config }),
+    recovery: createRecovery(),
 
     // THE ORDER: checking the counterparty's side and the joint address. Both checks - BEFORE signing: after it
     // there is nothing to fix.
@@ -273,17 +259,8 @@ export function createNinsei(options) {
     },
     sim,
     quotes: {
-      // LIVE INDICATIVE QUOTES. The subscription delivers data on every poll tick and is removed by the function
-      // watch returned; the last listener to leave stops the polling.
-      watch: (request, onSnapshot) => quotes.watch(request, onSnapshot),
-      snapshot: () => quotes.snapshot(),
-      // A firm quote is stage 2: it is signed with a key and lives in the order protocol, not in a market snapshot.
-      // A FIRM QUOTE: accepted only with a confirmed provider signature.
-      firm: (request) => quotes.firm(request),
-      // THE RELAY PATH: one recovery key in, signed orderQuote and its maker view half out.
+      // THE ONLY QUOTE PATH: one recovery key in, a signed orderQuote and the maker's view half out.
       firmRelay: (request) => quotes.firmRelay(request),
-      // A REVERSE TICKET: the node signs it; its claim tip is checked here before the caller sees it.
-      sale: (request) => quotes.sale(request),
     },
     // READING STATE WORKS, STARTING IS NAMED HONESTLY: list/get raise swaps from storage after a page reload;
     // start holds the step order and runs into the step that creates the record (stage 2).
@@ -292,19 +269,18 @@ export function createNinsei(options) {
     // non-existent side), and the network is needed to build the shared Monero address.
     // THE CHAIN READER GOES INTO THE SWAP START: it will check the escrow address, the order state and the fee
     // before signing.
-    // THE PATHS, THE POLL TIMINGS AND THE PASS GO INTO THE START: without the configuration the "server" step
-    // would not know where to knock, and without the pass there is nothing to present to the service (and that
-    // is a refusal with a CODE, not an invented path).
-    swaps: createSwaps({ preflight, http, mode: o.mode, xmrNetwork: o.xmrNetwork, call: o.evmCall, now: o.now || null, evmBlock: o.evmBlock || null, store,
+    // THE CHAIN READER GOES INTO THE SWAP START: it will check the escrow address, the order state and the fee
+    // before signing. The Monero watch reads the chain through the same seam; there is no backend watcher.
+    swaps: createSwaps({ preflight, mode: o.mode, xmrNetwork: o.xmrNetwork, call: o.evmCall, now: o.now || null, evmBlock: o.evmBlock || null, store,
       // THE LOG SEAM FOR THE DECLINE CHECK: the watch asks the escrow for its `Declined` event on every tick, so
       // a declined order stops the wait at once instead of running to `xmr-timeout`.
       logs: o.evmLogs || null,
-      config, auth: o.serverAuth, denylist, watch: o.watch,
+      config, denylist, watch: o.watch,
       // THE RECORD IS BUILT HERE ITSELF, and one brought from outside is only the caller's preference.
       createRecord: o.createRecord }),
     // XMR WITHDRAWAL: parsing the file and requesting data work; the withdrawal itself is named (the Monero
     // wallet as an adapter).
-    sweep: createSweep({ http, config, call: o.evmCall }),
+    sweep: createSweep({ call: o.evmCall }),
   });
 }
 

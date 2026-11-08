@@ -3,7 +3,7 @@
 // THREE CHECKS, ALL MANDATORY BEFORE SIGNING - after it there is nothing to fix:
 //
 //   1) the DLEQ proof stands in the CONTEXT OF THIS order: the counterparty proved for our terms, not for others.
-//      The context is the same one the quote signature is bound to (see quotes.firm);
+//      The context is the same one the quote signature is bound to (see quotes.firmRelay);
 //   2) the proven ed25519 point is THE VERY ONE that will go into the contract and from which the address is
 //      assembled. Without this check the counterparty could prove one thing and substitute another: on our side
 //      everything would look sound, and the discrepancy would surface when claiming the XMR, with nothing left to
@@ -218,7 +218,7 @@ function acceptedCounterparty({ context, side = null, counterparty = null, stand
   if (counterparty && typeof counterparty === "object") {
     const pub = counterparty.pub && typeof counterparty.pub === "object" ? counterparty.pub : {};
     // THE ORDER-QUOTE FIELD NAMES ARE THE ONES THE CORE ITSELF RETURNS (a defect found). The counterparty's side
-    // comes from `quotes.firm`, and there the point is called `edPointClaimer`, the view half - `viewHalfClaimer`
+    // comes from `firmRelay`, and there the point is called `edPointClaimer`, the view half - `viewHalfClaimer`
     // (rfq/orderQuote.mjs). While only `edPub`/`viewPub` were accepted, the facade's own side was NOT accepted:
     // start answered bad-input { field: "counterparty", missing: ["edPub"] } to its own answer. The engine knew
     // this mapping (sdk/src/swap-flow.mjs: edPub: quote.edPointClaimer). We accept BOTH names.

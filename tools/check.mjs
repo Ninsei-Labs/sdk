@@ -41,7 +41,6 @@ import { sweepAdapterCheck } from "./check-sweep-adapter.mjs";
 import { claimTipCheck } from "./check-claim-tip.mjs";
 import { claimSenderCheck } from "./check-claim-sender.mjs";
 import { chainGuardCheck } from "./check-chain-guard.mjs";
-import { quoteRankCheck } from "./check-quote-rank.mjs";
 import { settlementProfilesCheck } from "./check-settlement-profiles.mjs";
 import { dleqVectorsCheck } from "./check-dleq-vectors.mjs";
 import { swapNetworkCheck } from "./check-swap-network.mjs";
@@ -97,7 +96,7 @@ export const syntaxCheck = () => {
 // with a NAMED code (an SdkError), never with a bare TypeError: a breakdown must not look like an honest refusal.
 const NOT_HEADLESS = [
   "sdk.wallet.connect - needs an EIP-1193 provider brought from outside",
-  "sdk.quotes.watch - needs the quote service over HTTP",
+  "sdk.quotes.firmRelay - needs a relay and a chain read brought from outside",
   "sdk.swaps.start / swaps.watch - needs RPC, a maker and a Monero node (a live contour)",
   "src/adapters/local-storage.mjs - needs localStorage",
   "src/adapters/monero-wallet.mjs and monero.mjs - need a Monero wallet library (monero-ts)",
@@ -134,11 +133,11 @@ export const importCheck = async () => {
   // HEADLESS PROBES: each must answer a value or refuse with a NAMED code. A bare TypeError is a defect.
   const declared = new Set(mod.ERROR_CODES);
   const probes = [
-    ["config.route('swaps', { id: 'x' })", () => sdk.config.route("swaps", { id: "x" })],
     ["recovery.open(null)", () => sdk.recovery.open(null)],
     ["sim.apply('no-such-scenario')", () => sdk.sim.apply("no-such-scenario")],
     ["wallet.connect() with no provider", () => sdk.wallet.connect()],
-    ["quotes.firm({})", () => sdk.quotes.firm({})],
+    ["quotes.firmRelay({})", () => sdk.quotes.firmRelay({})],
+    ["createNinsei({ apiBase })", () => mod.createNinsei({ settlement: { chain: "arbitrum-sepolia" }, xmrNetwork: "stagenet", mode: "sim", apiBase: "https://retired.invalid" })],
   ];
   for (const [label, run] of probes) {
     try {
@@ -1905,19 +1904,10 @@ const declineRecord = (engine, { escrow = DECLINE_ESCROW, birthHeight = 12 } = {
   return swap;
 };
 
-/** The swaps facade over a stand-in service: `answers` is the queue of watch bodies, one per poll. */
-const declineFacade = (mod, { answers, logs = null }) => {
-  const seen = { polls: 0 };
-  const http = {
-    tryJson: async () => {
-      seen.polls += 1;
-      const body = answers.length > 1 ? answers.shift() : answers[0];
-      return { ok: true, status: 200, body };
-    },
-  };
-  const config = { apiBase: "http://service.invalid", route: (name, params) => "http://service.invalid/" + name + (params && params.id ? "/" + params.id : ""),
-    limits: { watchPollMs: 1, watchTimeoutMs: 25 } };
-  return { swaps: mod.createSwaps({ http, config, logs }), seen };
+/** The swaps facade over the client-side watch: the backend is gone, so only the node list is supplied. */
+const declineFacade = (mod, { logs = null } = {}) => {
+  const config = { limits: { watchPollMs: 1, watchTimeoutMs: 25 } };
+  return { swaps: mod.createSwaps({ config, logs }) };
 };
 
 export const declineCheck = async () => {
@@ -1988,82 +1978,16 @@ export const declineCheck = async () => {
     problems.push(`an answer that is not a list of logs did not refuse with bad-input: ${JSON.stringify({ code: (notAList && notAList.code) || null })}`);
   }
 
-  // (d) THE SERVICE'S `declined` STATUS IS NOT A DECISION. The backend is retired: a wire word may notify, but it
-  // must not write a settlement or stop a wait as a decline. The body carries no `receivedXmr`, so the watch refuses
-  // it as an unreadable answer - and leaves the record alone.
-  const declinedRecord = declineRecord(engine);
-  const wire = declineFacade(swapsMod, { answers: [{ status: "declined", code: "compliance", id: "w" }], logs: () => Promise.resolve([]) });
-  let wireRefusal = null;
-  try { await wire.swaps.watch({ id: declinedRecord.id, escrow: DECLINE_ESCROW, pollMs: 1, timeoutMs: 25 }); }
-  catch (error) { wireRefusal = error; }
-  if (!(wireRefusal && typeof wireRefusal.code === "string" && wireRefusal.code)) {
-    problems.push(`the service's declined status was not refused as an unreadable answer: ${JSON.stringify({ code: (wireRefusal && wireRefusal.code) || null })}`);
-  }
-  if (engine.swap.getSwap(declinedRecord.id).settlement) {
-    problems.push("the service's declined status was written into the record as a settlement");
-  }
-
   // (d2) SOURCE 1 AT THE WATCH LEVEL TOO - the escrow's event stops the wait even when the service says nothing.
   const eventRecord = declineRecord(engine, { escrow: DECLINE_ESCROW });
   const chainOnly = declineFacade(swapsMod, {
-    answers: [{ status: "awaiting_funding", receivedXmr: 0, id: "w2" }],
     logs: () => Promise.resolve([logFrom(DECLINE_ESCROW, decline.DECLINED_TOPIC0)]),
   });
+  const verifyStub = { nodes: [], address: DECLINE_ESCROW, viewSecret: "0x01", spendPub: "0x02", expectedAtomic: "1" };
   const chainOutcome = await watchOutcome("the watch on the escrow's Declined event",
-    () => chainOnly.swaps.watch({ id: eventRecord.id, escrow: DECLINE_ESCROW, pollMs: 1, timeoutMs: 25 }));
+    () => chainOnly.swaps.watch({ id: eventRecord.id, escrow: DECLINE_ESCROW, verify: verifyStub, pollMs: 1, timeoutMs: 25 }));
   if (!(chainOutcome && chainOutcome.declined === true && chainOutcome.source === "event")) {
     problems.push(`the escrow's Declined event did not stop the wait: ${JSON.stringify(chainOutcome)}`);
-  }
-
-  // (e) THE CONTROLS THAT KEEP (d) HONEST. A swap that simply has no XMR yet must STILL time out (the decline does
-  // not end every wait), a bare `declined` WITHOUT the node's code must not count, and the locked-funds state must
-  // keep its own refusal.
-  const plainRecord = declineRecord(engine);
-  const plain = declineFacade(swapsMod, { answers: [{ status: "awaiting_funding", receivedXmr: 0, id: "w3" }], logs: () => Promise.resolve([]) });
-  let plainRefusal = null;
-  try { await plain.swaps.watch({ id: plainRecord.id, escrow: DECLINE_ESCROW, pollMs: 1, timeoutMs: 20 }); }
-  catch (error) { plainRefusal = error; }
-  if (!(plainRefusal && plainRefusal.code === "xmr-timeout")) {
-    problems.push(`an ordinary wait did not end as xmr-timeout: ${JSON.stringify({ code: (plainRefusal && plainRefusal.code) || null })}`);
-  }
-  if (plain.seen.polls < 2) {
-    problems.push(`an ordinary wait stopped after ${plain.seen.polls} poll(s): the decline branch is not conditional`);
-  }
-  // A SERVICE THAT SAW MONEY DOES NOT DECLARE READINESS. The old path marked the escrow ready on receivedXmr > 0,
-  // ignoring the expected amount and confirmations. The observation is now returned with `seen: false` and the
-  // next step `verify`; only the client's own two-node check can produce an arrival.
-  const observedRecord = declineRecord(engine);
-  const observed = declineFacade(swapsMod, { answers: [{ status: "awaiting_funding", receivedXmr: 1, expectedAmountXmr: 10, confirmations: 0, id: "w-observed" }], logs: () => Promise.resolve([]) });
-  let observedOutcome = null;
-  try { observedOutcome = await observed.swaps.watch({ id: observedRecord.id, escrow: DECLINE_ESCROW, pollMs: 1, timeoutMs: 20 }); }
-  catch (error) { observedOutcome = error; }
-  if (!(observedOutcome && observedOutcome.seen === false && observedOutcome.next === "verify"
-        && observedOutcome.observed && observedOutcome.observed.receivedXmr === 1)) {
-    problems.push(`a service observation became readiness: ${JSON.stringify(observedOutcome && (observedOutcome.code || observedOutcome))}`);
-  }
-  // A BARE `declined` WITHOUT THE NODE'S CODE IS NOT THE STATE THE NODE NAMES: it is an answer that is not a watch
-  // response at all (no `receivedXmr` in it), so the watch names THAT and no decline is written down.
-  const bareRecord = declineRecord(engine);
-  const bare = declineFacade(swapsMod, { answers: [{ status: "declined", id: "w4" }], logs: () => Promise.resolve([]) });
-  let bareRefusal = null;
-  try { await bare.swaps.watch({ id: bareRecord.id, escrow: DECLINE_ESCROW, pollMs: 1, timeoutMs: 20 }); }
-  catch (error) { bareRefusal = error; }
-  if (!(bareRefusal && typeof bareRefusal.code === "string" && bareRefusal.code)) {
-    problems.push(`a status of "declined" WITHOUT the code "compliance" was not refused with a code: ${JSON.stringify({ code: (bareRefusal && bareRefusal.code) || null })}`);
-  }
-  if (engine.swap.getSwap(bareRecord.id).settlement) {
-    problems.push("a status of \"declined\" WITHOUT the code \"compliance\" was written into the record as a decline");
-  }
-  const lockedRecord = declineRecord(engine);
-  const locked = declineFacade(swapsMod, {
-    answers: [{ status: "xmr_locked", receivedXmr: 0, lockedXmr: 1, lockedUntil: { untilHeight: 9 }, id: "w5" }],
-    logs: () => Promise.resolve([]),
-  });
-  let lockedRefusal = null;
-  try { await locked.swaps.watch({ id: lockedRecord.id, escrow: DECLINE_ESCROW, pollMs: 1, timeoutMs: 20 }); }
-  catch (error) { lockedRefusal = error; }
-  if (!(lockedRefusal && lockedRefusal.code === "xmr-locked")) {
-    problems.push(`funds barred by unlock_time stopped being xmr-locked: ${JSON.stringify({ code: (lockedRefusal && lockedRefusal.code) || null })}`);
   }
 
   // (f) THE STATE, ONCE SEEN, IS WRITTEN INTO THE RECORD: every surface that reads the record reports the decline
@@ -2080,11 +2004,11 @@ export const declineCheck = async () => {
     problems.push("the decline was not written into the swap record as its settlement");
   }
   // AND A LATER WATCH RETURNS IT AT ONCE, WITHOUT POLLING AT ALL (a page reload).
-  const afterReload = declineFacade(swapsMod, { answers: [{ status: "awaiting_funding", receivedXmr: 0, id: "w6" }], logs: () => Promise.resolve([]) });
+  const afterReload = declineFacade(swapsMod, { logs: () => Promise.resolve([]) });
   const reloadOutcome = await watchOutcome("the watch after a reload",
-    () => afterReload.swaps.watch({ id: eventRecord.id, escrow: DECLINE_ESCROW, pollMs: 1, timeoutMs: 25 }));
-  if (!(reloadOutcome && reloadOutcome.declined === true && reloadOutcome.source === "record" && afterReload.seen.polls === 0)) {
-    problems.push(`a reloaded watch did not return the recorded decline at once: ${JSON.stringify(reloadOutcome)} / polls=${afterReload.seen.polls}`);
+    () => afterReload.swaps.watch({ id: eventRecord.id, escrow: DECLINE_ESCROW, verify: verifyStub, pollMs: 1, timeoutMs: 25 }));
+  if (!(reloadOutcome && reloadOutcome.declined === true && reloadOutcome.source === "record")) {
+    problems.push(`a reloaded watch did not return the recorded decline at once: ${JSON.stringify(reloadOutcome)}`);
   }
 
   // (g) THE CONTROL FOR (f): AN ORDINARY REFUND IS NOT A DECLINE, and neither is a live swap. A record settled by
@@ -2140,7 +2064,7 @@ export const declineCheck = async () => {
     problems.push(`the watch reports a decline with the fields [${watchShape}], not with the declared set [${watchDeclared}]`);
   }
   notes.push("the decline carries the state, the node's own `compliance` and WHERE it was seen - and no reason, category or provider, at any depth");
-  notes.push("an ordinary refund (a HalfRevealed footprint, or a record settled as refund_eth) is NOT a decline and keeps the refund's own state `refunded_eth`, a bare `declined` without its code is not one either, and a wait with no decline still ends as xmr-timeout");
+  notes.push("an ordinary refund (a HalfRevealed footprint, or a record settled as refund_eth) is NOT a decline and keeps the refund's own state `refunded_eth`");
 
   const green = problems.length === 0;
   return {
@@ -2609,7 +2533,6 @@ const runScriptCheck = (tool, label) => {
   }
 };
 
-const saleAuthCheck = () => runScriptCheck("check-sale-auth.mjs", "sale auth");
 // THE COVERAGE MERGER MUST NOT DISCARD A CHILD PROCESS'S COUNT. A parent process loads a module with count 0;
 // a child executes the same range. Merging equal boundaries and then choosing the innermost range is what turns
 // that into covered. This is the measured defect the audit found in the old first-range-wins reduce.
@@ -2632,7 +2555,6 @@ const coverageMergeCheck = () => {
   }
   return { note: "the V8 merger keeps a child process's execution count and the innermost range", problems, notes: [] };
 };
-const quoteTtlCheck = () => runScriptCheck("check-quote-ttl.mjs", "quote ttl");
 const backupConfirmationCheck = () => runScriptCheck("check-backup-confirmation.mjs", "backup confirmation");
 const keyViewCheck = () => runScriptCheck("check-key-view.mjs", "key view");
 const relayViewCheck = () => runScriptCheck("check-relay-view.mjs", "relay view");
@@ -2706,9 +2628,7 @@ const CHECKS = {
   "vendor-bundles": vendorBundlesCheck,
   "refund-window": refundWindowCheck,
   "refund-if-missing": refundIfMissingCheck,
-  "sale-auth": saleAuthCheck,
   "coverage-merge": coverageMergeCheck,
-  "quote-ttl": quoteTtlCheck,
   "backup-confirmation": backupConfirmationCheck,
   "key-view": keyViewCheck,
   "relay-view": relayViewCheck,
@@ -2728,10 +2648,9 @@ const CHECKS = {
   "sweep-window": sweepWindowCheck,
   "sweep-order": sweepFromOrderCheck,
   "sweep-adapter": sweepAdapterCheck,
-  "claim-tip": claimTipCheck,
   "claim-sender": claimSenderCheck,
+  "claim-tip": claimTipCheck,
   "chain-guard": chainGuardCheck,
-  "quote-rank": quoteRankCheck,
   "settlement-profiles": settlementProfilesCheck,
   "dleq-vectors": dleqVectorsCheck,
   "dleq-chunks": dleqChunksCheck,

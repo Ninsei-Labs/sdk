@@ -158,8 +158,8 @@ export const sweepFromOrderCheck = async () => {
   const swaps = createSwaps({ config: { limits: { watchPollMs: 1, watchTimeoutMs: 5 } } });
   let noBackend = null;
   try { await swaps.watch({ id: "no-backend" }); } catch (error) { noBackend = error; }
-  check(noBackend && noBackend.code === "bad-input" && noBackend.params && noBackend.params.why === "no-backend",
-    "a watch without verify data did not name the missing backend");
+  check(noBackend && noBackend.code === "bad-input" && noBackend.params && noBackend.params.why === "required",
+    "a watch without verify data did not name the missing client-side check");
   check(typeof sweep.report !== "function", "sweep.report still exists");
   notes.push("the SDK does not call a backend by default and has no service report");
 

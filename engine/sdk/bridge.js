@@ -11,8 +11,6 @@
 //
 // WHAT THE SHIM PASSES TO THE CORE - exactly the seams the core asks for from outside and cannot get itself:
 //   storage    - the page's storage: deals and session are read from where the page puts them (core/store.js);
-//   serverAuth - a pass to our service: only the wallet can sign the sign-in message (evm/auth.js signIn),
-//                so the core gets the pass READY-MADE;
 //   evmCall    - chain reads WITH THE PAGE'S WALLET: the core has no provider of its own and must not;
 //   wallet     - the page wallet adapter (sdk/src/adapters/evm-wallet.mjs): signing happens only in it.
 //
@@ -38,7 +36,6 @@
 
 import { chainById, DEFAULT_CHAIN, MONERO, allowedProvidersFor, knownFactoryCodesFor, knownImplementationCodesFor } from "../core/config.js";
 import { storage as pageStorage } from "../core/store.js";
-import { token as authToken, signIn } from "../evm/auth.js";
 import * as evm from "../evm/index.js";
 // ORDER TERMS FOR THE CORE ARE ASSEMBLED FROM DATA, NOT FROM RULES: the windows come from the finality policy
 // (core/finality.js), the salt from the engine's generator (evm/funding.js). No deadlines or numbers of its own here.
@@ -48,9 +45,8 @@ import { newSecret } from "../evm/funding.js";
 // exposes EXACTLY the same names (markReadyOrder/claimOrder/refundOrder/orderStatus/orderDeadlines), so a screen
 // changes only the import source, not the call expression - and the guard that fixes the call site sees the old call.
 //
-// THE DEAL LIST AND ITS UPKEEP (the #/swaps screen). States come from the CORE: swaps.list - display, swaps.sync -
-// merging with the server list, swaps.forget - dropping a record. The core needs only the page's seams for this
-// (the pass and the storage), and both are already passed above - the shim adds no rules of its own.
+// THE DEAL LIST AND ITS UPKEEP (the #/swaps screen). States come from the CORE: swaps.list - display, swaps.forget -
+// dropping a record. The core needs only the page's storage, and the shim adds no rules of its own.
 //
 // WATCHING IS A PAGE MECHANISM, NOT THE CORE'S: the poll tick lives in app.js, so the focus stays in
 // core/swap.js and the screen only declares it to the shim.
@@ -70,7 +66,7 @@ import { height as nodeHeightValue } from "../monero/node.js";
 // published `engine/` tree and in the page that serves this shim from `www/js/sdk/`; ?v=<hash> keeps the cache fresh.
 const SDK_BUNDLE = new URL("../../assets/vendors/sdk/sdk-browser.js?v=fa7dc71a", import.meta.url).href;
 
-// A NAMED SEAM FOR CHECKS - THE SAME TECHNIQUE AS sdkBookUse BELOW. The asynchronous path is driven against a
+// A NAMED SEAM FOR CHECKS. The asynchronous path is driven against a
 // stand-in order book (the demo network has no provider), and the ordinary escrow funding that follows a settled
 // swap can be replaced while that runs, because deploying an escrow factory on a throwaway chain is the stand's
 // job, not a check's. The replacement is named, set only by a check, and unset by the same function; production
@@ -127,12 +123,6 @@ function optionsFor(chain) {
     mode: modeOf(chain),
     // THE PAGE STORAGE BECOMES THE CORE STORAGE: deal records and the session live in one place.
     storage: pageStorage(),
-    // A PASS TO OUR SERVICE: the core only presents it; the page wallet obtains it.
-    serverAuth: async () => {
-      if (authToken()) return authToken();
-      try { await signIn(); } catch { return null; }
-      return authToken();
-    },
     // CHAIN READS - WITH THE PAGE'S WALLET (the core needs this seam: it has no provider of its own).
     evmCall: (request) => evm.readContract(request),
     // CONTRACT CODE - WITH THE PAGE'S WALLET: needed by the factory-code check, extcodehash is computed from it.
@@ -238,142 +228,6 @@ export async function sdkOpenRecovery(file, passphrase) {
 // The core is served to the page as a bundle, so these calls go through the REAL facade. They answer null only
 // if the bundle itself did not load - and then the cause is named in the console, not hidden.
 
-export async function sdkWatchQuotes(request, onSnapshot) {
-  const ctx = await instanceFor(request && request.chain);
-  if (!ctx) return null;
-  return ctx.sdk.quotes.watch(request, onSnapshot);
-}
-
-export async function sdkQuotesSnapshot(chainSlug) {
-  const ctx = await instanceFor(chainSlug);
-  return ctx ? ctx.sdk.quotes.snapshot() : null;
-}
-
-// --- THE INDICATIVE QUOTE BOOK ON THE CORE ---------------------------------------------------------
-// THE BOOK (offers and refusals) COMES FROM THE CORE: quotes.watch subscribes to the core poll, quotes.snapshot
-// returns the last snapshot without waiting. The shim does exactly ONE job here - TRANSLATION OF SHAPE: the core
-// snapshot's field names are mapped to those the screen already draws. There is no selection or priority rule
-// here: offer, refusal or best is decided by the core (sdk/src/quotes.mjs, readBook). The core is silent or
-// refused - the book is empty, and the former (engine) book is not substituted: it no longer exists.
-//
-// SUBSCRIPTION IS ONE. The core polls for the duration of the subscription; a second listener would be a second
-// poll, so the previous subscription is removed BEFORE the new one. The last snapshot survives re-subscription:
-// the reader sees the previous book until a fresh one arrives - not emptiness on every tick.
-let bookStop = null;       // unsubscribe from the core's current subscription
-let bookKey = null;        // which request (network|side|token|size) this subscription is for
-let bookCore = null;       // the last CORE snapshot (not the translation): the translation is done on read
-let bookResume = null;     // waiting for the first tick after subscribing
-// A SEAM HOOK (sdkBookUse): a core quote surface brought from outside. Needed by checks that run WITHOUT a
-// browser: the core itself is not in the bundle there, and the book must be checked. Not set in production.
-let bookQuotes = null;
-
-// THE CORE FOR CHECKS WITHOUT A BROWSER: put in a quote surface (watch/snapshot) and work with it.
-export function sdkBookUse(quotesApi) {
-  bookQuotes = quotesApi || null;
-  bookCore = null;
-  bookKey = null;
-  bookResume = null;
-  if (bookStop) { try { bookStop(); } catch { /* already removed */ } }
-  bookStop = null;
-}
-
-// TRANSLATING A CORE ROW INTO A SCREEN ROW. Names only: values are carried as is. The age is computed
-// HERE (from the quote's own timestamp): the core computed it on its own tick, while display asks for freshness
-// now - otherwise the quote's lifetime would be rejuvenated by a poll tick.
-function bookRow(o) {
-  const at = Number.isFinite(Number(o.at)) ? Number(o.at) : null;
-  return {
-    providerId: o.providerId, displayName: o.displayName, pair: o.pair,
-    asset: o.asset, currency: o.currency,
-    assetNetwork: o.assetNetwork, currencyNetwork: o.currencyNetwork, networkStated: o.networkStated === true,
-    rateQuote: o.rateQuote, rate: o.rate,
-    min: o.min, max: o.max, step: o.step, ttlMs: o.ttlMs,
-    at, ageMs: at === null ? null : Math.max(0, Date.now() - at),
-    seq: o.seq, why: o.why, signature: o.signature, keyId: o.keyId, finality: o.finality,
-    networksDerived: o.networksDerived === true, networksUnnamed: o.networksUnnamed === true,
-  };
-}
-
-// THE REFUSAL KIND WITH WHICH THE SCREEN NAMES THE CAUSE. The core code `disabled` is called `off` by the
-// screen; other code names match, and there is no reason to rename them.
-const REFUSAL_KIND = { disabled: "off" };
-function bookRefusal(r) {
-  return { ...bookRow(r), code: r.code, kind: REFUSAL_KIND[r.code] || r.code, why: r.why };
-}
-
-// CORE SNAPSHOT -> SCREEN SNAPSHOT. The shape is the one the screen had: ok/error/data/at, and in data -
-// references (the reference rate) and best. A connection failure does not turn into the former numbers: ok is
-// dropped and the screen shows an honest state. Core silence (no snapshot) is also an empty book, not the former one.
-function bookOf(core) {
-  if (!core) return { ok: false, error: null, data: null, at: 0, fetching: false };
-  const offers = (Array.isArray(core.offers) ? core.offers : []).map(bookRow);
-  const refused = (Array.isArray(core.refused) ? core.refused : []).map(bookRefusal);
-  const stamps = offers.map((o) => o.at).filter((v) => Number.isFinite(v));
-  return {
-    ok: !core.error,
-    error: core.error ? String(core.error.code || "unknown") : null,
-    at: core.at,
-    fetching: false,
-    data: {
-      offers, refused, quotes: offers,
-      // THE BEST, AS THE SERVICE NAMED IT: by it the screen confirms its "best" mark by pair and provider.
-      best: core.best || null,
-      seq: core.seq === undefined ? null : core.seq,
-      references: Array.isArray(core.references) ? core.references : [],
-      at: stamps.length ? Math.max(...stamps) : null,
-    },
-  };
-}
-
-// ASKING THE CORE FOR THE BOOK. The subscription is ONE and is replayed only when the REQUEST CHANGED: while
-// size and side are the same, the core polls the book on its own tick and no second poll is created. When the
-// request changed, the caller waits for the first tick and gets a FRESH snapshot, not a previous one. The core
-// did not come up - empty (and the console names why).
-export async function sdkBook({ chain, direction, token, size } = {}) {
-  let quotes = bookQuotes;
-  let instance = "injected";        // the hook (seam) has no network: its instance is one
-  if (!quotes) {
-    const ctx = await instanceFor(chain);
-    if (!ctx) {
-      if (bookStop) { try { bookStop(); } catch { /* already removed */ } bookStop = null; }
-      bookKey = null;
-      bookResume = null;
-      bookCore = null;
-      return null;
-    }
-    quotes = ctx.sdk.quotes;
-    instance = ctx.chain.id;       // books of different networks must not be mixed: the network is part of the key
-  }
-  const dir = direction === "sell" ? "sell" : "buy";
-  const key = instance + "|" + dir + "|" + String(token || "") + "|" + String(size === undefined || size === null ? "" : size);
-  // THE SAME REQUEST - A POLL IS ALREADY RUNNING: return the last snapshot, do not create a second subscription.
-  // Otherwise every screen tick would reset the core state and briefly serve an empty book to a direct reader.
-  if (bookStop && bookKey === key) return bookCore;
-  if (bookStop) { try { bookStop(); } catch { /* already removed */ } bookStop = null; }
-  bookKey = key;
-  bookResume = null;
-  const wait = new Promise((resolve) => { bookResume = resolve; });
-  try {
-    bookStop = quotes.watch({ direction: dir, token, size }, (snap) => {
-      bookCore = snap;
-      if (bookResume) { const resume = bookResume; bookResume = null; resume(); }
-    });
-  } catch (error) {
-    bookResume = null;
-    bookCore = null;
-    console.warn("[bridge] the quote book was not served to the core (" + ((error && error.message) || error) +
-      "): there will be no offers; see www/js/sdk/bridge.js");
-    return null;
-  }
-  await wait;
-  return bookCore;
-}
-
-// THE LAST SNAPSHOT WITHOUT WAITING - in the screen's shape. The core has not been polled once - empty (and that is honest).
-export function sdkBookSnapshot() {
-  return bookOf(bookCore);
-}
-
 export async function sdkListSwaps(chainSlug) {
   const ctx = await instanceFor(chainSlug);
   return ctx ? ctx.sdk.swaps.list() : null;
@@ -414,21 +268,6 @@ export function sdkOrderTerms({ chain, amountWei, finality = null, salt = null, 
   };
 }
 
-// A FIRM QUOTE FOR THE ORDER - BEFORE SIGNING. The screen shows the fee rate and recipient BEFORE the person
-// signs, and hands THE SAME quote to the swap start (sdkStartSwap, field orderQuote): exactly what is shown is
-// signed, and no second request to the node is made.
-//
-// WHY THIS PLACE AND NOT THE SCREEN. The order terms (network, factory, depositor, amount, windows, salt) are
-// assembled in ONE place - sdkOrderTerms; the screen must not assemble them in a second edition. Here they are
-// assembled, a firm quote is requested by them through the core's path, and both go outward: `order` and `quote`.
-export async function sdkOrderQuote({ chain, providerId, amountWei, finality = null, salt = null, asset = "XMR" } = {}) {
-  const ctx = await instanceFor(chain);
-  if (!ctx) return null;
-  const order = sdkOrderTerms({ chain: ctx.chain, amountWei, finality, salt, asset });
-  const quote = await ctx.sdk.quotes.firm({ providerId, order });
-  return { order, quote };
-}
-
 // STARTING THE SWAP WHOLE, BY THE CORE. Step order, the order side, deadlines into the contract, the escrow
 // address FROM THE RECEIPT, our readiness mark and watching the XMR - all of it is held by the core
 // (sdk/src/swaps.mjs, swaps.start). The screen passes only data: the quote, where to receive, the password, the
@@ -461,17 +300,8 @@ export async function sdkStartSwap(request) {
     req.order = sdkOrderTerms({ chain: ctx.chain, amountWei: req.amountWei, finality: req.finality,
       salt: req.salt, asset: req.receiveAsset });
   }
-  // A FIRM QUOTE FOR THIS ORDER - AND IT ALSO GOES INTO THE LOCK. A screen that showed the fee BEFORE signing
-  // brings the quote READY-MADE (sdkOrderQuote) - then we do not go to the node again and exactly what the person
-  // saw is signed. If it did not, we request it here through the core's path (config.route("orderQuote")).
-  //
-  // WHY THIS SEPARATE FIELD. The lock takes the quote NOT from req.quote: req.quote is the book's indicative
-  // quote for the guards (freshness, deadlines), while the factory needs a SIGNED SET (fee, registry, provider).
-  // The core reads it as `request.orderQuote` (sdk/src/swaps.mjs). While the bridge did not put it there, the
-  // start reached the deposit and failed there: "a signed quote is required: the factory takes a quote, not bare order terms".
-  if (!req.orderQuote && req.providerId) {
-    req.orderQuote = await ctx.sdk.quotes.firm({ providerId: req.providerId, order: req.order });
-  }
+  // THE SIGNED QUOTE COMES FROM THE RELAY PATH AND IS PASSED IN. There is no direct node call to fetch one here:
+  // a start without `orderQuote` reaches the lock without a signed set and the core refuses it.
   if (req.orderQuote) {
     // THE CLAIMER IS NAMED BY THE PROVIDER, and enters the order context: without it the proof would not agree
     // (the core refuses - context mismatch). Here we only carry its value into the terms.
@@ -502,14 +332,9 @@ export async function sdkWatchSwap(request) {
 
 // --- THE DEAL LIST FROM THE CORE (the #/swaps screen) ---------------------------------------------
 // READING, MERGING AND DROPPING GO THROUGH THE CORE, NOT THE ENGINE ON THE PAGE. sdkListSwaps above returns
-// deal states (swaps.list); below is the server list (swaps.sync: the path and merge rule live in the core) and
-// record dropping (swaps.forget: it removes the record only here; the server and the contract keep everything).
+// deal states (swaps.list) and record dropping (swaps.forget: it removes the record only here; the server and
+// the contract keep everything).
 // The core did not come up - null, and the console names the cause (see sdkBundle), not silence.
-export async function sdkSyncSwaps(chainSlug) {
-  const ctx = await instanceFor(chainSlug);
-  return ctx ? ctx.sdk.swaps.sync() : null;
-}
-
 export async function sdkForgetSwap(id, chainSlug) {
   const ctx = await instanceFor(chainSlug);
   return ctx ? ctx.sdk.swaps.forget(id) : null;

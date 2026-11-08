@@ -108,45 +108,6 @@ const LOCKED_STATUS = "xmr_locked";
 // WHAT IS DELIBERATELY ABSENT HERE: a waiting policy of its own inside the step. How long to wait for the XMR to
 // arrive is the caller's decision, so the watch is exposed as a separate method (`swaps.watch`) with a timeout from
 // the configuration.
-const MARK_FIELDS = ["id", "network", "escrow", "quoteId", "providerId", "hashlock", "amount", "t0", "t1", "sdkVersion"];
-// THE FIELDS OF THE FACTORY WATCH RECORD - the same whitelist as the page client's
-// (www/js/core/chainSource.js:33, ALLOWED_SESSION_FIELDS). The body is assembled FROM IT anew, so neither the spend
-// half nor the spend key can get into the request, even if someone adds them to the record "just in case".
-const ALLOWED_SESSION_FIELDS = ["swapId", "network", "address", "viewKey", "expectedAmountXmr", "restoreHeight", "chain"];
-
-/**
- * The mark body from the swap record. THE FIELDS ARE THE SAME AND WITH THE SAME MEANING as the interface's
- * (auth.js:114-125), not a private list: only public data goes out (the escrow address, amounts, deadlines, the
- * quote reference), and nothing secret - the spend key never leaves the browser under any configuration.
- */
-export function markBodyOf(swap, escrow, order = null) {
-  const e = (swap && swap.escrow) || {};
-  const o = order && typeof order === "object" ? order : {};
-  // A BIGINT AS A STRING: the order amount in wei comes both as a string and as a BigInt number (the order terms),
-  // and the request body is serialized to JSON, where a BigInt does not live at all (a TypeError on the very first
-  // call). The app expects a string.
-  const first = (...vals) => {
-    for (const v of vals) {
-      if (v === undefined || v === null || v === "") continue;
-      return typeof v === "bigint" ? v.toString() : v;
-    }
-    return null;
-  };
-
-  return {
-    id: swap.id || null,
-    network: swap.network || swap.chain || null,
-    escrow: escrow || e.address || null,
-    quoteId: first(swap.orderQuoteId, e.quoteId),
-    providerId: first(swap.providerId, e.providerId),
-    hashlock: first(e.hashlock, swap.hashlock),
-    amount: first(e.amountWei, o.amount, swap.amountWei),
-    t0: first(e.t0, o.t0),
-    t1: first(e.t1, o.t1),
-    sdkVersion: SDK_VERSION,
-  };
-}
-
 /**
  * THE VIEW KEY OF THE JOINT ADDRESS - THE SUM OF TWO HALVES. That is how the interface assembles it
  * (www/js/ui/views/confirm.js:559; math - www/js/monero/swapKeys.js, watchViewSeedHex), and only with it does the
@@ -168,32 +129,6 @@ export function jointViewKey(swap) {
  * field at all, and "the field is absent" and "zero" are different things (zero means "nothing arrived", absence -
  * "not read"). We return null if this is not a watch response at all - emptiness must not be taken for data.
  */
-export function incomingOf(session) {
-  if (!session || typeof session !== "object") return null;
-  const received = Number(session.receivedXmr);
-  if (!Number.isFinite(received)) return null;
-  const confirmations = Number(session.confirmations);
-  // LOCKED FUNDS ARE ON THE ADDRESS BUT ARE NOT AN ARRIVAL THE SWAP CAN USE: the sender set unlock_time, and the
-  // service names that state. `receivedXmr` counts only what can be spent; the barred sum is `lockedXmr`, and the
-  // boundary (a height or a date) travels as `lockedUntil` so the interface can say until WHEN.
-  const locked = session.status === LOCKED_STATUS;
-  const lockedXmr = num(session.lockedXmr);
-  return {
-    id: session.id || null,
-    address: session.address || null,
-    status: session.status || null,
-    expectedXmr: num(session.expectedAmountXmr),
-    receivedXmr: received,
-    confirmations: Number.isFinite(confirmations) ? confirmations : 0,
-    txids: Array.isArray(session.fundingTxids) ? session.fundingTxids : [],
-    locked,
-    lockedXmr: lockedXmr === null ? 0 : lockedXmr,
-    lockedUntil: session.lockedUntil || null,
-    // AN ARRIVAL IS MONEY AT THE ADDRESS THAT IS NOT BARRED BY unlock_time. Zero, or locked, means none.
-    seen: received > 0 && !locked,
-  };
-}
-
 /** Translating the engine's record into the contract state: our names, the engine's meaning. */
 export function toState(swap) {
   if (!swap || typeof swap !== "object" || !swap.id) throw new SdkError("bad-input", { field: "swap" });
@@ -326,7 +261,7 @@ export const recordInputOf = (request, xmrNetwork = null) => {
     expectedAtomic: quoteAtomic !== null ? quoteAtomic : (orderAtomic !== null ? orderAtomic : undefined),
     // THE ORDER-QUOTE ID IS PART OF THE RECORD, NOT A DETAIL OF THE SCREEN (a defect found): our service uses it to
     // tie the created escrow to the provider node's record, and without it the node cannot take the ETH
-    // (sdk/src/swap-flow.mjs: quoteId: quote.id -> swap.orderQuoteId; markBodyOf reads exactly this field).
+    // (sdk/src/swap-flow.mjs: quoteId: quote.id -> swap.orderQuoteId).
     orderQuoteId: pass(quote.id),
     // WHERE TO WITHDRAW XMR: part of the record, not a detail of the screen - the progress screen exports the file by it.
     receiveAddress: pass(request.receiveTo),
@@ -381,15 +316,10 @@ export function sellWatchTimeoutMs({ configuredMs = 1_200_000, readyBySec = null
   return Math.max(configured, (readyAt - now + SELL_WATCH_MARGIN_SEC) * 1000);
 }
 
-export function createSwaps({ preflight, http, createRecord, mode = null, xmrNetwork = null, call = null, now = null, evmBlock = null, store = engine.store,
-  // THE PATHS AND LIMITS ARE BROUGHT BY THE CONFIGURATION: the "server" step's paths are named by names (config.route),
-  // and the timeout and rate of the watch polling - in config.limits. Without the configuration the step answers with a
-  // code rather than following invented paths.
+export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork = null, call = null, now = null, evmBlock = null, store = engine.store,
+  // THE MONERO TIMINGS ARE BROUGHT BY THE CONFIGURATION: the watch's rate and timeout live in config.limits. There is
+  // no server step and no route table to consult.
   config = null,
-  // A SIGN-IN PASS - A SEAM FROM OUTSIDE. Only a wallet can sign the sign-in message, and its role in the core is an
-  // adapter (send/receipt): windows and message signatures remain the interface's. A READY pass arrives here (as
-  // www/js/evm/auth.js, signIn obtains it today), and the core merely presents it.
-  auth = null,
   // THE INTERFACE'S ADDRESS DENYLIST (issue #16), a Set of lower-cased addresses already assembled by the facade.
   // The check on the ACTUAL sender is done in start() below, ONE place, right before the send - the wallet adapter
   // only HANDS OUT the current account (`address()`), it does not carry the policy.
@@ -430,10 +360,6 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
   // MARKING READY GOES THROUGH THE SAME READ SEAM as the lock: checking the slots and signing must go one way,
   // otherwise part of the check goes past the wallet and part does not (see actions.mjs).
   const actions = createActions({ call: typeof call === "function" ? call : null });
-  const routeOf = (name, params) => {
-    if (!config || typeof config.route !== "function") throw new SdkError("bad-input", { field: "config", step: "server" });
-    return config.route(name, params);
-  };
   const limitOf = (name, fallback) => {
     const value = config && config.limits ? config.limits[name] : null;
     return Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : fallback;
@@ -524,7 +450,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       try { engine.swap.saveSwap(swap, store); } catch { throw new SdkError("storage-unavailable", { step: "save-escrow" }); }
       return { id: swap.id || null, escrow,
         address: (record.swapWallet && record.swapWallet.address) || null,
-        step: "xmr-incoming", server: null, watch: null, next: "watch" };
+        step: "xmr-incoming", next: "watch" };
     }
     return { id: swap.id || null, escrow: escrowRecord.address || null,
       address: (record.swapWallet && record.swapWallet.address) || null,
@@ -587,104 +513,6 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       }
     } catch { /* not read - the guard will name the field itself; silently considering the balance sufficient is not allowed */ }
     return options;
-  }
-
-  /**
-   * RECORDING THE SWAP WITH US. The path and body are the interface's (see the step description above). A refusal is
-   * called by a CODE and carries the service's response in full: the connection never got through - server-unavailable,
-   * the service answered and did not accept - server-refused (with the status and ITS reason). The code is named so the
-   * interface itself decides whether to abort the swap: today it does not abort it (www/js/evm/auth.js:15-16), and that
-   * is its decision, not the core's silence.
-   */
-  async function markOnServer(swap, escrow, order) {
-    if (!http || typeof http.tryJson !== "function") throw new SdkError("bad-input", { field: "http", step: "mark" });
-    const mark = markBodyOf(swap, escrow, order);
-    // THE BROWSER SDK LINE IS PART OF THE BODY. The node's body routes read it before any work; a mark request
-    // without it is refused as sdk-version-absent even though the swap is already funded.
-    const body = JSON.stringify(Object.fromEntries(MARK_FIELDS.map((field) => [field, mark[field]])));
-    const headers = { "content-type": "application/json" };
-    // THE PASS IS ASKED EVERY TIME, NOT CACHED: it is short-lived (an hour: app/server.mjs, AUTH_TOKEN_TTL_MS), and a
-    // cached pass would give a 401 at a step that does not move money itself but shows the swap to the service.
-    if (typeof auth === "function") {
-      let token = null;
-      try { token = await auth(); } catch { token = null; }
-      if (typeof token === "string" && token) headers.authorization = "Bearer " + token;
-    }
-    let answer = null;
-    try { answer = await http.tryJson(routeOf("evmSwaps"), { method: "POST", headers, body }); }
-    catch (error) { throw new SdkError("server-unavailable", { step: "mark", why: (error && error.code) || "fetch" }); }
-    if (!answer || answer.ok !== true) {
-      throw new SdkError("server-refused", {
-        step: "mark", status: answer ? answer.status : null,
-        why: (answer && answer.body && (answer.body.error || answer.body.detail)) || null,
-      });
-    }
-    return { marked: true, httpStatus: answer.status, orderBinding: (answer.body && answer.body.orderBinding) || null };
-  }
-
-  /**
-   * THE FACTORY WATCH RECORD with our service: by the same POST /api/swaps the page makes
-   * (www/js/ui/views/confirm.js:581). The address and the VIEW KEY go out - that is enough to see incoming payments,
-   * and not enough to spend them.
-   */
-  async function openWatch(swap, order) {
-    if (!http || typeof http.tryJson !== "function") throw new SdkError("bad-input", { field: "http", step: "watch" });
-    const e = (swap && swap.escrow) || {};
-    const address = e.moneroAddress || (swap.swapWallet && swap.swapWallet.address) || null;
-    if (!address) throw new SdkError("bad-input", { field: "moneroAddress" });
-    // THE EXPECTED AMOUNT IS MANDATORY, and this is not a formality: without it the watch cannot check the sufficiency of
-    // the arrival, and the app does not accept such a record (app/store.mjs:85-94). A refusal is more honest than a
-    // silent record by which an underpayment would look like a completed swap.
-    const expectedXmr = num(order && order.xmrAmount !== undefined ? order.xmrAmount : swap.xmrAmount);
-    if (!(expectedXmr > 0)) throw new SdkError("bad-input", { field: "expectedAmountXmr" });
-    const network = swap.moneroNetwork || xmrNetwork || null;
-    if (!network) throw new SdkError("bad-input", { field: "moneroNetwork" });
-    const restoreHeight = Number(swap.restoreHeight) > 0 ? Number(swap.restoreHeight)
-      : (Number(e.moneroRestoreHeight) > 0 ? Number(e.moneroRestoreHeight) : null);
-    if (!(restoreHeight > 0)) throw new SdkError("bad-input", { field: "restoreHeight", step: "watch" });
-    const wanted = {
-      swapId: swap.id || null, network, address, viewKey: jointViewKey(swap), expectedAmountXmr: expectedXmr,
-      // THE RESTORE HEIGHT - THE MONERO HEIGHT, NEVER THE EVM BLOCK. It is measured before the file is handed
-      // over and kept on the record; `birthHeight`/`evmBirthBlock` is a settlement-chain block for log search and
-      // is far above any Monero tip, so using it here opened the watch nowhere near the money.
-      restoreHeight,
-      chain: swap.network || swap.chain || null,
-    };
-    const body = { sdkVersion: SDK_VERSION };
-    for (const field of ALLOWED_SESSION_FIELDS) if (wanted[field] !== undefined && wanted[field] !== null) body[field] = wanted[field];
-    // THE VIEW KEY IS NOT NEEDED BY THE SERVICE FOR THE DECISION ANY MORE: since the arrival is checked by the
-    // client (verifyArrival), the backend may keep a watch only for notifications, and even that it can do from
-    // the maker's txid. So sending the key is an OPTION: `watch.sendViewKeyToServer === false` drops it from the
-    // record. The default keeps the current backend flow working until it stops deciding on its own.
-    if (watchOptions && watchOptions.sendViewKeyToServer === false) delete body.viewKey;
-    let answer = null;
-    try { answer = await http.tryJson(routeOf("swaps"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); }
-    catch (error) { throw new SdkError("server-unavailable", { step: "watch", why: (error && error.code) || "fetch" }); }
-    if (!answer || answer.ok !== true) {
-      throw new SdkError("server-refused", {
-        step: "watch", status: answer ? answer.status : null,
-        why: (answer && answer.body && (answer.body.error || answer.body.detail)) || null,
-      });
-    }
-    const session = incomingOf(answer.body);
-    if (!session) throw new SdkError("server-unavailable", { step: "watch", why: "bad-response" });
-    return { registered: true, httpStatus: answer.status, ...session,
-      expectedXmr: session.expectedXmr !== null ? session.expectedXmr : expectedXmr };
-  }
-
-  /** THE WATCH STATE: GET /api/swaps/{id} - the same path as the page's (chainSource.js:184). */
-  async function readWatch(id) {
-    if (!http || typeof http.tryJson !== "function") throw new SdkError("bad-input", { field: "http", step: "watch" });
-    let answer = null;
-    try { answer = await http.tryJson(routeOf("swap", { id }), { method: "GET" }); }
-    catch (error) { throw new SdkError("server-unavailable", { step: "watch", why: (error && error.code) || "fetch" }); }
-    if (!answer || answer.ok !== true) {
-      throw new SdkError("server-refused", {
-        step: "watch", status: answer ? answer.status : null, id,
-        why: (answer && answer.body && (answer.body.error || answer.body.detail)) || null,
-      });
-    }
-    return answer.body;
   }
 
   // A SELL SENDS XMR ONLY INTO AN ESCROW THE CHAIN ALREADY HOLDS. The relay answer proves the maker signed the
@@ -822,39 +650,6 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       delete swaps[id];
       try { store.saveState(state); } catch { throw new SdkError("storage-unavailable", { step: "forget" }); }
       return true;
-    },
-
-    /**
-     * THE SERVICE'S SWAP LIST, MERGED INTO THE LOCAL ONE. The path and the body are the page's
-     * (www/js/evm/auth.js, loadServerSwaps: GET /api/evm-swaps, the address ties the list to the wallet). The
-     * merge rule is the ENGINE'S (core/swap.js, addServerSwaps): a local record always wins, the service only
-     * adds what this browser does not have, and the rules are not written a second time here. The pass is
-     * obtained by the interface and only presented by the core (the `auth` seam), so an unauthenticated call is
-     * the service's own refusal with a code, not a silent empty list.
-     */
-    async sync() {
-      if (!http || typeof http.tryJson !== "function") throw new SdkError("bad-input", { field: "http", step: "sync" });
-      const headers = {};
-      if (typeof auth === "function") {
-        let token = null;
-        try { token = await auth(); } catch { token = null; }
-        if (typeof token === "string" && token) headers.authorization = "Bearer " + token;
-      }
-      let answer = null;
-      try { answer = await http.tryJson(routeOf("evmSwaps"), { method: "GET", headers }); }
-      catch (error) { throw new SdkError("server-unavailable", { step: "sync", why: (error && error.code) || "fetch" }); }
-      if (!answer || answer.ok !== true) {
-        throw new SdkError("server-refused", {
-          step: "sync", status: answer ? answer.status : null,
-          why: (answer && answer.body && (answer.body.error || answer.body.detail)) || null,
-        });
-      }
-      // A GARBAGE ANSWER IS A REFUSAL, NOT AN EMPTY LIST: a non-JSON body (an SPA fallback, a proxy error page) must
-      // not look like "the service has no swaps" - the two are different, and only one of them means "synced".
-      const body = answer.body;
-      if (!body || !Array.isArray(body.swaps)) throw new SdkError("server-unavailable", { step: "sync", why: "bad-response" });
-      const added = engine.swap.addServerSwaps(body.swaps, store);
-      return { ok: true, added, seen: body.swaps.length };
     },
 
     // THE ARRIVAL VERDICT WITHOUT THE WATCH LOOP, and the deadline check as a separate call: an interface may
@@ -1300,24 +1095,15 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         // THE SALT IS THE RECOVERY BINDING; there is no index reservation to commit here.
       }
 
-      // 5. A BACKEND IS OPTIONAL AND NEVER A DEFAULT. When the caller configured an API base, the swap is recorded
-      // there and the watch row is opened. Without one, the SDK returns the local state and the joint address: the
-      // caller watches the chain itself. The owner's rule: no request to the page's own origin.
-      let server = null;
-      let watch = null;
-      if (config && config.apiBase) {
-        server = await markOnServer(record.swap, escrowAddress, request.order);
-        watch = await openWatch(record.swap, request.order);
-      }
+      // THE START ENDS AT THE JOINT ADDRESS. There is no backend step any more: the retired node routes are gone,
+      // and the caller watches the chain through `swaps.watch` with its own node list.
       // THE STATE IS NAMED, NOT PASSED OFF AS COMPLETION: the swap reached exactly "waiting for XMR at the joint address",
       // and there is no arrival yet - `receivedXmr` is never implied by zero.
       return {
         id: record.swap.id || null,
         escrow: escrowAddress,
-        address: (watch && watch.address) || (record.swapWallet && record.swapWallet.address) || null,
+        address: (record.swapWallet && record.swapWallet.address) || null,
         step: "xmr-incoming",
-        server,
-        watch,
         next: "watch",
       };
     },
@@ -1325,10 +1111,8 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
     /**
      * WAIT FOR THE XMR TO ARRIVE AT THE JOINT ADDRESS - the whole point of opening the watch.
      *
-     * The CLIENT checks the arrival from the Monero nodes (`verify`); there is no backend poll by default. The rate
-     * and the timeout come from the configuration (config.limits.watchPollMs/watchTimeoutMs) and are overridable here.
-     * A caller that explicitly configured `apiBase` may still read the old watch row, but that row is only an
-     * observation: it never declares readiness or a decline.
+     * The CLIENT checks the arrival from the Monero nodes (`verify`); there is no backend watcher. The rate and the
+     * timeout come from the configuration (config.limits.watchPollMs/watchTimeoutMs) and are overridable here.
      * IT ARRIVED - we return the FACT (the amount, the confirmations, the txid); WE DID NOT WAIT - a refusal with the
      * code `xmr-timeout`, separate from the others, so "the wait expired" is confused with neither a breakdown nor an
      * empty response. XMR ON THE ADDRESS BUT BARRED BY unlock_time is a THIRD answer with its own code `xmr-locked`
@@ -1370,11 +1154,10 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
           : (request.deadline && request.deadline.readyBy !== undefined ? Number(request.deadline.readyBy) : null);
         if (readyBy) xmrArrival.assertTimeForConfirmations({ readyBySec: readyBy, nowSec: Math.floor(Date.now() / 1000), minConfirmations, blockTimeSec: limitOf("xmrBlockTimeSec", 120) });
       }
-      const hasBackend = Boolean(config && config.apiBase);
-      // THE WATCH DOES NOT CALL A BACKEND BY DEFAULT. The client-side arrival check needs the joint address, the view
-      // secret and the spend public key; without them, and without an explicitly configured backend, there is nothing
-      // to wait on. That is a named refusal, not a request to the page's own origin.
-      if (!verifyRequest && !hasBackend) throw new SdkError("bad-input", { field: "verify", why: "no-backend" });
+      // THE WATCH IS A CLIENT-SIDE CHECK AND NOTHING ELSE. It needs the joint address, the joint view secret and
+      // the spend public key. Without them there is nothing to wait on: a named refusal, not a request to the
+      // page's own origin and not a fallback to a retired backend.
+      if (!verifyRequest) throw new SdkError("bad-input", { field: "verify", why: "required" });
       const started = Date.now();
       // --- THE MAKER'S DECLINE: THE WAIT IS NOT STARTED AT ALL (issue #40). -------------------------------------
       // A decline leaves the escrow `refunded`, so nothing in the state says "do not wait any longer": without
@@ -1382,13 +1165,10 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       // CLOSED and whose ETH is already back - or, worse, the app offers the recovery file and a manual refund
       // for money nobody can recover.
       //
-      // THE DECLINE IS ASKED WITH TWO INDEPENDENT SOURCES AND EITHER ONE ENDS THE WAIT:
-      //   * THE CHAIN - the escrow's own `Declined` event, through the same log reader the rest of the core uses;
-      //   * THE WIRE - the status the service answers with is an observation, not a decision; it never writes the
-      //     decline.
-      // A CHAIN READ THAT FAILS is neither a decline nor a refusal of the swap: the wait goes on and the wire may
-      // still answer. What the chain read did is carried out with the result (`chain.checked` / `chain.error`), so
-      // a broken reader is visible instead of silent.
+      // THE DECLINE IS READ FROM THE CHAIN: the escrow's own `Declined` event, through the same log reader the rest
+      // of the core uses. A CHAIN READ THAT FAILS is neither a decline nor a refusal of the swap: the wait goes on,
+      // and what the chain read did is carried out with the result (`chain.checked` / `chain.error`), so a broken
+      // reader is visible instead of silent.
       // A STORAGE THAT CANNOT BE READ IS NOT A REASON TO REFUSE THE WAIT: the record is what makes the state
       // durable, and the escrow may also arrive in the request. The watch is not a new user of the store - and it
       // must not start failing where it did not before.
@@ -1420,7 +1200,7 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
         try { engine.swap.saveSwap(swap, store); } catch { throw new SdkError("storage-unavailable", { step: "decline" }); }
       };
       // THE STATE THE WATCH REPORTS FOR A DECLINE: no arrival, the state's own code, the node's own token and
-      // WHERE it was seen ("event", "status", or "record" when it was already written down). NO reason, category
+      // WHERE it was seen ("event" or "record" when it was already written down). NO reason, category
       // or provider travels here - the node names none, and the sentence a person reads is the interface's.
       const declineResult = ({ source, at, waitedMs, address, chainChecked, chainError }) => ({
         id,
@@ -1443,34 +1223,14 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
       let last = null;
       for (;;) {
         await readDeclineLogs();
-        // THE CLIENT-SIDE CHECK DOES NOT ASK THE SERVICE. Only a watch without `verify` and with an explicitly
-        // configured backend reads the watch row.
-        const body = verifyRequest ? {} : await readWatch(id);
-        last = verifyRequest
-          ? { address: request.address || escrowAddress, expectedXmr: request.expectedXmr ?? null, status: null }
-          : incomingOf(body);
+        last = { address: request.address || escrowAddress, expectedXmr: request.expectedXmr ?? null, status: null };
         // THE DECLINE IS THE ESCROW'S EVENT, NOT THE SERVICE'S WORD. The legacy backend's `declined` status used
         // to become a settlement and end the wait; it no longer does. A service answer is at most a notification.
         const declineNow = declineOf({ logs: chainDecline.logs, escrow: escrowAddress, at: Date.now() });
         if (declineNow.declined) {
           settleDecline(record, declineNow.at);
           return declineResult({ source: declineNow.source, at: declineNow.at, waitedMs: Date.now() - started,
-            address: body && body.address, chainChecked: chainDecline.checked, chainError: chainDecline.error });
-        }
-        // AN EMPTY OR FOREIGN RESPONSE IS NOT AN ARRIVAL: counting it as incoming would mean declaring money that was
-        // never seen. This is a named refusal, not "let us wait some more".
-        if (!last) throw new SdkError("server-unavailable", { step: "watch", why: "bad-response", id });
-        // XMR IS ON THE ADDRESS BUT LOCKED BY THE TRANSACTION'S unlock_time: a NAMED refusal, not "keep waiting".
-        // The ready mark hands the escrow to the maker; under funds that cannot be spent the maker would take the
-        // ETH and the XMR would stay locked (issue #84), so nothing is signed. The boundary is in `until`.
-        if (last.locked) {
-          const until = last.lockedUntil || {};
-          throw new SdkError("xmr-locked", { id, address: last.address, status: last.status,
-            expectedXmr: last.expectedXmr, receivedXmr: last.receivedXmr, lockedXmr: last.lockedXmr,
-            // The boundary goes as NUMBERS and their kind - a block height or unix seconds - never as text:
-            // turning them into a date the person reads is the interface's dictionary (www/js/sdk/codes.js).
-            untilHeight: until.untilHeight ?? null, untilTime: until.untilTime ?? null,
-            waitedMs: Date.now() - started });
+            address: last && last.address, chainChecked: chainDecline.checked, chainError: chainDecline.error });
         }
         // THE CLIENT'S OWN ANSWER COMES FIRST AND DECIDES. The backend's `seen` may still be false (it no longer
         // holds the view key), so it is not consulted when the client verifies. A disagreement or locked money
@@ -1499,21 +1259,6 @@ export function createSwaps({ preflight, http, createRecord, mode = null, xmrNet
           }
           return verified;
         }
-        if (last.seen) {
-          // THE SERVICE MAY OBSERVE MONEY, BUT IT DOES NOT DECLARE AN ARRIVAL. Readiness hands a foreign address
-          // the settlement, and only the client's own two-node check may do that. The observation is returned with
-          // `seen: false` and the next step named; no mark is ever signed from this body.
-          return { seen: false, observed: { id: last.id, address: last.address, status: last.status,
-            expectedXmr: last.expectedXmr, receivedXmr: last.receivedXmr, confirmations: last.confirmations,
-            txids: last.txids }, id, address: last.address, expectedXmr: last.expectedXmr,
-            next: "verify", source: "service" };
-        }
-        if (Date.now() - started >= timeoutMs) {
-          throw new SdkError("xmr-timeout", { id, address: last.address, expectedXmr: last.expectedXmr,
-            receivedXmr: last.receivedXmr, confirmations: last.confirmations, waitedMs: Date.now() - started,
-            timeoutMs, pollMs });
-        }
-        await new Promise((resolve) => setTimeout(resolve, pollMs));
       }
     },
 
