@@ -1,5 +1,6 @@
 ## Unreleased
 
+- `swaps.claimViaRelay` claims a sell through the relay that answered the quote without creating or using a wallet: the signed `claimTip` pays the sender, the sell record keeps the relay origin, and only a validated txid is a success. A lost answer is `claim-unknown`; `sellClaim` remains the own-wallet path.
 - The retired direct-node paths are gone: `quotes.watch`, `quotes.snapshot`, `quotes.firm`, `quotes.sale`, `swaps.sync`, `DEFAULT_ROUTES`, `config.route`/`routes`, `apiBase` and `serverAuth`. `quotes.firmRelay` is the only quote path; `swaps.start` ends at the joint address, and `swaps.watch` requires the client-side `verify` inputs. The page bridge lost the matching quote-book, direct-quote and server-sync helpers.
 - The engine's `rfqSource` mirror keeps only the executor's order quote and its shape check; the indicative quote book and its `sdkBook`/`sdkBookSnapshot` calls are gone.
 - The SDK no longer ships or loads a WalletConnect browser bundle. `evmWallet(provider)` remains the only wallet seam, so a host page can keep using injected wallets or load `@walletconnect/ethereum-provider` itself and pass the resulting EIP-1193 provider. The SDK's browser engine now offers only the injected connector; the WalletConnect build package, manifest entry, CI workflow and checks are gone.
