@@ -41,10 +41,39 @@ jobs:
 
       # ANVIL AND CAST COME FROM THE SAME PINNED FOUNDRY THE CONTRACT REPOSITORY USES. The fork check below needs
       # both; pinning here keeps the local run and CI on one node implementation.
-      - name: Set up Foundry (anvil and cast, pinned)
-        uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: v1.9.0
+      # FOUNDRYUP IS NOT USED. The toolchain action runs foundryup, whose installer resolves the `latest` release
+      # from GitHub; a 504 on that one URL stopped every SDK job. The release download URL had the same 504, while
+      # the API asset endpoint still served the file. This downloads the pinned asset by id and checks its published
+      # SHA-256 before anything from it runs.
+      - name: Install the pinned Foundry release
+        env:
+          FOUNDRY_VERSION: v1.9.0
+          FOUNDRY_ASSET_ID: 703110190
+          FOUNDRY_SHA256: 8d17599b42e3139f1a9c171be3798c4ed8e743ae17b84cc3435e57bf2a51ae99
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          archive="foundry_${FOUNDRY_VERSION}_linux_amd64.tar.gz"
+          asset="https://api.github.com/repos/foundry-rs/foundry/releases/assets/${FOUNDRY_ASSET_ID}"
+          release="https://github.com/foundry-rs/foundry/releases/download/${FOUNDRY_VERSION}/${archive}"
+          mkdir -p "$RUNNER_TEMP/foundry"
+          common=(
+            --fail --location --retry 5 --retry-all-errors --retry-delay 5
+            --connect-timeout 20 --max-time 300
+            --output "$RUNNER_TEMP/$archive"
+          )
+          if ! curl "${common[@]}" \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "Accept: application/octet-stream" \
+            "$asset"; then
+            echo "The API asset endpoint failed; trying the release download URL." >&2
+            curl "${common[@]}" "$release"
+          fi
+          printf '%s  %s\n' "$FOUNDRY_SHA256" "$RUNNER_TEMP/$archive" | sha256sum --check
+          tar --extract --gzip --file "$RUNNER_TEMP/$archive" --directory "$RUNNER_TEMP/foundry"
+          echo "$RUNNER_TEMP/foundry" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/foundry/anvil" --version
+          "$RUNNER_TEMP/foundry/cast" --version
 
       # --frozen-lockfile: the lock file is the input, not something CI may rewrite.
       - name: Install dependencies

@@ -135,6 +135,48 @@ console.log("=== BREAKING RUN: a removed draft condition reddens ===");
   else bad("breaking run does not catch a missing draft condition");
 }
 
+// FOUNDRY IS A PINNED RELEASE, NOT AN INSTALLER THAT RESOLVES `latest`. The toolchain action runs foundryup, whose
+// installer asks GitHub for the latest foundryup; one 504 there stopped every SDK job. The build downloads one
+// release asset and checks its published SHA-256, so the version and the bytes are both named in the tree.
+export function foundryInstallerMisses(files) {
+  return Object.entries(files)
+    .filter(([, text]) => {
+      const body = text.replace(/\r\n/g, "\n");
+      const lines = body.split("\n").filter((line) => !line.trimStart().startsWith("#"));
+      return lines.some((line) => /foundry-rs\/foundry-toolchain/.test(line) || /\bfoundryup\b/.test(line));
+    })
+    .map(([name]) => name);
+}
+
+export function foundryPinMisses(files) {
+  const text = (files[".github/workflows/ci.yml"] || "").replace(/\r\n/g, "\n");
+  const misses = [];
+  if (!/FOUNDRY_VERSION:\s*v\d+\.\d+\.\d+/.test(text)) misses.push("version");
+  if (!/FOUNDRY_ASSET_ID:\s*\d+/.test(text)) misses.push("asset-id");
+  if (!/FOUNDRY_SHA256:\s*[0-9a-f]{64}/.test(text)) misses.push("sha256");
+  if (!/foundry_\$\{FOUNDRY_VERSION\}_linux_amd64\.tar\.gz/.test(text)) misses.push("asset");
+  if (!/api\.github\.com\/repos\/foundry-rs\/foundry\/releases\/assets\/\$\{FOUNDRY_ASSET_ID\}/.test(text)) misses.push("asset-url");
+  return misses;
+}
+
+console.log("=== FOUNDRY IS A PINNED RELEASE, NOT AN INSTALLER ===");
+const installers = foundryInstallerMisses(files);
+if (!installers.length) ok("no workflow runs foundryup or the foundry-toolchain action");
+else bad("workflows that resolve Foundry at run time: " + JSON.stringify(installers));
+const missingPins = foundryPinMisses(files);
+if (!missingPins.length) ok("the SDK workflow names the Foundry version, asset id and URL, and SHA-256");
+else bad("the SDK workflow is missing the Foundry pin: " + JSON.stringify(missingPins));
+
+console.log("=== BREAKING RUN: a Foundry installer or an unpinned release reddens ===");
+{
+  const brokenInstaller = { ...files, ".github/workflows/ci.yml": (files[".github/workflows/ci.yml"] || "") + "\n      - uses: foundry-rs/foundry-toolchain@v1\n" };
+  if (foundryInstallerMisses(brokenInstaller).length) ok("breaking run REDDENS: a foundryup installer is caught");
+  else bad("breaking run does not catch a Foundry installer");
+  const brokenPin = { ...files, ".github/workflows/ci.yml": (files[".github/workflows/ci.yml"] || "").replace(/FOUNDRY_SHA256:.*\r?\n/, "") };
+  if (foundryPinMisses(brokenPin).includes("sha256")) ok("breaking run REDDENS: a missing Foundry SHA-256 is caught");
+  else bad("breaking run does not catch a missing Foundry SHA-256");
+}
+
 console.log("");
 console.log(fails.length ? "FAILED: " + fails.length + " (passed " + pass + ")" : "ci scripts: " + pass + " checks passed.");
 if (fails.length) process.exit(1);
