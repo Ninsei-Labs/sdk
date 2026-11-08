@@ -86,6 +86,10 @@ and any other origin is refused with `bad-input`. The node's refusal keeps its o
 claim may already be sent, so read the escrow before acting again, and never treat the lost answer as a success.
 Only a validated txid is returned. The half is never logged or written by this path.
 
+The sell record also keeps the node's signed `readyWindow`. `sellWatch`, the late-arrival boundary and
+`refundIfXmrMissing` use its `readyMinSeconds`/`readyMaxSeconds`; a record without the window is refused with
+`bad-input` and `field: "readyWindow"` instead of falling back to the retired local constants.
+
 ## 6. Claim, refund and ready
 
 `actions.markReady`, `actions.claim` and `actions.refund` require the order expectations. They read the escrow slots

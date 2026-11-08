@@ -526,6 +526,8 @@ export interface FirmRelayAnswer {
   readonly orderQuote: Readonly<Record<string, unknown>>;
   /** The exact order terms the quote is bound to. */
   readonly order: Readonly<Record<string, unknown>>;
+  /** The node's signed ready window for this side: the wait, the late boundary and the refund lead. */
+  readonly readyWindow: ReadyWindow;
   readonly nodeHalf: Readonly<Record<string, unknown>>;
   /** Ready to pass as `swaps.start({ counterparty })`: proof, claimer commitment and maker view half. */
   readonly counterparty: Readonly<Record<string, unknown>>;
@@ -554,6 +556,24 @@ export interface FirmRelayAnswer {
   readonly offered: number | null;
   readonly forwarded: Readonly<Record<string, unknown>> | null;
   readonly answer: Readonly<Record<string, unknown>>;
+}
+
+// --- Ready windows ------------------------------------------------------------------------------
+
+/**
+ * The signed `firmWindows` entry the relay answer came with. `readyMinSeconds` and `readyMaxSeconds` bound the
+ * quote's readiness horizon; the SDK derives the late-arrival boundary and the refund lead from them instead of
+ * keeping its own 1200 s / 20-minute numbers.
+ */
+export interface ReadyWindow {
+  readonly market: string | null;
+  readonly side: string | null;
+  readonly xmrNetwork: string | null;
+  readonly readyMinSeconds: number;
+  readonly readyMaxSeconds: number;
+  readonly settlementMinSeconds: number | null;
+  readonly settlementMaxSeconds: number | null;
+  readonly quoteTtlSeconds: number | null;
 }
 
 // --- Pre-signature checks -----------------------------------------------------------------------
@@ -883,6 +903,8 @@ export interface SwapStart {
   readonly step: "xmr-incoming";
   /** The named next step: wait for the arrival. */
   readonly next: "watch";
+  /** The node's signed window, when the start came from a relay answer. */
+  readonly readyWindow?: ReadyWindow | null;
 }
 
 export interface SellStartRequest {
@@ -910,6 +932,7 @@ export interface SellStart {
   readonly xmrAmount: string;
   readonly claimTip: string | null;
   readonly orderQuote: Readonly<Record<string, unknown>> | null;
+  readonly readyWindow: ReadyWindow | null;
   readonly resumed: boolean;
   readonly next: "send-xmr";
 }
@@ -952,6 +975,8 @@ export interface SellWatchRequest {
   readonly escrow: string;
   readonly timeoutMs?: number;
   readonly pollMs?: number;
+  /** The node's window, if the caller does not rely on the record found by `escrow`. */
+  readonly readyWindow?: ReadyWindow;
 }
 
 export interface SellWatchResult {
@@ -993,6 +1018,8 @@ export interface SwapWatchRequest {
   readonly minConfirmations?: number;
   /** The ready deadline in unix seconds; with less time left than the confirmations take it refuses with a code. */
   readonly readyBySec?: number;
+  /** The node's window, if the record does not carry one. Required for a client-side arrival check. */
+  readonly readyWindow?: ReadyWindow;
 }
 
 /**

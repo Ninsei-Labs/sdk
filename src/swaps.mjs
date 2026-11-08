@@ -39,6 +39,7 @@ import * as xmrArrival from "./xmr-arrival.mjs";
 // `compliance` status is an observation on the wire, not a second source this file trusts; the detectors and the
 // neutral vocabulary live in one module, so this file names the state instead of re-reading either.
 import { declineOf, logReaderOf, blockBoundaryOf, DECLINED_TOPIC0, DECLINED_TERMINAL, DECLINED_CODE } from "./decline.mjs";
+import { readReadyWindow, readyLeadSec, readyLateSec, readyWindowMs } from "./readyWindow.mjs";
 // THE NO-WALLET CLAIM: the seller's half goes to the relay that answered the quote, which sends `claim` for the
 // signed tip. This module speaks that one wire; swaps.mjs decides which record may be claimed.
 import { relayOriginOf, addressTextOf, halfTextOf, postRelayClaim } from "./relayClaim.mjs";
@@ -317,6 +318,20 @@ export function sellWatchTimeoutMs({ configuredMs = 1_200_000, readyBySec = null
   const now = Number(nowSec);
   if (!Number.isSafeInteger(readyAt) || !Number.isSafeInteger(now) || readyAt <= now) return configured;
   return Math.max(configured, (readyAt - now + SELL_WATCH_MARGIN_SEC) * 1000);
+}
+
+// THE RECORD OF A SALE, FOUND BY ITS ESCROW. `sellWatch` is called from a reloaded page with the address in hand,
+// so the window stored by `startSell` must be readable without a second argument. A record the store cannot read
+// is not a reason to invent a local window; the caller gets the store's refusal at the point it matters.
+function swapByEscrow(store, escrow) {
+  try {
+    const state = store.loadState();
+    const wanted = String(escrow || "").toLowerCase();
+    for (const swap of Object.values((state && state.swaps) || {})) {
+      if (swap && swap.escrow && String(swap.escrow.address || "").toLowerCase() === wanted) return swap;
+    }
+  } catch { /* the caller names the missing window */ }
+  return null;
 }
 
 export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork = null, call = null, now = null, evmBlock = null, store = engine.store,
@@ -671,10 +686,11 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
      * and found no matching transaction). `pending` with a transaction, `one-node`, and every failure to check are NOT
      * "no money": the helper refuses to sign, so a lagging or busy witness can never look like an empty address.
      *
-     * IT FIRES ONLY WHEN LESS THAN THE CONFIRMATIONS' TIME IS LEFT before `readyBy`
-     * (`minConfirmations * blockTimeSec`, overridable with `leadSec`): refunding earlier would abandon a maker who
-     * still has time to deliver. The refund goes through the same action seam as the screen (actions.refund), and
-     * the order expectations are mandatory.
+     * IT FIRES ONLY WHEN LESS THAN THE NODE'S REFUND LEAD IS LEFT before `readyBy` (`readyLeadSec` of the window
+     * stored with the record, overridable with `leadSec`): refunding earlier would abandon a maker who still has
+     * time to deliver. The lead is the window's own headroom, not the retired `minConfirmations * blockTimeSec`.
+     * The refund goes through the same action seam as the screen (actions.refund), and the order expectations are
+     * mandatory.
      *
      * The seams `deps.verify` / `deps.refund` / `deps.now` exist for the checks; in production they are the real
      * arrival check and the real refund.
@@ -709,10 +725,12 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       if (!Number.isFinite(readyBy) || readyBy <= 0) throw new SdkError("bad-input", { field: "readyBySec" });
       const minConfirmations = Number.isFinite(Number(request.minConfirmations)) && Number(request.minConfirmations) > 0
         ? Math.trunc(Number(request.minConfirmations)) : limitOf("xmrConfirmations", 10);
-      const blockTimeSec = Number.isFinite(Number(request.blockTimeSec)) && Number(request.blockTimeSec) > 0
-        ? Number(request.blockTimeSec) : limitOf("xmrBlockTimeSec", 120);
       const leadSec = Number.isFinite(Number(request.leadSec)) && Number(request.leadSec) >= 0
-        ? Number(request.leadSec) : minConfirmations * blockTimeSec;
+        ? Number(request.leadSec) : (() => {
+            const window = request.readyWindow || (swap && (swap.readyWindow || swap.sellWindow));
+            if (!window) throw new SdkError("bad-input", { field: "readyWindow", why: "not-in-record" });
+            return readyLeadSec(readReadyWindow(window, { side: "bid", field: "readyWindow" }));
+          })();
       // THE WALK STARTS AT THE SWAP'S BIRTH, NEVER AT GENESIS. A missing height used to become block 0, so a refund
       // check on a real chain would walk every block ever mined. The record carries the measured height; a caller
       // that has neither an explicit height nor a record height is refused rather than given a scan of the whole chain.
@@ -908,6 +926,15 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       // side comes from outside; in the sandbox the engine builds it as a stand-in, but on a live chain a stand-in would
       // mean the money goes against a non-existent side, so there it is a refusal.
       let record = made;
+      // THE NODE'S WINDOW IS PART OF THE RECORD. It is read from the signed features and later decides how long a
+      // sale may wait and when a depositor may still refund; a record without it is refused when that decision is
+      // made, never filled with the old local constants.
+      const readyWindowRaw = request.readyWindow || (request.quote && request.quote.readyWindow) || null;
+      let readyWindow = null;
+      if (readyWindowRaw) {
+        readyWindow = readReadyWindow(readyWindowRaw, { side: "ask", field: "readyWindow" });
+        record.swap.readyWindow = readyWindow;
+      }
       // THE ORDER SIDE BUILT BY THE CORE STAYS UNTIL THE END OF THE START: the points and commitments for the lock terms
       // are taken from it - otherwise the record and the order would diverge, and the slot check against the chain would
       // go red (and rightly so). There is no second build of the side here.
@@ -1081,7 +1108,8 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         return { id: record.swap.id || null, escrow: record.swap.escrow.address || null,
           address: (record.swapWallet && record.swapWallet.address) || null,
           step: "funding-pending", txHash: pendingTx,
-          reason: funded.pendingReason || "no-receipt", predictedEscrow: predicted, next: "receipt" };
+          reason: funded.pendingReason || "no-receipt", predictedEscrow: predicted, next: "receipt",
+          readyWindow };
       }
       // THE ESCROW ADDRESS IS TAKEN FROM THE RECEIPT (lock.send does this), not from a prediction. It is also written
       // into the swap: otherwise the progress screen and the explorer link would show an address that is not on the
@@ -1108,6 +1136,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         address: (record.swapWallet && record.swapWallet.address) || null,
         step: "xmr-incoming",
         next: "watch",
+        readyWindow,
       };
     },
 
@@ -1137,6 +1166,10 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       const wantWallet = request.wallet !== undefined && request.wallet !== null;
       if (wantExpect !== wantWallet) throw new SdkError("bad-input", { field: wantExpect ? "wallet" : "expect" });
       if (wantExpect && !(request.escrow || request.address)) throw new SdkError("bad-input", { field: "escrow" });
+      const storedSwap = (() => { try { return engine.swap.getSwap(id, store); } catch { return null; } })();
+      const readyWindowRaw = request.readyWindow || (storedSwap && storedSwap.readyWindow) || null;
+      const readyWindow = readyWindowRaw
+        ? readReadyWindow(readyWindowRaw, { side: "ask", field: "readyWindow" }) : null;
       const pollMs = Number.isFinite(Number(request.pollMs)) && Number(request.pollMs) > 0 ? Number(request.pollMs) : limitOf("watchPollMs", 5000);
       const timeoutMs = Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0 ? Number(request.timeoutMs) : limitOf("watchTimeoutMs", 1_200_000);
       // THE CONFIRMATION TARGET - FROM THE CONFIGURATION (one number, the owner's decision: 10).
@@ -1153,9 +1186,14 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         : null;
       // LESS TIME LEFT THAN THE CONFIRMATIONS TAKE - NAMED AND NOT STARTED (issue #85, the owner's decision).
       if (verifyRequest) {
+        if (!readyWindow) throw new SdkError("bad-input", { field: "readyWindow", why: "not-in-record" });
         const readyBy = request.readyBySec !== undefined && request.readyBySec !== null ? Number(request.readyBySec)
           : (request.deadline && request.deadline.readyBy !== undefined ? Number(request.deadline.readyBy) : null);
-        if (readyBy) xmrArrival.assertTimeForConfirmations({ readyBySec: readyBy, nowSec: Math.floor(Date.now() / 1000), minConfirmations, blockTimeSec: limitOf("xmrBlockTimeSec", 120) });
+        if (readyBy) xmrArrival.assertTimeForConfirmations({
+          readyBySec: readyBy, nowSec: Math.floor(Date.now() / 1000), minConfirmations,
+          blockTimeSec: limitOf("xmrBlockTimeSec", 120),
+          minLeadSec: readyLateSec(readyWindow),
+        });
       }
       // THE WATCH IS A CLIENT-SIDE CHECK AND NOTHING ELSE. It needs the joint address, the joint view secret and
       // the spend public key. Without them there is nothing to wait on: a named refusal, not a request to the
@@ -1283,6 +1321,12 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       // that answered this quote; an origin that is present but not https is refused here, not at claim time.
       const offerRelay = offer.relayUrl === undefined || offer.relayUrl === null || offer.relayUrl === ""
         ? null : relayOriginOf(offer.relayUrl);
+      // THE NODE'S WINDOW IS PART OF THE OFFER. `firmRelay` took it from the signed features; a hand-built offer
+      // without one is stored as null, and `sellWatch`/`refundIfXmrMissing` refuse by name instead of using the
+      // old local 1200 s or 20-minute numbers.
+      const offerWindowRaw = offer.readyWindow || (quote && quote.readyWindow) || null;
+      const offerWindow = offerWindowRaw
+        ? readReadyWindow(offerWindowRaw, { side: "bid", field: "offer.readyWindow" }) : null;
       // THE RECORD'S ROLE IS THE BID ROLE. The node is the locker and the person is the claimer; a quote whose
       // addresses or factory disagree with the order is not the offer this record describes.
       const sameValue = (a, b) => String(a || "").replace(/^0x/, "").toLowerCase() === String(b || "").replace(/^0x/, "").toLowerCase();
@@ -1320,10 +1364,23 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
           try { engine.swap.saveSwap(existing, store); }
           catch { throw new SdkError("storage-unavailable", { step: "save-relay" }); }
         }
+        const storedWindow = existing.readyWindow || existing.sellWindow || null;
+        if (offerWindow && storedWindow) {
+          const a = readReadyWindow(storedWindow, { side: "bid", field: "readyWindow" });
+          if (a.readyMinSeconds !== offerWindow.readyMinSeconds || a.readyMaxSeconds !== offerWindow.readyMaxSeconds) {
+            throw new SdkError("quote-refused", { step: "sell-record", why: "window-changed" });
+          }
+        }
+        if (offerWindow && !storedWindow) {
+          existing.readyWindow = offerWindow;
+          try { engine.swap.saveSwap(existing, store); }
+          catch { throw new SdkError("storage-unavailable", { step: "save-window" }); }
+        }
         return { id: existing.id, side: "sell", escrow: (existing.escrow && existing.escrow.address) || offer.escrow,
           address: (existing.escrow && existing.escrow.moneroAddress) || offer.jointAddress,
           xmrAmount: (existing.escrow && existing.escrow.xmrAmount) || quote.xmrAmount,
           claimTip: existing.claimTip || quote.claimTip, orderQuote: existing.orderQuote || offer.orderQuote,
+          readyWindow: existing.readyWindow || existing.sellWindow || null,
           resumed: true, next: "send-xmr" };
       }
       const storage = store.storage();
@@ -1411,8 +1468,10 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         commitHalfLocker: (offer.nodeHalf && offer.nodeHalf.commitHalf) || null,
         orderContext: offer.context || null, xmrAmount: quote.xmrAmount || null,
       };
-      // KEPT WITH THE RECORD, NOT REBUILT LATER: the claim must return to the relay that signed this offer.
+      // KEPT WITH THE RECORD, NOT BUILT LATER: the claim and the watch use the relay and window that signed this
+      // offer, not a value the page chose after the quote.
       if (offerRelay) swap.relayUrl = offerRelay;
+      if (offerWindow) swap.readyWindow = offerWindow;
       // THE RECORD IS NOT A RECEIPT FOR A GATE THAT FAILED. createRecord has already written it, so a refusal
       // from the escrow/deadline/slot gate must remove it again; otherwise the interface lists send-xmr for an
       // order the SDK never checked.
@@ -1425,7 +1484,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       try { engine.swap.saveSwap(swap, store); } catch { throw new SdkError("storage-unavailable", { step: "save-swap" }); }
       return { id: swap.id, side: "sell", escrow: offer.escrow, address: offer.jointAddress,
         xmrAmount: quote.xmrAmount, claimTip: quote.claimTip || null, orderQuote: offer.orderQuote || null,
-        resumed: false, next: "send-xmr" };
+        readyWindow: swap.readyWindow || null, resumed: false, next: "send-xmr" };
     },
 
     /**
@@ -1529,18 +1588,27 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
       const escrow = String(request.escrow || "").trim();
       if (!escrow) throw new SdkError("bad-input", { field: "escrow" });
-      // THE WAIT IS BOUNDED BY THE ORDER'S OWN READY DEADLINE, NOT BY A FIXED 20 MINUTES. Ten confirmations
-      // average about twenty minutes, so the old default timed out roughly half of honest sales. A request may
-      // still set an explicit timeout; otherwise the wait covers the remaining time to readyBy plus a margin.
+      // THE NODE'S WINDOW IS READ FROM THE RECORD BY THE ESCROW. A reload keeps only the address in hand; the
+      // stored `startSell` record carries the range the maker signed, so the wait is not the old fixed 20 minutes.
+      const storedSwap = swapByEscrow(store, escrow);
+      const readyWindowRaw = request.readyWindow || (storedSwap && (storedSwap.readyWindow || storedSwap.sellWindow)) || null;
+      const readyWindow = readyWindowRaw
+        ? readReadyWindow(readyWindowRaw, { side: "bid", field: "readyWindow" }) : null;
       const pollMs = Number.isFinite(Number(request.pollMs)) && Number(request.pollMs) > 0
         ? Number(request.pollMs) : limitOf("watchPollMs", 6_000);
-      let timeoutMs = Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0
-        ? Number(request.timeoutMs) : limitOf("watchTimeoutMs", 1_200_000);
-      if (!(Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0)) {
+      const explicitTimeout = Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0;
+      if (!readyWindow && !explicitTimeout) {
+        throw new SdkError("bad-input", { field: "readyWindow", why: "not-in-record" });
+      }
+      let timeoutMs = explicitTimeout ? Number(request.timeoutMs) : null;
+      if (!explicitTimeout) {
         try {
           const deadlines = await flow.orderDeadlines(escrow, { call: reader });
-          timeoutMs = sellWatchTimeoutMs({ configuredMs: timeoutMs, readyBySec: deadlines.readyBy });
-        } catch { /* no deadline read: keep the configured wait */ }
+          timeoutMs = sellWatchTimeoutMs({ configuredMs: readyWindowMs(readyWindow), readyBySec: deadlines.readyBy });
+        } catch {
+          // NO DEADLINE READ: the node's own maximum horizon is the bound, not a second local 20-minute number.
+          timeoutMs = readyWindowMs(readyWindow);
+        }
       }
       // THE CLAIM OPENS AT readyBy WITHOUT A MARK. The deadline comes from the escrow once; the clock is the
       // facade's own millisecond seam, so a simulation and a caller that controls time agree with the rest of

@@ -392,13 +392,16 @@ export async function verifyArrival(request) {
  * deadline does not move. If less than that is left, the client must NAME it and not start - waiting silently would
  * start a trade that cannot be finished in time. Returns seconds left; refuses with `xmr-too-late` otherwise.
  */
-export function assertTimeForConfirmations({ readyBySec, nowSec, minConfirmations, blockTimeSec } = {}) {
+export function assertTimeForConfirmations({ readyBySec, nowSec, minConfirmations, blockTimeSec, minLeadSec = null } = {}) {
   const readyBy = Number(readyBySec);
   const now = Number.isFinite(Number(nowSec)) ? Number(nowSec) : Math.floor(Date.now() / 1000);
   const count = Math.max(1, intOf(minConfirmations) ?? 1);
   const block = Number.isFinite(Number(blockTimeSec)) && Number(blockTimeSec) > 0 ? Number(blockTimeSec) : 120;
   if (!Number.isFinite(readyBy) || readyBy <= 0) return null;   // no deadline known - nothing to compare against
-  const needSec = count * block;
+  // THE NODE'S LEAD WINS WHEN IT IS LONGER. A maker that advertises a 2400 s minimum cannot be paid in the old
+  // 1200 s; the client uses the longer of the two so its own confirmations and the maker's settlement both fit.
+  const nodeLead = Number.isFinite(Number(minLeadSec)) && Number(minLeadSec) > 0 ? Number(minLeadSec) : 0;
+  const needSec = Math.max(count * block, nodeLead);
   const leftSec = Math.floor(readyBy - now);
   if (leftSec < needSec) throw new SdkError("xmr-too-late", { needSec, leftSec, minConfirmations: count, readyBy: Math.floor(readyBy) });
   return leftSec;
