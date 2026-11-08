@@ -141,6 +141,9 @@ export async function requestFirmQuote({
   }
   return {
     ...verified,
+    // THE ORIGIN THAT ANSWERED, KEPT FOR THE LATER CLAIM. The seller has no wallet, so the claim goes back to the
+    // same relay through `swaps.claimViaRelay`; the record stores this value and a different origin is refused.
+    relayUrl: base,
     relay: response.body.relay ?? null,
     offered: response.body.offered ?? null,
     forwarded: response.body.forwarded ?? null,

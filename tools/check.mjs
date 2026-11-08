@@ -40,6 +40,7 @@ import { sweepFromOrderCheck } from "./check-sweep-order.mjs";
 import { sweepAdapterCheck } from "./check-sweep-adapter.mjs";
 import { claimTipCheck } from "./check-claim-tip.mjs";
 import { claimSenderCheck } from "./check-claim-sender.mjs";
+import { relayClaimCheck } from "./check-relay-claim.mjs";
 import { chainGuardCheck } from "./check-chain-guard.mjs";
 import { settlementProfilesCheck } from "./check-settlement-profiles.mjs";
 import { dleqVectorsCheck } from "./check-dleq-vectors.mjs";
@@ -2650,6 +2651,7 @@ const CHECKS = {
   "sweep-adapter": sweepAdapterCheck,
   "claim-sender": claimSenderCheck,
   "claim-tip": claimTipCheck,
+  "relay-claim": relayClaimCheck,
   "chain-guard": chainGuardCheck,
   "settlement-profiles": settlementProfilesCheck,
   "dleq-vectors": dleqVectorsCheck,

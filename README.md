@@ -35,6 +35,7 @@ The supported versions, scope, response targets, safe-harbor rules and disclosur
 | `swaps.list` / `swaps.get` | read state from storage (and after a page reload) |
 | `swaps.start` | holds the order: guards → recovery file and the person's confirmation → order → locking funds → **watching the Monero address**; no backend is required; returns the named state `step: "xmr-incoming"` |
 | `swaps.watch` | waits for XMR at the joint address with the CLIENT's own check: `verify` carries the joint address, view secret, spend public key and witness nodes. Arrived — returns the fact (amount, confirmations, txid); did not wait — a refusal with `xmr-timeout`; funds barred by `unlock_time` — `xmr-locked`; the maker DECLINED — `SwapDeclinedWatch` (`declined: true`, `terminal: "declined"`), every action off; with expectations and a wallet, places the ready mark after the arrival |
+| `swaps.startSell` / `swaps.sellClaim` / `swaps.claimViaRelay` | a sell is recorded from the verified relay offer; `sellClaim` claims from the claimer's own wallet, `claimViaRelay` claims with no wallet through the relay that answered, paid by the signed `claimTip` |
 | `wallet.balances` | works: the native coin and tokens, in minimal units |
 
 What is not ready names itself with the code `not-implemented` with the fields `surface` and `stage`: an empty
@@ -154,7 +155,8 @@ interface's: this package holds no user-facing string.
 
 `not-implemented`, `bad-input`, `wallet-not-connected`, `wallet-rejected`, `wrong-chain`, `quote-unavailable`,
 `quote-refused`, `address-denied`, `quote-stale`, `recovery-declined`, `recovery-failed`, `storage-unavailable`,
-`server-unavailable`, `server-refused`, `xmr-timeout`, `xmr-locked`, `contract-reverted`, `insufficient-funds`, `unknown`.
+`server-unavailable`, `server-refused`, `claim-unknown`, `xmr-timeout`, `xmr-locked`, `contract-reverted`,
+`insufficient-funds`, `unknown`.
 
 Three refusals that are easy to merge into one are named DIFFERENTLY, because the advice differs:
 `server-unavailable` — the service did not answer (retry); `server-refused` — it answered and did not accept (its
@@ -178,6 +180,39 @@ const offer = await sdk.quotes.firmRelay({ relayUrl, features, order, side: "ask
 offer.orderQuote;   // the signed quote the factory takes
 offer.startRequest; // quote, order, orderQuote, counterparty and recovery salt for swaps.start
 ```
+
+## Selling and claiming
+
+A bid is a sale of XMR. `quotes.firmRelay({ side: "bid", claimTip, ... })` returns the signed quote, the escrow,
+the one-time address and the `relayUrl` that answered. `swaps.startSell` stores all of them, including the relay
+origin, and sends nothing.
+
+A seller who has their own EVM wallet uses the own-wallet path. It signs the claim from that wallet and therefore
+needs ETH for gas:
+
+```js
+await sdk.swaps.sellClaim({ id }, wallet);
+```
+
+A seller who has XMR but no ETH uses the relay path. The escrow pays the signed `claimTip` to the sender, so the
+relay submits the half and is paid from the claim itself. No wallet is created or used, and no chain transaction is
+signed by the client:
+
+```js
+const claimed = await sdk.swaps.claimViaRelay({ id });
+claimed.txid;    // the claim transaction
+claimed.from;    // the maker node's claim sender
+claimed.tipWei;  // the signed tip paid out of the claim
+```
+
+`claimViaRelay` reads the sell record made by `startSell` and requires a positive `claimTip`, the provider, the
+escrow and the half. It posts to the relay origin stored with the record; an optional `relayUrl` may repeat that
+origin but a different one is refused. A node refusal is `quote-refused` with the provider's own code in
+`params.code`. A timeout or a body without a real transaction hash is `claim-unknown`: the claim may have been
+sent, so read the escrow before trying anything else. Only a validated txid is returned as a claim.
+
+`actions.claim` is unchanged: it still sends only from the claimer's own wallet, because the half is revealed by
+whoever sends the claim.
 
 ## Found orders and the paying token
 
