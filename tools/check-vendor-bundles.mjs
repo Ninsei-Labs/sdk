@@ -59,9 +59,10 @@ export const vendorBundlesCheck = ({ vendorsDir = VENDORS, manifestPath = join(V
       problems.push("engine/evm/session.js: the WalletConnect connector is back; the host owns it");
     }
   }
-  // THE SDK BUNDLE EMBEDS THE PAGE BRIDGE, AND THE BRIDGE NAMES THE BUNDLE'S CACHE KEY. Changing that key after
-  // building leaves the committed bundle with the previous key and makes CI rebuild a different file. The key is a
-  // cache label, not the bundle hash: keep it stable and rebuild after changing it.
+  // THE SDK BUNDLE MAY EMBED THE PAGE BRIDGE, AND THE BRIDGE NAMES THE BUNDLE'S CACHE KEY. When it does, changing
+  // that key after building leaves the committed bundle with the previous key and makes CI rebuild a different
+  // file. The key is a cache label, not the bundle hash: keep it stable and rebuild after changing it. A bundle
+  // that does not carry the bridge has no key to compare.
   const bridgeFile = join(ROOT, "engine", "sdk", "bridge.js");
   const sdkBundle = join(vendorsDir, "sdk", "sdk-browser.js");
   if (existsSync(bridgeFile) && existsSync(sdkBundle)) {
@@ -69,10 +70,10 @@ export const vendorBundlesCheck = ({ vendorsDir = VENDORS, manifestPath = join(V
     const bundleText = readFileSync(sdkBundle, "utf8");
     const bridgeKey = /sdk-browser\.js\?v=([0-9a-f]+)/.exec(bridgeText);
     const bundleKey = /sdk-browser\.js\?v=([0-9a-f]+)/.exec(bundleText);
-    if (!bridgeKey || !bundleKey) problems.push("sdk/sdk-browser.js: the bridge query is missing");
-    else if (bridgeKey[1] !== bundleKey[1]) {
+    if (bundleKey && !bridgeKey) problems.push("sdk/sdk-browser.js: the bridge query is missing");
+    else if (bundleKey && bridgeKey[1] !== bundleKey[1]) {
       problems.push(`sdk/sdk-browser.js: embeds query ${bundleKey[1]}, while engine/sdk/bridge.js names ${bridgeKey[1]}; rebuild after changing the key`);
-    }
+    } else if (!bundleKey) notes.push("the bundle does not embed the page bridge; no cache key to compare");
   }
   if (!problems.length) notes.push(`${Object.keys(manifest.bundles).length} pinned browser bundles match their manifest`);
   return { note: "the prebuilt browser bundles match the pinned manifest", problems, notes };
