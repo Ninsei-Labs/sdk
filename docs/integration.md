@@ -22,7 +22,6 @@ const sdk = createNinsei({
   settlement: { chain: "arbitrum-sepolia" },
   xmrNetwork: "stagenet",
   mode: "live",
-  // apiBase: "https://your-service", // only when the host provides a backend
 });
 ```
 
@@ -40,7 +39,6 @@ isolated; do not reuse a storage adapter between tenants.
 | `evmBlock` | Quote tip and block-time checks | `(tag?) => Promise<{ timestamp, baseFeePerGas?, baseFeeWei?, priorityFeePerGas?, maxPriorityFeePerGas?, gasPrice?, ... }>`; the priority fee may be explicit or derived from `gasPrice - baseFee`; an unread block is a named refusal, not zero. |
 | `evmLogs` | Decline and order event reads | `({ address, topics, fromBlock, toBlock }) => Promise<logs>`. |
 | `fetch` | HTTP and Monero-node probes | `fetch`-compatible function. Required only for paths that perform network reads. |
-| `serverAuth` | Authenticated service routes | `() => Promise<string>` or a ready bearer token, depending on the route. Missing auth is a named service refusal. |
 | `createRecord` | A host-owned swap record | Optional capability. The default record builder is part of the SDK. |
 
 `driver()` on an EVM wallet must return the same EIP-1193 provider that signs. The SDK uses it for action reads and
@@ -51,7 +49,7 @@ for the latest block; a different provider would let the guard read a different 
 The host normally follows this sequence:
 
 1. Build the offer or choose the provider.
-2. Call the quote method for the flow (`quotes.firm`, `quotes.firmRelay` or `quotes.sale`).
+2. Call `quotes.firmRelay` for the flow; there is no direct quote route in the SDK.
 3. Show the signed terms and the recovery key to the person.
 4. Call `swaps.start` with the quote, the wallet and the confirmation that the recovery key is saved. A relay answer
    carries `startRequest` with the quote, order, orderQuote, counterparty and recovery salt; add your wallet,

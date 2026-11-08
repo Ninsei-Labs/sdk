@@ -4,11 +4,9 @@
 // The file arrives from the interface as a string or as `{ contents }`: the SDK knows neither about
 // <input type=file> nor about buffers - that is the interface's business.
 //
-// THE RESTORE HEIGHT IS A RULE, NOT A LOOKUP THE PAGE PERFORMS. Two sources exist: the height written into the
-// file when it was issued, and the height the service learned when it registered the wallet (it watches the
-// address, so its row is often more precise). The order between them is the package's: the service's height wins
-// when it is known, the file's is the fallback, and NO height is a named state - not a refusal, because the
-// person can still type one.
+// THE RESTORE HEIGHT COMES FROM THE FILE. The retired node route that used to answer by address is gone: the
+// height written into the file is the only source the SDK reads, and no height is a named state - not a refusal,
+// because the person can still type one.
 import * as engine from "./engine.mjs";
 import { SdkError } from "./errors.mjs";
 
@@ -18,7 +16,7 @@ const contentsOf = (file) => {
   return null;
 };
 
-export function createRecovery({ http = null, config = null } = {}) {
+export function createRecovery() {
   return {
     async open(file, passphrase) {
       const contents = contentsOf(file);
@@ -86,34 +84,19 @@ export function createRecovery({ http = null, config = null } = {}) {
       const address = typeof wallet.address === "string" && wallet.address ? wallet.address : null;
       const fileHeight = Number(wallet.restoreHeight) || 0;
 
-      let appHeight = 0;
-      let appAsked = false;
-      let appProblem = null;
-      if (http && config && address) {
-        appAsked = true;
-        try {
-          const answer = await http.json(config.route("swaps"));
-          const rows = Array.isArray(answer) ? answer : ((answer && answer.swaps) || []);
-          const row = rows.find((x) => String((x && x.address) || "") === String(address)) || null;
-          appHeight = Number(row && row.restoreHeight) || 0;
-          if (!row) appProblem = "no-row";
-        } catch {
-          appProblem = "unreachable";
-        }
-      }
-
-      const height = appHeight > 0 ? appHeight : fileHeight;
-      const source = appHeight > 0 ? "app" : (fileHeight > 0 ? "file" : "none");
+      const height = fileHeight;
+      const source = fileHeight > 0 ? "file" : "none";
       return {
         address,
         height,
         source,
         fileHeight,
-        appHeight,
-        appAsked,
+        appHeight: 0,
+        appAsked: false,
         // Why there is no height, when there is none: a token the interface turns into words. Null when a height
-        // was found, so a reader cannot mistake "found" for "asked and failed".
-        appProblem: source === "none" ? (appProblem || "no-height") : null,
+        // was found, so a reader cannot mistake "found" for "asked and failed". The service is not asked any more:
+        // the retired node routes are not part of the SDK.
+        appProblem: source === "none" ? "no-height" : null,
       };
     },
   };

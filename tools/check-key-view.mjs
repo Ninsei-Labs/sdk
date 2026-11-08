@@ -15,8 +15,6 @@ import { loadState, memoryStorage, saveState, setStorage } from "../engine/core/
 import { FACTORY_METHODS, ORDER_CREATED_TOPIC } from "../engine/evm/factory.js";
 import { encodeStatus } from "../engine/evm/escrow.js";
 import { takerHalvesV2 } from "../src/recovery-key.mjs";
-import { markBodyOf } from "../src/swaps.mjs";
-import { SDK_VERSION } from "../src/version.mjs";
 
 const WORDS = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 const addr = (b) => "0x" + b.repeat(20);
@@ -205,13 +203,6 @@ console.log("=== 1d3) A FUNDED STATUS RESCUES A MISSING RECEIPT ===");
   if (predicted && second.result && second.result.step === "xmr-incoming" && second.result.escrow === predicted && second.sent === 0) {
     ok("a funded status saves the predicted escrow when the receipt is gone");
   } else bad("funded status fallback: " + JSON.stringify({ step: second.result && second.result.step, escrow: second.result && second.result.escrow, predicted, sent: second.sent, code: second.result && second.result.code }));
-}
-
-console.log("=== 1e) THE MARK BODY NAMES THE SDK LINE ===");
-{
-  const mark = markBodyOf({ id: "x", network: "n", escrow: {} });
-  if (mark.sdkVersion === SDK_VERSION) ok("the mark body carries the SDK version");
-  else bad("mark body version: " + JSON.stringify(mark.sdkVersion));
 }
 
 console.log("=== 1f) A HALF AND A DIFFERENT POINT ARE REFUSED ===");

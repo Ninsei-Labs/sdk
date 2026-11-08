@@ -178,12 +178,6 @@ jobs:
       - name: Check the restore pass (height, rescan, the one locked second pass)
         run: pnpm run check:restore
 
-      # THE RESTORE HEIGHT HAS ONE ORDER. The service's height wins when it knows one (it watches the address),
-      # the file's is the fallback, and no height is a named state - not a refusal, because the person can type
-      # one. The guard builds a real file and a stand-in service, and cuts each of the three load-bearing lines.
-      - name: Check the restore height (service wins, file is the fallback, none is named)
-        run: pnpm run check:restore-height
-
       - name: Check the CI boundary (no private repository checkout)
         run: pnpm run check:ci-boundary
 
@@ -271,7 +265,7 @@ jobs:
 
       # THE REGISTRY IS THE LIST. The named steps above keep failures readable, but a check that was added to
       # `CHECKS` and not to this workflow used to run only in the release workflow: storage, scan-range,
-      # funding-receipt, sweep-window, sweep-order, sweep-adapter, claim-tip, claim-sender, quote-rank, provider,
+      # funding-receipt, sweep-window, sweep-order, sweep-adapter, claim-sender, provider,
       # compose, entries, version and settlement-profiles were in that position. This last step runs every
       # registered check under NODE_V8_COVERAGE, so the battery and the coverage floor are one pass; the named
       # steps stay for diagnosis.

@@ -84,25 +84,9 @@ const chainConfig = (chain) => ({
 // configurability" would become a way to switch the checks off with a single field, which is exactly what the
 // core exists to prevent.
 //
-// PATHS ARE NAMED BY NAMES, NOT BY STRINGS IN CODE. `route("swept", { id })` substitutes the value and encodes
-// it; the path holds `{id}`. So changing the host or using a third-party server is an edit of an object, not an
-// edit of the core.
-// WHY THESE PATHS DID NOT EXIST BEFORE AND WHERE THEY COME FROM. The "server" step (recording the swap with us
-// and watching the Monero address) is done with THE SAME requests as the current interface, so the paths are
-// named after its calls, not invented: the watch state - GET /swaps/{id} (www/js/core/chainSource.js:184,
-// fetchSession), the factory record of a swap - POST /evm-swaps (www/js/evm/auth.js:111, saveServerSwap; in app
-// the full path /api/evm-swaps is declared by the template /^\/api\/evm-swaps$/ in app/server.mjs:1230).
-export const DEFAULT_ROUTES = Object.freeze({
-  swaps: "/swaps",
-  swap: "/swaps/{id}",
-  evmSwaps: "/evm-swaps",
-  // A quote for an order: the provider's commitment under keys, not a market snapshot.
-  orderQuote: "/order-quote",
-  // A reverse-mode ticket: the maker supplies the XMR fields, the node answers with a signed quote and its claim tip.
-  orderSell: "/order-sell",
-  revealedHalf: "/escrow/revealed-half",
-  swept: "/swaps/{id}/swept",
-});
+// THE SDK TALKS TO A MAKER THROUGH A RELAY AND READS THE CHAIN THROUGH THE SEAMS THE CALLER BRINGS. It does not
+// carry a client for the old node's HTTP surface: those routes were retired, and a client that still names them
+// would silently make every request against a service that no longer exists.
 
 // THE MONERO NODES THE ARRIVAL IS CHECKED AGAINST. Defaults are the list verified on 2026-10-02 (issue #85):
 // mainnet - four public nodes of different operators; stagenet - our node and the one independent public node.
@@ -154,28 +138,10 @@ const nodesOf = (options, selected) => {
   return out;
 };
 
-const pathOf = (template, params) => template.replace(/\{([a-z]+)\}/g, (whole, name) => {
-  const value = params ? params[name] : undefined;
-  if (value === undefined || value === null || value === "") fail("bad-input", { field: "route.param", param: name });
-  return encodeURIComponent(String(value));
-});
-
-const routesOf = (options) => {
-  const custom = (options && options.routes) || {};
-  for (const name of Object.keys(custom)) {
-    // AN UNKNOWN NAME IS A TYPO, NOT "let's add our own": otherwise the path silently fails to apply, and the
-    // call falls back to a default nobody knows about.
-    if (!(name in DEFAULT_ROUTES)) fail("bad-input", { field: "routes", unknown: name, known: Object.keys(DEFAULT_ROUTES) });
-    if (typeof custom[name] !== "string" || !custom[name]) fail("bad-input", { field: "routes." + name });
-  }
-  return { ...DEFAULT_ROUTES, ...custom };
-};
-
 // THE POLL RATE AND TIMEOUT FOR WATCHING THE MONERO ADDRESS. The defaults come from the engine's settings, not
-// from numbers in the code: the rate is the same as the page's (www/js/core/chainSource.js, pollInterval =
-// API.pollMs), and the timeout is from the Monero timings (blockTimeReal x confirmTarget): that is how long it
-// takes to gather the confirmations of the target, and declaring the wait expired before that would be lying
-// about the money. Both numbers are overridable by the `watch` option.
+// from numbers in the code: the rate is the same as the page's and the timeout is blockTimeReal x confirmTarget,
+// so the wait is never declared expired before the target's confirmations can gather. Both are overridable by
+// the `watch` option.
 const positive = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null);
 const watchOf = (options) => {
   const w = (options && options.watch) || {};
@@ -217,7 +183,6 @@ export function buildConfig(options) {
   const chosen = chains.find((c) => c.id === options.settlement.chain) || null;
   if (!chosen) fail("bad-input", { field: "settlement.chain", known: chains.map((c) => c.id) });
   const rawChain = engine.config.CHAINS.find((c) => c.id === options.settlement.chain) || {};
-  const routes = routesOf(options);
   const watch = watchOf(options);
   const endpoints = endpointsOf(rawChain, options);
   const nodes = nodesOf(options, options.xmrNetwork);
@@ -258,7 +223,6 @@ export function buildConfig(options) {
     chains,
     xmrNetworks,
     assetsBase: options.assetsBase,
-    apiBase: options.apiBase,
     mode: options.mode,
     limits: {
       // SIZE LIMITS COME WITH THE LIVE QUOTE, NOT FROM A FILE: the provider node declares them, and different
@@ -277,25 +241,15 @@ export function buildConfig(options) {
       xmrConfirmations: engine.config.MONERO.confirmTarget ?? 10,
       xmrBlockTimeSec: Math.round((engine.config.MONERO.blockTimeReal ?? 120000) / 1000),
       readyLeadWarnSec: guards.readyLeadWarnSec ?? null,
-      // THE PRICE POLL RATE AND THE REQUEST TIMEOUT - from the engine's settings, not from numbers in the SDK:
-      // two numbers in two places would silently diverge, and polling would become more frequent than the
-      // backend allows.
-      quotePollMs: engine.config.API.pollMs ?? 5000,
-      httpTimeoutMs: engine.config.API.timeoutMs ?? 20000,
     },
     routing: { providers: known, prefer },
-    // NAMED PATHS AND ADDRESSES: `route` substitutes parameters, `endpoints` carries the already-resolved values
-    // (the default from the registry, the override from the options).
-    routes: { ...routes },
+    // NAMED ADDRESSES: `endpoints` carries the already-resolved values (the default from the registry, the
+    // override from the options).
     endpoints,
     // THE NODES THE XMR ARRIVAL IS CHECKED AGAINST - by network, with the defaults from the verified list and any
     // overrides the caller (or the user) brought. `nodesFor` is the pick for one network.
     xmrNodes: nodes,
     nodesFor: (network) => (nodes && nodes[network]) ? nodes[network] : [],
-    route: (name, params) => {
-      if (!(name in routes)) fail("bad-input", { field: "route", unknown: name, known: Object.keys(routes) });
-      return pathOf(routes[name], params);
-    },
     codes: { steps: STEP_CODES, checks: CHECK_CODES, errors: ERROR_CODES },
   };
 }
