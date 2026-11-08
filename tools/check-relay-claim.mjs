@@ -50,6 +50,7 @@ const offer = {
   recovery: { kind: "salt-v2", salt: order.salt },
   viewHalfClaimer: derived.makerViewHalf,
   relayUrl: "https://relay.example/",
+  readyWindow: { side: "bid", readyMinSeconds: 2400, readyMaxSeconds: 3000 },
 };
 
 const word = (value) => BigInt(value).toString(16).padStart(64, "0");
@@ -102,6 +103,8 @@ export const relayClaimCheck = async () => {
   check(stored && stored.relayUrl === "https://relay.example", "startSell did not store the relay origin");
   check(stored && stored.claimTip === claimTip && stored.escrow && stored.escrow.half,
     "the sale record does not carry the positive tip and the half");
+  check(stored && stored.readyWindow && stored.readyWindow.readyMinSeconds === 2400
+    && stored.readyWindow.readyMaxSeconds === 3000, "startSell did not store the node's ready window");
 
   // (0) THE RELAY IS PART OF THE OFFER ON A RESUME TOO: a retry naming another origin is a different offer.
   {

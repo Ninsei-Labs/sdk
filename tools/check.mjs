@@ -1986,7 +1986,8 @@ export const declineCheck = async () => {
   });
   const verifyStub = { nodes: [], address: DECLINE_ESCROW, viewSecret: "0x01", spendPub: "0x02", expectedAtomic: "1" };
   const chainOutcome = await watchOutcome("the watch on the escrow's Declined event",
-    () => chainOnly.swaps.watch({ id: eventRecord.id, escrow: DECLINE_ESCROW, verify: verifyStub, pollMs: 1, timeoutMs: 25 }));
+    () => chainOnly.swaps.watch({ id: eventRecord.id, escrow: DECLINE_ESCROW, verify: verifyStub, pollMs: 1, timeoutMs: 25,
+      readyWindow: { readyMinSeconds: 2400, readyMaxSeconds: 3000, side: "ask" } }));
   if (!(chainOutcome && chainOutcome.declined === true && chainOutcome.source === "event")) {
     problems.push(`the escrow's Declined event did not stop the wait: ${JSON.stringify(chainOutcome)}`);
   }
@@ -2007,7 +2008,8 @@ export const declineCheck = async () => {
   // AND A LATER WATCH RETURNS IT AT ONCE, WITHOUT POLLING AT ALL (a page reload).
   const afterReload = declineFacade(swapsMod, { logs: () => Promise.resolve([]) });
   const reloadOutcome = await watchOutcome("the watch after a reload",
-    () => afterReload.swaps.watch({ id: eventRecord.id, escrow: DECLINE_ESCROW, verify: verifyStub, pollMs: 1, timeoutMs: 25 }));
+    () => afterReload.swaps.watch({ id: eventRecord.id, escrow: DECLINE_ESCROW, verify: verifyStub, pollMs: 1, timeoutMs: 25,
+      readyWindow: { readyMinSeconds: 2400, readyMaxSeconds: 3000, side: "ask" } }));
   if (!(reloadOutcome && reloadOutcome.declined === true && reloadOutcome.source === "record")) {
     problems.push(`a reloaded watch did not return the recorded decline at once: ${JSON.stringify(reloadOutcome)}`);
   }
@@ -2566,6 +2568,7 @@ const relayRequestCheck = () => runScriptCheck("check-relay-request.mjs", "relay
 const relayAnswerCheck = () => runScriptCheck("check-relay-answer.mjs", "relay answer");
 const relayHttpCheck = () => runScriptCheck("check-relay-http.mjs", "relay http");
 const relayAdapterCheck = () => runScriptCheck("check-relay-adapter.mjs", "relay adapter");
+const readyWindows = () => runScriptCheck("check-ready-windows.mjs", "ready windows");
 const sellWatchCheck = () => runScriptCheck("check-sell-watch.mjs", "sell watch");
 const sellStartCheck = () => runScriptCheck("check-sell-start.mjs", "sell start");
 const arrivalConsensusCheck = () => runScriptCheck("check-arrival-consensus.mjs", "arrival consensus");
@@ -2652,6 +2655,7 @@ const CHECKS = {
   "claim-sender": claimSenderCheck,
   "claim-tip": claimTipCheck,
   "relay-claim": relayClaimCheck,
+  "ready-windows": readyWindows,
   "chain-guard": chainGuardCheck,
   "settlement-profiles": settlementProfilesCheck,
   "dleq-vectors": dleqVectorsCheck,

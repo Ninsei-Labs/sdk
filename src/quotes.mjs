@@ -10,6 +10,7 @@ import { claimGasGiftWei } from "../engine/evm/claimGas.js";
 import { takerHalvesV2, recoverySaltOf } from "./recovery-key.mjs";
 import { acceptCounterpartyChunked, buildOwnSideFromHalvesChunked, jointAddress } from "./order.mjs";
 import { requestFirmQuote } from "./relayFirmClient.mjs";
+import { readReadyWindow } from "./readyWindow.mjs";
 // THE CHAIN READ NEEDED TO ASK THE REGISTRY WHO OWNS THE KEY. The selector is COMPUTED from the signature, not
 // remembered: a single wrong hex digit would call another function and return a zero address - and a zero
 // address is exactly the answer "nobody owns this key", which the caller would take as the truth.
@@ -190,6 +191,7 @@ export function createQuotes({ config, now = () => Date.now(), evmCall = null, e
       if (!market) fail("bad-input", { field: "market" });
       const window = windows.find((entry) => entry.market === market) || null;
       if (!window) fail("quote-refused", { step: "features", why: "window" });
+      const readyWindow = readReadyWindow(window, { side, field: "features.firmWindows" });
       const xmrNetwork = request.xmrNetwork !== undefined ? String(request.xmrNetwork) : window.xmrNetwork;
       if (!xmrNetwork) fail("bad-input", { field: "xmrNetwork" });
       if (request.xmrAmount === undefined || request.xmrAmount === null || request.xmrAmount === "") {
@@ -369,7 +371,7 @@ export function createQuotes({ config, now = () => Date.now(), evmCall = null, e
       const marketAsset = request.market && String(request.market).includes(":")
         ? String(request.market).split(":").slice(1).join(":") : null;
       const asset = String(order.asset || marketAsset || "").trim();
-      const startQuote = { ...quote, viewHalfClaimer: derived.makerViewHalf, xmrAmount: signedAtomic,
+      const startQuote = { ...quote, viewHalfClaimer: derived.makerViewHalf, xmrAmount: signedAtomic, readyWindow,
         ...(asset ? { asset, token: asset.toLowerCase() } : {}),
         // A STABLE ID FOR THE PENDING-FUNDING RECORD. The signed nonce is the one value every relay answer carries.
         ...(quote.nonce !== undefined && quote.nonce !== null ? { id: String(quote.nonce) } : {}) };
@@ -386,6 +388,8 @@ export function createQuotes({ config, now = () => Date.now(), evmCall = null, e
         ...result,
         quote: startQuote,
         order: startOrder,
+        // THE NODE'S WINDOW TRAVELS WITH THE ANSWER, SO A SALE CAN USE THE SAME NUMBERS THE MAKER SIGNED.
+        readyWindow,
         // THE CALLER ADDS ITS WALLET, `receiveTo` AND THE HEIGHT; everything the relay can know is here.
         startRequest: {
           quote: startQuote,

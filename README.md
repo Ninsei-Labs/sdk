@@ -184,8 +184,10 @@ offer.startRequest; // quote, order, orderQuote, counterparty and recovery salt 
 ## Selling and claiming
 
 A bid is a sale of XMR. `quotes.firmRelay({ side: "bid", claimTip, ... })` returns the signed quote, the escrow,
-the one-time address and the `relayUrl` that answered. `swaps.startSell` stores all of them, including the relay
-origin, and sends nothing.
+the one-time address, the `relayUrl` that answered and the node's `readyWindow`. `swaps.startSell` stores all of
+them, including the relay origin and the window, and sends nothing. The window's `readyMinSeconds` and
+`readyMaxSeconds` are the only source of the sale wait, the late-arrival boundary and the refund lead; a record
+without it is refused by name when the watch or the refund needs it.
 
 A seller who has their own EVM wallet uses the own-wallet path. It signs the claim from that wallet and therefore
 needs ETH for gas:
