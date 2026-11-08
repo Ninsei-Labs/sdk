@@ -28,6 +28,11 @@
 // is the RULES, not the crypto.
 import { SdkError } from "./errors.mjs";
 import * as engine from "./engine.mjs";
+// THE HALF'S COMMITMENT, COMPUTED LOCALLY. The escrow checks the low 160 bits of `keccak256(x||y)` of `half*G`
+// (NinseiEscrow.halfMatchesCommit); the same formula runs here, so an action is compared with the order without
+// the half ever leaving this process.
+import { halfCommitmentHex } from "../engine/atomic/orderHalfCommit.js";
+import { keccak256, secp256k1 } from "./primitives.mjs";
 // THE MAKER'S DECLINE (issue #40) - the escrow's `Declined` event and the neutral vocabulary the state is
 // reported in. It is its own module because TWO surfaces ask the same question (this flow and the swaps watch)
 // and a second implementation of the same event would be a second truth about it.
@@ -508,7 +513,10 @@ async function assertActionWindow(escrow, what, deps, now = null) {
 // THE ACTION IS EXECUTED ON PAPER BEFORE IT IS SIGNED. `eth_call` runs the same call against the latest state
 // from the same sender, so a revert becomes a named refusal instead of a mined transaction that changed nothing.
 // The guards above answer the questions we know how to ask; this answers the contract itself, including its own
-// deadlines and the half checks. A caller without a call seam keeps the old behaviour.
+// deadlines. A caller without a call seam keeps the old behaviour.
+//
+// IT IS NOT USED FOR AN ACTION THAT CARRIES A HALF. A claim or a refund puts the half in the calldata, and the
+// dry run would hand it to the RPC operator before any money moves; see assertHalfMatchesCommit below.
 async function simulateAction(escrow, data, what, deps) {
   const call = deps.call;
   if (typeof call !== "function") return;
@@ -531,6 +539,38 @@ async function simulateAction(escrow, data, what, deps) {
   }
 }
 
+// A DRY RUN MUST NOT HAND THE HALF TO THE RPC. `eth_call` goes to a public endpoint by default, so simulating
+// `claim(half)` or `refund(half)` publishes the half to a third party while the escrow is still open and the ETH
+// has not moved. Whoever keeps that call holds both halves of the Monero key when the person declines the
+// transaction in the wallet or the send never lands (sdk#291).
+//
+// The simulation added exactly one check, and it is arithmetic: the half's point commitment must equal the
+// order's. The contract compares the LOW 160 BITS of `keccak256(x||y)` of `half*G`
+// (NinseiEscrow.halfMatchesCommit); the same formula runs here over the half we hold, against the slot READ FROM
+// THE ESCROW. Every other refusal the contract can give (closed, unfunded, not ready, window closed) is answered
+// by the state and clock guards above, before this line.
+const low160Hex = (value) => String(value == null ? "" : value).replace(/^0x/i, "").toLowerCase().slice(-40);
+async function assertHalfMatchesCommit(escrow, half, slot, what, deps) {
+  const field = what === "claim" ? "halfClaimer" : "halfLocker";
+  let got;
+  try {
+    got = low160Hex(halfCommitmentHex(BigInt(half), secp256k1, keccak256));
+  } catch {
+    throw new SdkError("bad-input", { field });
+  }
+  const call = deps.call || readContract;
+  let commit;
+  try {
+    commit = decodeBytes32(await call({ to: escrow, data: encodeRead(slot), block: deps.blockTag || "latest" }), slot + "()");
+  } catch {
+    // AN UNREAD ORDER IS NOT A MATCHING ONE.
+    throw new SdkError("contract-reverted", { step: what, why: "slots-unreadable" });
+  }
+  if (got !== low160Hex(commit)) {
+    throw new SdkError("contract-reverted", { step: what, why: "half-mismatch" });
+  }
+}
+
 // Claim the ETH by the CLAIMER'S half. The field name in the contract is halfClaimer (:213); the former word
 // "secret" is a synonym of the same value (the half serves as the preimage of the commitment), while "hashlock"
 // lied here: the current contract has NO hashlock field. Instead it has two half commitments -
@@ -540,14 +580,16 @@ async function simulateAction(escrow, data, what, deps) {
 export async function claimOrder({ escrow, halfClaimer, expect, onStep, deps = {} }) {
   if (!escrow) throw new SdkError("bad-input", { field: "escrow" });
   if (!halfClaimer) throw new SdkError("bad-input", { field: "halfClaimer" });
-  // STATE, TIME AND SLOTS BEFORE SIGNING: a claim reveals the half, and it must be revealed in the VERY order
-  // whose commitments we know, while that order is open. The contract's ready rule is TIME-DEPENDENT: before
+  // STATE, TIME, SLOTS AND THE HALF BEFORE SIGNING: a claim reveals the half, and it must be revealed in the VERY
+  // order whose commitments we know, while that order is open. The contract's ready rule is TIME-DEPENDENT: before
   // `readyBy` it requires the mark, after `readyBy` it allows a claim without it. Both are checked from the
   // chain's own timestamp when the actions facade brings one.
   await assertOrderOpen(escrow, "claim", deps);
   await assertActionWindow(escrow, "claim", deps);
   await assertOrderSlots(escrow, expect, "claim", deps);
-  await simulateAction(escrow, encodeClaim(halfClaimer), "claim", deps);
+  // THE HALF IS CHECKED HERE, NOT BY A DRY RUN: the escrow's own comparison, computed locally and read against
+  // the order. No call carries the half until the send.
+  await assertHalfMatchesCommit(escrow, halfClaimer, "commitHalfClaimer", "claim", deps);
   onStep?.("confirm-claim");
   // THE CLAIM GAS LIMIT COMES FROM THE SHARED MODULE, NOT A LITERAL HERE (issue #127): the node lays exactly
   // this limit into the gas gift. It is set explicitly and with a margin: claim has the same trap as order
@@ -575,7 +617,9 @@ export async function refundOrder({ escrow, halfLocker, onStep, expect = null, d
   // for the same reason. Expectations are optional for compatibility with previous calls (the page calls without
   // them); the core always passes them.
   if (expect) await assertOrderSlots(escrow, expect, "refund", deps);
-  await simulateAction(escrow, encodeRefund(halfLocker), "refund", deps);
+  // THE SAME LOCAL CHECK ON THE DEPOSITOR'S HALF. A refund reveals it exactly as a claim reveals the claimer's,
+  // so it is compared with the escrow's `commitHalfLocker` before the signature and never sent to a dry run.
+  await assertHalfMatchesCommit(escrow, halfLocker, "commitHalfLocker", "refund", deps);
   onStep?.("confirm-refund");
   const hash = await (deps.send || sendTransaction)({ to: escrow, data: encodeRefund(halfLocker), gas: 250_000n });
   return { hash };

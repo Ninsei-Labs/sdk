@@ -56,10 +56,18 @@ const chainConfig = (chain) => ({
   dex: chain.dex ? { routes: chain.dex.routes || [] } : null,
   // THE ESCROW'S BIRTH HEIGHT, when the network has an escrow. A caller can hand it to findSwaps instead of
   // inventing a start block or asking from genesis, which public RPCs refuse.
+  //
+  // THE VAULT AND THE IMPLEMENTATION PIN TRAVEL WITH THE NETWORK, not only with the deployment record. `quotes`
+  // refuses an answer whose `cashier` is not this network's vault, and the funding path fills the order terms
+  // from the same projection. A projection that drops the field leaves a client built from a network NAME with
+  // no vault at all, so every relay quote ends as `no-pinned-cashier` - a defect in the profile, not in the
+  // answer (sdk#291). Nothing else fills these fields: the projection is the one place both facades read.
   escrow: chain.escrow ? {
     address: chain.escrow.address || null,
     mode: chain.escrow.mode || null,
     registry: chain.escrow.registry || null,
+    cashier: chain.escrow.cashier || null,
+    implementationCodeHash: chain.escrow.implementationCodeHash || null,
     deploymentBlock: Number.isSafeInteger(chain.escrow.deploymentBlock) ? chain.escrow.deploymentBlock : null,
   } : null,
 });
