@@ -40,6 +40,13 @@ check("the default implementation policy comes from the same network", () => {
   assert.deepEqual(implementationCodesForChain({ chain: DEFAULT_CHAIN, knownImplementationCodes: null }),
     knownImplementationCodesFor(DEFAULT_CHAIN));
 });
+check("a caller's explicit implementation list still wins", () => {
+  const explicit = ["0x" + "2".repeat(64)];
+  assert.deepEqual(implementationCodesForChain({ chain: DEFAULT_CHAIN, knownImplementationCodes: explicit }), explicit);
+});
+check("a chain object is read by its id", () => {
+  assert.equal(implementationCodesForChain({ chain: { id: "no-such-network" }, knownImplementationCodes: null }), null);
+});
 check("an unknown network does not inherit the default implementation pin", () => {
   assert.equal(implementationCodesForChain({ chain: "no-such-network", knownImplementationCodes: null }), null);
 });
