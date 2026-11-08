@@ -941,7 +941,7 @@ export interface RelayClaimResult {
   readonly escrow: string;
   readonly relayUrl: string;
   readonly txid: string;
-  /** The address that sent the claim transaction (the relay's sender, not the seller). */
+  /** The address that sent the claim transaction (the maker node's sender, not the seller). */
   readonly from: string;
   /** The signed tip, in wei, paid out of the claim. */
   readonly tipWei: string;
