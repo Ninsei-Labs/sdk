@@ -142,8 +142,8 @@ export function foundryInstallerMisses(files) {
   return Object.entries(files)
     .filter(([, text]) => {
       const body = text.replace(/\r\n/g, "\n");
-      return /^\s*-\s*uses:\s*foundry-rs\/foundry-toolchain/m.test(body)
-        || /^\s*run:\s*.*\bfoundryup\b/m.test(body);
+      const lines = body.split("\n").filter((line) => !line.trimStart().startsWith("#"));
+      return lines.some((line) => /foundry-rs\/foundry-toolchain/.test(line) || /\bfoundryup\b/.test(line));
     })
     .map(([name]) => name);
 }
