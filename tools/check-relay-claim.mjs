@@ -224,6 +224,8 @@ export const relayClaimCheck = async () => {
   for (const [label, transport] of [
     ["a thrown transport", async () => { throw new TypeError("connection reset"); }],
     ["a success body without a txid", async () => ({ ok: true, status: 200, json: async () => ({ version: 1 }) })],
+    ["a relay that lost the answer after dispatch", async () => ({ ok: false, status: 503,
+      json: async () => ({ version: 1, code: "claim-unknown", message: "the claim may have been sent" }) })],
   ]) {
     try {
       await swaps.claimViaRelay({ id: record.id, fetchImpl: transport });

@@ -85,6 +85,9 @@ export async function postRelayClaim({
   const code = answer && typeof answer.code === "string" && answer.code ? answer.code : null;
 
   if (!response.ok) {
+    if (code === "claim-unknown" || code === "claim_unknown") {
+      throw new SdkError("claim-unknown", { step: "relay-claim", why: "relay-timeout", code, status: response.status, outcome: "unknown" });
+    }
     if (code && version === 1) throw new SdkError("quote-refused", { step: "relay-claim", code, status: response.status });
     // AN UNVERSIONED NON-2XX IS NOT A REFUSAL WE CAN READ. The claim may still have been sent, so it is unknown.
     throw new SdkError("claim-unknown", { step: "relay-claim", why: "answer-status", status: response.status, outcome: "unknown" });

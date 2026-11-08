@@ -201,7 +201,7 @@ signed by the client:
 ```js
 const claimed = await sdk.swaps.claimViaRelay({ id });
 claimed.txid;    // the claim transaction
-claimed.from;    // the relay's sender
+claimed.from;    // the maker node's claim sender
 claimed.tipWei;  // the signed tip paid out of the claim
 ```
 
