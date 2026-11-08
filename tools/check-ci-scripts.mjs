@@ -152,8 +152,10 @@ export function foundryPinMisses(files) {
   const text = (files[".github/workflows/ci.yml"] || "").replace(/\r\n/g, "\n");
   const misses = [];
   if (!/FOUNDRY_VERSION:\s*v\d+\.\d+\.\d+/.test(text)) misses.push("version");
+  if (!/FOUNDRY_ASSET_ID:\s*\d+/.test(text)) misses.push("asset-id");
   if (!/FOUNDRY_SHA256:\s*[0-9a-f]{64}/.test(text)) misses.push("sha256");
   if (!/foundry_\$\{FOUNDRY_VERSION\}_linux_amd64\.tar\.gz/.test(text)) misses.push("asset");
+  if (!/api\.github\.com\/repos\/foundry-rs\/foundry\/releases\/assets\/\$\{FOUNDRY_ASSET_ID\}/.test(text)) misses.push("asset-url");
   return misses;
 }
 
@@ -162,7 +164,7 @@ const installers = foundryInstallerMisses(files);
 if (!installers.length) ok("no workflow runs foundryup or the foundry-toolchain action");
 else bad("workflows that resolve Foundry at run time: " + JSON.stringify(installers));
 const missingPins = foundryPinMisses(files);
-if (!missingPins.length) ok("the SDK workflow names the Foundry version, asset and SHA-256");
+if (!missingPins.length) ok("the SDK workflow names the Foundry version, asset id and URL, and SHA-256");
 else bad("the SDK workflow is missing the Foundry pin: " + JSON.stringify(missingPins));
 
 console.log("=== BREAKING RUN: a Foundry installer or an unpinned release reddens ===");
