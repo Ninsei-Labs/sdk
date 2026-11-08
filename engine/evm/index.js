@@ -3,7 +3,8 @@
 // Everything below this header is identical to the source.
 
 // The wallet used by the demo interface.
-// One implementation: WalletConnect (www/js/evm/walletconnect.js) - the user's real wallet, real balances.
+// One implementation: the injected EIP-1193 browser wallet (www/js/evm/session.js) - the user's real wallet,
+// real balances. Mobile connectors are loaded by the host page and passed in as the same provider.
 // The built-in demo wallet and its mode switch were removed: we are heading to a real product, not a mockup.
 // Still NO transfers: there is no escrow contract yet and the address is mocked (mock/chain.js), so funding
 // is a simulation (simulateEscrowFunding below); provider.sendTransaction will replace it.
@@ -51,7 +52,7 @@ import { sendTransaction, readContract, readReceipt, readCode } from "./session.
 export { sendTransaction, readContract, readReceipt, readCode };
 
 // The browser wallets available here (EIP-6963, falling back to window.ethereum). An empty list is normal:
-// no extension, so WalletConnect remains.
+// no extension is installed; the host can still bring its own connector and pass its provider to the SDK.
 export function wallets() {
   return discoverWallets();
 }

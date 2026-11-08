@@ -345,9 +345,7 @@ after that runs it again, so keep the work in draft until the last commit.
 3. **The wallet is outside.** The SDK opens no windows and does not look for injected providers itself.
 4. **The step order and the guards are inside `swaps.start`** (stage 2): funds are not locked until the interface
    has confirmed the recovery file is saved; retrying after an error or a reload is safe.
-5. **The WalletConnect bundle is a separate file** from `assetsBase`, so the interface's bundler (Astro/Vite) does
-   not touch it. Monero mnemonic, key and address code is part of the package core: it needs no separate file and
-   no vendored browser bundle.
+5. **WalletConnect is the host's connector.** The SDK ships no vendor bundle and loads no connector at runtime; a page that wants mobile wallets loads `@walletconnect/ethereum-provider` itself (from its own lock or a pinned CDN asset), draws the QR, and passes the resulting EIP-1193 provider to `evmWallet(provider)`. A page without it works with injected wallets only. Monero mnemonic, key and address code is part of the package core: it needs no separate file and no vendored browser bundle.
 6. **Strict CSP.** The package is designed for a policy without `eval` and inline.
 7. **Few dependencies, all permissive.** Every production dependency is checked in CI against an allowlist: MIT, MIT-0,
    ISC, Apache-2.0, BSD-2-Clause, BSD-3-Clause, Unlicense, 0BSD, CC0-1.0 and BlueOak-1.0.0. Copyleft,
