@@ -51,14 +51,21 @@ export function readReadyWindow(value, { side = null, field = "readyWindow" } = 
 export function readyLeadSec(window) {
   const ready = readReadyWindow(window);
   const headroom = ready.readyMaxSeconds - ready.readyMinSeconds;
-  return Math.max(0, headroom);
+  // A window with more headroom than its minimum cannot make the depositor refund before the quote exists; cap
+  // the lead at the minimum instead of letting a degenerate signed range move it into the past.
+  return Math.max(0, Math.min(headroom, ready.readyMinSeconds));
 }
 
-/** The node's own settlement margin: the latest point at which it can still pay before `readyBy`. */
+/** The node's own settlement margin: the latest point at which it can still pay before `readyBy`. The advertised
+ *  `settlementMinSeconds/MaxSeconds` describe `t1 - readyBy` (the claim window), not this payout margin, so they
+ *  are carried for callers but do not decide the late boundary. */
 export function readyLateSec(window) {
   const ready = readReadyWindow(window);
   const headroom = ready.readyMaxSeconds - ready.readyMinSeconds;
-  return Math.max(0, ready.readyMinSeconds - headroom);
+  const derived = ready.readyMinSeconds - headroom;
+  // A range whose headroom swallows its minimum cannot advertise "pay immediately"; keep the minimum as the
+  // conservative boundary rather than disabling the check with a zero.
+  return Math.max(0, derived > 0 ? derived : ready.readyMinSeconds);
 }
 
 /** The longest wait a quote from this window can ask for, without inventing a second client-side deadline. */

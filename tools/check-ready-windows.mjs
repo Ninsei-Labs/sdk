@@ -23,8 +23,6 @@ const expectRefusal = (fn, code, field) => {
   check(window.readyMinSeconds === 2400 && window.readyMaxSeconds === 3000, "the advertised window is kept");
   check(readyWindowMs(window) === (3000 + 300) * 1000, "the wait is the node's maximum plus one margin");
   check(readyLeadSec(window) === 600, "the default 2400..3000 window yields the 600 s refund lead");
-  check(readyLeadSec(window, { minConfirmations: 20, blockTimeSec: 120 }) === 600,
-    "the refund lead is the window's own headroom, not the confirmation setting");
   check(readyLeadSec({ readyMinSeconds: 3000, readyMaxSeconds: 4200 }) === 1200,
     "a wider node window moves the lead with it");
   check(readyLeadSec({ readyMinSeconds: 2400, readyMaxSeconds: 2400 }) === 0,
@@ -32,6 +30,10 @@ const expectRefusal = (fn, code, field) => {
   check(readyLateSec(window) === 1800, "the same window gives the 1800 s payout margin");
   check(readyLateSec({ readyMinSeconds: 3000, readyMaxSeconds: 4200 }) === 1800,
     "a wider window keeps the payout margin at its minimum minus its headroom");
+  check(readyLeadSec({ readyMinSeconds: 100, readyMaxSeconds: 10000 }) === 100,
+    "a degenerate headroom is capped at the window minimum");
+  check(readyLateSec({ readyMinSeconds: 100, readyMaxSeconds: 10000 }) === 100,
+    "a degenerate headroom does not disable the late boundary");
   const sideMismatch = expectRefusal(() => readReadyWindow(window, { side: "ask" }), "bad-input", "readyWindow");
   check(sideMismatch && sideMismatch.error.code === "bad-input" && sideMismatch.error.params.why === "side",
     "a window for another side is refused");
@@ -59,17 +61,19 @@ const expectRefusal = (fn, code, field) => {
 }
 
 // 3. THE REFUND LEAD IS THE NODE'S WINDOW. The old 1200 s would have signed a refund here while the maker was
-// still inside its 1800 s settlement margin.
+// still inside its 1800 s settlement margin. The helper is the BUYER's early refund, so its record carries the
+// ask-side window; the helper must not pin the bid side.
 const now = 1_800_000_000;
 const escrow = "0x" + "aa".repeat(20);
 const half = "0x" + "11".repeat(32);
 const readyWindow = { side: "bid", readyMinSeconds: 2400, readyMaxSeconds: 3000 };
+const refundWindow = { ...readyWindow, side: "ask" };
 const refundBase = {
   escrow, halfLocker: half, address: "59DnddZzVBCevVg9YB3zCs24DSRH4ByS2FMBafPpYxSEB6FMegQNEbtNzbLjrrEUPNAg9NhK5uMiiAZpAvENBS4D4mEPcRq",
   viewSecret: "0x" + "22".repeat(32), spendPub: "0x" + "33".repeat(32),
   expect: { edPointLocker: half, edPointClaimer: half, edViewPointLocker: half, commitHalfLocker: half, commitHalfClaimer: half },
   expectedAtomic: "1", fromHeight: 1, nowSec: now,
-  swap: { escrow: { address: escrow, half }, readyWindow },
+  swap: { escrow: { address: escrow, half }, readyWindow: refundWindow },
 };
 {
   let verified = 0;
@@ -84,12 +88,12 @@ const refundBase = {
 }
 {
   let verified = 0;
-  const result = await createSwaps({}).refundIfXmrMissing({ ...refundBase, readyBySec: now + 1000 }, {
+  const result = await createSwaps({}).refundIfXmrMissing({ ...refundBase, readyBySec: now + 1000, leadSec: 1200 }, {
     verify: async () => { verified += 1; return { absent: true, seen: false }; },
-    refund: async () => { throw new Error("must not refund before the node's lead"); },
+    refund: async () => ({ hash: "0x" + "cc".repeat(32) }),
     now: () => now,
   });
-  check(result.refunded === false && verified === 0, "the refund holds the whole margin");
+  check(result.refunded === true && verified === 1, "an explicit leadSec still overrides the window");
 }
 {
   const missing = await createSwaps({}).refundIfXmrMissing({ ...refundBase, readyBySec: now + 1700, swap: { escrow: { address: escrow, half } } }, {

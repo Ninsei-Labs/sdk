@@ -704,8 +704,8 @@ export interface SwapsApi {
    * without the ready mark, and the early window is gone. The arrival is decided by THE SAME check as the watch
    * (`verifyArrival`). Only a verdict with `absent: true` refunds; a transaction that is seen (`pending` with a txid or
    * height, `one-node`, `arrived`) does not; a failure to check (no nodes, a disagreement) throws its own code and
-   * signs nothing. It fires only when less than the
-   * confirmations' time is left before `readyBy` (`minConfirmations * blockTimeSec`, overridable with `leadSec`).
+   * signs nothing. It fires only when less than the node's refund lead is left before `readyBy` (the headroom of
+   * the signed `readyWindow` stored with the record, overridable with `leadSec`).
    */
   refundIfXmrMissing(request: AutoRefundRequest, deps?: AutoRefundDeps): Promise<AutoRefundVerdict>;
   /** Unfinished swaps after a page reload. */
@@ -862,8 +862,11 @@ export interface AutoRefundRequest {
   readonly fromHeight?: number | null;
   readonly txid?: string | null;
   readonly minConfirmations?: number;
+  /** Retained for callers that used to derive the lead locally; the refund no longer reads it. */
   readonly blockTimeSec?: number;
-  /** How long before `readyBy` the refund becomes due. Defaults to `minConfirmations * blockTimeSec`. */
+  /** The node's signed window, when it is not read from `swap.readyWindow`. */
+  readonly readyWindow?: ReadyWindow;
+  /** How long before `readyBy` the refund becomes due. Defaults to the window's own headroom. */
   readonly leadSec?: number;
   readonly timeoutMs?: number;
   readonly nowSec?: number;

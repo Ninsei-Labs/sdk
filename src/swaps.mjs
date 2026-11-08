@@ -729,7 +729,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         ? Number(request.leadSec) : (() => {
             const window = request.readyWindow || (swap && (swap.readyWindow || swap.sellWindow));
             if (!window) throw new SdkError("bad-input", { field: "readyWindow", why: "not-in-record" });
-            return readyLeadSec(readReadyWindow(window, { side: "bid", field: "readyWindow" }));
+            return readyLeadSec(readReadyWindow(window, { field: "readyWindow" }));
           })();
       // THE WALK STARTS AT THE SWAP'S BIRTH, NEVER AT GENESIS. A missing height used to become block 0, so a refund
       // check on a real chain would walk every block ever mined. The record carries the measured height; a caller
@@ -1167,9 +1167,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       if (wantExpect !== wantWallet) throw new SdkError("bad-input", { field: wantExpect ? "wallet" : "expect" });
       if (wantExpect && !(request.escrow || request.address)) throw new SdkError("bad-input", { field: "escrow" });
       const storedSwap = (() => { try { return engine.swap.getSwap(id, store); } catch { return null; } })();
-      const readyWindowRaw = request.readyWindow || (storedSwap && storedSwap.readyWindow) || null;
-      const readyWindow = readyWindowRaw
-        ? readReadyWindow(readyWindowRaw, { side: "ask", field: "readyWindow" }) : null;
+      const readyWindowRaw = request.readyWindow || (storedSwap && (storedSwap.readyWindow || storedSwap.sellWindow)) || null;
       const pollMs = Number.isFinite(Number(request.pollMs)) && Number(request.pollMs) > 0 ? Number(request.pollMs) : limitOf("watchPollMs", 5000);
       const timeoutMs = Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0 ? Number(request.timeoutMs) : limitOf("watchTimeoutMs", 1_200_000);
       // THE CONFIRMATION TARGET - FROM THE CONFIGURATION (one number, the owner's decision: 10).
@@ -1186,7 +1184,8 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         : null;
       // LESS TIME LEFT THAN THE CONFIRMATIONS TAKE - NAMED AND NOT STARTED (issue #85, the owner's decision).
       if (verifyRequest) {
-        if (!readyWindow) throw new SdkError("bad-input", { field: "readyWindow", why: "not-in-record" });
+        if (!readyWindowRaw) throw new SdkError("bad-input", { field: "readyWindow", why: "not-in-record" });
+        const readyWindow = readReadyWindow(readyWindowRaw, { side: "ask", field: "readyWindow" });
         const readyBy = request.readyBySec !== undefined && request.readyBySec !== null ? Number(request.readyBySec)
           : (request.deadline && request.deadline.readyBy !== undefined ? Number(request.deadline.readyBy) : null);
         if (readyBy) xmrArrival.assertTimeForConfirmations({
@@ -1592,11 +1591,11 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       // stored `startSell` record carries the range the maker signed, so the wait is not the old fixed 20 minutes.
       const storedSwap = swapByEscrow(store, escrow);
       const readyWindowRaw = request.readyWindow || (storedSwap && (storedSwap.readyWindow || storedSwap.sellWindow)) || null;
-      const readyWindow = readyWindowRaw
-        ? readReadyWindow(readyWindowRaw, { side: "bid", field: "readyWindow" }) : null;
       const pollMs = Number.isFinite(Number(request.pollMs)) && Number(request.pollMs) > 0
         ? Number(request.pollMs) : limitOf("watchPollMs", 6_000);
       const explicitTimeout = Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0;
+      const readyWindow = !explicitTimeout && readyWindowRaw
+        ? readReadyWindow(readyWindowRaw, { side: "bid", field: "readyWindow" }) : null;
       if (!readyWindow && !explicitTimeout) {
         throw new SdkError("bad-input", { field: "readyWindow", why: "not-in-record" });
       }
