@@ -38,6 +38,7 @@ import { refundIfMissingCheck } from "./check-refund-if-missing.mjs";
 import { sweepWindowCheck } from "./check-sweep-window.mjs";
 import { sweepFromOrderCheck } from "./check-sweep-order.mjs";
 import { sweepAdapterCheck } from "./check-sweep-adapter.mjs";
+import { claimTipCheck } from "./check-claim-tip.mjs";
 import { claimSenderCheck } from "./check-claim-sender.mjs";
 import { chainGuardCheck } from "./check-chain-guard.mjs";
 import { settlementProfilesCheck } from "./check-settlement-profiles.mjs";
@@ -2648,6 +2649,7 @@ const CHECKS = {
   "sweep-order": sweepFromOrderCheck,
   "sweep-adapter": sweepAdapterCheck,
   "claim-sender": claimSenderCheck,
+  "claim-tip": claimTipCheck,
   "chain-guard": chainGuardCheck,
   "settlement-profiles": settlementProfilesCheck,
   "dleq-vectors": dleqVectorsCheck,

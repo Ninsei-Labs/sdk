@@ -24,6 +24,12 @@ export const SECURITY_INVARIANTS = [
     checks: ["tools/check-relay-http.mjs", "tools/check-relay-adapter.mjs"],
   },
   {
+    id: "QUOTE-TIP-01",
+    statement: "A signed claim tip is bounded by the measured claim cost; a non-zero tip without a block read and a tip above the ceiling are named refusals.",
+    files: ["src/quotes.mjs"],
+    checks: ["tools/check-claim-tip.mjs", "tools/check-relay-adapter.mjs"],
+  },
+  {
     id: "DLEQ-01",
     statement: "A cross-curve proof carries knowledge proofs for both curves and a pure-multiple witness is refused.",
     files: ["engine/atomic/dleq2.js", "src/relayRequest.mjs"],

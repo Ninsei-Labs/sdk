@@ -78,11 +78,10 @@ const cases = [
     wants: "substituted commitment",
   },
   {
-    check: "sale-auth", source: "src/quotes.mjs",
-    name: "the returned order is no longer compared with the signed quote",
-    from: "if (!sameValue(ticket.order[name], quote[name])) {",
-    to: "if (false) {",
-    wants: "another amount",
+    check: "claim-tip", source: "src/quotes.mjs",
+    name: "the claim-tip ceiling is removed",
+    from: "if (tip > ceiling) {", to: "if (false) {",
+    wants: "too-large",
   },
   {
     check: "relay-http", source: "src/relayQuote.mjs",
