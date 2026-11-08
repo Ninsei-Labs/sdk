@@ -2,6 +2,10 @@
 //
 // The page used to assemble the SDK's own payload from the order and the key. That rule is now here: the side,
 // the person's spend and view points, the other side's points, the joint address and the restore height.
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { createSweep } from "../src/sweep.mjs";
 import { createSwaps } from "../src/swaps.mjs";
 import { takerHalvesV2 } from "../src/recovery-key.mjs";
@@ -16,9 +20,12 @@ const orderFor = (halves, side) => ({
   escrow: field("aa"),
   locker: field("bb"),
   claimer: field("cc"),
-  edPointLocker: side === "locker" ? halves.spendPoint : halves.makerViewPoint,
-  edPointClaimer: side === "locker" ? halves.makerViewPoint : halves.spendPoint,
-  edViewPointLocker: side === "locker" ? halves.viewPoint : halves.makerViewPoint,
+  edPointLocker: "0x" + String(side === "locker" ? halves.spendPoint : halves.makerViewPoint).replace(/^0x/, ""),
+  edPointClaimer: "0x" + String(side === "locker" ? halves.makerViewPoint : halves.spendPoint).replace(/^0x/, ""),
+  edViewPointLocker: "0x" + String(side === "locker" ? halves.viewPoint : halves.makerViewPoint).replace(/^0x/, ""),
+  amount: "1000000000000000000",
+  commitHalfLocker: "0x" + "11".repeat(32),
+  commitHalfClaimer: "0x" + "22".repeat(32),
   derivation: "salt-v2",
   factory: factoryV2main,
   salt: saltV2main,
@@ -49,6 +56,21 @@ export const sweepFromOrderCheck = async () => {
     `the signed XMR amount is not in the recovery file: ${JSON.stringify(buy.payload.receive)}`);
   check(buy.payload.moneroWallet.restoreHeight === 2_100_000, `the restore height is ${buy.payload.moneroWallet.restoreHeight}`);
   check(buy.payload.moneroWallet.escrowAddress === orderFor(halves, "locker").escrow, "the escrow is not on the wallet");
+  check(buy.side === "locker" && buy.kind === "refund", "a buy did not return the locker's refund action");
+  check(buy.escrow === field("aa") && buy.claimer === field("cc"), "the buy action does not name its escrow and claimer");
+  check(buy.half === halves.spendHalf, "the buy action did not carry the recovered spend half");
+  check(buy.expect.chainId === CHAIN && buy.expect.factory === factoryV2main,
+    "the buy action does not carry the chain and factory");
+  check(buy.expect.locker === field("bb") && buy.expect.claimer === field("cc"),
+    "the buy action does not carry the order parties");
+  check(buy.expect.amount === "1000000000000000000" && buy.expect.readyBy === 1_700_000_100 && buy.expect.t1 === 1_700_000_200,
+    "the buy action does not carry the amount and deadlines");
+  check(buy.expect.salt === saltV2main && buy.expect.commitHalfLocker === "0x" + "11".repeat(32) &&
+    buy.expect.commitHalfClaimer === "0x" + "22".repeat(32),
+    "the buy action does not carry the salt and commitments");
+  check(buy.expect.edPointLocker === "0x" + halves.spendPoint && buy.expect.edPointClaimer === "0x" + halves.makerViewPoint &&
+    buy.expect.edViewPointLocker === "0x" + halves.viewPoint,
+    "the buy action does not carry the order points");
   notes.push("a found buy becomes the same payload a recovery file carries");
 
   const sell = await sweep.fromOrder({
@@ -57,6 +79,10 @@ export const sweepFromOrderCheck = async () => {
   });
   check(sell.payload.side === "sell" && sell.address === sell.payload.moneroWallet.address,
     "the sell did not build the claimer's joint address");
+  check(sell.side === "claimer" && sell.kind === "claim" && sell.half === halves.spendHalf,
+    "a sell did not return the claimer's claim action and recovered half");
+  check(sell.claimer === field("cc") && sell.expect.claimer === field("cc"),
+    "the sell action does not name the claimer the sender guard reads");
   notes.push("a found sell names the person as the claimer");
 
   // A V2 ORDER CARRIES NO INDEX. Its salt, factory and the words rebuild the same address; reading an index would
@@ -82,6 +108,43 @@ export const sweepFromOrderCheck = async () => {
   } catch (error) { mismatch = error; }
   check(mismatch && mismatch.code === "bad-input" && mismatch.params && mismatch.params.why === "spend-point",
     "an order whose spend point is not the key's was not refused");
+
+  // THE ACTION MATERIAL REFUSES AN ORDER THAT CANNOT BE CHECKED. A missing expectation field would make the
+  // slot guard skip that field; the half must not become usable from an order without it.
+  let incomplete = null;
+  try {
+    const broken = orderFor(halves, "locker");
+    delete broken.amount;
+    await sweep.fromOrder({
+      mnemonic: WORDS, chainId: CHAIN, network: "arbitrum-sepolia", moneroNetwork: "stagenet", order: broken,
+    });
+  } catch (error) { incomplete = error; }
+  check(incomplete && incomplete.code === "bad-input" && incomplete.params && incomplete.params.field === "order" &&
+    Array.isArray(incomplete.params.missing) && incomplete.params.missing.includes("amount"),
+    "an order without the native amount still produced action material");
+
+  // BREAKING RUN: THE MISSING-AMOUNT REFUSAL IS THE GUARD THE CASE CLAIMS. A copy with the amount check removed must
+  // accept the same order; otherwise the refusal above came from something else and would survive the rule's removal.
+  const tmp = mkdtempSync(join(tmpdir(), "sdk-sweep-action-"));
+  try {
+    const source = readFileSync(new URL("../src/sweep-action.mjs", import.meta.url), "utf8");
+    const errorsUrl = new URL("../src/errors.mjs", import.meta.url).href;
+    const amountGuard = 'if (!amount || !INTEGER_RE.test(amount) || BigInt(amount) <= 0n) missing.push("amount");';
+    const mutated = source
+      .replace('from "./errors.mjs"', `from "${errorsUrl}"`)
+      .replace(amountGuard, "/* the amount guard is removed by the breaking run */");
+    check(!mutated.includes(amountGuard), "the breaking run could not find the amount guard");
+    const copy = join(tmp, "sweep-action.mjs");
+    writeFileSync(copy, mutated);
+    const mod = await import(pathToFileURL(copy).href + "?run=" + Date.now());
+    const broken = orderFor(halves, "locker");
+    delete broken.amount;
+    let accepted = null;
+    try { accepted = mod.actionMaterialOf({ order: broken, chainId: CHAIN, half: halves.spendHalf }); } catch { accepted = null; }
+    check(accepted && accepted.expect.amount === null, "removing the amount guard did not change the refusal");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 
   let missing = null;
   try {
