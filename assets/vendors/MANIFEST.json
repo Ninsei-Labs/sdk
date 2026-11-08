@@ -3,7 +3,7 @@
   "note": "Pinned browser bundles. A change to one of these files must be accompanied by a matching SHA-256 here and a rebuild of the page's asset registry.",
   "bundles": {
     "sdk/sdk-browser.js": {
-      "sha256": "da40669f8f820c4b3b817a7be374ca22ee6ee742b50061aff02fd119b43cb1d1",
+      "sha256": "79184831ccb49fd1c105310cba2e4a811d8d4a29f6f7b5434c47128861583dee",
       "source": "sdk/src (facade, adapters, recovery)"
     },
     "walletconnect/wc-browser.js": {

@@ -17,6 +17,7 @@ import { recordInputOf } from "../src/swaps.mjs";
 import * as engine from "../src/engine.mjs";
 import { buildOwnSideFromHalves } from "../src/order.mjs";
 import { createRecoveryKey, takerHalvesV2 } from "../src/recovery-key.mjs";
+import { createNinsei } from "../src/index.mjs";
 import { deploymentFor } from "../engine/core/config.js";
 
 const suite = new CipherSuite({
@@ -61,11 +62,14 @@ const window = (side) => ({
   settlementMaxSeconds: 7200,
   quoteTtlSeconds: 30,
 });
-const features = (() => {
+// The node's features, signed by the maker key: a case that changes a signed field must sign the change, exactly
+// as a real node would.
+const nodeFeatures = (overrides = {}) => {
   const base = {
     type: "node_features", version: 1, relayId: "test-relay", provider, quoteKey, registry,
     hpkeKey: hpkePublic, firmWindows: [window("ask"), window("bid")],
     time: nowSec - 10, nonce: "0x" + "07".repeat(32),
+    ...overrides,
   };
   const sig = secp256k1.sign(nodeFeaturesDigest(base), quotePrivate, { format: "recovered", prehash: false });
   return {
@@ -74,7 +78,8 @@ const features = (() => {
       + Buffer.from(sig.slice(33, 65)).toString("hex")
       + (27 + sig[0]).toString(16),
   };
-})();
+};
+const features = nodeFeatures();
 
 const order = {
   chainId: 421614,
@@ -194,14 +199,19 @@ function makeQuotes({ providerWord = provider, factoryWord = factory, cashierPin
     denylist,
     config: { settlement: { chain: { escrow: { ...(cashierPin ? { cashier: cashierPin } : {}), ...(registryPin ? { registry: registryPin } : {}) } } } },
     now: () => nowSec * 1000,
-    evmCall: async ({ data }) => {
-      if (data.startsWith(providerSelector)) return word(providerWord);
-      if (data.startsWith(factorySelector)) return word(factoryWord);
-      if (data.startsWith(engine.evm.FACTORY_METHODS.predict)) return word(predictedEscrow);
-      throw new Error("unexpected chain call");
-    },
+    evmCall: chainReads({ providerWord, factoryWord }),
     evmBlock: async () => ({ baseFeePerGas: "0" }),
   });
+}
+
+// The registry and the factory entry point a real chain would answer, reduced to the three reads this path makes.
+function chainReads({ providerWord = provider, factoryWord = factory } = {}) {
+  return async ({ data }) => {
+    if (data.startsWith(providerSelector)) return word(providerWord);
+    if (data.startsWith(factorySelector)) return word(factoryWord);
+    if (data.startsWith(engine.evm.FACTORY_METHODS.predict)) return word(predictedEscrow);
+    throw new Error("unexpected chain call");
+  };
 }
 
 const baseRequest = {
@@ -373,6 +383,44 @@ try {
   if (error && error.code === "quote-cashier-mismatch" && error.params && error.params.why === "no-pinned-cashier") {
     ok("a profile without a pinned cashier is refused");
   } else bad("wrong missing-cashier code: " + JSON.stringify(error && (error.code || error.message)));
+}
+
+// sdk#291: THE PIN MUST COME FROM THE PROJECTION, NOT FROM A HAND-BUILT CONFIG. Cases 7 and 8 pass a config that
+// already names the vault; a client built from the NETWORK NAME is the shape a library caller uses, and it had no
+// vault at all, so every relay quote ended as `no-pinned-cashier`.
+console.log("=== 8b) A CLIENT BUILT FROM THE NETWORK NAME CARRIES THE NETWORK'S VAULT ===");
+{
+  const deployed = deploymentFor("arbitrum-sepolia").escrow;
+  const facade = createNinsei({
+    settlement: { chain: "arbitrum-sepolia" },
+    xmrNetwork: "stagenet",
+    evmCall: chainReads(),
+    // THE FACTORY AND IMPLEMENTATION POLICY IS NOT THIS CASE'S SUBJECT: an explicit empty list means "no policy"
+    // on purpose, so the vault pin is the only thing the answer is judged by here.
+    knownFactoryCodes: [],
+    knownImplementationCodes: [],
+  });
+  const projected = (facade.config.settlement.chain.escrow || {}).cashier;
+  if (String(projected || "").toLowerCase() === String(deployed.cashier).toLowerCase()) {
+    ok("the network projection carries the deployed vault");
+  } else {
+    bad("a client built from the chain name has cashier " + JSON.stringify(projected));
+  }
+  const networkFeatures = nodeFeatures({ registry: deployed.registry });
+  const relayCall = (fetchImpl) => facade.quotes.firmRelay({ ...baseRequest, features: networkFeatures, order, fetchImpl });
+  try {
+    await relayCall(relayFetch().fetchImpl);
+    ok("a valid relay answer is accepted by a client built from the chain name");
+  } catch (error) {
+    bad("a client built from the chain name refused a valid answer: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
+  }
+  try {
+    await relayCall(relayFetch({ cashierAddress: "0x" + "66".repeat(20) }).fetchImpl);
+    bad("a quote naming another vault passed on a client built from the chain name");
+  } catch (error) {
+    if (error && error.code === "quote-cashier-mismatch") ok("a quote naming another vault is refused on a client built from the chain name");
+    else bad("wrong foreign-vault code on a client built from the chain name: " + JSON.stringify(error && (error.code || error.message)));
+  }
 }
 
 console.log("");

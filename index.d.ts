@@ -305,11 +305,18 @@ export interface ChainConfig {
   readonly nativeSymbol: string;
   readonly tokens: readonly TokenConfig[];
   readonly dex: { readonly routes: readonly unknown[] } | null;
-  /** The escrow deployment on this network, when there is one. `deploymentBlock` is the block that holds the factory's creation. */
+  /**
+   * The escrow deployment on this network, when there is one. `deploymentBlock` is the block that holds the
+   * factory's creation. `cashier`, `registry` and `implementationCodeHash` are the network's pins, carried here
+   * so a client built from a network name alone compares a quote against them; a simulated network has nulls.
+   */
   readonly escrow: {
     readonly address: string | null;
     readonly mode: string | null;
     readonly deploymentBlock: number | null;
+    readonly registry: string | null;
+    readonly cashier: string | null;
+    readonly implementationCodeHash: string | null;
   } | null;
 }
 

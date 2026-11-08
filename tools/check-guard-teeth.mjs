@@ -103,6 +103,25 @@ const cases = [
     to: "if (false) fail(\"quote-cashier-mismatch\", { step, got: got || null, want: pin });",
     wants: "foreign cashier",
   },
+  {
+    check: "action-state", source: "src/swap-flow.mjs",
+    name: "the claim's dry run carries the half again",
+    from: "await assertHalfMatchesCommit(escrow, halfClaimer, \"commitHalfClaimer\", \"claim\", deps);",
+    to: "await simulateAction(escrow, encodeClaim(halfClaimer), \"claim\", deps);",
+    wants: "read call(s) carried the half",
+  },
+  {
+    check: "action-state", source: "src/swap-flow.mjs",
+    name: "the local half comparison is removed",
+    from: "if (got !== low160Hex(commit)) {", to: "if (false) {",
+    wants: "with a foreign half",
+  },
+  {
+    check: "relay-adapter", source: "src/config.mjs",
+    name: "the cashier is dropped from the network projection",
+    from: "    cashier: chain.escrow.cashier || null,", to: "",
+    wants: "has cashier",
+  },
 ];
 
 const originals = new Map();
