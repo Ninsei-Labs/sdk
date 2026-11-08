@@ -1,5 +1,6 @@
 ## Unreleased
 
+- The SDK no longer ships or loads a WalletConnect browser bundle. `evmWallet(provider)` remains the only wallet seam, so a host page can keep using injected wallets or load `@walletconnect/ethereum-provider` itself and pass the resulting EIP-1193 provider. The SDK's browser engine now offers only the injected connector; the WalletConnect build package, manifest entry, CI workflow and checks are gone.
 - `recovery.readEscrowEventsByTopic` reads `HalfRevealed`, `Ready` and `Declined` without an address filter, so a recovery page can scan by topic and filter by `escrow` locally. The existing `readEscrowEvents({ escrows, ... })` is unchanged.
 
 ## 0.57.2 — 2026-11-06

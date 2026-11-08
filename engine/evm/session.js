@@ -2,29 +2,26 @@
 // Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
 // Everything below this header is identical to the source.
 
-// The EVM wallet: state, balances, network switching and two ways to connect.
+// The EVM wallet: state, balances, network switching and the injected connector.
 
-// WHY TWO CONNECTORS. WalletConnect (Reown) is for a user coming from a phone or a wallet without an extension:
-// the session lives over a QR. A browser wallet (MetaMask, Rabby, Coinbase...), if installed, connects directly
-// over EIP-1193 - faster and with no extra hop.
-// Both expose the same EIP-1193 interface, so state, balances and network switching are shared:
-// only the handshake differs (see www/js/evm/injected.js).
+// A browser wallet (MetaMask, Rabby, Coinbase...) found by EIP-6963 connects directly over EIP-1193. The SDK
+// accepts the provider through `evmWallet(provider)`; WalletConnect and any other mobile connector are loaded by
+// the host page, which passes the resulting EIP-1193 provider the same way. No vendor bundle is shipped here.
 
 // What is real here and what is not matters:
-//   REAL: connecting (QR or browser extension), address, chainId, native-token and ERC-20 balances (values come
+//   REAL: connecting (browser extension), address, chainId, native-token and ERC-20 balances (values come
 //         from the user's wallet through its provider, decimals from the config);
 //
 //   NOT REAL: transfers. The escrow contract is not deployed yet and the escrow address in the demo is a mock,
 //         so sending a transaction stays a simulation (see evm/index.js). The demo does not move real money
 //         and must not.
 
-// The modal is drawn by us (ui/walletModal.js): Reown's own uses inline styles, which the demo CSP forbids.
-// The WalletConnect provider is initialised with showQrModal: false; the session link comes from the
-// display_uri event and is encoded into a QR in a data: URL.
+// The modal is drawn by us (ui/walletModal.js): the browser-wallet list comes from EIP-6963, and the CSP bans
+// inline styles, so everything goes through dom.h(). The host owns any QR or WalletConnect UI.
 
 // Balances are cached in the state: the UI asks balanceOf() synchronously, and refreshBalances() updates
 // them (on connect, network change, wallet event).
-import { CHAINS, EVM, chainById, chainByChainId, tokensOf } from "../core/config.js";
+import { chainById, chainByChainId, tokensOf } from "../core/config.js";
 import {
   discoverWallets,
   explainInjectedError,
@@ -41,8 +38,8 @@ const listeners = new Set();
 
 const state = {
   status: "idle", // idle | pairing | connected | error
-  kind: null, // walletconnect | injected - which connector is in use
-  label: null, // wallet name for the UI: "WalletConnect", "MetaMask", "Rabby"...
+  kind: null, // injected - the only connector this engine owns
+  label: null, // wallet name for the UI: "MetaMask", "Rabby"...
   address: null,
   chainId: null, // numeric chainId of the network the wallet is on
   balances: {}, // "42161:USDC" -> a human-readable number
@@ -52,7 +49,6 @@ const state = {
 
 let provider = null;
 let modal = null;
-let lib = null;
 
 function emit() {
   for (const fn of listeners) {
@@ -105,21 +101,6 @@ export function balanceOf(chainSlugOrId, symbol) {
 
 const hexChainId = (id) => "0x" + Number(id).toString(16);
 
-async function loadLib() {
-  if (!lib) {
-    // A dynamic import of our own file: CSP script-src 'self' allows it,
-    // and the 2 MB bundle loads only when the user actually presses Connect.
-    lib = await import("../../assets/vendors/walletconnect/wc-browser.js?v=fb64f27c");
-  }
-  return lib;
-}
-
-function rpcMap() {
-  const map = {};
-  for (const c of CHAINS) map[c.chainId] = c.rpcUrl;
-  return map;
-}
-
 function reset(status = "idle", error = null) {
   state.status = status;
   state.error = error;
@@ -132,11 +113,10 @@ function reset(status = "idle", error = null) {
   emit();
 }
 
-// --- the part shared by both connectors ------------------------------------------------------
+// --- the injected connector -----------------------------------------------------------------
 //
-// WalletConnect and a browser wallet expose the same EIP-1193 interface, so events, state and balance reading
-// are shared. Only the handshake differs, so here are the handlers and in connect()/
-// connectInjected() - how exactly the provider was obtained.
+// The browser wallet exposes EIP-1193. The host may supply WalletConnect or another connector as the same
+// interface; that connector is not created or loaded here.
 
 function wireProvider(p) {
   p.on("chainChanged", (id) => {
@@ -158,172 +138,27 @@ function wireProvider(p) {
     emit();
     refreshBalances();
   });
-  // disconnect comes from both WalletConnect and a browser wallet (e.g. on reset);
-  // session_delete - only WalletConnect. Both mean one thing: the session is gone.
+  // disconnect comes from a browser wallet, for example after it resets the site.
   p.on("disconnect", () => {
     if (modal) modal.close();
     reset("idle", null);
   });
-  p.on("session_delete", () => {
-    if (modal) modal.close();
-    reset("idle", null);
-  });
 }
 
-// RETURNING TO THE PAGE FROM BFCACHE. Chrome (since 149) tears down the WebSocket when the page goes into the
-// back-forward cache, deliberately: in the console it looks like "failed: Page entered Back-Forward Cache",
-// although the network is not to blame. Consequence: the WalletConnect provider is cached in a variable, its
-// socket is closed and the relay retries froze with the page - so after returning the session LOOKS alive while
-// requests to the wallet do not get through. Neither the one-shot restore() nor provider events notice it. We
-// fix it with the same mechanism restore() relies on: init() raises the session from localStorage.
-// disconnect() is NOT called here - it deletes the session from storage, i.e. would break what we restore.
-let resumeInFlight = false;
-
-export async function resumeConnection() {
-  if (resumeInFlight || state.status !== "connected" || state.kind !== "walletconnect" || !provider) return;
-  resumeInFlight = true;
-  const p = provider;
-  try {
-    await Promise.race([
-      p.request({ method: "eth_accounts" }),
-      new Promise((_, rej) => setTimeout(() => rej(new Error("the relay did not answer in 4 s")), 4000)),
-    ]);
-    console.log("[wc] the connection is alive after returning to the page");
-    return;
-  } catch (e) {
-    console.log("[wc] the relay does not answer after returning (" + e.message + ") - raising the session again");
-  } finally {
-    resumeInFlight = false;
-  }
-  provider = null;                       // the browser closed the old socket, so caching it is pointless
-  try {
-    const want = state.chainId || (CHAINS.find((c) => c.escrow) || {}).chainId;
-    const fresh = await ensureProvider(want);
-    const accounts = await fresh.request({ method: "eth_accounts" });
-    if (!Array.isArray(accounts) || !accounts.length) {
-      console.log("[wc] no session left in storage - a new QR is needed");
-      reset("idle", null);
-      return;
-    }
-    state.address = accounts[0];
-    emit();
-    await refreshBalances();
-    console.log("[wc] session raised again: " + state.address);
-  } catch (e) {
-    console.log("[wc] could not raise the session: " + e.message);
-    reset("idle", null);
-  }
-}
-
-// Returning to the page: pageshow (including from bfcache) and tab visibility. Debounced so switching
-// tabs does not poke the relay on every twitch.
-let resumeTimer = null;
-const scheduleResume = () => {
-  clearTimeout(resumeTimer);
-  resumeTimer = setTimeout(() => { resumeConnection(); }, 400);
-};
-// WINDOW-EVENT SUBSCRIPTION ONLY WHERE THERE IS A WINDOW. It used to run with no environment check, and the
-// module failed on load in Node (repo checks) and in the SDK, which promises "no DOM": the failure came not at
-// subscription time but on importing the file - i.e. it broke everything that pulls it in.
-if (typeof window !== "undefined" && typeof document !== "undefined") {
-  window.addEventListener("pageshow", () => scheduleResume());
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) scheduleResume(); });
-}
-
-async function ensureProvider(wantChainId) {
-  if (provider) return provider;
-  const { EthereumProvider } = await loadLib();
-  provider = await EthereumProvider.init({
-    projectId: EVM.projectId,
-    chains: [wantChainId],
-    // Only networks the demo can settle on: there is no point offering the wallet a network without an escrow
-    // (and the WalletConnect project may not know it, which would break the connection).
-    optionalChains: CHAINS.filter((c) => c.escrow).map((c) => c.chainId),
-    showQrModal: false,
-    rpcMap: rpcMap(),
-    // The url in the WalletConnect metadata is compared against the page's actual origin (the app-origin
-    // check). Substituting the production domain breaks the session locally and on a test domain - hence
-    // the origin is taken, not a constant.
-    metadata: { ...EVM.metadata, url: location.origin },
-  });
-
-  provider.on("display_uri", (uri) => showUri(uri));
-  wireProvider(provider);
-  // kind/label are NOT set here: the provider is created, but there is no connection yet. Otherwise, after
-  // a reload without a session the state would be idle while the UI counted the wallet as connected
-  // (a browser check catches this: status=idle, kind=walletconnect).
-  return provider;
-}
-
-async function showUri(uri) {
-  if (!modal || modal.closed.value) return;
-  try {
-    const { QRCode } = await loadLib();
-    const qrDataUrl = await QRCode.toDataURL(uri, {
-      margin: 1,
-      width: 440,
-      errorCorrectionLevel: "M",
-      color: { dark: "#0a0d13", light: "#ffffff" },
-    });
-    modal.update({ qrDataUrl, uri, status: "Waiting for the wallet to approve..." });
-  } catch (e) {
-    // The QR did not render - the link is shown anyway, it can be copied.
-    modal.update({ uri, status: "Scan failed to render, copy the link instead", error: true });
-    console.warn("qr render failed", e);
-  }
-}
-
-// Restoring the session after a page reload.
-//
-// WalletConnect keeps the session in localStorage, and EthereumProvider.init() raises it back.
-// But our provider was created LAZILY - only on "Connect wallet" - so after F5 the session lay in storage while
-// the page knew nothing: it showed "Connect wallet" and offered a new QR. Restoration is an explicit step at
-// load: raise the provider and, if a session exists, declare it connected (address, network, balances).
-//
-//
-// State is read AFTER init, not by event: during restoration the event may arrive before
-// the page has subscribed to the provider.
-let restoreTried = false;
-
-// THE "OPTED OUT MANUALLY" MARK. WalletConnect keeps the session in localStorage, so one disconnect() is not
-// enough: on the next load restore() would raise it back and the logout would prove false. The mark is cleared
-// ONLY on a deliberate connect.
+// THE "OPTED OUT MANUALLY" MARK. A browser wallet may remember the site even after
+// wallet_revokePermissions is unavailable, so a deliberate disconnect must survive the next load.
 const OPTOUT_KEY = "ninsei.wallet.optOut";
 const isOptedOut = () => { try { return localStorage.getItem(OPTOUT_KEY) === "1"; } catch { return false; } };
 const setOptOut = (on) => { try { on ? localStorage.setItem(OPTOUT_KEY, "1") : localStorage.removeItem(OPTOUT_KEY); } catch {} };
 
+let restoreTried = false;
+
+// Restore the injected wallet without a prompt. The host may pass its own wallet list; otherwise EIP-6963 is used.
 export async function restore() {
-  // Opted out manually - do not pick it up: otherwise the "log out" button means nothing.
-  if (isOptedOut()) { restoreTried = true; console.log("[wc] restore skipped: wallet disconnected manually"); return publicState(); }
+  if (isOptedOut()) { restoreTried = true; console.log("[wallet] restore skipped: wallet disconnected manually"); return publicState(); }
   if (restoreTried || state.status === "connected") return publicState();
   restoreTried = true;
-  // Order: first the WalletConnect session (in localStorage), then a browser wallet.
-  // The second step is silent: eth_accounts shows no window, so page load does not turn into
-  // "connect your wallet" for those who already connected before.
-  if (EVM.projectId) {
-    try {
-      const want = chainById(state.chainId || undefined);
-      const p = await ensureProvider(want.chainId);
-      const accounts = (p && p.accounts) || [];
-      // Empty - there is no session in storage (or it was disconnected). This is normal: below we
-      // try a browser wallet and, if there is none either, the page will offer to connect.
-      if (accounts.length) {
-        state.kind = "walletconnect";
-        state.label = "WalletConnect";
-        state.address = accounts[0];
-        state.chainId = Number(p.chainId) || want.chainId;
-        state.status = "connected";
-        state.error = null;
-        emit();
-        await refreshBalances();
-        console.info("WalletConnect: session restored after reload", state.address);
-      }
-    } catch (e) {
-      console.warn("WalletConnect: could not restore the session", e && e.message ? e.message : e);
-    }
-  }
-  if (!isConnected()) return restoreInjected();
-  return publicState();
+  return restoreInjected();
 }
 
 // A silent check for browser wallets: one already allowed for the site returns an address without a window.
@@ -398,9 +233,8 @@ export async function connectInjected({ wallet, chainSlug } = {}) {
 
 // Connect. chainSlug - the network selected in the form; it also becomes the primary in the session.
 //
-// WalletConnect does NOT start immediately here: first a choice is shown - browser wallets found via EIP-6963
-// and WalletConnect as a separate row. So a user with an extension is not given a WalletConnect session he did
-// not ask for, and a phone user does not have to hunt for an extension.
+// Only browser wallets found through EIP-6963 are offered. WalletConnect and any other connector are loaded by
+// the host page, which passes the resulting EIP-1193 provider to `evmWallet`.
 export async function connect({ chainSlug } = {}) {
   if (isConnected()) return { address: state.address, chainId: state.chainId };
   const want = chainById(chainSlug || state.chainId || undefined);
@@ -419,12 +253,12 @@ export async function connect({ chainSlug } = {}) {
         wallets.map((w) => w.name + " [" + w.source + (w.rdns ? " " + w.rdns : "") + "]").join(", ")
     );
   } else {
-    console.info("[wallet] no browser wallets found (WalletConnect remains)");
+    console.info("[wallet] no browser wallets found");
   }
   modal = openWalletModal({
     title: "Connect a wallet",
-    subtitle: `Requested network: ${want.name}. The QR below is a public WalletConnect link - nothing secret. This demo never moves real funds: there is no escrow contract on-chain yet.`,
-    hint: "Browser wallets are detected in this browser (EIP-6963). WalletConnect works with mobile wallets by QR.",
+    subtitle: `Requested network: ${want.name}.`,
+    hint: "Browser wallets are detected in this browser through EIP-6963.",
   });
 
   const choice = await new Promise((resolve) => {
@@ -439,20 +273,11 @@ export async function connect({ chainSlug } = {}) {
       hint: w.source === "eip6963" ? null : "detected via window.ethereum",
       onClick: () => resolve({ type: "injected", wallet: w }),
     }));
-    if (EVM.projectId) {
-      options.push({
-        key: "walletconnect",
-        name: "WalletConnect",
-        icon: null,
-        hint: "QR code for a mobile wallet",
-        onClick: () => resolve({ type: "walletconnect" }),
-      });
-    }
     modal.setChoices(options);
     modal.update({
       status: wallets.length
-        ? "Choose a browser wallet above, or scan the QR code below."
-        : "No browser wallet found in this browser - use the QR code below.",
+        ? "Choose a browser wallet above."
+        : "No browser wallet found in this browser. Install a browser wallet or use the host's own connector.",
     });
   });
 
@@ -462,72 +287,21 @@ export async function connect({ chainSlug } = {}) {
   }
 
   // --- browser wallet: the wallet itself shows the permission window ---
-  if (choice.type === "injected") {
-    try {
-      const res = await connectInjected({ wallet: choice.wallet, chainSlug: want.id });
-      if (modal) modal.close();
-      return res;
-    } catch (e) {
-      // The modal is NOT closed: the refusal cause must stay on screen. Otherwise it is
-      // "pressed - nothing happened", and there is nowhere to learn what happened (a check catches this).
-      const message = String((e && e.message) || e);
-      if (modal) {
-        modal.update({
-          error: message,
-          status: "Try again, or use WalletConnect below.",
-        });
-      }
-      throw e;
-    }
-  }
-
-  // --- WalletConnect: the previous path, including instant cancel ---
-  if (!EVM.projectId) {
-    if (modal) modal.close();
-    reset("error", "no-project-id");
-    throw new Error("WalletConnect projectId is not configured");
-  }
-  modal.update({ status: "Preparing the session..." });
-  // Cancel must finish the connect IMMEDIATELY. Without this, await provider.connect() hangs until the
-  // session timeout, the "Connect wallet" button stays disabled, and the demo looks broken (the bug was
-  // caught by a browser check: after cancel the button did not revive).
-  let cancelReject = null;
-  const cancelled = new Promise((_, reject) => {
-    cancelReject = () => reject(new Error("Connection cancelled"));
-  });
-
-  modal.setOnCancel(() => {
-    // The user closed the modal: the session must be extinguished, else it hangs.
-    const p = provider;
-    provider = null;
-    if (p) Promise.resolve(p.disconnect()).catch(() => {});
-    reset("idle", null);
-    if (cancelReject) cancelReject();
-  });
-
   try {
-    const p = await ensureProvider(want.chainId);
-    await Promise.race([p.connect({ chains: [want.chainId] }), cancelled]);
-    state.kind = "walletconnect";
-    state.label = "WalletConnect";
-    state.address = (p.accounts && p.accounts[0]) || null;
-    state.chainId = Number(p.chainId);
-    state.status = "connected";
-    state.error = null;
-    // Exactly close(), not cancel(): the connection happened, the session must not be extinguished.
+    const res = await connectInjected({ wallet: choice.wallet, chainSlug: want.id });
     if (modal) modal.close();
-    emit();
-    await refreshBalances();
-    return { address: state.address, chainId: state.chainId };
+    return res;
   } catch (e) {
-    const message = e && e.message ? String(e.message) : String(e);
-    console.warn("WalletConnect connect failed:", message);
-    // The user's refusal is not an app error.
-    const rejected = isUserRejection(e) || /cancell?ed/i.test(message);
-    if (modal) modal.close();
-    reset(rejected ? "idle" : "error", rejected ? null : message);
-    if (!rejected) throw e;
-    return null;
+    // The modal is NOT closed: the refusal cause must stay on screen. Otherwise it is
+    // "pressed - nothing happened", and there is nowhere to learn what happened (a check catches this).
+    const message = String((e && e.message) || e);
+    if (modal) {
+      modal.update({
+        error: message,
+        status: "Try again.",
+      });
+    }
+    throw e;
   }
 }
 
@@ -574,21 +348,16 @@ export async function signTypedData(typedData) {
 export async function disconnect() {
   setOptOut(true);   // remember the decision: after a reload the wallet is not picked up
   const p = provider;
-  const kind = state.kind;
   if (!p) {
     reset("idle", null);
     return;
   }
   try {
-    if (kind === "injected") {
-      // A browser wallet has no "session" on our side: we can only ask it to revoke the permission
-      // (wallet_revokePermissions) and forget the address locally. Honestly: the next eth_accounts may
-      // return the address again if the wallet remembers the site.
-      if (typeof p.revokePermissions === "function") {
-        await p.request({ method: "wallet_revokePermissions", params: [{ eth_accounts: {} }] });
-      }
-    } else {
-      await p.disconnect();
+    // A browser wallet has no "session" on our side: we can only ask it to revoke the permission
+    // (wallet_revokePermissions) and forget the address locally. Honestly: the next eth_accounts may
+    // return the address again if the wallet remembers the site.
+    if (typeof p.revokePermissions === "function") {
+      await p.request({ method: "wallet_revokePermissions", params: [{ eth_accounts: {} }] });
     }
   } catch (e) {
     console.warn("disconnect failed", e);
@@ -642,7 +411,7 @@ export async function switchChain(chainSlugOrId) {
 // through eth_call (selector 0x70a08231); decimals come from the config (where the BSC trap was).
 // Send a transaction from the USER's wallet and return its hash.
 //
-// An EIP-1193 method, one for WalletConnect and browser wallets: both expose
+// An EIP-1193 method, one for every injected browser wallet: each exposes
 // a provider with request(). The signature happens in the wallet, our code never touches keys.
 //
 // The call does not return at once: the user confirms the transaction in their wallet, and until

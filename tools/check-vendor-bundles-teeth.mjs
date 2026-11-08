@@ -20,22 +20,29 @@ writeFileSync(manifest, JSON.stringify({
   version: 1,
   bundles: { "a/one.js": { sha256: hash("one") }, "two.js": { sha256: hash("two") } },
 }));
+const session = join(root, "session.js");
+writeFileSync(session, "export const session = true;\n");
 
 const problems = [];
 const expect = (condition, message) => { if (!condition) problems.push(message); };
 try {
-  const green = vendorBundlesCheck({ vendorsDir: vendors, manifestPath: manifest });
+  const green = vendorBundlesCheck({ vendorsDir: vendors, manifestPath: manifest, sessionPath: session });
   expect(green.problems.length === 0, `the baseline is red: ${green.problems.join("; ")}`);
 
   writeFileSync(join(vendors, "three.js"), "three");
-  const extra = vendorBundlesCheck({ vendorsDir: vendors, manifestPath: manifest });
+  const extra = vendorBundlesCheck({ vendorsDir: vendors, manifestPath: manifest, sessionPath: session });
   expect(extra.problems.some((line) => line.includes("three.js") && line.includes("absent")),
     `an unlisted bundle is not named: ${extra.problems.join("; ")}`);
 
   writeFileSync(join(vendors, "two.js"), "changed");
-  const changed = vendorBundlesCheck({ vendorsDir: vendors, manifestPath: manifest });
+  const changed = vendorBundlesCheck({ vendorsDir: vendors, manifestPath: manifest, sessionPath: session });
   expect(changed.problems.some((line) => line.includes("two.js") && line.includes("sha256")),
     `a changed bundle is not named: ${changed.problems.join("; ")}`);
+
+  writeFileSync(session, "const lib = import(\"../../assets/vendors/walletconnect/wc-browser.js\");\n");
+  const connector = vendorBundlesCheck({ vendorsDir: vendors, manifestPath: manifest, sessionPath: session });
+  expect(connector.problems.some((line) => line.includes("WalletConnect connector")),
+    `a returning WalletConnect connector is not named: ${connector.problems.join("; ")}`);
 } finally {
   rmSync(root, { recursive: true, force: true });
 }
@@ -44,4 +51,4 @@ if (problems.length) {
   console.error("FAILED: " + problems.join("; "));
   process.exit(1);
 }
-console.log("vendor-bundles teeth: 2 breaking cases red and named");
+console.log("vendor-bundles teeth: 3 breaking cases red and named");

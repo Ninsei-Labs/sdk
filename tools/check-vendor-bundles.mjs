@@ -26,7 +26,8 @@ const listBundles = (dir, root = dir, out = []) => {
   return out;
 };
 
-export const vendorBundlesCheck = ({ vendorsDir = VENDORS, manifestPath = join(VENDORS, "MANIFEST.json") } = {}) => {
+export const vendorBundlesCheck = ({ vendorsDir = VENDORS, manifestPath = join(VENDORS, "MANIFEST.json"),
+  sessionPath = join(ROOT, "engine", "evm", "session.js") } = {}) => {
   const problems = [];
   const notes = [];
   let manifest = null;
@@ -43,10 +44,20 @@ export const vendorBundlesCheck = ({ vendorsDir = VENDORS, manifestPath = join(V
     const got = sha256Of(file);
     if (!/^[0-9a-f]{64}$/.test(want) || got !== want) problems.push(`${rel}: sha256 ${got}, expected ${want || "a 64-digit hash"}`);
   }
-  // EVERY JAVASCRIPT FILE UNDER vendors IS AN INPUT THE PACKAGE SHIPS. A fifth bundle added to the directory but
-  // not to the manifest is named, so the manifest cannot quietly cover only the four known files.
+  // EVERY JAVASCRIPT FILE UNDER vendors IS AN INPUT THE PACKAGE SHIPS. A bundle added to the directory but
+  // not to the manifest is named, so the manifest cannot quietly cover only the known files.
   for (const rel of listBundles(vendorsDir)) {
     if (!listed.has(rel)) problems.push(`${rel}: present under assets/vendors but absent from the manifest`);
+  }
+  // THE SDK ENGINE MUST NOT LOAD A WALLETCONNECT VENDOR. `evmWallet(provider)` is the seam; the host page
+  // owns the connector and its bundle. A path or provider initializer returning here would make the package
+  // depend on a file it no longer ships.
+  const sessionFile = sessionPath;
+  if (existsSync(sessionFile)) {
+    const sessionText = readFileSync(sessionFile, "utf8");
+    if (/assets\/vendors\/walletconnect|EthereumProvider\.init|QRCode\.toDataURL/.test(sessionText)) {
+      problems.push("engine/evm/session.js: the WalletConnect connector is back; the host owns it");
+    }
   }
   // THE SDK BUNDLE EMBEDS THE PAGE BRIDGE, AND THE BRIDGE NAMES THE BUNDLE'S CACHE KEY. Changing that key after
   // building leaves the committed bundle with the previous key and makes CI rebuild a different file. The key is a

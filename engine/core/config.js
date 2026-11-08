@@ -45,10 +45,6 @@ export const ENDPOINTS = Object.freeze({
   sweepOrigin: (BROWSER_DEPLOY && BROWSER_DEPLOY.sweepOrigin) || (NODE_ENV && NODE_ENV.NINSEI_SWEEP_ORIGIN) || LOCAL_ENDPOINTS.sweepOrigin,
 });
 
-// THE PAGE'S OWN ADDRESS comes from the environment, not from a constant: WalletConnect compares the metadata url
-// with the page's actual origin, so a hard-coded host breaks the session on any other host.
-const PAGE_ORIGIN = typeof location !== "undefined" ? location.origin : "";
-
 // THE EIP-712 SIGNING DOMAIN (name/version) for a signed order quote. It is NOT a brand literal in the signer: it
 // belongs to the registry contract (it returns DOMAIN_SEPARATOR()), so it is taken from the config here. The defaults
 // reproduce today's result byte for byte.
@@ -941,20 +937,6 @@ export function sweepOrigin() {
 export const SWEEP = {
   origin: ENDPOINTS.sweepOrigin,
   localOrigin: "http://localhost:5195",
-};
-
-// ---------------------------------------------------------------------------
-// The EVM wallet: WalletConnect (Reown). projectId is the app's public identifier, visible to any site with
-// WalletConnect (not a secret: it goes into the QR and the relay). The metadata is shown to the user in the wallet.
-// ---------------------------------------------------------------------------
-export const EVM = {
-  projectId: "18c13c05b6c0ab011ffff7cee0700e2d",
-  metadata: {
-    name: "NinseiSwap",
-    description: "Non-custodial XMR <-> EVM atomic swap. Demo build: real wallet, real balances, no real funds move.",
-    url: PAGE_ORIGIN,
-    icons: [],
-  },
 };
 
 // THERE IS NO FEE RATE HERE - AND THERE MUST NOT BE. The only source of truth is the SIGNED QUOTE. The rate, amount
