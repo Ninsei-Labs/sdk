@@ -297,6 +297,7 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: '1.27.3'
+          cache-dependency-path: test/dleq-oracle/go/go.sum
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@1.99.1
       - name: Install dependencies
