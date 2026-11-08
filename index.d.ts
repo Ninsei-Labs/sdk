@@ -548,6 +548,8 @@ export interface FirmRelayAnswer {
     recoveryKey: unknown;
     recoverySalt: string;
   }>;
+  /** The relay origin that answered. `startSell` stores it for the later no-wallet claim. */
+  readonly relayUrl: string;
   readonly relay: string | null;
   readonly offered: number | null;
   readonly forwarded: Readonly<Record<string, unknown>> | null;
@@ -633,6 +635,16 @@ export interface SwapsApi {
   startSell(request: SellStartRequest): Promise<SellStart>;
   /** CLAIM THE ETH on a sell from the record: the half and the expectations are the ones stored by `startSell`. */
   sellClaim(request: SellClaimRequest, wallet: WalletAdapter): Promise<unknown>;
+  /**
+   * CLAIM THE ETH ON A SELL WITHOUT A WALLET. The seller holds XMR and no ETH, so the signed `claimTip` pays the
+   * sender. The half goes to the relay that answered the quote (the origin stored by `startSell`), which posts
+   * `POST /v1/claims/{provider}/{escrow}`. No wallet is created or used and no chain transaction is signed.
+   *
+   * The record must be a sell with a POSITIVE `claimTip` and a stored provider, escrow and half. `relayUrl` may
+   * restate the stored origin; a different origin is refused. A node refusal is `quote-refused` with its own code
+   * in `params.code`; a lost answer is `claim-unknown` (the claim may have been sent), never success.
+   */
+  claimViaRelay(request: RelayClaimRequest): Promise<RelayClaimResult>;
   /**
    * WAIT FOR THE XMR TO ARRIVE at the order's joint address. The polling uses the same request as the page's
    * (GET /swaps/{id}), the rate and the timeout - from `config.limits` and overridable here.
@@ -908,6 +920,31 @@ export interface SellClaimRequest {
   readonly halfClaimer?: string;
   readonly expect?: Readonly<Record<string, unknown>>;
   readonly onStep?: (step: unknown) => void;
+}
+
+/**
+ * THE NO-WALLET CLAIM'S INPUTS. `id` names the sell record made by `startSell`; the provider, escrow, half and
+ * signed tip come from it. `relayUrl` is optional and may only repeat the origin stored with the record - a foreign
+ * origin is refused, because the relay that answered the quote is part of the verified offer.
+ */
+export interface RelayClaimRequest {
+  readonly id: string;
+  readonly relayUrl?: string;
+  readonly fetchImpl?: typeof fetch;
+  readonly timeoutMs?: number;
+}
+
+/** The claim the relay sent for the record. Only a validated on-chain transaction hash is returned here. */
+export interface RelayClaimResult {
+  readonly id: string;
+  readonly provider: string;
+  readonly escrow: string;
+  readonly relayUrl: string;
+  readonly txid: string;
+  /** The address that sent the claim transaction (the relay's sender, not the seller). */
+  readonly from: string;
+  /** The signed tip, in wei, paid out of the claim. */
+  readonly tipWei: string;
 }
 
 export interface SellWatchRequest {
@@ -1728,6 +1765,11 @@ export type ErrorCode =
   | "server-unavailable"
   /** The service answered and did not accept: the connection got through, the request did not (status and reason in params). */
   | "server-refused"
+  /**
+   * THE CLAIM WAS POSTED BUT NO REAL ANSWER CAME BACK: a timeout, a reset, or a body without a usable transaction
+   * hash. The relay may have sent the claim; the caller must read the escrow before acting again. Never success.
+   */
+  | "claim-unknown"
   /** The funding transaction was sent, but no status-1 receipt with the expected OrderCreated proves the escrow. */
   | "funding-pending"
   /** The wait for the XMR to arrive expired: a separate code, because this is a state of the money, not a breakdown. */

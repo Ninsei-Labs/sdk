@@ -66,9 +66,25 @@ encryption envelope in the host, and do not pass a bid answer to `swaps.start` (
 
 ## 5. Sell flow
 
-`swaps.startSell` records the one-time address, the escrow, our half and the expectations. It sends no transaction.
-The same offer retried returns the same record with `resumed: true`; a changed commitment is refused rather than
-silently resumed. Use `swaps.sellClaim` with the record and the wallet when the time comes to claim.
+`swaps.startSell` records the one-time address, the escrow, our half, the expectations and the relay origin that
+answered the quote. It sends no transaction. The same offer retried returns the same record with `resumed: true`; a
+changed commitment or a different relay origin is refused rather than silently resumed.
+
+There are two claim paths, and the host picks by what the seller holds:
+
+- `swaps.sellClaim({ id }, wallet)` - the own-wallet path. The claimer signs the claim, so the wallet must hold
+  enough native coin for gas. This path is unchanged, and `actions.claim` still refuses a sender that is not the
+  claimer.
+- `swaps.claimViaRelay({ id })` - the no-wallet path. The seller has XMR and no ETH; the escrow pays the signed
+  `claimTip` to the sender, so the relay that answered the quote submits the half. No wallet is created or used and
+  the client signs no chain transaction.
+
+`claimViaRelay` requires a sell record with a positive `claimTip` and the stored provider, escrow and half. It does
+not take a relay or a sender from the caller after the quote: an optional `relayUrl` may repeat the stored origin,
+and any other origin is refused with `bad-input`. The node's refusal keeps its own code under
+`quote-refused.params.code`. A timeout, a reset or a body without a real transaction hash is `claim-unknown`: the
+claim may already be sent, so read the escrow before acting again, and never treat the lost answer as a success.
+Only a validated txid is returned. The half is never logged or written by this path.
 
 ## 6. Claim, refund and ready
 
@@ -77,8 +93,9 @@ before signing and then pass the expected sender to the wallet adapter. The adap
 `eth_chainId` again immediately before `eth_sendTransaction`; a changed account or chain is a refusal and the
 transaction is not sent.
 
-A claim reveals the claimer's half. The SDK sends a claim only from the claimer's own wallet. A host that needs a
-third-party sender must use the relay flow, not `actions.claim`.
+A claim reveals the claimer's half. `actions.claim` and `swaps.sellClaim` send a claim only from the claimer's own
+wallet. A seller with no wallet uses `swaps.claimViaRelay`; it returns only a real txid, refuses a foreign relay
+origin and reports a lost answer as `claim-unknown`, never as success.
 
 ## 7. Recovery
 
@@ -97,6 +114,7 @@ subpath, but only public order data leaves the client.
 | Quote | A retry is a new quote unless the host reuses the same signed answer. Do not treat a timeout as a successful quote. |
 | `swaps.start` | Reuse the same quote and recovery salt. The SDK resumes an existing record when the terms match; a changed offer is refused. |
 | `swaps.startSell` | The same offer resumes the same record; a changed commitment is `quote-refused`. |
+| `swaps.claimViaRelay` | A `claim-unknown` answer means the claim MAY have been sent. Read the escrow before calling again; do not resend the half on a guess. |
 | `actions.markReady` / `claim` / `refund` | Do not send a second transaction while the first outcome is unknown. Keep the transaction hash and re-read the receipt; a repeated call is not a substitute for an unknown receipt. |
 | `swaps.watch` | The wait may be repeated; it reads the same Monero address and does not create an order. |
 | `recovery.open` | Pure local parsing; safe to repeat. |
@@ -115,8 +133,8 @@ bytes on an idempotent retry where the SDK provides one, and never turn a timeou
 
 Every refusal carries a stable code and parameters; the host maps codes to its own copy. Never display a raw
 exception or a code as a user-facing sentence. Important groups include quote refusals, `wrong-chain`,
-`wrong-account`, `storage-unavailable`, `xmr-timeout`, `xmr-locked`, `contract-reverted`, `wallet-rejected` and
-`not-implemented`.
+`wrong-account`, `storage-unavailable`, `claim-unknown`, `xmr-timeout`, `xmr-locked`, `contract-reverted`,
+`wallet-rejected` and `not-implemented`.
 
 See `src/codes.mjs` and `index.d.ts` for the current unions. Code values are part of the integration contract; a
 new code is a compatibility event and should be called out in the release notes.

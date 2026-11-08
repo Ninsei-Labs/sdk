@@ -97,6 +97,11 @@ export const ERROR_CODES = [
   // through - server-unavailable, while the service answered and did not accept - server-refused (with the
   // status and its own reason). The advice to the interface differs: "retry" versus "investigate".
   "server-refused",
+  // THE CLAIM WAS POSTED BUT NO REAL ANSWER CAME BACK. A timeout, a reset or a body without a usable transaction
+  // hash leaves the outcome UNKNOWN: the relay may have sent the claim, and the half is already out of the client.
+  // It is NOT `server-unavailable` (which would invite a blind retry) and NOT a success: the caller must read the
+  // escrow before doing anything else. `params.why` names the lost part (`answer-lost`, `answer-txid`, ...).
+  "claim-unknown",
   // THE TRANSACTION WAS SENT BUT THE RECEIPT DOES NOT PROVE AN ESCROW: no receipt yet, no expected OrderCreated,
   // or a receipt from another factory. The tx hash is the handle for a retry read; nothing was saved as funded.
   "funding-pending",
@@ -182,6 +187,7 @@ export const ERROR_META = Object.freeze({
   "storage-unavailable": { retryable: true, side: "service" },
   "server-unavailable": { retryable: true, side: "service" },
   "server-refused": { retryable: false, side: "service" },
+  "claim-unknown": { retryable: false, side: "chain" },
   "funding-pending": { retryable: true, side: "chain" },
   "xmr-timeout": { retryable: true, side: "chain" },
   "xmr-locked": { retryable: true, side: "chain" },

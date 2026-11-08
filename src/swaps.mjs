@@ -39,6 +39,9 @@ import * as xmrArrival from "./xmr-arrival.mjs";
 // `compliance` status is an observation on the wire, not a second source this file trusts; the detectors and the
 // neutral vocabulary live in one module, so this file names the state instead of re-reading either.
 import { declineOf, logReaderOf, blockBoundaryOf, DECLINED_TOPIC0, DECLINED_TERMINAL, DECLINED_CODE } from "./decline.mjs";
+// THE NO-WALLET CLAIM: the seller's half goes to the relay that answered the quote, which sends `claim` for the
+// signed tip. This module speaks that one wire; swaps.mjs decides which record may be claimed.
+import { relayOriginOf, addressTextOf, halfTextOf, postRelayClaim } from "./relayClaim.mjs";
 
 // THE ENGINE'S SETTLEMENT KINDS -> THE CONTRACT'S CODES: THE KEY IS THE KIND THE ENGINE REALLY WRITES.
 //
@@ -1276,6 +1279,10 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       if (!order || !quote) throw new SdkError("bad-input", { field: "offer", missing: ["order", "quote"] });
       if (typeof offer.jointAddress !== "string" || !offer.jointAddress) throw new SdkError("bad-input", { field: "offer.jointAddress" });
       if (typeof offer.escrow !== "string" || !offer.escrow) throw new SdkError("bad-input", { field: "offer.escrow" });
+      // THE RELAY ORIGIN IS PART OF THE OFFER. It is stored with the record so a later claim goes back to the relay
+      // that answered this quote; an origin that is present but not https is refused here, not at claim time.
+      const offerRelay = offer.relayUrl === undefined || offer.relayUrl === null || offer.relayUrl === ""
+        ? null : relayOriginOf(offer.relayUrl);
       // THE RECORD'S ROLE IS THE BID ROLE. The node is the locker and the person is the claimer; a quote whose
       // addresses or factory disagree with the order is not the offer this record describes.
       const sameValue = (a, b) => String(a || "").replace(/^0x/, "").toLowerCase() === String(b || "").replace(/^0x/, "").toLowerCase();
@@ -1300,7 +1307,19 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
           || !same(existing.escrow && existing.escrow.moneroAddress, offer.jointAddress)) {
           throw new SdkError("quote-refused", { step: "sell-record", why: "offer-changed" });
         }
+        // THE RELAY IS PART OF THE VERIFIED OFFER. A claim later goes to the origin that answered this quote, so
+        // a resumed offer naming another origin is a different offer; one that now names the same origin fills a
+        // record made before the origin was kept.
+        const storedRelay = existing.relayUrl ? relayOriginOf(existing.relayUrl) : null;
+        if (offerRelay && storedRelay && offerRelay !== storedRelay) {
+          throw new SdkError("quote-refused", { step: "sell-record", why: "relay-changed" });
+        }
         await sellEscrowGate((existing.escrow && existing.escrow.address) || offer.escrow, existing.expect || null, request.wallet);
+        if (offerRelay && !storedRelay) {
+          existing.relayUrl = offerRelay;
+          try { engine.swap.saveSwap(existing, store); }
+          catch { throw new SdkError("storage-unavailable", { step: "save-relay" }); }
+        }
         return { id: existing.id, side: "sell", escrow: (existing.escrow && existing.escrow.address) || offer.escrow,
           address: (existing.escrow && existing.escrow.moneroAddress) || offer.jointAddress,
           xmrAmount: (existing.escrow && existing.escrow.xmrAmount) || quote.xmrAmount,
@@ -1392,6 +1411,8 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         commitHalfLocker: (offer.nodeHalf && offer.nodeHalf.commitHalf) || null,
         orderContext: offer.context || null, xmrAmount: quote.xmrAmount || null,
       };
+      // KEPT WITH THE RECORD, NOT REBUILT LATER: the claim must return to the relay that signed this offer.
+      if (offerRelay) swap.relayUrl = offerRelay;
       // THE RECORD IS NOT A RECEIPT FOR A GATE THAT FAILED. createRecord has already written it, so a refusal
       // from the escrow/deadline/slot gate must remove it again; otherwise the interface lists send-xmr for an
       // order the SDK never checked.
@@ -1425,6 +1446,78 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       if (!expect) throw new SdkError("bad-input", { field: "expect", why: "not-in-record" });
       return actions.claim({ escrow, halfClaimer, claimer: swap.order && swap.order.claimer,
         expect, onStep: request.onStep }, wallet);
+    },
+
+    /**
+     * CLAIM THE ETH ON A SELL WITHOUT A WALLET.
+     *
+     * The seller holds XMR and no ETH, so the escrow pays the signed `claimTip` to whoever submits the claim.
+     * This method sends the half to the relay that answered the quote - the origin stored by `startSell` - and the
+     * relay posts it to `POST /v1/claims/{provider}/{escrow}`. It NEVER creates or uses a wallet and never signs a
+     * chain transaction; `sellClaim` remains the own-wallet path.
+     *
+     * A record must come from `startSell`, carry a POSITIVE `claimTip`, and name the provider, escrow and half.
+     * `relayUrl` is only a restatement of the stored origin: a different one is refused rather than obeyed. A
+     * vanished answer is `claim-unknown` (the claim may have been sent), never success; only a real txid returns.
+     */
+    async claimViaRelay(request = {}) {
+      if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
+      const id = String(request.id === undefined || request.id === null ? "" : request.id).trim();
+      if (!id) throw new SdkError("bad-input", { field: "id" });
+      let swap = null;
+      try { swap = engine.swap.getSwap(id, store); } catch { swap = null; }
+      if (!swap || swap.side !== "sell") throw new SdkError("bad-input", { field: "id", why: "sell-not-found" });
+
+      // THE TIP PAYS THE SENDER. A zero tip is not a claim the relay can make: the node would pay the gas for
+      // nothing, and the request would be refused after the half had already left the client. Refuse here.
+      let tip = 0n;
+      try { tip = BigInt(swap.claimTip === undefined || swap.claimTip === null || swap.claimTip === "" ? 0 : swap.claimTip); }
+      catch { throw new SdkError("bad-input", { field: "claimTip", why: "unreadable" }); }
+      if (tip <= 0n) throw new SdkError("bad-input", { field: "claimTip", why: "not-positive" });
+
+      // THE RECORD NAMES THE OTHER SIDE. The quote's provider is also the locker: a record whose fields disagree
+      // is not the order this half belongs to, and no relay may be told to claim it.
+      const quote = swap.quote && typeof swap.quote === "object" ? swap.quote : {};
+      const order = swap.order && typeof swap.order === "object" ? swap.order : {};
+      const escrowRecord = swap.escrow && typeof swap.escrow === "object" ? swap.escrow : {};
+      const providerRaw = quote.provider !== undefined && quote.provider !== null ? quote.provider
+        : (escrowRecord.providerId !== undefined && escrowRecord.providerId !== null ? escrowRecord.providerId : order.locker);
+      if (providerRaw === undefined || providerRaw === null || providerRaw === "") {
+        throw new SdkError("bad-input", { field: "provider", why: "not-in-record" });
+      }
+      const provider = addressTextOf(providerRaw, "provider");
+      for (const [field, value] of [["order.locker", order.locker], ["quote.locker", quote.locker]]) {
+        if (value !== undefined && value !== null && String(value) !== "") {
+          if (addressTextOf(value, field) !== provider) {
+            throw new SdkError("quote-refused", { step: "relay-claim", why: "provider" });
+          }
+        }
+      }
+      if (escrowRecord.address === undefined || escrowRecord.address === null || escrowRecord.address === "") {
+        throw new SdkError("bad-input", { field: "escrow", why: "not-in-record" });
+      }
+      const escrow = addressTextOf(escrowRecord.address, "escrow");
+      const halfClaimer = halfTextOf(escrowRecord.half);
+
+      // THE ORIGIN IS THE QUOTE'S, NOT THE CALLER'S. The record stores the relay that answered; a request may
+      // repeat it (with a trailing slash), but may not choose another one after the quote.
+      if (swap.relayUrl === undefined || swap.relayUrl === null || swap.relayUrl === "") {
+        throw new SdkError("bad-input", { field: "relayUrl", why: "not-in-record" });
+      }
+      const relayUrl = relayOriginOf(swap.relayUrl);
+      if (request.relayUrl !== undefined && request.relayUrl !== null && String(request.relayUrl).trim() !== "") {
+        if (relayOriginOf(request.relayUrl) !== relayUrl) {
+          throw new SdkError("bad-input", { field: "relayUrl", why: "foreign-relay" });
+        }
+      }
+
+      const timeoutMs = Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0
+        ? Number(request.timeoutMs) : 20_000;
+      const claimed = await postRelayClaim({
+        relayUrl, provider, escrow, halfClaimer, expectedTipWei: tip,
+        fetchImpl: request.fetchImpl || null, timeoutMs,
+      });
+      return { id, provider, escrow, relayUrl, txid: claimed.txid, from: claimed.from, tipWei: claimed.tipWei };
     },
 
     /**
