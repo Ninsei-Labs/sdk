@@ -37,7 +37,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## @hpke/common 1.10.1
+## @hpke/common 1.10.1, 1.11.0
 
 License: MIT
 Source: git+https://github.com/dajiaji/hpke-js.git
@@ -68,7 +68,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## @hpke/core 1.9.0
+## @hpke/core 1.10.0
 
 License: MIT
 Source: git+https://github.com/dajiaji/hpke-js.git
