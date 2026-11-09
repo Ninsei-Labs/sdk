@@ -1844,6 +1844,10 @@ export declare class SdkError extends Error {
 
 /** The step codes the SDK works with (`state.step`): the same list as the `StepCode` type. */
 export declare const SDK_VERSION: string;
+/** The minimum remaining lifetime of a quote when a swap starts, in seconds. */
+export declare const LOCK_START_MARGIN_SEC: number;
+/** The default firm quote lifetime, in seconds. A node may override it; the SDK default stays authoritative. */
+export declare const DEFAULT_ORDER_QUOTE_TTL_SEC: number;
 export declare const STEP_CODES: readonly StepCode[];
 /** The check codes a preflight verdict names (`checks[].code`): the same list as the `CheckCode` type. */
 export declare const CHECK_CODES: readonly CheckCode[];

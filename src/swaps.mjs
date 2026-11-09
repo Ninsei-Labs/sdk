@@ -5,6 +5,7 @@
 // order and halves -> server -> watching the Monero address. A lock without a recovery file is a lock with nothing
 // to open it with if the browser is lost, so the confirmation stands BEFORE anything that locks funds.
 import { SdkError } from "./errors.mjs";
+import { LOCK_START_MARGIN_SEC } from "./quotePolicy.mjs";
 import { SDK_VERSION } from "./version.mjs";
 import * as engine from "./engine.mjs";
 // The name is NOT `record`: inside start there is a variable with that name, and referencing the module before it
@@ -1059,8 +1060,8 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         // THE CLOCK IS THE SDK'S OWN SEAM, IN MILLISECONDS, LIKE EVERY OTHER NOW IN THE FACADE.
         const nowMs = typeof now === "function" ? Number(now()) : Date.now();
         const nowSec = Math.floor(nowMs / 1000);
-        if (!Number.isSafeInteger(until) || !Number.isSafeInteger(nowSec) || until <= nowSec + 30) {
-          throw new SdkError("quote-expired", { validUntil: Number.isFinite(until) ? until : null, now: Number.isFinite(nowSec) ? nowSec : null, marginSec: 30, step: "lock" });
+        if (!Number.isSafeInteger(until) || !Number.isSafeInteger(nowSec) || until <= nowSec + LOCK_START_MARGIN_SEC) {
+          throw new SdkError("quote-expired", { validUntil: Number.isFinite(until) ? until : null, now: Number.isFinite(nowSec) ? nowSec : null, marginSec: LOCK_START_MARGIN_SEC, step: "lock" });
         }
       }
       lockRequest.quote = request.orderQuote || null;
