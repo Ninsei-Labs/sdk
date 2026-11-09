@@ -66,9 +66,9 @@ encryption envelope in the host, and do not pass a bid answer to `swaps.start` (
 
 ## 5. Sell flow
 
-`swaps.startSell` records the one-time address, the escrow, our half, the expectations and the relay origin that
-answered the quote. It sends no transaction. The same offer retried returns the same record with `resumed: true`; a
-changed commitment or a different relay origin is refused rather than silently resumed.
+`swaps.startSell` records the one-time address, the escrow, our half, the chosen `claimSender`, the expectations and
+the relay origin that answered the quote. It sends no transaction. The same offer retried returns the same record
+with `resumed: true`; a changed commitment, claim sender or relay origin is refused rather than silently resumed.
 
 There are two claim paths, and the host picks by what the seller holds:
 
@@ -76,15 +76,18 @@ There are two claim paths, and the host picks by what the seller holds:
   enough native coin for gas. This path is unchanged, and `actions.claim` still refuses a sender that is not the
   claimer.
 - `swaps.claimViaRelay({ id })` - the no-wallet path. The seller has XMR and no ETH; the escrow pays the signed
-  `claimTip` to the sender, so the relay that answered the quote submits the half. No wallet is created or used and
-  the client signs no chain transaction.
+  `claimTip` to the sender, so the relay that answered the quote submits the half. The sender is a listed maker
+  OTHER than the deal's maker, chosen by the client and stored by `startSell` as `claimSender`; no wallet is created
+  or used and the client signs no chain transaction.
 
-`claimViaRelay` requires a sell record with a positive `claimTip` and the stored provider, escrow and half. It does
-not take a relay or a sender from the caller after the quote: an optional `relayUrl` may repeat the stored origin,
-and any other origin is refused with `bad-input`. The node's refusal keeps its own code under
-`quote-refused.params.code`. A timeout, a reset or a body without a real transaction hash is `claim-unknown`: the
-claim may already be sent, so read the escrow before acting again, and never treat the lost answer as a success.
-Only a validated txid is returned. The half is never logged or written by this path.
+`claimViaRelay` requires a sell record with a positive `claimTip` and the stored sender, escrow and half. A record
+made before the sender was stored may pass `claimSender` once; it is stored on the record then. A sender naming the
+deal's maker or its quote key owner is refused before the half leaves the client. It does not take a relay from the
+caller after the quote: an optional `relayUrl` may repeat the stored origin, and any other origin is refused with
+`bad-input`. The node's refusal keeps its own code under `quote-refused.params.code`. A timeout, a reset or a body
+without a real transaction hash is `claim-unknown`: the claim may already be sent, so read the escrow before acting
+again, and never treat the lost answer as a success. Only a validated txid is returned. The half is never logged or
+written by this path.
 
 The sell record also keeps the node's signed `readyWindow`. `sellWatch`, the late-arrival boundary and
 `refundIfXmrMissing` use its `readyMinSeconds`/`readyMaxSeconds`; a record without the window is refused with

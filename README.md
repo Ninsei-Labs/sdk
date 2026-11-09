@@ -35,7 +35,7 @@ The supported versions, scope, response targets, safe-harbor rules and disclosur
 | `swaps.list` / `swaps.get` | read state from storage (and after a page reload) |
 | `swaps.start` | holds the order: guards → recovery file and the person's confirmation → order → locking funds → **watching the Monero address**; no backend is required; returns the named state `step: "xmr-incoming"` |
 | `swaps.watch` | waits for XMR at the joint address with the CLIENT's own check: `verify` carries the joint address, view secret, spend public key and witness nodes. Arrived — returns the fact (amount, confirmations, txid); did not wait — a refusal with `xmr-timeout`; funds barred by `unlock_time` — `xmr-locked`; the maker DECLINED — `SwapDeclinedWatch` (`declined: true`, `terminal: "declined"`), every action off; with expectations and a wallet, places the ready mark after the arrival |
-| `swaps.startSell` / `swaps.sellClaim` / `swaps.claimViaRelay` | a sell is recorded from the verified relay offer; `sellClaim` claims from the claimer's own wallet, `claimViaRelay` claims with no wallet through the relay that answered, paid by the signed `claimTip` |
+| `swaps.startSell` / `swaps.sellClaim` / `swaps.claimViaRelay` | a sell is recorded from the verified relay offer; `sellClaim` claims from the claimer's own wallet, `claimViaRelay` claims with no wallet through the sender the client chose, paid by the signed `claimTip` |
 | `wallet.balances` | works: the native coin and tokens, in minimal units |
 
 What is not ready names itself with the code `not-implemented` with the fields `surface` and `stage`: an empty
@@ -202,15 +202,21 @@ relay submits the half and is paid from the claim itself. No wallet is created o
 signed by the client:
 
 ```js
-const claimed = await sdk.swaps.claimViaRelay({ id });
+const sell = await sdk.swaps.startSell({ offer, claimSender }); // another listed maker
+const claimed = await sdk.swaps.claimViaRelay({ id: sell.id });
 claimed.txid;    // the claim transaction
-claimed.from;    // the maker node's claim sender
+claimed.from;    // the sender node's claim sender
 claimed.tipWei;  // the signed tip paid out of the claim
 ```
 
-`claimViaRelay` reads the sell record made by `startSell` and requires a positive `claimTip`, the provider, the
+`claimSender` is chosen by the client from the relay's price answer: a listed maker OTHER than the deal's maker and
+other than its quote key owner. `startSell` stores it with the record, so a reload claims through the same node; a
+record made before the sender was stored may pass `claimSender` to `claimViaRelay` once; it is stored on the record
+then. A sender naming the deal's maker or its quote key is refused before the half leaves the client.
+
+`claimViaRelay` reads the sell record made by `startSell` and requires a positive `claimTip`, the sender, the
 escrow and the half. It posts to the relay origin stored with the record; an optional `relayUrl` may repeat that
-origin but a different one is refused. A node refusal is `quote-refused` with the provider's own code in
+origin but a different one is refused. A node refusal is `quote-refused` with the sender's own code in
 `params.code`. A timeout or a body without a real transaction hash is `claim-unknown`: the claim may have been
 sent, so read the escrow before trying anything else. Only a validated txid is returned as a claim.
 

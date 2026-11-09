@@ -1333,8 +1333,8 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
 
     /**
      * START A SELL FROM A VERIFIED RELAY OFFER. The offer is the result of `quotes.firmRelay` for the bid side;
-     * the record keeps the one-time address, the escrow, our half and the order expectations, so a reload can
-     * continue with `get` + `sellWatch` + `sellClaim`. This method sends nothing.
+     * the record keeps the one-time address, the escrow, our half, the chosen claim sender and the order
+     * expectations, so a reload can continue with `get` + `sellWatch` + `sellClaim`. This method sends nothing.
      */
     async startSell(request) {
       if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
@@ -1363,6 +1363,20 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         || !sameValue(quote.factory, order.factory) || Number(quote.chainId) !== Number(order.chainId)) {
         throw new SdkError("quote-refused", { step: "sell-record", why: "terms" });
       }
+      // THE SENDER IS CHOSEN BY THE CLIENT, NOT THE DEAL'S MAKER. The record keeps it so a reload claims through
+      // the same node; a sender naming the maker or the quote key owner would reveal the half to the party that
+      // must never receive it.
+      const dealMaker = addressTextOf(quote.provider, "provider");
+      const quoteKeyOwner = quote.quoteKey === undefined || quote.quoteKey === null
+        || String(quote.quoteKey).trim() === "" ? null : addressTextOf(quote.quoteKey, "quoteKey");
+      const requestedSender = request.claimSender === undefined || request.claimSender === null
+        || String(request.claimSender).trim() === "" ? null : addressTextOf(request.claimSender, "claimSender");
+      if (requestedSender && requestedSender === dealMaker) {
+        throw new SdkError("bad-input", { field: "claimSender", why: "is-deal-maker" });
+      }
+      if (requestedSender && quoteKeyOwner && requestedSender === quoteKeyOwner) {
+        throw new SdkError("bad-input", { field: "claimSender", why: "is-quote-key" });
+      }
       // THE RECORD IS FOUND BEFORE A SECOND ONE IS MADE. The same offer retried after a reload yields the same
       // one-time address and escrow; a second record would be a second promise about one deal.
       const quoteId = quote.id || quote.nonce || null;
@@ -1379,6 +1393,10 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
           || !same(existing.escrow && existing.escrow.moneroAddress, offer.jointAddress)) {
           throw new SdkError("quote-refused", { step: "sell-record", why: "offer-changed" });
         }
+        const storedSender = existing.claimSender ? addressTextOf(existing.claimSender, "claimSender") : null;
+        if (requestedSender && storedSender && requestedSender !== storedSender) {
+          throw new SdkError("quote-refused", { step: "sell-record", why: "claim-sender-changed" });
+        }
         // THE RELAY IS PART OF THE VERIFIED OFFER. A claim later goes to the origin that answered this quote, so
         // a resumed offer naming another origin is a different offer; one that now names the same origin fills a
         // record made before the origin was kept.
@@ -1391,6 +1409,11 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
           existing.relayUrl = offerRelay;
           try { engine.swap.saveSwap(existing, store); }
           catch { throw new SdkError("storage-unavailable", { step: "save-relay" }); }
+        }
+        if (requestedSender && !storedSender) {
+          existing.claimSender = requestedSender;
+          try { engine.swap.saveSwap(existing, store); }
+          catch { throw new SdkError("storage-unavailable", { step: "save-claim-sender" }); }
         }
         const storedWindow = existing.readyWindow || existing.sellWindow || null;
         if (offerWindow && storedWindow) {
@@ -1408,6 +1431,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
           address: (existing.escrow && existing.escrow.moneroAddress) || offer.jointAddress,
           xmrAmount: (existing.escrow && existing.escrow.xmrAmount) || quote.xmrAmount,
           claimTip: existing.claimTip || quote.claimTip, orderQuote: existing.orderQuote || offer.orderQuote,
+          claimSender: existing.claimSender || null,
           readyWindow: existing.readyWindow || existing.sellWindow || null,
           resumed: true, next: "send-xmr" };
       }
@@ -1477,6 +1501,9 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       swap.orderQuote = offer.orderQuote || null;
       swap.quote = quote;
       swap.claimTip = quote.claimTip || null;
+      // THE CLAIM SENDER IS PART OF THE OFFER, NOT A LATER CHOICE. Keeping it means a reload cannot silently
+      // send the half to a different node than the one the client selected.
+      if (requestedSender) swap.claimSender = requestedSender;
       swap.expect = {
         chainId, factory: order.factory, locker: order.locker, claimer: order.claimer, amount: String(order.amount),
         readyBy: order.readyBy, t1: order.t1, salt: order.salt,
@@ -1512,6 +1539,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       try { engine.swap.saveSwap(swap, store); } catch { throw new SdkError("storage-unavailable", { step: "save-swap" }); }
       return { id: swap.id, side: "sell", escrow: offer.escrow, address: offer.jointAddress,
         xmrAmount: quote.xmrAmount, claimTip: quote.claimTip || null, orderQuote: offer.orderQuote || null,
+        claimSender: swap.claimSender || null,
         readyWindow: swap.readyWindow || null, resumed: false, next: "send-xmr" };
     },
 
@@ -1539,13 +1567,15 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
      * CLAIM THE ETH ON A SELL WITHOUT A WALLET.
      *
      * The seller holds XMR and no ETH, so the escrow pays the signed `claimTip` to whoever submits the claim.
-     * This method sends the half to the relay that answered the quote - the origin stored by `startSell` - and the
-     * relay posts it to `POST /v1/claims/{provider}/{escrow}`. It NEVER creates or uses a wallet and never signs a
+     * This method sends the half to the sender the client chose - a listed maker other than the deal's maker - and
+     * the relay posts it to `POST /v1/claims/{sender}/{escrow}`. It NEVER creates or uses a wallet and never signs a
      * chain transaction; `sellClaim` remains the own-wallet path.
      *
-     * A record must come from `startSell`, carry a POSITIVE `claimTip`, and name the provider, escrow and half.
-     * `relayUrl` is only a restatement of the stored origin: a different one is refused rather than obeyed. A
-     * vanished answer is `claim-unknown` (the claim may have been sent), never success; only a real txid returns.
+     * A record must come from `startSell`, carry a POSITIVE `claimTip`, and name the sender, escrow and half. The
+     * sender is stored by `startSell`; a request may supply `claimSender` only when the record has none, and may
+     * never name the deal's maker. `relayUrl` is only a restatement of the stored origin: a different one is refused
+     * rather than obeyed. A vanished answer is `claim-unknown` (the claim may have been sent), never success; only a
+     * real txid returns.
      */
     async claimViaRelay(request = {}) {
       if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
@@ -1562,23 +1592,47 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       catch { throw new SdkError("bad-input", { field: "claimTip", why: "unreadable" }); }
       if (tip <= 0n) throw new SdkError("bad-input", { field: "claimTip", why: "not-positive" });
 
-      // THE RECORD NAMES THE OTHER SIDE. The quote's provider is also the locker: a record whose fields disagree
-      // is not the order this half belongs to, and no relay may be told to claim it.
+      // THE DEAL'S MAKER IS THE ONE PARTY THAT MUST NOT RECEIVE THE HALF. It is the quote's provider and, on a
+      // sell, the order's locker. The sender is a different node, chosen by the client; a record with no sender
+      // cannot be claimed through a guess.
       const quote = swap.quote && typeof swap.quote === "object" ? swap.quote : {};
       const order = swap.order && typeof swap.order === "object" ? swap.order : {};
       const escrowRecord = swap.escrow && typeof swap.escrow === "object" ? swap.escrow : {};
-      const providerRaw = quote.provider !== undefined && quote.provider !== null ? quote.provider
+      const makerRaw = quote.provider !== undefined && quote.provider !== null ? quote.provider
         : (escrowRecord.providerId !== undefined && escrowRecord.providerId !== null ? escrowRecord.providerId : order.locker);
-      if (providerRaw === undefined || providerRaw === null || providerRaw === "") {
+      if (makerRaw === undefined || makerRaw === null || makerRaw === "") {
         throw new SdkError("bad-input", { field: "provider", why: "not-in-record" });
       }
-      const provider = addressTextOf(providerRaw, "provider");
+      const maker = addressTextOf(makerRaw, "provider");
       for (const [field, value] of [["order.locker", order.locker], ["quote.locker", quote.locker]]) {
         if (value !== undefined && value !== null && String(value) !== "") {
-          if (addressTextOf(value, field) !== provider) {
+          if (addressTextOf(value, field) !== maker) {
             throw new SdkError("quote-refused", { step: "relay-claim", why: "provider" });
           }
         }
+      }
+      const storedSenderRaw = swap.claimSender === undefined || swap.claimSender === null
+        || String(swap.claimSender).trim() === "" ? null : swap.claimSender;
+      const requestedSenderRaw = request.claimSender === undefined || request.claimSender === null
+        || String(request.claimSender).trim() === "" ? null : request.claimSender;
+      const storedSender = storedSenderRaw ? addressTextOf(storedSenderRaw, "claimSender") : null;
+      const requestedSender = requestedSenderRaw ? addressTextOf(requestedSenderRaw, "claimSender") : null;
+      if (storedSender && requestedSender && storedSender !== requestedSender) {
+        throw new SdkError("bad-input", { field: "claimSender", why: "different-from-record" });
+      }
+      const sender = storedSender || requestedSender;
+      if (!sender) throw new SdkError("bad-input", { field: "claimSender", why: "not-in-record" });
+      if (sender === maker) throw new SdkError("bad-input", { field: "claimSender", why: "is-deal-maker" });
+      const quoteKeyOwner = quote.quoteKey === undefined || quote.quoteKey === null
+        || String(quote.quoteKey).trim() === "" ? null : addressTextOf(quote.quoteKey, "quoteKey");
+      if (quoteKeyOwner && sender === quoteKeyOwner) {
+        throw new SdkError("bad-input", { field: "claimSender", why: "is-quote-key" });
+      }
+      // AN OLDER RECORD KEEPS THE SENDER ONCE IT IS USED. A reload must not be forced to remember a second input.
+      if (!storedSender && requestedSender) {
+        swap.claimSender = requestedSender;
+        try { engine.swap.saveSwap(swap, store); }
+        catch { throw new SdkError("storage-unavailable", { step: "save-claim-sender" }); }
       }
       if (escrowRecord.address === undefined || escrowRecord.address === null || escrowRecord.address === "") {
         throw new SdkError("bad-input", { field: "escrow", why: "not-in-record" });
@@ -1601,10 +1655,10 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       const timeoutMs = Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0
         ? Number(request.timeoutMs) : 20_000;
       const claimed = await postRelayClaim({
-        relayUrl, provider, escrow, halfClaimer, expectedTipWei: tip,
+        relayUrl, provider: sender, escrow, halfClaimer, expectedTipWei: tip,
         fetchImpl: request.fetchImpl || null, timeoutMs,
       });
-      return { id, provider, escrow, relayUrl, txid: claimed.txid, from: claimed.from, tipWei: claimed.tipWei };
+      return { id, provider: sender, claimSender: sender, escrow, relayUrl, txid: claimed.txid, from: claimed.from, tipWei: claimed.tipWei };
     },
 
     /**
