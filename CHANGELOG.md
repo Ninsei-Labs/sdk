@@ -1,5 +1,6 @@
 ## Unreleased
 
+- The quote defaults are public: `DEFAULT_ORDER_QUOTE_TTL_SEC` (60 s) is the firm quote lifetime a node signs when it has no override, and `LOCK_START_MARGIN_SEC` (30 s) is the margin `swaps.start` requires before opening a wallet. A node imports the lifetime instead of keeping its own copy.
 - The node's signed ready window now drives a sale: `quotes.firmRelay` returns `readyWindow`, `startSell` stores it, and `sellWatch`, the late-arrival boundary and `refundIfXmrMissing` use `readyMinSeconds`/`readyMaxSeconds` instead of the retired local 1200 s and 20-minute constants. A record without the window is refused by name.
 - `swaps.claimViaRelay` claims a sell through the relay that answered the quote without creating or using a wallet: the signed `claimTip` pays the sender, the sell record keeps the relay origin, and only a validated txid is a success. A lost answer is `claim-unknown`; `sellClaim` remains the own-wallet path.
 - The retired direct-node paths are gone: `quotes.watch`, `quotes.snapshot`, `quotes.firm`, `quotes.sale`, `swaps.sync`, `DEFAULT_ROUTES`, `config.route`/`routes`, `apiBase` and `serverAuth`. `quotes.firmRelay` is the only quote path; `swaps.start` ends at the joint address, and `swaps.watch` requires the client-side `verify` inputs. The page bridge lost the matching quote-book, direct-quote and server-sync helpers.
