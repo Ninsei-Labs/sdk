@@ -57,6 +57,9 @@ const failureOf = (error, node) => {
 // A NODE LIST IS A LIST OF {url, operator}. The operator is what makes two nodes two witnesses: two nodes of one
 // operator are one opinion. A plain string is accepted and its operator is the host - a user who adds their own
 // node is the operator of it.
+//
+// `protocol` is an OPTIONAL capability, not a role. It is kept here so a slice-only witness can be named on the
+// same list without inferring an endpoint from a standard daemon URL.
 export function normalizeNodes(nodes) {
   if (!Array.isArray(nodes)) throw new SdkError("bad-input", { field: "nodes" });
   const out = [];
@@ -66,7 +69,12 @@ export function normalizeNodes(nodes) {
       out.push({ url, operator: hostOf(url) });
     } else if (raw && typeof raw === "object" && isStr(raw.url)) {
       const url = raw.url.replace(/\/+$/, "");
-      out.push({ url, operator: isStr(raw.operator) ? raw.operator : hostOf(url) });
+      const node = { url, operator: isStr(raw.operator) ? raw.operator : hostOf(url) };
+      if (raw.protocol !== undefined && raw.protocol !== null) {
+        if (!isStr(raw.protocol)) throw new SdkError("bad-input", { field: "nodes.protocol" });
+        node.protocol = raw.protocol;
+      }
+      out.push(node);
     } else {
       throw new SdkError("bad-input", { field: "nodes", why: "each-node-is-url-or-url+operator" });
     }
@@ -420,6 +428,228 @@ export async function verifyArrival(request) {
   return { seen: true, state: "arrived", txid: located.txid, height: located.height, blockHash: best.observation.blockHash,
     amountAtomic: amountAtomic.toString(), confirmations, needConfirmations: minConfirmations,
     operators: [...best.operators], agreedBy, checked: seen, failed };
+}
+
+// ---------------------------------------------------------------------------
+// WITNESS-V1: FIXED BLOCK SLICES FOR THE SHADOW CHECK
+// ---------------------------------------------------------------------------
+//
+// This is the client side of the read-only slice endpoint. It is deliberately a SEPARATE call from
+// `verifyArrival`: the production decision still uses the exact walk until an independent operator serves
+// witness-v1. `verifyArrivalShadow` runs both and compares them without changing ready, refund or any swap state.
+
+export const WITNESS_SLICE_BLOCKS = 20;
+
+export function witnessSliceIndex(height) {
+  const value = Number(height);
+  if (!Number.isSafeInteger(value) || value < 0) throw new SdkError("bad-input", { field: "height" });
+  return Math.floor(value / WITNESS_SLICE_BLOCKS);
+}
+
+export function witnessSliceStart(index) {
+  const value = Number(index);
+  if (!Number.isSafeInteger(value) || value < 0) throw new SdkError("bad-input", { field: "slice" });
+  return value * WITNESS_SLICE_BLOCKS;
+}
+
+export function witnessSliceEnd(index) {
+  return witnessSliceStart(index) + WITNESS_SLICE_BLOCKS - 1;
+}
+
+const witnessHash = (value) => {
+  const text = String(value || "").replace(/^0x/, "").toLowerCase();
+  return /^[0-9a-f]{64}$/.test(text) ? text : null;
+};
+
+function assertWitnessSliceBody(body, { network, index }) {
+  if (!body || typeof body !== "object") throw new SdkError("xmr-no-nodes", { why: "bad-witness-slice" });
+  if (Number(body.version) !== 1) throw new SdkError("xmr-no-nodes", { why: "bad-witness-version" });
+  if (String(body.network) !== String(network)) throw new SdkError("xmr-no-nodes", { why: "witness-network" });
+  if (Number(body.grid) !== WITNESS_SLICE_BLOCKS) throw new SdkError("xmr-no-nodes", { why: "witness-grid" });
+  if (Number(body.slice) !== index) throw new SdkError("xmr-no-nodes", { why: "witness-slice" });
+  if (Number(body.from) !== witnessSliceStart(index) || Number(body.to) !== witnessSliceEnd(index)) {
+    throw new SdkError("xmr-no-nodes", { why: "witness-bounds" });
+  }
+  if (!Array.isArray(body.blocks) || body.blocks.length !== WITNESS_SLICE_BLOCKS) {
+    throw new SdkError("xmr-no-nodes", { why: "witness-block-count" });
+  }
+  const blocks = body.blocks.map((block, i) => {
+    if (!block || Number(block.height) !== witnessSliceStart(index) + i) {
+      throw new SdkError("xmr-no-nodes", { why: "witness-height" });
+    }
+    const hash = witnessHash(block.hash);
+    if (!hash) throw new SdkError("xmr-no-nodes", { why: "witness-hash" });
+    if (!Array.isArray(block.txids)) throw new SdkError("xmr-no-nodes", { why: "witness-txids" });
+    const txids = block.txids.map((txid) => {
+      const value = witnessHash(txid);
+      if (!value) throw new SdkError("xmr-no-nodes", { why: "witness-txid" });
+      return value;
+    });
+    return { height: Number(block.height), hash, txids };
+  });
+  return { version: 1, network: String(network), grid: WITNESS_SLICE_BLOCKS, slice: index,
+    from: body.from, to: body.to, blocks };
+}
+
+async function readWitnessSlice(node, index, { network, fetchImpl, timeoutMs }) {
+  if (node.protocol !== "witness-v1") throw new SdkError("xmr-no-nodes", { node: node.url, why: "no-slice-witness" });
+  const body = await call(node, "/v1/witness/slice",
+    { version: 1, network, grid: WITNESS_SLICE_BLOCKS, slice: index }, fetchImpl, timeoutMs);
+  return assertWitnessSliceBody(body, { network, index });
+}
+
+// ALL THE TRANSACTIONS OF A SLICE, IN ONE REQUEST. The request names the whole slice's txids, not the one
+// transaction an order is looking for.
+async function readSliceTransactions(node, slice, { fetchImpl, timeoutMs }) {
+  const txids = [...new Set(slice.blocks.flatMap((block) => block.txids))];
+  if (!txids.length) return new Map();
+  if (txids.length > 4096) throw new SdkError("xmr-no-nodes", { node: node.url, why: "slice-too-large", count: txids.length });
+  const txs = await getBlockTxs(node, txids, fetchImpl, timeoutMs);
+  return new Map(txs.map((tx) => [String(tx.tx_hash || "").toLowerCase(), tx]));
+}
+
+// FIND A PAYMENT THROUGH SLICES. The exact `fromHeight` is local: the witness sees only slice indexes.
+async function locateInSlices(node, { expectedAtomic, address, viewSecret, spendPub, fromHeight, toHeight, nowSec, network, fetchImpl, timeoutMs }) {
+  const first = witnessSliceIndex(fromHeight);
+  const last = witnessSliceIndex(toHeight);
+  let best = null;
+  let completed = true;
+  for (let index = first; index <= last; index++) {
+    const slice = await readWitnessSlice(node, index, { network, fetchImpl, timeoutMs });
+    const txs = await readSliceTransactions(node, slice, { fetchImpl, timeoutMs });
+    for (const block of slice.blocks) {
+      for (const txid of block.txids) {
+        const tx = txs.get(txid);
+        if (!tx) continue;
+        const hit = engine.xmrScan.matchTransaction(tx, [{ address, viewSecret, spendPub }], {
+          height: block.height, tipHeight: Math.max(0, toHeight), nowSec,
+        });
+        if (!hit.length) continue;
+        const amountAtomic = sumOutputs(hit[0]);
+        const amountVerified = hit[0].outputs.every((o) => o.amountVerified === true);
+        const locked = hit[0].unlock && hit[0].unlock.locked === true;
+        const score = (amountAtomic >= expectedAtomic ? 4 : 0) + (amountVerified ? 2 : 0) + (locked ? 0 : 1);
+        const candidate = { txid, height: block.height, blockHash: block.hash, amountAtomic, score };
+        if (!best || score > best.score || (score === best.score && amountAtomic > best.amountAtomic)) best = candidate;
+      }
+    }
+    // THE WHOLE SLICE WAS READ. A perfect candidate lets the walk stop after this slice, not after a block:
+    // the last witness request is still a fixed slice, never the payout height. `completed` means the full
+    // requested slice range was walked, so it stays false on an early stop.
+    if (best && best.score === 7) {
+      completed = index === last;
+      break;
+    }
+  }
+  return { located: best, completed };
+}
+
+/**
+ * RUN THE PRODUCTION CHECK AND THE SLICE CHECK SIDE BY SIDE.
+ *
+ * This is a shadow: it returns the exact verdict, the slice reading and the differences. It never flips
+ * `ready`, signs anything or changes a swap. It is the first step before a slice-only default.
+ *
+ * `witnessNodes` must name at least one `{url, operator, protocol: "witness-v1"}` node. A URL without the
+ * protocol is not guessed into an endpoint.
+ */
+export async function verifyArrivalShadow(request) {
+  if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
+  if (request.witnessNodes === undefined || request.witnessNodes === null) {
+    throw new SdkError("bad-input", { field: "witnessNodes", why: "required" });
+  }
+  const witnessNodes = normalizeNodes(request.witnessNodes);
+  if (!witnessNodes.some((node) => node.protocol === "witness-v1")) {
+    throw new SdkError("bad-input", { field: "witnessNodes", why: "no-witness-v1" });
+  }
+  let addressKeys;
+  try { addressKeys = engine.xmrArrivalRead.decodeAddressKeys(request.address); }
+  catch { throw new SdkError("bad-input", { field: "address", why: "not-a-monero-address" }); }
+  if (!addressKeys.network) throw new SdkError("bad-input", { field: "address", why: "subaddress-not-supported" });
+  const network = request.network || addressKeys.network;
+  const fetchImpl = typeof request.fetch === "function" ? request.fetch : globalThis.fetch;
+  if (typeof fetchImpl !== "function") throw new SdkError("bad-input", { field: "fetch" });
+  const timeoutMs = Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0 ? Number(request.timeoutMs) : 20000;
+  const nowSec = Number.isFinite(Number(request.nowSec)) ? Number(request.nowSec) : Math.floor(Date.now() / 1000);
+  const fromHeight = Number(request.fromHeight);
+  if (!Number.isSafeInteger(fromHeight) || fromHeight <= 0) throw new SdkError("bad-input", { field: "fromHeight" });
+  let expectedAtomic;
+  try { expectedAtomic = BigInt(request.expectedAtomic); } catch { throw new SdkError("bad-input", { field: "expectedAtomic" }); }
+  if (expectedAtomic <= 0n) throw new SdkError("bad-input", { field: "expectedAtomic" });
+  if (!isStr(request.spendPub)) throw new SdkError("bad-input", { field: "spendPub" });
+  if (request.viewSecret === undefined || request.viewSecret === null) throw new SdkError("bad-input", { field: "viewSecret" });
+  const spendPub = String(request.spendPub).replace(/^0x/, "").toLowerCase();
+  if (spendPub !== String(addressKeys.spendPub).toLowerCase()) {
+    throw new SdkError("xmr-address-mismatch", { field: "spendPub", address: request.address });
+  }
+  const viewForm = engine.xmrScan.viewKeyFormForAddress(request.viewSecret, addressKeys.viewPub);
+  if (!viewForm) throw new SdkError("xmr-address-mismatch", { field: "viewSecret", address: request.address });
+  const viewSecret = engine.xmrScan.viewSecretCandidates(request.viewSecret).find(([form]) => form === viewForm)?.[1] ?? request.viewSecret;
+
+  let exact = null;
+  let exactError = null;
+  try { exact = await verifyArrival(request); }
+  catch (error) { exactError = { code: error && error.code ? error.code : "unknown", params: (error && error.params) || {} }; }
+
+  const checked = [];
+  const failed = [];
+  let located = null;
+  let completed = false;
+  for (const node of witnessNodes) {
+    if (node.protocol !== "witness-v1") { failed.push({ url: node.url, operator: node.operator, code: "no-slice-witness" }); continue; }
+    let info;
+    try { info = await getInfo(node, fetchImpl, timeoutMs); }
+    catch (error) { failed.push(failureOf(error, node)); checked.push({ url: node.url, operator: node.operator, state: "down" }); continue; }
+    if (!info.synced) {
+      failed.push({ url: node.url, operator: node.operator, code: "stale", why: "not-synchronized" });
+      checked.push({ url: node.url, operator: node.operator, state: "stale", height: info.height });
+      continue;
+    }
+    const top = Math.max(0, info.height - 1);
+    checked.push({ url: node.url, operator: node.operator, state: "ok", height: info.height });
+    try {
+      const found = await locateInSlices(node, {
+        expectedAtomic, address: request.address, viewSecret, spendPub, fromHeight, toHeight: top,
+        nowSec, network, fetchImpl, timeoutMs,
+      });
+      completed = completed || found.completed;
+      if (found.located && (!located || found.located.score > located.score)) {
+        located = found.located;
+        located.operator = node.operator;
+        located.url = node.url;
+      }
+    } catch (error) {
+      failed.push(failureOf(error, node));
+    }
+  }
+
+  const witness = located
+    ? { state: "seen", txid: located.txid, height: located.height, blockHash: located.blockHash,
+        amountAtomic: located.amountAtomic.toString(), operator: located.operator, url: located.url, completed, checked, failed }
+    : { state: "pending", txid: null, height: null, blockHash: null, amountAtomic: null, completed, checked, failed };
+
+  const problems = [];
+  let agrees = null;
+  if (exactError) problems.push("exact:" + exactError.code);
+  if (located && exact && exact.txid) {
+    if (String(exact.txid).toLowerCase() !== located.txid) problems.push("txid");
+    if (Number(exact.height) !== located.height) problems.push("height");
+    if (String(exact.blockHash || "").toLowerCase() !== located.blockHash) problems.push("blockHash");
+    if (String(exact.amountAtomic ?? "") !== located.amountAtomic.toString()) problems.push("amount");
+    agrees = problems.length === 0;
+  } else if (located) {
+    problems.push("exact:no-transaction");
+    agrees = false;
+  } else if (exact && exact.absent === true) {
+    // ABSENCE NEEDS THE WHOLE SLICE WALK, NOT A SILENT WITNESS. A server that is down, stale or answered a
+    // partial slice has not shown that the money is absent; its missing answer must not become agreement.
+    if (witness.completed && witness.failed.length === 0) agrees = true;
+    else {
+      agrees = false;
+      problems.push("witness:not-completed");
+    }
+  }
+  return { exact, exactError, witness, agrees, problems };
 }
 
 /**

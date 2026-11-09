@@ -2572,6 +2572,7 @@ const readyWindows = () => runScriptCheck("check-ready-windows.mjs", "ready wind
 const sellWatchCheck = () => runScriptCheck("check-sell-watch.mjs", "sell watch");
 const sellStartCheck = () => runScriptCheck("check-sell-start.mjs", "sell start");
 const arrivalConsensusCheck = () => runScriptCheck("check-arrival-consensus.mjs", "arrival consensus");
+const arrivalShadowCheck = () => runScriptCheck("check-arrival-shadow.mjs", "arrival shadow");
 const arrivalTeethCheck = () => runScriptCheck("check-arrival-teeth.mjs", "arrival teeth");
 const arrivalRealCheck = () => runScriptCheck("check-arrival-real.mjs", "real arrival");
 const arrivalExtraKeysCheck = () => runScriptCheck("check-arrival-extra-keys.mjs", "extra keys");
@@ -2648,6 +2649,7 @@ const CHECKS = {
   "sell-watch": sellWatchCheck,
   "sell-start": sellStartCheck,
   "arrival-consensus": arrivalConsensusCheck,
+  "arrival-shadow": arrivalShadowCheck,
   "arrival-teeth": arrivalTeethCheck,
   "arrival-real": arrivalRealCheck,
   "arrival-extra-keys": arrivalExtraKeysCheck,

@@ -2,9 +2,9 @@
 // THE ARRIVAL GUARDS ARE LOAD-BEARING.
 //
 // The consensus check drives the real verifyArrival cases, but a case stays green if the guard it protects is
-// removed and a later fallback returns the same shape. These two mutations are the deletion proofs: an unsynchronized
-// witness must stop counting as absence, and a key that does not belong to the address must be refused before the
-// network walk.
+// removed and a later fallback returns the same shape. These mutations are the deletion proofs: an unsynchronized
+// witness must stop counting as absence, a key that does not belong to the address must be refused before the
+// network walk, and a silent witness must not agree that the money is absent.
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -83,6 +83,36 @@ try {
   if (!mutantMismatch || mutantMismatch.code !== "xmr-address-mismatch") {
     ok("removing the address binding stops refusing the wrong key (the guard is load-bearing)");
   } else bad("spend-check mutation", "it kept refusing");
+
+  // THE SHADOW'S ABSENCE RULE HAS ITS OWN DELETION PROOF. A witness that never answered is not evidence that
+  // the money is absent; removing the completed/failed condition must make the comparison claim agreement.
+  const absentFetch = async (url, init) => {
+    if (url.startsWith("https://missing.example")) return { ok: false, status: 404, json: async () => ({}) };
+    return fetchFor({ synchronized: true })(url, init);
+  };
+  const shadowRequest = {
+    ...request({ fetch: absentFetch }),
+    witnessNodes: [{ url: "https://missing.example", operator: "W", protocol: "witness-v1" }],
+  };
+  const absentShadow = await real.verifyArrivalShadow(shadowRequest);
+  if (absentShadow.exact && absentShadow.exact.absent === true
+    && absentShadow.witness.completed === false && absentShadow.agrees === false
+    && absentShadow.problems.includes("witness:not-completed")) {
+    ok("a silent witness does not agree that the money is absent");
+  } else bad("shadow absence guard", JSON.stringify({
+    exact: absentShadow.exact && absentShadow.exact.absent,
+    completed: absentShadow.witness.completed,
+    agrees: absentShadow.agrees,
+    problems: absentShadow.problems,
+  }));
+
+  const noWitnessEvidence = await mutatedLadder(
+    "if (witness.completed && witness.failed.length === 0) agrees = true;",
+    "if (true) agrees = true;", "no-witness-evidence");
+  const mutantShadow = await noWitnessEvidence.verifyArrivalShadow(shadowRequest);
+  if (mutantShadow.agrees === true) {
+    ok("removing the completed/failed condition makes a silent witness agree (the guard is load-bearing)");
+  } else bad("shadow absence mutation", JSON.stringify(mutantShadow));
 } finally {
   rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

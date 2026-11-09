@@ -702,6 +702,12 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
     // THE ARRIVAL VERDICT WITHOUT THE WATCH LOOP, and the deadline check as a separate call: an interface may
     // want to run both itself. The watch uses exactly these, so there is one decision, not two.
     verifyArrival: (request) => xmrArrival.verifyArrival(request),
+    /**
+     * SHADOW THE FIXED-SLICE WITNESS WITHOUT CHANGING THE DECISION. It runs the exact check and the witness-v1
+     * slice check and returns both; `witnessNodes` must carry `{protocol: "witness-v1"}`. Nothing here opens
+     * `ready` or refunds. It exists so the protocol can be exercised before an independent operator serves it.
+     */
+    verifyArrivalShadow: (request) => xmrArrival.verifyArrivalShadow(request),
     assertTimeForConfirmations: (request) => xmrArrival.assertTimeForConfirmations(request),
 
     /**
