@@ -10,16 +10,22 @@
 import { SdkError } from "../src/errors.mjs";
 import { createSwaps, recordInputOf } from "../src/swaps.mjs";
 import { verifyArrival } from "../src/xmr-arrival.mjs";
+import { ed25519, keccak256 } from "../src/primitives.mjs";
+import { addressFromKeys } from "../engine/monero/address.js";
 
 const now = 1_800_000_000;
-const address = "59DnddZzVBCevVg9YB3zCs24DSRH4ByS2FMBafPpYxSEB6FMegQNEbtNzbLjrrEUPNAg9NhK5uMiiAZpAvENBS4D4mEPcRq";
+const VIEW = 11n;
+const SPEND = 13n;
+const spendPub = ed25519.Point.BASE.multiply(SPEND).toHex();
+const address = addressFromKeys({ network: "stagenet", kind: "primary", spendPub,
+  viewPub: ed25519.Point.BASE.multiply(VIEW).toHex() }, { keccak256 });
 const slot = "0x" + "11".repeat(32);
 const base = {
   escrow: "0x" + "aa".repeat(20),
   halfLocker: slot,
   address,
-  viewSecret: "0x" + "22".repeat(32),
-  spendPub: "0x" + "33".repeat(32),
+  viewSecret: VIEW,
+  spendPub,
   expect: { edPointLocker: slot, edPointClaimer: slot, edViewPointLocker: slot, commitHalfLocker: slot, commitHalfClaimer: slot },
   expectedAtomic: "1000000000000",
   fromHeight: 100,

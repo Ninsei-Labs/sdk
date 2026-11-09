@@ -129,6 +129,19 @@ console.log("=== 5) PADDING BEFORE THE KEY IS SKIPPED ===");
   else bad("padding parse: " + JSON.stringify(keys));
 }
 
+console.log("=== 6) A MALFORMED EXTRA KEY DOES NOT HIDE THE REAL OUTPUT ===");
+{
+  const f = fixture();
+  const bad = { ...f.tx, extra: [0x01, ...hexToBytes("ff".repeat(32)), ...f.tx.extra] };
+  let hit = null;
+  let error = null;
+  try { hit = matchTransaction(bad, [{ address: "subaddress", viewSecret: VIEW, spendPub: f.spendPub }], { height: 100 }); }
+  catch (e) { error = e; }
+  if (!error && hit.length === 1 && hit[0].outputs.length === 1 && hit[0].outputs[0].index === 1) {
+    ok("the decoder skips the bad key and still finds output 1");
+  } else bad("bad extra key -> " + (error ? error.message : JSON.stringify(hit)));
+}
+
 console.log("");
 console.log(fails.length ? "FAILED: " + fails.length + " (passed " + pass + ")" : "extra keys: " + pass + " checks passed.");
 if (fails.length) process.exit(1);
