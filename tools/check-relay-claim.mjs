@@ -179,6 +179,27 @@ export const relayClaimCheck = async () => {
     check(called === 0, "a different claim sender reached the relay");
   }
 
+  // (0c2) THE MIGRATION PATH IS GUARDED TOO: an explicit sender on a legacy record is checked before the network.
+  {
+    const legacy = await seed({ omitClaimSender: true });
+    for (const [label, forbidden, why] of [
+      ["deal maker", quote.provider, "is-deal-maker"],
+      ["quote key owner", quote.quoteKey, "is-quote-key"],
+    ]) {
+      let called = 0;
+      try {
+        await swaps.claimViaRelay({ id: legacy.id, claimSender: forbidden,
+          fetchImpl: async () => { called += 1; throw new Error("must not be called"); } });
+        check(false, "a legacy record was claimed through the " + label);
+      } catch (error) {
+        check(error && error.code === "bad-input" && error.params && error.params.field === "claimSender"
+          && error.params.why === why,
+          "the " + label + " was not refused at claim time with bad-input claimSender " + why + ": " + JSON.stringify({ code: error && error.code, params: error && error.params }));
+      }
+      check(called === 0, "the " + label + " reached the relay from a legacy record");
+    }
+  }
+
   // (0d) A RESUMED OFFER CANNOT SWAP THE SENDER THE RECORD ALREADY NAMED.
   {
     try {
