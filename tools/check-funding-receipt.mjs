@@ -5,7 +5,7 @@
 // that was called, for the predicted escrow. A missing receipt or a different event is pending, not funded.
 import { ORDER_CREATED_TOPIC } from "../engine/evm/factory.js";
 import { escrowFromReceipt, fundingReceiptVerdict } from "../engine/evm/funding.js";
-import { samePendingFunding } from "../src/swaps.mjs";
+import { samePendingFunding, pendingFundingVerdict } from "../src/swaps.mjs";
 
 const factory = "0x" + "11".repeat(20);
 const escrow = "0x" + "88".repeat(20);
@@ -73,6 +73,11 @@ console.log("=== 5) A PENDING FUNDING IS RESUMED ONLY FOR THE SAME QUOTE AND SAL
   if (!samePendingFunding({ ...pending, fundingPending: false, escrow: { salt: "aa".repeat(32) } }, "nonce-1", "aa".repeat(32))) {
     ok("a non-pending record is not resumed");
   } else bad("a non-pending record resumed");
+  if (pendingFundingVerdict(pending, "nonce-1", null) === "salt-required") {
+    ok("an id-only resume is refused instead of falling through to a new deposit");
+  } else bad("an id-only pending record was not refused: " + pendingFundingVerdict(pending, "nonce-1", null));
+  if (pendingFundingVerdict(pending, "nonce-1", "aa".repeat(32)) === "resume") ok("the verdict resumes with the same salt");
+  else bad("the verdict did not resume with the same salt");
 }
 
 console.log("");
