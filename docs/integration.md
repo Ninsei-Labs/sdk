@@ -81,13 +81,13 @@ There are two claim paths, and the host picks by what the seller holds:
   or used and the client signs no chain transaction.
 
 `claimViaRelay` requires a sell record with a positive `claimTip` and the stored sender, escrow and half. A record
-made before the sender was stored may pass `claimSender` once; a sender naming the deal's maker or its quote key
-owner is refused before the half leaves the client. It does not take a relay from the caller after the quote: an
-optional `relayUrl` may repeat the stored origin, and any other origin is refused with `bad-input`. The node's
-refusal keeps its own code under `quote-refused.params.code`. A timeout, a reset or a body without a real
-transaction hash is `claim-unknown`: the claim may already be sent, so read the escrow before acting again, and
-never treat the lost answer as a success. Only a validated txid is returned. The half is never logged or written by
-this path.
+made before the sender was stored may pass `claimSender` once; it is stored on the record then. A sender naming the
+deal's maker or its quote key owner is refused before the half leaves the client. It does not take a relay from the
+caller after the quote: an optional `relayUrl` may repeat the stored origin, and any other origin is refused with
+`bad-input`. The node's refusal keeps its own code under `quote-refused.params.code`. A timeout, a reset or a body
+without a real transaction hash is `claim-unknown`: the claim may already be sent, so read the escrow before acting
+again, and never treat the lost answer as a success. Only a validated txid is returned. The half is never logged or
+written by this path.
 
 The sell record also keeps the node's signed `readyWindow`. `sellWatch`, the late-arrival boundary and
 `refundIfXmrMissing` use its `readyMinSeconds`/`readyMaxSeconds`; a record without the window is refused with

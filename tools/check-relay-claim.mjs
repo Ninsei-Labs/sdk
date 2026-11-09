@@ -159,6 +159,9 @@ export const relayClaimCheck = async () => {
     }
     check(explicit && explicit.provider === lower(claimSender),
       "an explicit claim sender did not become the provider in the result");
+    const afterExplicit = engine.swap.getSwap(noSender.id, store);
+    check(afterExplicit && afterExplicit.claimSender === claimSender,
+      "the explicit claim sender was not stored on the record");
   }
 
   // (0c) A RECORD THAT NAMED A SENDER CANNOT BE CLAIMED THROUGH ANOTHER ONE.

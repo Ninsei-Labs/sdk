@@ -1628,6 +1628,12 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       if (quoteKeyOwner && sender === quoteKeyOwner) {
         throw new SdkError("bad-input", { field: "claimSender", why: "is-quote-key" });
       }
+      // AN OLDER RECORD KEEPS THE SENDER ONCE IT IS USED. A reload must not be forced to remember a second input.
+      if (!storedSender && requestedSender) {
+        swap.claimSender = requestedSender;
+        try { engine.swap.saveSwap(swap, store); }
+        catch { throw new SdkError("storage-unavailable", { step: "save-claim-sender" }); }
+      }
       if (escrowRecord.address === undefined || escrowRecord.address === null || escrowRecord.address === "") {
         throw new SdkError("bad-input", { field: "escrow", why: "not-in-record" });
       }

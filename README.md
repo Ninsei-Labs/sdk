@@ -211,8 +211,8 @@ claimed.tipWei;  // the signed tip paid out of the claim
 
 `claimSender` is chosen by the client from the relay's price answer: a listed maker OTHER than the deal's maker and
 other than its quote key owner. `startSell` stores it with the record, so a reload claims through the same node; a
-record made before the sender was stored may pass `claimSender` to `claimViaRelay` once. A sender naming the deal's
-maker or its quote key is refused before the half leaves the client.
+record made before the sender was stored may pass `claimSender` to `claimViaRelay` once; it is stored on the record
+then. A sender naming the deal's maker or its quote key is refused before the half leaves the client.
 
 `claimViaRelay` reads the sell record made by `startSell` and requires a positive `claimTip`, the sender, the
 escrow and the half. It posts to the relay origin stored with the record; an optional `relayUrl` may repeat that
