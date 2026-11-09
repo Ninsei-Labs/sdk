@@ -321,6 +321,20 @@ export function sellWatchTimeoutMs({ configuredMs = 1_200_000, readyBySec = null
   return Math.max(configured, (readyAt - now + SELL_WATCH_MARGIN_SEC) * 1000);
 }
 
+// A PENDING FUNDING IS RESUMED ONLY FOR THE SAME QUOTE, NOT MERELY THE SAME NONCE. The quote id is the maker's
+// nonce; a second offer can reuse it. The salt is the client's own binding to the terms and the predicted escrow,
+// so an id match without the same salt is a different order.
+export function samePendingFunding(swap, quoteId, salt) {
+  if (!swap || !(swap.fundingPending === true || (swap.escrow && swap.escrow.fundingPending === true))) return false;
+  const id = String(quoteId || "");
+  const saltHex = String(salt || "").replace(/^0x/i, "").toLowerCase();
+  if (!id && !saltHex) return false;
+  const recordedId = String(swap.orderQuoteId || "");
+  const recordedSalt = String((swap.escrow && swap.escrow.salt) || swap.recoverySalt || "").replace(/^0x/i, "").toLowerCase();
+  if (id && recordedId === id) return Boolean(saltHex && recordedSalt === saltHex);
+  return Boolean(saltHex && recordedSalt === saltHex);
+}
+
 // THE RECORD OF A SALE, FOUND BY ITS ESCROW. `sellWatch` is called from a reloaded page with the address in hand,
 // so the window stored by `startSell` must be readable without a second argument. A record the store cannot read
 // is not a reason to invent a local window; the caller gets the store's refusal at the point it matters.
@@ -407,15 +421,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
     const id = String(quoteId || "");
     const saltHex = String(salt || "").replace(/^0x/i, "").toLowerCase();
     if (!id && !saltHex) return null;
-    return records().find((swap) => {
-      if (!(swap.fundingPending === true || (swap.escrow && swap.escrow.fundingPending === true))) return false;
-      if (id && String(swap.orderQuoteId || "") === id) return true;
-      // THE RELAY ANSWER MAY CARRY NO ORDER ID. The salt is the client's own binding to the same escrow: it is
-      // written into the terms and the predicted address is derived from it, so it identifies the pending record
-      // without inventing an id or asking the factory again.
-      const recordedSalt = String((swap.escrow && swap.escrow.salt) || swap.recoverySalt || "").replace(/^0x/i, "").toLowerCase();
-      return Boolean(saltHex && recordedSalt === saltHex);
-    }) || null;
+    return records().find((swap) => samePendingFunding(swap, id, saltHex)) || null;
   };
   async function resumePendingFunding(record, request) {
     const swap = record.swap || record;

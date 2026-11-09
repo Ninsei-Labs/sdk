@@ -24,6 +24,7 @@ import {
   scalarToBytesLE,
   varint,
 } from "../engine/monero/scan.js";
+import { addressFromKeys } from "../engine/monero/address.js";
 
 const G = ed25519.Point.BASE;
 const TXID = "a".repeat(64);
@@ -81,11 +82,11 @@ function fixture({ amount = AMOUNT, unlockTime = 0 } = {}) {
   };
 }
 
-function rpcFor(txByHost) {
+function rpcFor(txByHost, { synchronized = true } = {}) {
   return async (url, init) => {
     const body = JSON.parse(init.body);
     if (body.method === "get_info") {
-      return { ok: true, json: async () => ({ result: { height: 121, synchronized: true } }) };
+      return { ok: true, json: async () => ({ result: { height: 121, synchronized } }) };
     }
     if (body.method === "get_block") {
       return { ok: true, json: async () => ({ result: { block_header: { hash: BLOCK_HASH }, tx_hashes: [TXID] } }) };
@@ -101,8 +102,9 @@ function rpcFor(txByHost) {
   };
 }
 
-const address = "stagenet-address-for-the-fixture";
 const spendPub = G.multiply(SPEND).toHex();
+const viewPub = G.multiply(VIEW).toHex();
+const address = addressFromKeys({ network: "stagenet", kind: "primary", spendPub, viewPub }, { keccak256 });
 
 async function run({ nodes, txByHost, expectedAtomic = AMOUNT, minConfirmations = 10, txid = TXID }) {
   const verdict = await verifyArrival({
@@ -382,6 +384,46 @@ console.log("=== 3) ONE NODE WHOSE OUTPUT KEY DIFFERS IS ALSO A DISAGREEMENT ===
   } catch (e) { error = e; }
   if (error && error.code === "xmr-nodes-disagree") ok("a different output key is a disagreement");
   else bad("different output key returned " + (error ? error.code : "a verdict"));
+}
+
+console.log("=== 3b) UNSYNCHRONIZED WITNESSES ARE UNKNOWN, NOT ABSENT ===");
+{
+  const verdict = await verifyArrival({
+    nodes: [{ url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" }],
+    address, viewSecret: VIEW, spendPub, expectedAtomic: AMOUNT, minConfirmations: 10,
+    fromHeight: 100, txid: TXID, fetch: rpcFor({ default: fixture() }, { synchronized: false }),
+  });
+  if (verdict.state === "pending" && verdict.absent === false) ok("two unsynchronized witnesses give pending, not absent");
+  else bad("unsynchronized witnesses -> " + JSON.stringify(verdict));
+  if (verdict.failed && verdict.failed.length === 2 && verdict.failed.every((f) => f.code === "stale")) {
+    ok("both stale witnesses are named");
+  } else bad("stale failures: " + JSON.stringify(verdict.failed));
+}
+
+console.log("=== 3c) A KEY THAT DOES NOT BELONG TO THE ADDRESS IS REFUSED ===");
+{
+  let error = null;
+  try {
+    await verifyArrival({
+      nodes: [{ url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" }],
+      address, viewSecret: VIEW + 1n, spendPub, expectedAtomic: AMOUNT, minConfirmations: 10,
+      fromHeight: 100, txid: TXID, fetch: rpcFor({ default: fixture() }),
+    });
+  } catch (e) { error = e; }
+  if (error && error.code === "xmr-address-mismatch" && error.params && error.params.field === "viewSecret") {
+    ok("the other byte-order/key reading is refused before the network walk");
+  } else bad("wrong view key -> " + JSON.stringify(error && (error.code || error.message)));
+  let spendError = null;
+  try {
+    await verifyArrival({
+      nodes: [{ url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" }],
+      address, viewSecret: VIEW, spendPub: G.multiply(SPEND + 1n).toHex(), expectedAtomic: AMOUNT, minConfirmations: 10,
+      fromHeight: 100, txid: TXID, fetch: rpcFor({ default: fixture() }),
+    });
+  } catch (e) { spendError = e; }
+  if (spendError && spendError.code === "xmr-address-mismatch" && spendError.params && spendError.params.field === "spendPub") {
+    ok("a spend key from another address is refused");
+  } else bad("wrong spend key -> " + JSON.stringify(spendError && (spendError.code || spendError.message)));
 }
 
 console.log("=== 4) A SHORTFALL IS STILL NAMED, NOT ACCEPTED ===");

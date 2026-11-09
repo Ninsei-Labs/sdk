@@ -11,6 +11,7 @@ import { takerHalvesV2, recoverySaltOf } from "./recovery-key.mjs";
 import { acceptCounterpartyChunked, buildOwnSideFromHalvesChunked, jointAddress } from "./order.mjs";
 import { requestFirmQuote } from "./relayFirmClient.mjs";
 import { readReadyWindow } from "./readyWindow.mjs";
+import { quoteLifeVerdict } from "./quotePolicy.mjs";
 // THE CHAIN READ NEEDED TO ASK THE REGISTRY WHO OWNS THE KEY. The selector is COMPUTED from the signature, not
 // remembered: a single wrong hex digit would call another function and return a zero address - and a zero
 // address is exactly the answer "nobody owns this key", which the caller would take as the truth.
@@ -245,6 +246,17 @@ export function createQuotes({ config, now = () => Date.now(), evmCall = null, e
         side,
       });
       const quote = result.quote;
+      // A QUOTE THAT IS ALREADY AT THE START MARGIN CANNOT BECOME A SWAP. The proof and the record work take
+      // seconds; refusing at the lock would show the person a confirmation that was never going to reach the wallet.
+      // The check is here, on arrival, with its own code so the caller asks again without showing confirm.
+      const life = quoteLifeVerdict({
+        validUntil: quote.validUntil,
+        nowSec: Math.floor(Number(now()) / 1000),
+      });
+      if (!life.ok) {
+        fail("quote-too-short", { step: "answer", validUntil: Number.isFinite(Number(quote.validUntil)) ? Number(quote.validUntil) : null,
+          now: Math.floor(Number(now()) / 1000), remainingSec: life.remainingSec, marginSec: life.marginSec });
+      }
       requirePinnedCashier(quote, "relay", config);
       // THE NODE HALF IS NOT A DECORATION. The answer's proof must stand in THIS order's context and the proven
       // point must be the one the quote commits to. For ask that is the claimer's commitment; for bid the node

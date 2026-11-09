@@ -214,9 +214,19 @@ jobs:
           npm --version
 
       - name: Publish the checked tarball
+        env:
+          DIST_TAG: ${{ needs.build.outputs.tag }}
         run: |
           set -euo pipefail
+          # THE TAG CROSSES THE JOB BOUNDARY AS DATA, NOT AS SHELL. It comes from a node script after dependency
+          # build scripts have run; interpolating it into this script would let a compromised output run in the job
+          # that holds id-token: write. Validate it here and use the environment variable, quoted.
+          printf '%s' "$DIST_TAG" | grep -Eq '^[A-Za-z_][A-Za-z0-9._-]*$' || {
+            echo "dist-tag is not usable: $DIST_TAG" >&2
+            exit 1
+          }
+          case "$DIST_TAG" in v[0-9]*) echo "dist-tag reads as a version: $DIST_TAG" >&2; exit 1 ;; esac
           tarball=$(find dist -maxdepth 1 -name '*.tgz' -print -quit)
           test -n "$tarball"
           # ./$tarball, not $tarball: npm reads a bare dist/... argument as a GitHub shorthand, not a local file.
-          npm publish "./$tarball" --access public --provenance --ignore-scripts --tag "${{ needs.build.outputs.tag }}"
+          npm publish "./$tarball" --access public --provenance --ignore-scripts --tag "$DIST_TAG"
