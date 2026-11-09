@@ -229,6 +229,10 @@ export async function verifyArrival(request) {
   let addressKeys;
   try { addressKeys = engine.xmrArrivalRead.decodeAddressKeys(request.address); }
   catch { throw new SdkError("bad-input", { field: "address", why: "not-a-monero-address" }); }
+  // THE WATCHED ADDRESS IS A PRIMARY ADDRESS. A subaddress has a different payload layout and its view/spend points
+  // are not the ones the joint-address builder produces; refusing it by name is clearer than a spurious spend-pub
+  // mismatch. SDK-generated addresses are always primary.
+  if (!addressKeys.network) throw new SdkError("bad-input", { field: "address", why: "subaddress-not-supported" });
   const spendPub = String(request.spendPub).replace(/^0x/, "").toLowerCase();
   if (!addressKeys.spendPub || spendPub !== String(addressKeys.spendPub).toLowerCase()) {
     throw new SdkError("xmr-address-mismatch", { field: "spendPub", address: request.address });

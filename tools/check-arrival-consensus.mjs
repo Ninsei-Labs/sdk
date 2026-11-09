@@ -424,6 +424,18 @@ console.log("=== 3c) A KEY THAT DOES NOT BELONG TO THE ADDRESS IS REFUSED ===");
   if (spendError && spendError.code === "xmr-address-mismatch" && spendError.params && spendError.params.field === "spendPub") {
     ok("a spend key from another address is refused");
   } else bad("wrong spend key -> " + JSON.stringify(spendError && (spendError.code || spendError.message)));
+  const subaddress = addressFromKeys({ network: "stagenet", kind: "subaddress", spendPub, viewPub }, { keccak256 });
+  let subError = null;
+  try {
+    await verifyArrival({
+      nodes: [{ url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" }],
+      address: subaddress, viewSecret: VIEW, spendPub, expectedAtomic: AMOUNT, minConfirmations: 10,
+      fromHeight: 100, txid: TXID, fetch: rpcFor({ default: fixture() }),
+    });
+  } catch (e) { subError = e; }
+  if (subError && subError.code === "bad-input" && subError.params && subError.params.why === "subaddress-not-supported") {
+    ok("a subaddress is refused by name instead of a spend-pub mismatch");
+  } else bad("subaddress -> " + JSON.stringify(subError && (subError.code || subError.message)));
 }
 
 console.log("=== 4) A SHORTFALL IS STILL NAMED, NOT ACCEPTED ===");

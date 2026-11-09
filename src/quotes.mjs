@@ -249,13 +249,11 @@ export function createQuotes({ config, now = () => Date.now(), evmCall = null, e
       // A QUOTE THAT IS ALREADY AT THE START MARGIN CANNOT BECOME A SWAP. The proof and the record work take
       // seconds; refusing at the lock would show the person a confirmation that was never going to reach the wallet.
       // The check is here, on arrival, with its own code so the caller asks again without showing confirm.
-      const life = quoteLifeVerdict({
-        validUntil: quote.validUntil,
-        nowSec: Math.floor(Number(now()) / 1000),
-      });
+      const answerNowSec = Math.floor(Number(now()) / 1000);
+      const life = quoteLifeVerdict({ validUntil: quote.validUntil, nowSec: answerNowSec });
       if (!life.ok) {
         fail("quote-too-short", { step: "answer", validUntil: Number.isFinite(Number(quote.validUntil)) ? Number(quote.validUntil) : null,
-          now: Math.floor(Number(now()) / 1000), remainingSec: life.remainingSec, marginSec: life.marginSec });
+          now: answerNowSec, remainingSec: life.remainingSec, marginSec: life.marginSec });
       }
       requirePinnedCashier(quote, "relay", config);
       // THE NODE HALF IS NOT A DECORATION. The answer's proof must stand in THIS order's context and the proven

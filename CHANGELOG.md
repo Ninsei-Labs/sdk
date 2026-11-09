@@ -1,7 +1,7 @@
 ## Unreleased
 
 - A quote is refused as `quote-too-short` when it arrives with less than the start margin left, instead of showing a confirmation that the lock would reject seconds later.
-- Arrival refuses a view key or spend key that does not belong to the watched address, skips a malformed transaction extra key instead of losing the whole walk, and treats an unsynchronized witness as unknown, not as absence.
+- Arrival refuses a view key or spend key that does not belong to the watched address, refuses a subaddress by name, skips a malformed transaction extra key instead of losing the whole walk, and treats an unsynchronized witness as unknown, not as absence.
 - A pending funding is resumed only for the same quote nonce and salt; a reused nonce with different terms is a new order, and an id-only retry is refused instead of funding a second escrow.
 - The release publish job receives the npm dist-tag as an environment value and validates it, so the build output cannot become shell code in the OIDC job.
 - The quote defaults are public: `DEFAULT_ORDER_QUOTE_TTL_SEC` (60 s) is the firm quote lifetime a node signs when it has no override, and `LOCK_START_MARGIN_SEC` (30 s) is the margin `swaps.start` requires before opening a wallet. A node imports the lifetime instead of keeping its own copy.
