@@ -657,12 +657,14 @@ export interface SwapsApi {
   sellClaim(request: SellClaimRequest, wallet: WalletAdapter): Promise<unknown>;
   /**
    * CLAIM THE ETH ON A SELL WITHOUT A WALLET. The seller holds XMR and no ETH, so the signed `claimTip` pays the
-   * sender. The half goes to the relay that answered the quote (the origin stored by `startSell`), which posts
-   * `POST /v1/claims/{provider}/{escrow}`. No wallet is created or used and no chain transaction is signed.
+   * sender. The half goes to the sender the client chose - a listed maker OTHER than the deal's maker - through
+   * the relay that answered the quote (`POST /v1/claims/{sender}/{escrow}`). No wallet is created or used and no
+   * chain transaction is signed.
    *
-   * The record must be a sell with a POSITIVE `claimTip` and a stored provider, escrow and half. `relayUrl` may
-   * restate the stored origin; a different origin is refused. A node refusal is `quote-refused` with its own code
-   * in `params.code`; a lost answer is `claim-unknown` (the claim may have been sent), never success.
+   * The sender is stored by `startSell`; a request may supply `claimSender` only when the record has none, and
+   * may never name the deal's maker. `relayUrl` may restate the stored origin; a different origin is refused. A
+   * node refusal is `quote-refused` with its own code in `params.code`; a lost answer is `claim-unknown` (the
+   * claim may have been sent), never success.
    */
   claimViaRelay(request: RelayClaimRequest): Promise<RelayClaimResult>;
   /**
@@ -913,6 +915,12 @@ export interface SwapStart {
 export interface SellStartRequest {
   /** The verified `quotes.firmRelay` answer for the bid side. */
   readonly offer: FirmRelayAnswer;
+  /**
+   * The sender the client chose for a later no-ETH claim: a listed maker other than the deal's maker. It is
+   * stored with the record so a reload claims through the same node; the relay route names it as `provider`.
+   * Omitted for a record that will only use the own-wallet path.
+   */
+  readonly claimSender?: string;
   /** The twelve-word key; required only when no key is stored yet. */
   readonly recoveryKey?: string | { readonly mnemonic: string };
   /** The recovery file's passphrase. In memory; the interface puts it on disk if it deems fit. */
@@ -935,6 +943,8 @@ export interface SellStart {
   readonly xmrAmount: string;
   readonly claimTip: string | null;
   readonly orderQuote: Readonly<Record<string, unknown>> | null;
+  /** The no-wallet claim sender stored by `startSell`, or null when only the own-wallet path is available. */
+  readonly claimSender: string | null;
   readonly readyWindow: ReadyWindow | null;
   readonly resumed: boolean;
   readonly next: "send-xmr";
@@ -949,12 +959,15 @@ export interface SellClaimRequest {
 }
 
 /**
- * THE NO-WALLET CLAIM'S INPUTS. `id` names the sell record made by `startSell`; the provider, escrow, half and
- * signed tip come from it. `relayUrl` is optional and may only repeat the origin stored with the record - a foreign
- * origin is refused, because the relay that answered the quote is part of the verified offer.
+ * THE NO-WALLET CLAIM'S INPUTS. `id` names the sell record made by `startSell`; the escrow, half and signed tip
+ * come from it. `claimSender` is the list-member node that will send the claim: it must be a listed maker other than
+ * the deal's maker, and is normally stored by `startSell`. `relayUrl` is optional and may only repeat the origin
+ * stored with the record - a foreign origin is refused.
  */
 export interface RelayClaimRequest {
   readonly id: string;
+  /** Only for a record made before the sender was stored; it may never name the deal's maker. */
+  readonly claimSender?: string;
   readonly relayUrl?: string;
   readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number;
@@ -963,11 +976,13 @@ export interface RelayClaimRequest {
 /** The claim the relay sent for the record. Only a validated on-chain transaction hash is returned here. */
 export interface RelayClaimResult {
   readonly id: string;
+  /** The sender the client chose; `claimSender` repeats it for callers that think in that name. */
   readonly provider: string;
+  readonly claimSender: string;
   readonly escrow: string;
   readonly relayUrl: string;
   readonly txid: string;
-  /** The address that sent the claim transaction (the maker node's sender, not the seller). */
+  /** The address that sent the claim transaction (the sender node's sender, not the seller). */
   readonly from: string;
   /** The signed tip, in wei, paid out of the claim. */
   readonly tipWei: string;

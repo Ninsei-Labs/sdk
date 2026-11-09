@@ -1,9 +1,10 @@
-// A SELLER WITH NO WALLET CAN STILL CLAIM: the half goes to the relay that answered the quote and the signed tip
-// pays the sender. This check drives the real `startSell` record and the real `claimViaRelay` wire with stand-in
+// A SELLER WITH NO WALLET CAN STILL CLAIM: the half goes to the sender the client chose and the signed tip pays
+// that sender. This check drives the real `startSell` record and the real `claimViaRelay` wire with stand-in
 // transports, and proves the own-wallet path is unchanged.
 //
-// It covers: a no-wallet success, a zero-tip refusal before any request, a foreign relay origin, a provider that
-// disagrees with the answer, a node refusal, a lost answer (never success), and the `sellClaim` fallback.
+// It covers: the deal maker and its quote key refused as sender, a no-wallet success, a zero-tip refusal before any
+// request, a foreign relay origin, a provider that disagrees with the answer, a node refusal, a lost answer (never
+// success), and the `sellClaim` fallback.
 import { createRecoveryKey, takerHalvesV2 } from "../src/recovery-key.mjs";
 import { buildOwnSideFromHalves } from "../src/order.mjs";
 import { keccak256, secp256k1 } from "../src/primitives.mjs";
@@ -29,9 +30,12 @@ const own = buildOwnSideFromHalves(order, { spendHalf: derived.spendHalf, viewHa
 const ownCommit = "0x" + Buffer.from(keccak256(secp256k1.Point.fromHex(own.side.proof.XA).toBytes(false).slice(1))).toString("hex");
 const escrow = "0x" + "dd".repeat(20);
 const claimTip = "1000000000000000";
+// THE SENDER IS NOT THE DEAL'S MAKER. `order.locker` is the maker; this address is another listed node.
+const claimSender = "0x" + "c3".repeat(20);
 const quote = {
   id: "oq_relay_claim",
   provider: order.locker, factory: order.factory,
+  quoteKey: "0x" + "e4".repeat(20),
   locker: order.locker, claimer: order.claimer, chainId: order.chainId,
   amount: order.amount, xmrAmount: "1000000000000", claimTip,
   commitHalfLocker: "0x" + "a1".repeat(32), edPointLocker: "0x" + "a2".repeat(32), edViewPointLocker: "0x" + "a3".repeat(32),
@@ -89,7 +93,10 @@ const seed = async (overrides = {}) => {
     jointAddress: "52TsoaDECj3P6WFzmChWEq6WMLf9gYp831b76bRNzFN4EMDgNXuxDQXY8hRcmncmMMF3o5bYqFeTEbzPQ3joqdABAeGwY3z".slice(0, -2) + String(sequence % 10) + String(sequence % 10),
   };
   if (overrides.withoutRelay) { delete made.withoutRelay; delete made.relayUrl; }
-  return await swaps.startSell({ offer: made, recoveryKey: mnemonic, onRecoveryKey: accept });
+  const sender = Object.prototype.hasOwnProperty.call(overrides, "claimSender") ? overrides.claimSender : claimSender;
+  const request = { offer: made, recoveryKey: mnemonic, onRecoveryKey: accept };
+  if (sender && !overrides.omitClaimSender) request.claimSender = sender;
+  return await swaps.startSell(request);
 };
 
 export const relayClaimCheck = async () => {
@@ -101,10 +108,86 @@ export const relayClaimCheck = async () => {
   const record = await seed({ escrow });
   const stored = engine.swap.getSwap(record.id, store);
   check(stored && stored.relayUrl === "https://relay.example", "startSell did not store the relay origin");
+  check(stored && stored.claimSender === claimSender, "startSell did not store the chosen claim sender");
   check(stored && stored.claimTip === claimTip && stored.escrow && stored.escrow.half,
     "the sale record does not carry the positive tip and the half");
   check(stored && stored.readyWindow && stored.readyWindow.readyMinSeconds === 2400
     && stored.readyWindow.readyMaxSeconds === 3000, "startSell did not store the node's ready window");
+
+  // (0a) THE DEAL'S MAKER CANNOT BE THE SENDER.
+  {
+    try {
+      await seed({ claimSender: order.locker });
+      check(false, "startSell accepted the deal maker as the claim sender");
+    } catch (error) {
+      check(error && error.code === "bad-input" && error.params && error.params.field === "claimSender"
+        && error.params.why === "is-deal-maker",
+        "startSell did not refuse the deal maker as the claim sender: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
+    }
+    try {
+      await seed({ claimSender: quote.quoteKey });
+      check(false, "startSell accepted the quote key owner as the claim sender");
+    } catch (error) {
+      check(error && error.code === "bad-input" && error.params && error.params.field === "claimSender"
+        && error.params.why === "is-quote-key",
+        "startSell did not refuse the quote key owner as the claim sender: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
+    }
+  }
+
+  // (0b) A RECORD WITHOUT A SENDER CANNOT GUESS ONE; AN EXPLICIT SENDER FILLS THE GAP.
+  {
+    const noSender = await seed({ omitClaimSender: true });
+    let called = 0;
+    try {
+      await swaps.claimViaRelay({ id: noSender.id, fetchImpl: async () => { called += 1; throw new Error("must not be called"); } });
+      check(false, "a record without a claim sender was claimed");
+    } catch (error) {
+      check(error && error.code === "bad-input" && error.params && error.params.field === "claimSender"
+        && error.params.why === "not-in-record",
+        "a missing claim sender was not refused with bad-input claimSender not-in-record: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
+    }
+    check(called === 0, "a record without a sender reached the relay");
+    let explicit = null;
+    const noSenderEscrow = noSender.escrow;
+    try {
+      explicit = await swaps.claimViaRelay({ id: noSender.id, claimSender,
+        fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({
+          version: 1, provider: claimSender, escrow: noSenderEscrow, txid: "0x" + "ab".repeat(32), from: claimSender, tipWei: claimTip,
+        }) }) });
+    } catch (error) {
+      check(false, "an explicit claim sender was refused: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
+    }
+    check(explicit && explicit.provider === lower(claimSender),
+      "an explicit claim sender did not become the provider in the result");
+  }
+
+  // (0c) A RECORD THAT NAMED A SENDER CANNOT BE CLAIMED THROUGH ANOTHER ONE.
+  {
+    let called = 0;
+    try {
+      await swaps.claimViaRelay({ id: record.id, claimSender: "0x" + "ff".repeat(20),
+        fetchImpl: async () => { called += 1; throw new Error("must not be called"); } });
+      check(false, "a record claimed through a different sender");
+    } catch (error) {
+      check(error && error.code === "bad-input" && error.params && error.params.field === "claimSender"
+        && error.params.why === "different-from-record",
+        "a different claim sender was not refused with bad-input claimSender different-from-record: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
+    }
+    check(called === 0, "a different claim sender reached the relay");
+  }
+
+  // (0d) A RESUMED OFFER CANNOT SWAP THE SENDER THE RECORD ALREADY NAMED.
+  {
+    try {
+      await swaps.startSell({ offer: { ...offer, escrow, jointAddress: stored.escrow.moneroAddress,
+        quote: { ...stored.quote }, orderQuote: stored.orderQuote },
+        recoveryKey: mnemonic, onRecoveryKey: accept, claimSender: "0x" + "ff".repeat(20) });
+      check(false, "a resumed sell accepted another claim sender");
+    } catch (error) {
+      check(error && error.code === "quote-refused" && error.params && error.params.why === "claim-sender-changed",
+        "a resumed sell did not refuse another claim sender: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
+    }
+  }
 
   // (0) THE RELAY IS PART OF THE OFFER ON A RESUME TOO: a retry naming another origin is a different offer.
   {
@@ -125,7 +208,7 @@ export const relayClaimCheck = async () => {
   const sender = "0x" + "c3".repeat(20);
   const successFetch = async (url, init) => {
     sentCalls.push({ url, init });
-    return { ok: true, status: 200, json: async () => ({ version: 1, provider: order.locker, escrow, txid, from: sender, tipWei: claimTip }) };
+    return { ok: true, status: 200, json: async () => ({ version: 1, provider: claimSender, escrow, txid, from: sender, tipWei: claimTip }) };
   };
   const noChain = createSwaps({ config: {}, store, call: () => { throw new Error("the no-wallet claim read the chain"); } });
   let claimed = null;
@@ -137,15 +220,16 @@ export const relayClaimCheck = async () => {
   if (claimed) {
     check(claimed.txid === txid && claimed.from === sender && claimed.tipWei === claimTip,
       "the claim did not return the real txid, sender and tip");
-    check(claimed.provider === lower(order.locker) && claimed.escrow === escrow && claimed.relayUrl === "https://relay.example",
-      "the claim does not name the provider, escrow and relay it used");
+    check(claimed.provider === lower(claimSender) && claimed.claimSender === lower(claimSender)
+      && claimed.escrow === escrow && claimed.relayUrl === "https://relay.example",
+      "the claim does not name the sender, escrow and relay it used");
   }
   check(sentCalls.length === 1, "the claim did not make exactly one relay request");
   if (sentCalls.length === 1) {
     const call = sentCalls[0];
     check(call.init && call.init.method === "POST", "the claim was not a POST");
-    check(call.url === "https://relay.example/v1/claims/" + lower(order.locker) + "/" + escrow,
-      "the claim path is not /v1/claims/{provider}/{escrow}: " + call.url);
+    check(call.url === "https://relay.example/v1/claims/" + lower(claimSender) + "/" + escrow,
+      "the claim path is not /v1/claims/{sender}/{escrow}: " + call.url);
     let body = null;
     try { body = JSON.parse(call.init.body); } catch { body = null; }
     check(body && body.version === 1 && body.halfClaimer === stored.escrow.half && Object.keys(body).length === 2,
