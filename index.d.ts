@@ -1771,6 +1771,8 @@ export type ErrorCode =
   | "quote-field-unbound"
   /** The quote's own `validUntil` has passed. */
   | "quote-expired"
+  /** The quote arrived with less than the start margin left; ask again before showing a confirmation. */
+  | "quote-too-short"
   /** There was no chain read to ask the registry whose key it is: the claim stays unproven. */
   | "quote-registry-unchecked"
   /** The registry has no provider for this key: nobody owns it. */
@@ -1816,7 +1818,9 @@ export type ErrorCode =
   | "xmr-no-nodes"
   /** The amount that arrived is below the expected one. */
   | "xmr-underpaid"
-  /** Less time remains before the ready deadline than the required confirmations take. */
+  /** The view key or spend key does not belong to the address being watched. */
+  | "xmr-address-mismatch"
+  /** The ready deadline cannot fit the confirmations the arrival needs. */
   | "xmr-too-late"
   | "contract-reverted"
   | "insufficient-funds"

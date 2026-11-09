@@ -222,7 +222,27 @@ export async function verifyArrival(request) {
   const nowSec = Number.isFinite(Number(request.nowSec)) ? Number(request.nowSec) : Math.floor(Date.now() / 1000);
   const timeoutMs = Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0 ? Number(request.timeoutMs) : 20000;
   const txidHint = txidOf(request.txid);
-  const watched = { address: request.address, viewSecret: request.viewSecret, spendPub: request.spendPub };
+  // THE KEY MUST BELONG TO THE ADDRESS, NOT MERELY BE PASSED BESIDE IT. The scanner used to try both byte orders
+  // of the view secret and accept the first match; a maker could pay to the address built from the other reading and
+  // still get `arrived` while the person's wallet saw nothing. Decode the address, keep the matching view form, and
+  // require its spend key to be the same key.
+  let addressKeys;
+  try { addressKeys = engine.xmrArrivalRead.decodeAddressKeys(request.address); }
+  catch { throw new SdkError("bad-input", { field: "address", why: "not-a-monero-address" }); }
+  // THE WATCHED ADDRESS IS A PRIMARY ADDRESS. A subaddress has a different payload layout and its view/spend points
+  // are not the ones the joint-address builder produces; refusing it by name is clearer than a spurious spend-pub
+  // mismatch. SDK-generated addresses are always primary.
+  if (!addressKeys.network) throw new SdkError("bad-input", { field: "address", why: "subaddress-not-supported" });
+  const spendPub = String(request.spendPub).replace(/^0x/, "").toLowerCase();
+  if (!addressKeys.spendPub || spendPub !== String(addressKeys.spendPub).toLowerCase()) {
+    throw new SdkError("xmr-address-mismatch", { field: "spendPub", address: request.address });
+  }
+  const viewForm = engine.xmrScan.viewKeyFormForAddress(request.viewSecret, addressKeys.viewPub);
+  if (!viewForm) {
+    throw new SdkError("xmr-address-mismatch", { field: "viewSecret", address: request.address });
+  }
+  const viewSecret = engine.xmrScan.viewSecretCandidates(request.viewSecret).find(([form]) => form === viewForm)?.[1] ?? request.viewSecret;
+  const watched = { address: request.address, viewSecret, spendPub: addressKeys.spendPub };
 
   // 1. THE TIP, and with it the first proof that ANY node answers. All nodes down is a named refusal, not silence.
   const live = [];
@@ -243,9 +263,16 @@ export async function verifyArrival(request) {
   // 2. LOCATE: from the birth height, by whole blocks. The first reachable node does the walk.
   let located = null;
   const completedOperators = new Set();
-  for (const { node } of live) {
+  for (const { node, info } of live) {
+    // A WITNESS THAT IS NOT SYNCHRONIZED HAS NOT SEEN THE RANGE. Counting its empty walk as absence would let two
+    // nodes that restarted behind the payout height refund a paid swap; the same rule already guards the positive
+    // branch below.
+    if (!info.synced) {
+      failed.push({ url: node.url, operator: node.operator, code: "stale", why: "not-synchronized" });
+      continue;
+    }
     try {
-      located = await locate(node, { expectedAtomic, address: request.address, viewSecret: request.viewSecret, spendPub: request.spendPub, fromHeight: request.fromHeight, toHeight: top, nowSec, fetchImpl, timeoutMs });
+      located = await locate(node, { expectedAtomic, address: request.address, viewSecret, spendPub, fromHeight: request.fromHeight, toHeight: top, nowSec, fetchImpl, timeoutMs });
       if (!located) completedOperators.add(node.operator);
     } catch (error) {
       failed.push(failureOf(error, node));
@@ -257,7 +284,15 @@ export async function verifyArrival(request) {
     // ABSENCE IS A CLAIM ABOUT MONEY, SO IT NEEDS TWO OPERATORS. One node can withhold a transaction and make
     // this walk look empty; a refund signed on that answer would take the depositor's ETH from a maker who paid.
     // Only when no node finished the walk is every node unreachable.
-    if (!completedOperators.size) throw new SdkError("xmr-no-nodes", { tried: nodes.map((n) => n.url), nodes: failed });
+    if (!completedOperators.size) {
+      // A LIVE BUT UNSYNCHRONIZED NODE IS UNKNOWN, NOT ABSENT. Returning pending keeps the refund closed while
+      // naming the stale witness in `failed`; xmr-no-nodes would say the nodes did not answer, which they did.
+      if (live.some((entry) => !entry.info.synced)) {
+        return { seen: false, state: "pending", absent: false, txid: txidHint, tip,
+          completedOperators: [], checked: live.map((l) => ({ url: l.node.url, operator: l.node.operator, height: l.info.height, synchronized: l.info.synced })), failed };
+      }
+      throw new SdkError("xmr-no-nodes", { tried: nodes.map((n) => n.url), nodes: failed });
+    }
     return { seen: false, state: "pending", absent: completedOperators.size >= 2, txid: txidHint, tip, completedOperators: [...completedOperators], checked: live.map((l) => ({ url: l.node.url, operator: l.node.operator, height: l.info.height })), failed };
   }
 

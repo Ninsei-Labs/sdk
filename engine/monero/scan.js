@@ -272,12 +272,22 @@ export function findOurOutputs({ txPublicKey = null, txPublicKeys = null, additi
   const usable = viewSecretCandidates(viewSecretHex).filter(([, v]) => v !== null);
   const first = usable[0] || ["unparsed", null];
   for (const [form, secret] of usable) {
-    const primaryDerivations = primaryKeys.map((key) => keyDerivation(key, secret));
+    // A MALFORMED EXTRA KEY IS NOT A REASON TO STOP LOOKING AT THE OTHER KEYS. Monero's wallet skips a key that is
+    // not a curve point and keeps scanning; a transaction with one bad tag-0x01 key otherwise blinds every arrival
+    // whose range includes its block.
+    const primaryDerivations = [];
+    for (const key of primaryKeys) {
+      try { primaryDerivations.push(keyDerivation(key, secret)); }
+      catch { /* skip this candidate; the other keys may still be ours */ }
+    }
     const found = [];
     for (const o of outputs) {
       // The main keys first, then only THIS output's additional key.
       const candidates = primaryDerivations.slice();
-      if (additional[o.index]) candidates.push(keyDerivation(additional[o.index], secret));
+      if (additional[o.index]) {
+        try { candidates.push(keyDerivation(additional[o.index], secret)); }
+        catch { /* a malformed per-output key is skipped, like the primary list */ }
+      }
       for (const derivation of candidates) {
         const scalar = hashToScalar(derivation, varint(o.index));
         const derived = derivedOutputKey(derivation, o.index, spendPubHex);
@@ -302,13 +312,17 @@ export function findOurOutputs({ txPublicKey = null, txPublicKeys = null, additi
       }
     }
     if (found.length) return { derivation: found[0].derivation, outputs: found, viewKeyForm: form };
-  }
-  return {
-    derivation: first[1] === null || !primaryKeys.length ? null : bytesToHex(keyDerivation(primaryKeys[0], first[1])),
-    outputs: [],
-    viewKeyForm: first[0],
-  };
-}
+    }
+    let fallback = null;
+    if (first[1] !== null && primaryKeys.length) {
+      try { fallback = bytesToHex(keyDerivation(primaryKeys[0], first[1])); } catch { fallback = null; }
+    }
+    return {
+      derivation: fallback,
+      outputs: [],
+      viewKeyForm: first[0],
+    };
+    }
 
 // ============================================================================================
 // SCANNING A HEIGHT RANGE. This is the indexing itself: read blocks in order, take their transaction hashes

@@ -55,3 +55,6 @@ export * as xmrAddress from "../engine/monero/address.js";
 // the engine mirror. check-sdk-engine reddens on any drift, so the two cannot diverge silently.
 export * as xmrUnlock from "../engine/monero/unlock.js";
 export * as xmrScan from "../engine/monero/scan.js";
+// THE ADDRESS AND ITS PUBLIC KEYS, for the arrival check: the view secret and spend key are bound to the address,
+// not merely used as labels.
+export * as xmrArrivalRead from "../engine/monero/arrivalRead.js";

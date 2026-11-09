@@ -5,6 +5,7 @@
 // that was called, for the predicted escrow. A missing receipt or a different event is pending, not funded.
 import { ORDER_CREATED_TOPIC } from "../engine/evm/factory.js";
 import { escrowFromReceipt, fundingReceiptVerdict } from "../engine/evm/funding.js";
+import { samePendingFunding, pendingFundingVerdict } from "../src/swaps.mjs";
 
 const factory = "0x" + "11".repeat(20);
 const escrow = "0x" + "88".repeat(20);
@@ -57,6 +58,26 @@ console.log("=== 4) ONLY STATUS 1 WITH THE EXPECTED EVENT IS FUNDED ===");
   const direct = escrowFromReceipt(receipt("0x1", [event()]), { factory, expectedEscrow: escrow });
   if (direct === escrow) ok("escrowFromReceipt keeps the expected address");
   else bad("escrowFromReceipt -> " + JSON.stringify(direct));
+}
+
+console.log("=== 5) A PENDING FUNDING IS RESUMED ONLY FOR THE SAME QUOTE AND SALT ===");
+{
+  const pending = { orderQuoteId: "nonce-1", recoverySalt: "aa".repeat(32), fundingPending: true,
+    escrow: { salt: "aa".repeat(32), fundingPending: true } };
+  if (samePendingFunding(pending, "nonce-1", "aa".repeat(32))) ok("the same quote id and salt resumes");
+  else bad("the same quote id and salt did not resume");
+  if (!samePendingFunding(pending, "nonce-1", "bb".repeat(32))) ok("a reused id with another salt is a different order");
+  else bad("a reused id with another salt resumed");
+  if (!samePendingFunding(pending, "nonce-2", "bb".repeat(32))) ok("another id is a different order");
+  else bad("another id resumed");
+  if (!samePendingFunding({ ...pending, fundingPending: false, escrow: { salt: "aa".repeat(32) } }, "nonce-1", "aa".repeat(32))) {
+    ok("a non-pending record is not resumed");
+  } else bad("a non-pending record resumed");
+  if (pendingFundingVerdict(pending, "nonce-1", null) === "salt-required") {
+    ok("an id-only resume is refused instead of falling through to a new deposit");
+  } else bad("an id-only pending record was not refused: " + pendingFundingVerdict(pending, "nonce-1", null));
+  if (pendingFundingVerdict(pending, "nonce-1", "aa".repeat(32)) === "resume") ok("the verdict resumes with the same salt");
+  else bad("the verdict did not resume with the same salt");
 }
 
 console.log("");

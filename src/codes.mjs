@@ -67,6 +67,9 @@ export const ERROR_CODES = [
   "quote-key-mismatch",
   "quote-field-unbound",
   "quote-expired",
+  // THE QUOTE ARRIVED WITH LESS THAN THE START MARGIN LEFT. The lock would refuse it seconds later, after the proof
+  // and the record work, so the answer is refused as soon as it arrives and the caller can ask again.
+  "quote-too-short",
   // WHO OWNS THE KEY - ASKED OF THE CHAIN (maker registry, providerOf). The signature alone proves only that
   // SOME key signed; these four name what the registry (and the interface's policy) said:
   //   quote-registry-unchecked  - there was no way to ask the chain, so the claim stays unproven;
@@ -124,6 +127,7 @@ export const ERROR_CODES = [
   "xmr-no-nodes",
   "xmr-underpaid",
   "xmr-too-late",
+  "xmr-address-mismatch",
   "contract-reverted",
   "insufficient-funds",
   // A FEE REPORTED BY A WALLET/NODE IS DATA, NOT AN INSTRUCTION. Without a ceiling a malicious node can take
@@ -173,6 +177,7 @@ export const ERROR_META = Object.freeze({
   "quote-key-mismatch": { retryable: false, side: "provider" },
   "quote-field-unbound": { retryable: false, side: "provider" },
   "quote-expired": { retryable: true, side: "provider" },
+  "quote-too-short": { retryable: true, side: "provider" },
   "quote-registry-unchecked": { retryable: true, side: "chain" },
   "quote-key-unknown": { retryable: false, side: "chain" },
   "quote-provider-mismatch": { retryable: false, side: "chain" },
@@ -195,6 +200,7 @@ export const ERROR_META = Object.freeze({
   "xmr-no-nodes": { retryable: true, side: "chain" },
   "xmr-underpaid": { retryable: false, side: "chain" },
   "xmr-too-late": { retryable: false, side: "chain" },
+  "xmr-address-mismatch": { retryable: false, side: "caller" },
   "contract-reverted": { retryable: false, side: "chain" },
   "insufficient-funds": { retryable: false, side: "wallet" },
   "sweep-fee-too-high": { retryable: false, side: "chain" },
