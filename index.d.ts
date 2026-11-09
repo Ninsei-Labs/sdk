@@ -698,6 +698,12 @@ export interface SwapsApi {
    * never a silent success.
    */
   verifyArrival(request: XmrArrivalRequest): Promise<XmrArrivalVerdict>;
+  /**
+   * RUN THE EXACT CHECK AND THE WITNESS-V1 SLICE CHECK SIDE BY SIDE. The exact verdict still decides; this
+   * returns both readings and any difference, and changes no swap state. `witnessNodes` must name at least one
+   * node with `protocol: "witness-v1"`. It is the staging step before slice-only verification.
+   */
+  verifyArrivalShadow(request: XmrArrivalShadowRequest): Promise<XmrArrivalShadowResult>;
   /** Fewer seconds before the ready deadline than the confirmations take - a named refusal (`xmr-too-late`). */
   assertTimeForConfirmations(request: XmrDeadlineRequest): number | null;
   /**
@@ -785,10 +791,12 @@ export interface SwapProgressView {
   readonly terminal: unknown;
 }
 
-/** ONE WITNESS NODE: the address, and whose node it is (two nodes of one operator are one opinion). */
+/** ONE WITNESS NODE: the address, whose node it is, and the optional slice protocol. */
 export interface XmrNode {
   readonly url: string;
   readonly operator?: string;
+  /** `witness-v1` when this URL serves `POST /v1/witness/slice`; absent for a standard daemon. */
+  readonly protocol?: "witness-v1" | string;
 }
 
 /**
@@ -807,6 +815,37 @@ export interface XmrArrivalRequest {
   readonly fromHeight?: number | null;
   readonly nowSec?: number;
   readonly timeoutMs?: number;
+}
+
+/** The slice check's extra input: independent witnesses that serve witness-v1. */
+export interface XmrArrivalShadowRequest extends XmrArrivalRequest {
+  readonly witnessNodes: readonly (XmrNode | string)[];
+  /** Overrides the network derived from the address; normally left out. */
+  readonly network?: string;
+}
+
+/** What one witness returned from the slice walk. */
+export interface XmrWitnessShadowReading {
+  readonly state: "seen" | "pending";
+  readonly txid: string | null;
+  readonly height: number | null;
+  readonly blockHash: string | null;
+  readonly amountAtomic: string | null;
+  readonly operator?: string;
+  readonly url?: string;
+  readonly completed: boolean;
+  readonly checked: readonly Record<string, unknown>[];
+  readonly failed: readonly Record<string, unknown>[];
+}
+
+/** The exact verdict and the slice reading, side by side. This is not a swap decision. */
+export interface XmrArrivalShadowResult {
+  readonly exact: XmrArrivalVerdict | null;
+  readonly exactError: { readonly code: string; readonly params: Record<string, unknown> } | null;
+  readonly witness: XmrWitnessShadowReading;
+  /** True when the two readings agree; null when there is nothing comparable to agree on. */
+  readonly agrees: boolean | null;
+  readonly problems: readonly string[];
 }
 
 /** The XMR state the watch hands to the interface: the fact, the waiting state, or a refusal with a code. */

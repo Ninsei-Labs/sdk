@@ -114,6 +114,25 @@ analytics, crash reports or a backend.
 from; a missing height is a named state, not zero. The host may use the public log search from the recovery
 subpath, but only public order data leaves the client.
 
+## 7a. The arrival shadow
+
+Production arrival still uses `swaps.verifyArrival`: first operator walks from the order's start height, and every
+witness is asked for the located block so the observations can be compared. Before slice-only verification is
+enabled, `swaps.verifyArrivalShadow` runs that exact check and a `witness-v1` slice check side by side:
+
+```js
+const shadow = await sdk.swaps.verifyArrivalShadow({
+  ...arrivalRequest,
+  witnessNodes: [{ url: "https://witness.example", operator: "partner", protocol: "witness-v1" }],
+});
+```
+
+The slice request is `{ version: 1, network, grid: 20, slice }`. It contains no start height, payout block, txid or
+order id; a URL without `protocol: "witness-v1"` is refused rather than guessed. The same witness must answer
+`get_info` and the slice's `get_transactions` reads; the node-side contract describes those routes. `shadow.exact`
+still decides; `shadow.agrees` and `shadow.problems` exist for staging and logs. A shadow mismatch must never be
+turned into a refund or a ready mark.
+
 ## 8. Retry and idempotency
 
 | Operation | Retry rule |

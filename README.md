@@ -35,6 +35,7 @@ The supported versions, scope, response targets, safe-harbor rules and disclosur
 | `swaps.list` / `swaps.get` | read state from storage (and after a page reload) |
 | `swaps.start` | holds the order: guards → recovery file and the person's confirmation → order → locking funds → **watching the Monero address**; no backend is required; returns the named state `step: "xmr-incoming"` |
 | `swaps.watch` | waits for XMR at the joint address with the CLIENT's own check: `verify` carries the joint address, view secret, spend public key and witness nodes. Arrived — returns the fact (amount, confirmations, txid); did not wait — a refusal with `xmr-timeout`; funds barred by `unlock_time` — `xmr-locked`; the maker DECLINED — `SwapDeclinedWatch` (`declined: true`, `terminal: "declined"`), every action off; with expectations and a wallet, places the ready mark after the arrival |
+| `swaps.verifyArrivalShadow` | the staging path for witness-v1: runs the exact walk and the fixed-slice walk side by side, without changing ready or refund. The slice request carries only the grid and slice; a node must name `protocol: "witness-v1"` |
 | `swaps.startSell` / `swaps.sellClaim` / `swaps.claimViaRelay` | a sell is recorded from the verified relay offer; `sellClaim` claims from the claimer's own wallet, `claimViaRelay` claims with no wallet through the sender the client chose, paid by the signed `claimTip` |
 | `wallet.balances` | works: the native coin and tokens, in minimal units |
 
