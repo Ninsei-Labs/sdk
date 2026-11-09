@@ -22,6 +22,10 @@ const VIEW = 11n;
 const SPEND = 13n;
 const R = 17n;
 
+function isHost(url, host) {
+  try { return new URL(url).hostname === host; } catch { return false; }
+}
+
 let pass = 0;
 const problems = [];
 const ok = (name) => { pass += 1; console.log("  ok    " + name); };
@@ -78,7 +82,7 @@ function fetchBoth({ witnessHash = BLOCK_HASH } = {}) {
   return async (url, init) => {
     const body = JSON.parse(String(init.body || "{}"));
     requests.push({ url, body });
-    if (url.startsWith("https://witness.example") && url.endsWith("/v1/witness/slice")) {
+    if (isHost(url, "witness.example") && url.endsWith("/v1/witness/slice")) {
       if (body.height !== undefined || body.txid !== undefined) return { ok: false, status: 400, json: async () => ({}) };
       const from = Number(body.slice) * Number(body.grid);
       const blocks = Array.from({ length: Number(body.grid) }, (_, i) => {
@@ -93,7 +97,7 @@ function fetchBoth({ witnessHash = BLOCK_HASH } = {}) {
         from, to: from + 19, blocks }) };
     }
     if (body.method === "get_info") {
-      return { ok: true, json: async () => ({ result: { height: url.startsWith("https://witness.example") ? 120 : 121, synchronized: true } }) };
+      return { ok: true, json: async () => ({ result: { height: isHost(url, "witness.example") ? 120 : 121, synchronized: true } }) };
     }
     if (body.method === "get_block") {
       return { ok: true, json: async () => ({ result: blockFor(Number(body.params.height)) }) };
@@ -113,7 +117,7 @@ function fetchBoth({ witnessHash = BLOCK_HASH } = {}) {
 function fetchEmpty() {
   return async (url, init) => {
     const body = JSON.parse(String(init.body || "{}"));
-    if (url.startsWith("https://missing.example")) return { ok: false, status: 404, json: async () => ({}) };
+    if (isHost(url, "missing.example")) return { ok: false, status: 404, json: async () => ({}) };
     if (body.method === "get_info") return { ok: true, json: async () => ({ result: { height: 121, synchronized: true } }) };
     if (body.method === "get_block") {
       return { ok: true, json: async () => ({ result: { block_header: { hash: String(body.params.height).padStart(64, "0") }, tx_hashes: [] } }) };
@@ -142,7 +146,7 @@ console.log("=== 1) THE EXACT AND SLICE READINGS AGREE ===");
   else bad("slice walk: " + JSON.stringify(result.witness));
   if (result.agrees === true && result.problems.length === 0) ok("the two readings agree");
   else bad("agreement: " + JSON.stringify(result.problems));
-  const witnessCalls = requests.filter((entry) => entry.url.startsWith("https://witness.example"));
+  const witnessCalls = requests.filter((entry) => isHost(entry.url, "witness.example"));
   if (!witnessCalls.some((entry) => entry.url.endsWith("/json_rpc") && entry.body.method === "get_block")) ok("the witness never receives a get_block request");
   else bad("a get_block reached the witness");
   const sliceCalls = witnessCalls.filter((entry) => entry.url.endsWith("/v1/witness/slice"));

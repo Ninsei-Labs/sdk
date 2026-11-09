@@ -22,6 +22,10 @@ const address = addressFromKeys({ network: "stagenet", kind: "primary", spendPub
 const wrongSpend = G.multiply(SPEND + 1n).toHex();
 const dir = mkdtempSync(join(tmpdir(), "sdk-arrival-teeth-"));
 
+function isHost(url, host) {
+  try { return new URL(url).hostname === host; } catch { return false; }
+}
+
 let pass = 0;
 const problems = [];
 const ok = (name) => { pass += 1; console.log("  ok    " + name); };
@@ -87,7 +91,7 @@ try {
   // THE SHADOW'S ABSENCE RULE HAS ITS OWN DELETION PROOF. A witness that never answered is not evidence that
   // the money is absent; removing the completed/failed condition must make the comparison claim agreement.
   const absentFetch = async (url, init) => {
-    if (url.startsWith("https://missing.example")) return { ok: false, status: 404, json: async () => ({}) };
+    if (isHost(url, "missing.example")) return { ok: false, status: 404, json: async () => ({}) };
     return fetchFor({ synchronized: true })(url, init);
   };
   const shadowRequest = {
