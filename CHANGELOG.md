@@ -1,4 +1,4 @@
-## Unreleased
+## 0.58.0 — 2026-11-10
 
 - `swaps.verifyArrivalShadow` runs the exact arrival walk and the fixed-slice witness-v1 walk side by side. The witness request carries only `{version, network, grid, slice}` (20 blocks aligned to multiples of 20), never the start height, payout block, txid or order id; a node without `protocol: "witness-v1"` is refused rather than guessed. The exact verdict still decides, so this is the staging path before an independent operator serves the protocol.
 - A quote is refused as `quote-too-short` when it arrives with less than the start margin left, instead of showing a confirmation that the lock would reject seconds later.
