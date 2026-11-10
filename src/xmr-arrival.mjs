@@ -594,6 +594,7 @@ export async function verifyArrivalShadow(request) {
   const exactTop = exactTopOf(exact);
   let located = null;
   let completed = false;
+  const completedWitnessOperators = new Set();
   for (const node of witnessNodes) {
     if (node.protocol !== "witness-v1") { failed.push({ url: node.url, operator: node.operator, code: "no-slice-witness" }); continue; }
     let info;
@@ -614,6 +615,7 @@ export async function verifyArrivalShadow(request) {
         nowSec, network, fetchImpl, timeoutMs,
       });
       completed = completed || found.completed;
+      if (found.completed) completedWitnessOperators.add(node.operator || node.url);
       if (found.failure) {
         failed.push(failureOf(found.failure, node));
         entry.state = "error";
@@ -630,10 +632,17 @@ export async function verifyArrivalShadow(request) {
   }
 
   if (!located) failed.push(...staleWitnesses);
+  const completedOperators = [...completedWitnessOperators];
+  const independentOperators = completedOperators.filter((operator) => String(operator).toLowerCase() !== "ninsei");
+  const required = 2;
+  const witnessQuorum = { required, completed: completedOperators, independent: independentOperators,
+    ok: (network === "mainnet" ? independentOperators.length : completedOperators.length) >= required };
   const witness = located
     ? { state: "seen", txid: located.txid, height: located.height, blockHash: located.blockHash,
-        amountAtomic: located.amountAtomic.toString(), operator: located.operator, url: located.url, completed, checked, failed }
-    : { state: "pending", txid: null, height: null, blockHash: null, amountAtomic: null, completed, checked, failed };
+        amountAtomic: located.amountAtomic.toString(), operator: located.operator, url: located.url, completed, checked, failed,
+        quorum: witnessQuorum }
+    : { state: "pending", txid: null, height: null, blockHash: null, amountAtomic: null, completed, checked, failed,
+        quorum: witnessQuorum };
 
   const problems = [];
   let agrees = null;
