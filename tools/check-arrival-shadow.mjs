@@ -78,14 +78,16 @@ function blockFor(height) {
   return { block_header: { hash }, tx_hashes: height === 105 ? [TXID] : [] };
 }
 
-function fetchBoth({ witnessHash = BLOCK_HASH } = {}) {
+function fetchBoth({ witnessHash = BLOCK_HASH, witnessTop = 119, witnessBroken = null } = {}) {
   return async (url, init) => {
     const body = JSON.parse(String(init.body || "{}"));
     requests.push({ url, body });
     if (isHost(url, "witness.example") && url.endsWith("/v1/witness/slice")) {
       if (body.height !== undefined || body.txid !== undefined) return { ok: false, status: 400, json: async () => ({}) };
       const from = Number(body.slice) * Number(body.grid);
-      const blocks = Array.from({ length: Number(body.grid) }, (_, i) => {
+      const sliceEnd = from + Number(body.grid) - 1;
+      const to = Math.min(sliceEnd, Number(witnessTop));
+      const blocks = Array.from({ length: to - from + 1 }, (_, i) => {
         const height = from + i;
         return {
           height,
@@ -93,11 +95,15 @@ function fetchBoth({ witnessHash = BLOCK_HASH } = {}) {
           txids: height === 105 ? [TXID] : [],
         };
       });
+      const complete = to === sliceEnd;
+      const tip = complete ? null : { height: witnessBroken === "wrong-tip" ? to - 1 : to, hash: blocks[blocks.length - 1].hash };
       return { ok: true, json: async () => ({ version: 1, network: "stagenet", grid: 20, slice: body.slice,
-        from, to: from + 19, blocks }) };
+        from, to, complete: witnessBroken === "claims-complete" ? true : complete, blocks,
+        tip: witnessBroken === "claims-complete" ? null : tip }) };
     }
     if (body.method === "get_info") {
-      return { ok: true, json: async () => ({ result: { height: isHost(url, "witness.example") ? 120 : 121, synchronized: true } }) };
+      const height = isHost(url, "witness.example") ? Number(witnessTop) + 1 : 121;
+      return { ok: true, json: async () => ({ result: { height, synchronized: true, status: "OK", nettype: "stagenet" } }) };
     }
     if (body.method === "get_block") {
       return { ok: true, json: async () => ({ result: blockFor(Number(body.params.height)) }) };
@@ -192,6 +198,30 @@ console.log("=== 4) ABSENCE NEEDS THE WITNESS WALK, NOT A SILENT SERVER ===");
   else bad("witness evidence: " + JSON.stringify({ completed: result.witness.completed, failed: result.witness.failed }));
   if (result.agrees === false && result.problems.includes("witness:not-completed")) ok("absence without a witness walk is not agreement");
   else bad("false agreement: " + JSON.stringify({ agrees: result.agrees, problems: result.problems }));
+}
+
+console.log("=== 5) A TIP SLICE IS PARTIAL, NOT A REFUSAL ===");
+{
+  requests.length = 0;
+  const result = await shadow({ witnessTop: 115 });
+  if (result.witness.state === "seen" && result.witness.completed === true) ok("the witness walk completes on a partial tip slice");
+  else bad("partial witness walk: " + JSON.stringify({ state: result.witness.state, completed: result.witness.completed, failed: result.witness.failed }));
+  if (result.agrees === true && result.problems.length === 0) ok("the partial tip agrees with the exact reading");
+  else bad("partial tip agreement: " + JSON.stringify(result.problems));
+  const slices = requests.filter((entry) => isHost(entry.url, "witness.example") && entry.url.endsWith("/v1/witness/slice"));
+  if (slices.length === 1 && slices[0].body.slice === 5) ok("the last request is still one fixed slice");
+  else bad("partial slice requests: " + JSON.stringify(slices.map((entry) => entry.body)));
+}
+
+console.log("=== 6) A BROKEN PARTIAL SLICE IS NOT AN ANSWER ===");
+{
+  const result = await shadow({ witnessTop: 115, witnessBroken: "claims-complete" });
+  if (result.witness.state !== "seen" && result.witness.failed.length > 0) ok("a partial slice that claims to be complete is refused");
+  else bad("broken partial: " + JSON.stringify({ state: result.witness.state, failed: result.witness.failed }));
+
+  const wrongTip = await shadow({ witnessTop: 115, witnessBroken: "wrong-tip" });
+  if (wrongTip.witness.state !== "seen" && wrongTip.witness.failed.length > 0) ok("a partial slice whose tip does not match the walk is refused");
+  else bad("wrong tip: " + JSON.stringify({ state: wrongTip.witness.state, failed: wrongTip.witness.failed }));
 }
 
 if (problems.length) {

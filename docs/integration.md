@@ -128,10 +128,11 @@ const shadow = await sdk.swaps.verifyArrivalShadow({
 ```
 
 The slice request is `{ version: 1, network, grid: 20, slice }`. It contains no start height, payout block, txid or
-order id; a URL without `protocol: "witness-v1"` is refused rather than guessed. The same witness must answer
-`get_info` and the slice's `get_transactions` reads; the node-side contract describes those routes. `shadow.exact`
-still decides; `shadow.agrees` and `shadow.problems` exist for staging and logs. A shadow mismatch must never be
-turned into a refund or a ready mark.
+order id; a URL without `protocol: "witness-v1"` is refused rather than guessed. A slice below the tip has 20 blocks;
+the slice that contains the tip ends at the top and sets `complete: false` with `tip: {height, hash}`. The same witness
+must answer `get_info` and the slice's `get_transactions` reads; the node-side contract describes those routes.
+`shadow.exact` still decides; `shadow.agrees` and `shadow.problems` exist for staging and logs. A shadow mismatch must
+never be turned into a refund or a ready mark.
 
 ## 8. Retry and idempotency
 
