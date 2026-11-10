@@ -78,7 +78,8 @@ function blockFor(height) {
   return { block_header: { hash }, tx_hashes: height === 105 ? [TXID] : [] };
 }
 
-function fetchBoth({ witnessHash = BLOCK_HASH, witnessTop = 119, witnessBroken = null } = {}) {
+function fetchBoth({ witnessHash = BLOCK_HASH, witnessTop = 119, witnessInfoTop = null, witnessPartialAt = null,
+  witnessPartialTo = null, witnessBroken = null } = {}) {
   return async (url, init) => {
     const body = JSON.parse(String(init.body || "{}"));
     requests.push({ url, body });
@@ -86,7 +87,9 @@ function fetchBoth({ witnessHash = BLOCK_HASH, witnessTop = 119, witnessBroken =
       if (body.height !== undefined || body.txid !== undefined) return { ok: false, status: 400, json: async () => ({}) };
       const from = Number(body.slice) * Number(body.grid);
       const sliceEnd = from + Number(body.grid) - 1;
-      const to = Math.min(sliceEnd, Number(witnessTop));
+      const limit = witnessPartialAt !== null && Number(body.slice) === Number(witnessPartialAt)
+        ? Number(witnessPartialTo) : Number(witnessTop);
+      const to = Math.min(sliceEnd, limit);
       const blocks = Array.from({ length: to - from + 1 }, (_, i) => {
         const height = from + i;
         return {
@@ -102,7 +105,7 @@ function fetchBoth({ witnessHash = BLOCK_HASH, witnessTop = 119, witnessBroken =
         tip: witnessBroken === "claims-complete" ? null : tip }) };
     }
     if (body.method === "get_info") {
-      const height = isHost(url, "witness.example") ? Number(witnessTop) + 1 : 121;
+      const height = isHost(url, "witness.example") ? Number(witnessInfoTop ?? witnessTop) + 1 : 121;
       return { ok: true, json: async () => ({ result: { height, synchronized: true, status: "OK", nettype: "stagenet" } }) };
     }
     if (body.method === "get_block") {
@@ -133,12 +136,12 @@ function fetchEmpty() {
   };
 }
 
-async function shadow(overrides = {}) {
+async function shadow({ fromHeight = 100, ...overrides } = {}) {
   return verifyArrivalShadow({
     nodes: [{ url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" }],
     witnessNodes: [{ url: "https://witness.example", operator: "W", protocol: "witness-v1" }],
     address, viewSecret: VIEW, spendPub, expectedAtomic: AMOUNT, minConfirmations: 1,
-    fromHeight: 100, fetch: fetchBoth(overrides),
+    fromHeight, fetch: fetchBoth(overrides),
   });
 }
 
@@ -222,6 +225,23 @@ console.log("=== 6) A BROKEN PARTIAL SLICE IS NOT AN ANSWER ===");
   const wrongTip = await shadow({ witnessTop: 115, witnessBroken: "wrong-tip" });
   if (wrongTip.witness.state !== "seen" && wrongTip.witness.failed.length > 0) ok("a partial slice whose tip does not match the walk is refused");
   else bad("wrong tip: " + JSON.stringify({ state: wrongTip.witness.state, failed: wrongTip.witness.failed }));
+}
+
+console.log("=== 7) THE WALK GUARDS ARE LOAD-BEARING ===");
+{
+  const nonTip = await shadow({ witnessTop: 139, witnessPartialAt: 5, witnessPartialTo: 115 });
+  if (nonTip.witness.state !== "seen" && nonTip.witness.completed === false && nonTip.witness.failed.length > 0) {
+    ok("a partial slice before the tip slice is refused");
+  } else bad("non-tip partial: " + JSON.stringify({ state: nonTip.witness.state, completed: nonTip.witness.completed, failed: nonTip.witness.failed }));
+
+  const wrongTop = await shadow({ witnessTop: 115, witnessInfoTop: 116 });
+  if (wrongTop.witness.state !== "seen" && wrongTop.witness.completed === false && wrongTop.witness.failed.length > 0) {
+    ok("a partial tip that does not match the caller's top is refused");
+  } else bad("tip height: " + JSON.stringify({ state: wrongTop.witness.state, completed: wrongTop.witness.completed, failed: wrongTop.witness.failed }));
+
+  const empty = await shadow({ fromHeight: 200, witnessTop: 115 });
+  if (empty.witness.completed === false) ok("an empty slice range is not a completed walk");
+  else bad("empty range: " + JSON.stringify({ completed: empty.witness.completed }));
 }
 
 if (problems.length) {
