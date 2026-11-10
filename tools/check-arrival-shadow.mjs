@@ -79,12 +79,16 @@ function blockFor(height) {
 }
 
 function fetchBoth({ witnessHash = BLOCK_HASH, witnessTop = 119, witnessInfoTop = null, exactInfoHeight = null,
-  exactStaleHeight = null, witnessPartialAt = null, witnessPartialTo = null, witnessBroken = null } = {}) {
+  exactStaleHeight = null, witnessPartialAt = null, witnessPartialTo = null, witnessBroken = null,
+  witnessFailAt = null } = {}) {
   return async (url, init) => {
     const body = JSON.parse(String(init.body || "{}"));
     requests.push({ url, body });
     if (isHost(url, "witness.example") && url.endsWith("/v1/witness/slice")) {
       if (body.height !== undefined || body.txid !== undefined) return { ok: false, status: 400, json: async () => ({}) };
+      if (witnessFailAt !== null && Number(body.slice) === Number(witnessFailAt)) {
+        return { ok: false, status: 503, json: async () => ({ code: "busy" }) };
+      }
       const from = Number(body.slice) * Number(body.grid);
       const sliceEnd = from + Number(body.grid) - 1;
       const limit = witnessPartialAt !== null && Number(body.slice) === Number(witnessPartialAt)
@@ -138,13 +142,13 @@ function fetchEmpty() {
   };
 }
 
-async function shadow({ fromHeight = 100, exactThird = false, ...overrides } = {}) {
+async function shadow({ fromHeight = 100, exactThird = false, expectedAtomic = AMOUNT, ...overrides } = {}) {
   const nodes = [{ url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" }];
   if (exactThird) nodes.push({ url: "https://c.example", operator: "C" });
   return verifyArrivalShadow({
     nodes,
     witnessNodes: [{ url: "https://witness.example", operator: "W", protocol: "witness-v1" }],
-    address, viewSecret: VIEW, spendPub, expectedAtomic: AMOUNT, minConfirmations: 1,
+    address, viewSecret: VIEW, spendPub, expectedAtomic, minConfirmations: 1,
     fromHeight, fetch: fetchBoth(overrides),
   });
 }
@@ -306,6 +310,17 @@ console.log("=== 12) A STALE EXACT NODE DOES NOT INFLATE THE TARGET ===");
   else bad("stale exact height: " + JSON.stringify(result.witness));
   if (result.agrees === true && result.problems.length === 0) ok("the honest witness still agrees with the exact reading");
   else bad("stale exact agreement: " + JSON.stringify({ agrees: result.agrees, problems: result.problems }));
+}
+
+console.log("=== 13) A LATER SLICE FAILURE DOES NOT ERASE A FOUND CANDIDATE ===");
+{
+  const result = await shadow({ witnessTop: 120, witnessFailAt: 6, expectedAtomic: AMOUNT * 2n });
+  if (result.witness.state === "seen" && result.witness.txid === TXID) {
+    ok("a candidate read before the failed slice is still reported");
+  } else bad("candidate retention: " + JSON.stringify(result.witness));
+  if (result.witness.failed.length > 0 && result.witness.checked[0] && result.witness.checked[0].state === "error") {
+    ok("the failed slice is named beside the candidate");
+  } else bad("candidate failure record: " + JSON.stringify({ failed: result.witness.failed, checked: result.witness.checked }));
 }
 
 if (problems.length) {

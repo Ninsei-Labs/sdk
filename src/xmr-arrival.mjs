@@ -490,11 +490,22 @@ async function locateInSlices(node, { expectedAtomic, address, viewSecret, spend
   const last = witnessSliceIndex(Math.min(toHeight, target));
   let best = null;
   let completed = false;
+  let failure = null;
   for (let index = first; index <= last; index++) {
-    // The witness reads its tip at slice time, so a block can arrive between the tip read and this request. The
-    // parser accepts a newer tip and rejects one below the top the walk started from.
-    const slice = await readWitnessSlice(node, index, { network, fetchImpl, timeoutMs, tipHeight: toHeight });
-    const txs = await readSliceTransactions(node, slice, { fetchImpl, timeoutMs });
+    let slice;
+    let txs;
+    try {
+      // The witness reads its tip at slice time, so a block can arrive between the tip read and this request. The
+      // parser accepts a newer tip and rejects one below the top the walk started from.
+      slice = await readWitnessSlice(node, index, { network, fetchImpl, timeoutMs, tipHeight: toHeight });
+      txs = await readSliceTransactions(node, slice, { fetchImpl, timeoutMs });
+    } catch (error) {
+      // A CANDIDATE FOUND BEFORE THE FAILURE IS STILL A CANDIDATE. The slice walk is evidence, and a later
+      // refused slice does not erase the transaction already read from an earlier one. The caller records the
+      // failure beside the located candidate; an absence still requires the whole walk.
+      failure = error;
+      break;
+    }
     for (const block of slice.blocks) {
       // THE SLICE IS A FIXED WINDOW; THE SWAP STARTS AT `fromHeight`. Blocks before the birth height may contain
       // an earlier transfer to the same address, and counting them would make the slice walk disagree with the
@@ -525,7 +536,7 @@ async function locateInSlices(node, { expectedAtomic, address, viewSecret, spend
     }
     if (index === last) completed = slice.to >= target;
   }
-  return { located: best, completed };
+  return { located: best, completed, failure };
 }
 
 /**
@@ -603,7 +614,10 @@ export async function verifyArrivalShadow(request) {
         nowSec, network, fetchImpl, timeoutMs,
       });
       completed = completed || found.completed;
-      if (!found.completed) entry.state = found.located ? "partial" : "behind";
+      if (found.failure) {
+        failed.push(failureOf(found.failure, node));
+        entry.state = "error";
+      } else if (!found.completed) entry.state = found.located ? "partial" : "behind";
       if (found.located && (!located || found.located.score > located.score)) {
         located = found.located;
         located.operator = node.operator;
