@@ -272,6 +272,20 @@ jobs:
       - name: Run every registered SDK check and enforce coverage
         run: pnpm run coverage
 
+      # THE SAME INTEROP FROM THE SDK SIDE. witness-node#13 already drives this SDK from its workflow; this step
+      # closes the reverse direction. The witness commit is pinned so a passing run names both sides exactly.
+      - name: Check out the witness node at the pinned commit
+        uses: actions/checkout@v7
+        with:
+          repository: Ninsei-Labs/witness-node
+          ref: 4c519ace4d6d86fdb710c31bbb2626b393799df4 # pinned; bump with the witness-node release
+          path: witness-node
+
+      - name: Run the SDK/witness interop check
+        env:
+          SDK_DIR: ${{ github.workspace }}
+        run: node witness-node/tools/check-sdk-interop.mjs
+
   dleq-oracle:
     name: Go/Rust DLEQ oracle
     needs: checks
