@@ -60,24 +60,31 @@ console.log("=== 4) ONLY STATUS 1 WITH THE EXPECTED EVENT IS FUNDED ===");
   else bad("escrowFromReceipt -> " + JSON.stringify(direct));
 }
 
-console.log("=== 5) A PENDING FUNDING IS RESUMED ONLY FOR THE SAME QUOTE AND SALT ===");
+console.log("=== 5) A PENDING FUNDING IS RESUMED ONLY FOR THE SAME ORDER ===");
 {
-  const pending = { orderQuoteId: "nonce-1", recoverySalt: "aa".repeat(32), fundingPending: true,
-    escrow: { salt: "aa".repeat(32), fundingPending: true } };
-  if (samePendingFunding(pending, "nonce-1", "aa".repeat(32))) ok("the same quote id and salt resumes");
-  else bad("the same quote id and salt did not resume");
-  if (!samePendingFunding(pending, "nonce-1", "bb".repeat(32))) ok("a reused id with another salt is a different order");
-  else bad("a reused id with another salt resumed");
-  if (!samePendingFunding(pending, "nonce-2", "bb".repeat(32))) ok("another id is a different order");
-  else bad("another id resumed");
-  if (!samePendingFunding({ ...pending, fundingPending: false, escrow: { salt: "aa".repeat(32) } }, "nonce-1", "aa".repeat(32))) {
+  const chainId = 42161;
+  const identity = { salt: "aa".repeat(32), chainId, factory, escrow };
+  const otherIdentity = { ...identity, escrow: other };
+  const pending = { fundingPending: true, order: { chainId, factory },
+    escrow: { salt: "aa".repeat(32), address: escrow, fundingPending: true } };
+  if (samePendingFunding(pending, identity)) ok("the same salt, chain, factory and escrow resumes");
+  else bad("the same identity did not resume");
+  if (!samePendingFunding(pending, { ...identity, salt: "bb".repeat(32) })) ok("another salt is a different order");
+  else bad("another salt resumed");
+  if (!samePendingFunding(pending, { ...identity, chainId: 1 })) ok("another chain is a different order");
+  else bad("another chain resumed");
+  if (!samePendingFunding(pending, { ...identity, factory: other })) ok("another factory is a different order");
+  else bad("another factory resumed");
+  if (!samePendingFunding(pending, otherIdentity)) ok("another predicted escrow is a different order");
+  else bad("another escrow resumed");
+  if (!samePendingFunding({ ...pending, fundingPending: false, escrow: { ...pending.escrow, fundingPending: false } }, identity)) {
     ok("a non-pending record is not resumed");
   } else bad("a non-pending record resumed");
-  if (pendingFundingVerdict(pending, "nonce-1", null) === "salt-required") {
-    ok("an id-only resume is refused instead of falling through to a new deposit");
-  } else bad("an id-only pending record was not refused: " + pendingFundingVerdict(pending, "nonce-1", null));
-  if (pendingFundingVerdict(pending, "nonce-1", "aa".repeat(32)) === "resume") ok("the verdict resumes with the same salt");
-  else bad("the verdict did not resume with the same salt");
+  if (pendingFundingVerdict(pending, {}) === "salt-required") {
+    ok("an identity without a salt is refused instead of falling through to a new deposit");
+  } else bad("a salt-less identity was not refused: " + pendingFundingVerdict(pending, {}));
+  if (pendingFundingVerdict(pending, identity) === "resume") ok("the verdict resumes with the full identity");
+  else bad("the verdict did not resume with the full identity");
 }
 
 console.log("");

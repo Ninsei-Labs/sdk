@@ -487,6 +487,14 @@ export declare function probeMoneroNode(options: {
 /** The watch key form that matches the address's view public key, or null when none does. */
 export declare function viewKeyFormForAddress(viewSecret: string, expectedViewPubHex: string): string | null;
 
+/** Whether the view and spend keys belong to the primary address they are scanned for, and the one scalar form to use. */
+export declare function watchedAddressVerdict(watched: {
+  address: string;
+  viewSecret: string | bigint;
+  spendPub: string;
+}): { readonly ok: true; readonly viewSecret: bigint; readonly spendPub: string; readonly form: string }
+  | { readonly ok: false; readonly code: string; readonly field?: string; readonly why?: string };
+
 /** A boundary height derived from a later unlock_time, or null when the time names no height. */
 export declare function laterBoundary(...args: unknown[]): unknown;
 

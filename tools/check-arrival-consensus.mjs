@@ -433,7 +433,7 @@ console.log("=== 3c) A KEY THAT DOES NOT BELONG TO THE ADDRESS IS REFUSED ===");
       fromHeight: 100, txid: TXID, fetch: rpcFor({ default: fixture() }),
     });
   } catch (e) { subError = e; }
-  if (subError && subError.code === "bad-input" && subError.params && subError.params.why === "subaddress-not-supported") {
+  if (subError && subError.code === "bad-input" && subError.params && subError.params.why === "not-a-primary-address") {
     ok("a subaddress is refused by name instead of a spend-pub mismatch");
   } else bad("subaddress -> " + JSON.stringify(subError && (subError.code || subError.message)));
 }

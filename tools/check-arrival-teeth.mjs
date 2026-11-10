@@ -79,8 +79,7 @@ try {
   else bad("original key binding", JSON.stringify(originalMismatch && (originalMismatch.code || originalMismatch.message)));
 
   const noSpendCheck = await mutatedLadder(
-    "if (!addressKeys.spendPub || spendPub !== String(addressKeys.spendPub).toLowerCase()) {",
-    "if (false) {", "no-spend-check");
+    "if (!bound.ok) {", "if (false) {", "no-spend-check");
   let mutantMismatch = null;
   try { await noSpendCheck.verifyArrival(request({ spendPub: wrongSpend, fetch: fetchFor({ synchronized: true }) })); }
   catch (error) { mutantMismatch = error; }

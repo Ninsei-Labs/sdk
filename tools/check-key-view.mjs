@@ -104,7 +104,7 @@ console.log("=== 1c) A SALT THE QUOTE DID NOT CARRY IS REFUSED ===");
   else bad("salt mismatch: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
 }
 
-async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 }, funded = false, withId = true } = {}) {
+async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 }, funded = false, withId = true, escrow = null } = {}) {
   if (fresh) setStorage(memoryStorage());
   let sent = 0;
   const wallet = { chainId: async () => order.chainId, address: async () => order.locker,
@@ -114,7 +114,7 @@ async function startPending({ fresh = true, receipt = { status: "0x1", logs: [],
     commitHalfClaimer: quote.commitHalfClaimer, viewHalfClaimer: derived.makerViewHalf };
   const request = { quote: { ...(withId ? { id: "q" } : {}), chain: "arbitrum-sepolia", asset: "ETH", amount: 1, size: 1 }, order, orderQuote: quote,
     counterparty, recoveryKey: WORDS, recoverySalt: order.salt, receiveTo: "synthetic-xmr-destination",
-    restoreHeight: 100, wallet, onRecoveryKey: async () => true };
+    restoreHeight: 100, wallet, onRecoveryKey: async () => true, ...(escrow ? { escrow } : {}) };
   const fundedStatus = "0x" + [1, 0, 0, 0].map((value) => BigInt(value).toString(16).padStart(64, "0")).join("");
   const result = await createSwaps({ mode: "live", xmrNetwork: "stagenet", logs: async () => [],
     call: async ({ data }) => {
@@ -153,7 +153,7 @@ console.log("=== 1d2) A RETRY READS THE SAME HASH AND DOES NOT SEND AGAIN ===");
   const pad = (v) => "0x" + String(v).replace(/^0x/, "").toLowerCase().padStart(64, "0");
   const created = { address: order.factory, topics: [ORDER_CREATED_TOPIC, pad(predicted), pad(order.locker), pad(order.claimer)],
     data: "0x" + "00".repeat(12 * 32) };
-  const second = await startPending({ fresh: false, receipt: { status: "0x1", logs: [created], blockNumber: 11 } });
+  const second = await startPending({ fresh: false, receipt: { status: "0x1", logs: [created], blockNumber: 11 }, escrow: predicted });
   if (predicted && second.result && second.result.step === "xmr-incoming" && second.result.escrow === predicted && second.sent === 0) {
     ok("the retry reads the pending hash, saves the escrow and sends nothing");
   } else bad("pending retry: " + JSON.stringify({ ctor: second.result && second.result.constructor && second.result.constructor.name, keys: second.result && Object.keys(second.result), code: second.result && second.result.code, msg: second.result && second.result.message, sent: second.sent }));
@@ -166,7 +166,7 @@ console.log("=== 1d2b) A RETRY WITHOUT AN ORDER ID FINDS THE SALT-KEYED PENDING 
   const pad = (v) => "0x" + String(v).replace(/^0x/, "").toLowerCase().padStart(64, "0");
   const created = { address: order.factory, topics: [ORDER_CREATED_TOPIC, pad(predicted), pad(order.locker), pad(order.claimer)],
     data: "0x" + "00".repeat(12 * 32) };
-  const second = await startPending({ fresh: false, withId: false, receipt: { status: "0x1", logs: [created], blockNumber: 11 } });
+  const second = await startPending({ fresh: false, withId: false, receipt: { status: "0x1", logs: [created], blockNumber: 11 }, escrow: predicted });
   if (predicted && second.result && second.result.step === "xmr-incoming" && second.result.escrow === predicted && second.sent === 0) {
     ok("the salt identifies the pending record when the relay answer has no order id");
   } else bad("salt-keyed retry: " + JSON.stringify({ predicted, step: second.result && second.result.step, escrow: second.result && second.result.escrow, sent: second.sent, code: second.result && second.result.code }));
@@ -199,7 +199,7 @@ console.log("=== 1d3) A FUNDED STATUS RESCUES A MISSING RECEIPT ===");
 {
   const first = await startPending();
   const predicted = first.result && first.result.escrow;
-  const second = await startPending({ fresh: false, receipt: null, funded: true });
+  const second = await startPending({ fresh: false, receipt: null, funded: true, escrow: predicted });
   if (predicted && second.result && second.result.step === "xmr-incoming" && second.result.escrow === predicted && second.sent === 0) {
     ok("a funded status saves the predicted escrow when the receipt is gone");
   } else bad("funded status fallback: " + JSON.stringify({ step: second.result && second.result.step, escrow: second.result && second.result.escrow, predicted, sent: second.sent, code: second.result && second.result.code }));

@@ -121,7 +121,9 @@ async function getInfo(node, fetchImpl, timeoutMs) {
   if (r.busy === true || r.busy_syncing === true || (typeof r.status === "string" && r.status && r.status !== "OK")) {
     throw new SdkError("xmr-no-nodes", { node: node.url, why: "busy" });
   }
-  return { height: Number(r.height), synced: r.synchronized !== false, nettype: r.nettype || null };
+  // A MISSING `synchronized` FIELD IS NOT A SYNCHRONIZED NODE. Only an explicit true lets an empty walk count as
+  // evidence of absence.
+  return { height: Number(r.height), synced: r.synchronized === true, nettype: r.nettype || null };
 }
 
 // THE WHOLE BLOCK: its hash and ALL of its transaction hashes. This is the only form a public node is asked in.
@@ -233,27 +235,18 @@ export async function verifyArrival(request) {
   const nowSec = Number.isFinite(Number(request.nowSec)) ? Number(request.nowSec) : Math.floor(Date.now() / 1000);
   const timeoutMs = Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0 ? Number(request.timeoutMs) : 20000;
   const txidHint = txidOf(request.txid);
-  // THE KEY MUST BELONG TO THE ADDRESS, NOT MERELY BE PASSED BESIDE IT. The scanner used to try both byte orders
-  // of the view secret and accept the first match; a maker could pay to the address built from the other reading and
-  // still get `arrived` while the person's wallet saw nothing. Decode the address, keep the matching view form, and
-  // require its spend key to be the same key.
-  let addressKeys;
-  try { addressKeys = engine.xmrArrivalRead.decodeAddressKeys(request.address); }
-  catch { throw new SdkError("bad-input", { field: "address", why: "not-a-monero-address" }); }
-  // THE WATCHED ADDRESS IS A PRIMARY ADDRESS. A subaddress has a different payload layout and its view/spend points
-  // are not the ones the joint-address builder produces; refusing it by name is clearer than a spurious spend-pub
-  // mismatch. SDK-generated addresses are always primary.
-  if (!addressKeys.network) throw new SdkError("bad-input", { field: "address", why: "subaddress-not-supported" });
-  const spendPub = String(request.spendPub).replace(/^0x/, "").toLowerCase();
-  if (!addressKeys.spendPub || spendPub !== String(addressKeys.spendPub).toLowerCase()) {
-    throw new SdkError("xmr-address-mismatch", { field: "spendPub", address: request.address });
+  // THE KEY MUST BELONG TO THE ADDRESS, AND THE RULE LIVES IN THE ENGINE. Both facade paths call the same binding;
+  // a public `scanRange` cannot accept the other byte-order reading while the facade refuses it.
+  const bound = engine.xmrScan.watchedAddressVerdict({
+    address: request.address, viewSecret: request.viewSecret, spendPub: request.spendPub,
+  });
+  if (!bound.ok) {
+    if (bound.code === "bad-input") throw new SdkError("bad-input", { field: bound.field || "address", why: bound.why });
+    throw new SdkError(bound.code, { field: bound.field || "address", address: request.address });
   }
-  const viewForm = engine.xmrScan.viewKeyFormForAddress(request.viewSecret, addressKeys.viewPub);
-  if (!viewForm) {
-    throw new SdkError("xmr-address-mismatch", { field: "viewSecret", address: request.address });
-  }
-  const viewSecret = engine.xmrScan.viewSecretCandidates(request.viewSecret).find(([form]) => form === viewForm)?.[1] ?? request.viewSecret;
-  const watched = { address: request.address, viewSecret, spendPub: addressKeys.spendPub };
+  const viewSecret = bound.viewSecret;
+  const spendPub = bound.spendPub;
+  const watched = { address: request.address, viewSecret, spendPub };
 
   // 1. THE TIP, and with it the first proof that ANY node answers. All nodes down is a named refusal, not silence.
   const live = [];
@@ -274,12 +267,14 @@ export async function verifyArrival(request) {
   // 2. LOCATE: from the birth height, by whole blocks. The first reachable node does the walk.
   let located = null;
   const completedOperators = new Set();
+  const staleWitnesses = [];
   for (const { node, info } of live) {
     // A WITNESS THAT IS NOT SYNCHRONIZED HAS NOT SEEN THE RANGE. Counting its empty walk as absence would let two
     // nodes that restarted behind the payout height refund a paid swap; the same rule already guards the positive
-    // branch below.
+    // branch below. The stale entry is reported only when it is evidence about absence; an arrived verdict has a
+    // synced witness and must not carry a stale one as a failure.
     if (!info.synced) {
-      failed.push({ url: node.url, operator: node.operator, code: "stale", why: "not-synchronized" });
+      staleWitnesses.push({ url: node.url, operator: node.operator, code: "stale", why: "not-synchronized" });
       continue;
     }
     try {
@@ -292,6 +287,7 @@ export async function verifyArrival(request) {
     if (located) break;
   }
   if (!located) {
+    failed.push(...staleWitnesses);
     // ABSENCE IS A CLAIM ABOUT MONEY, SO IT NEEDS TWO OPERATORS. One node can withhold a transaction and make
     // this walk look empty; a refund signed on that answer would take the depositor's ETH from a maker who paid.
     // Only when no node finished the walk is every node unreachable.
@@ -518,11 +514,20 @@ export async function verifyArrivalShadow(request) {
   if (!witnessNodes.some((node) => node.protocol === "witness-v1")) {
     throw new SdkError("bad-input", { field: "witnessNodes", why: "no-witness-v1" });
   }
-  let addressKeys;
-  try { addressKeys = engine.xmrArrivalRead.decodeAddressKeys(request.address); }
-  catch { throw new SdkError("bad-input", { field: "address", why: "not-a-monero-address" }); }
-  if (!addressKeys.network) throw new SdkError("bad-input", { field: "address", why: "subaddress-not-supported" });
-  const network = request.network || addressKeys.network;
+  // THE SAME ENGINE BINDING AS `verifyArrival`. The shadow path does not carry a second copy of the view/spend rule.
+  if (!isStr(request.address)) throw new SdkError("bad-input", { field: "address" });
+  if (!isStr(request.spendPub)) throw new SdkError("bad-input", { field: "spendPub" });
+  if (request.viewSecret === undefined || request.viewSecret === null) throw new SdkError("bad-input", { field: "viewSecret" });
+  const bound = engine.xmrScan.watchedAddressVerdict({
+    address: request.address, viewSecret: request.viewSecret, spendPub: request.spendPub,
+  });
+  if (!bound.ok) {
+    if (bound.code === "bad-input") throw new SdkError("bad-input", { field: bound.field || "address", why: bound.why });
+    throw new SdkError(bound.code, { field: bound.field || "address", address: request.address });
+  }
+  const network = request.network || bound.keys.network;
+  const viewSecret = bound.viewSecret;
+  const spendPub = bound.spendPub;
   const fetchImpl = typeof request.fetch === "function" ? request.fetch : globalThis.fetch;
   if (typeof fetchImpl !== "function") throw new SdkError("bad-input", { field: "fetch" });
   const timeoutMs = Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0 ? Number(request.timeoutMs) : 20000;
@@ -532,15 +537,6 @@ export async function verifyArrivalShadow(request) {
   let expectedAtomic;
   try { expectedAtomic = BigInt(request.expectedAtomic); } catch { throw new SdkError("bad-input", { field: "expectedAtomic" }); }
   if (expectedAtomic <= 0n) throw new SdkError("bad-input", { field: "expectedAtomic" });
-  if (!isStr(request.spendPub)) throw new SdkError("bad-input", { field: "spendPub" });
-  if (request.viewSecret === undefined || request.viewSecret === null) throw new SdkError("bad-input", { field: "viewSecret" });
-  const spendPub = String(request.spendPub).replace(/^0x/, "").toLowerCase();
-  if (spendPub !== String(addressKeys.spendPub).toLowerCase()) {
-    throw new SdkError("xmr-address-mismatch", { field: "spendPub", address: request.address });
-  }
-  const viewForm = engine.xmrScan.viewKeyFormForAddress(request.viewSecret, addressKeys.viewPub);
-  if (!viewForm) throw new SdkError("xmr-address-mismatch", { field: "viewSecret", address: request.address });
-  const viewSecret = engine.xmrScan.viewSecretCandidates(request.viewSecret).find(([form]) => form === viewForm)?.[1] ?? request.viewSecret;
 
   let exact = null;
   let exactError = null;
@@ -549,6 +545,7 @@ export async function verifyArrivalShadow(request) {
 
   const checked = [];
   const failed = [];
+  const staleWitnesses = [];
   let located = null;
   let completed = false;
   for (const node of witnessNodes) {
@@ -557,7 +554,7 @@ export async function verifyArrivalShadow(request) {
     try { info = await getInfo(node, fetchImpl, timeoutMs); }
     catch (error) { failed.push(failureOf(error, node)); checked.push({ url: node.url, operator: node.operator, state: "down" }); continue; }
     if (!info.synced) {
-      failed.push({ url: node.url, operator: node.operator, code: "stale", why: "not-synchronized" });
+      staleWitnesses.push({ url: node.url, operator: node.operator, code: "stale", why: "not-synchronized" });
       checked.push({ url: node.url, operator: node.operator, state: "stale", height: info.height });
       continue;
     }
@@ -579,6 +576,7 @@ export async function verifyArrivalShadow(request) {
     }
   }
 
+  if (!located) failed.push(...staleWitnesses);
   const witness = located
     ? { state: "seen", txid: located.txid, height: located.height, blockHash: located.blockHash,
         amountAtomic: located.amountAtomic.toString(), operator: located.operator, url: located.url, completed, checked, failed }

@@ -540,6 +540,10 @@ export interface FirmRelayAnswer {
   readonly jointAddress: string;
   /** The escrow address predicted from the signed quote and the depositor's half. */
   readonly escrow: string;
+  /** Seconds left when the answer was verified; the host may show this next to the confirm button. */
+  readonly remainingSec: number;
+  /** The last Unix second at which `swaps.start` can still begin this quote. */
+  readonly confirmBySec: number;
   readonly recovery: { readonly kind: "salt-v2"; readonly salt: string };
   /** Everything `swaps.start` can take from the relay; the caller adds its wallet, `receiveTo` and height. */
   readonly startRequest: Readonly<{
@@ -549,6 +553,7 @@ export interface FirmRelayAnswer {
     counterparty: Readonly<Record<string, unknown>>;
     recoveryKey: unknown;
     recoverySalt: string;
+    escrow: string;
   }>;
   /** The relay origin that answered. `startSell` stores it for the later no-wallet claim. */
   readonly relayUrl: string;
@@ -1904,6 +1909,8 @@ export declare class SdkError extends Error {
 export declare const SDK_VERSION: string;
 /** The minimum remaining lifetime of a quote when a swap starts, in seconds. */
 export declare const LOCK_START_MARGIN_SEC: number;
+/** The SDK's own preparation allowance for a buy quote, in addition to the start margin. */
+export declare const START_PREP_SEC: number;
 /** The default firm quote lifetime, in seconds. A node may override it; the SDK default stays authoritative. */
 export declare const DEFAULT_ORDER_QUOTE_TTL_SEC: number;
 export declare const STEP_CODES: readonly StepCode[];

@@ -105,7 +105,7 @@ function signRelayRequest(request) {
     + Buffer.from(sig.slice(33, 65)).toString("hex")
     + (27 + sig[0]).toString(16);
 }
-function answerFor(payload, { tamperProof = false, cashierAddress = cashier } = {}) {
+function answerFor(payload, { tamperProof = false, cashierAddress = cashier, validUntil = null } = {}) {
   const orderTerm = payload.terms.order;
   const context = engine.orderContext.orderContextString(orderTerm);
   const ask = payload.terms.side === "ask";
@@ -133,7 +133,7 @@ function answerFor(payload, { tamperProof = false, cashierAddress = cashier } = 
     feeBps: "0",
     fee: "0",
     feeRecipient: "0x" + "99".repeat(20),
-    validUntil: String(orderTerm.readyBy - 60),
+    validUntil: String(validUntil === null ? orderTerm.readyBy - 60 : validUntil),
     nonce: "1",
     xmrAmount: payload.terms.xmrAmount,
     claimTip: payload.terms.claimTip,
@@ -177,7 +177,7 @@ function answerFor(payload, { tamperProof = false, cashierAddress = cashier } = 
   };
 }
 
-function relayFetch({ tamperProof = false, cashierAddress = cashier } = {}) {
+function relayFetch({ tamperProof = false, cashierAddress = cashier, validUntil = null } = {}) {
   const bodies = [];
   return {
     bodies,
@@ -189,16 +189,16 @@ function relayFetch({ tamperProof = false, cashierAddress = cashier } = {}) {
       bodies.push(body);
       const payload = JSON.parse(body.payload);
       payload._raw = body.payload;
-      return { ok: true, status: 200, json: async () => answerFor(payload, { tamperProof, cashierAddress }) };
+      return { ok: true, status: 200, json: async () => answerFor(payload, { tamperProof, cashierAddress, validUntil }) };
     },
   };
 }
 
-function makeQuotes({ providerWord = provider, factoryWord = factory, cashierPin = cashier, registryPin = null, denylist = null } = {}) {
+function makeQuotes({ providerWord = provider, factoryWord = factory, cashierPin = cashier, registryPin = null, denylist = null, now = null } = {}) {
   return createQuotes({
     denylist,
     config: { settlement: { chain: { escrow: { ...(cashierPin ? { cashier: cashierPin } : {}), ...(registryPin ? { registry: registryPin } : {}) } } } },
-    now: () => nowSec * 1000,
+    now: now || (() => nowSec * 1000),
     evmCall: chainReads({ providerWord, factoryWord }),
     evmBlock: async () => ({ baseFeePerGas: "0" }),
   });
@@ -274,6 +274,21 @@ try {
   } else bad("start request: " + JSON.stringify(result.startRequest));
 } catch (error) { bad("valid adapter call failed: " + JSON.stringify(error && (error.code || error.message)) + " " + JSON.stringify(error && error.params)); }
 
+console.log("=== 1b) A BUY QUOTE MUST KEEP THE START MARGIN AND THE PREPARATION TIME ===");
+for (const [left, expected] of [[30, "quote-too-short"], [31, "quote-too-short"], [45, "quote-too-short"], [60, null]]) {
+  const until = Math.floor(Date.now() / 1000) + left;
+  try {
+    const result = await call(makeQuotes({ now: () => Date.now() }), { fetchImpl: relayFetch({ validUntil: until }).fetchImpl });
+    if (expected === null && result.remainingSec > 45 && result.confirmBySec === until - 45) {
+      ok("a buy with " + left + " s left is accepted and reports its confirm deadline");
+    } else bad("a buy with " + left + " s left was accepted without the expected life: " + JSON.stringify({ remainingSec: result.remainingSec, confirmBySec: result.confirmBySec }));
+  } catch (error) {
+    if (expected && error && error.code === expected && error.params && error.params.side === "ask") {
+      ok("a buy with " + left + " s left is refused before confirmation");
+    } else bad("a buy with " + left + " s left gave " + JSON.stringify(error && (error.code || error.message)) + " " + JSON.stringify(error && error.params));
+  }
+}
+
 console.log("=== 1a) THE REGISTRY IS PINNED TO THE NETWORK ===");
 {
   const foreign = makeQuotes({ registryPin: "0x" + "aa".repeat(20) });
@@ -303,6 +318,16 @@ try {
   if (result.viewHalfClaimer === derived.makerViewHalf) ok("the bid uses the same derived maker view half");
   else bad("the bid maker view half is not derived");
 } catch (error) { bad("valid bid call failed: " + JSON.stringify(error && (error.code || error.message)) + " " + JSON.stringify(error && error.params)); }
+
+console.log("=== 2b) A SELL QUOTE IS NOT BOUND BY THE BUY START MARGIN ===");
+try {
+  const until = Math.floor(Date.now() / 1000) + 30;
+  const result = await call(makeQuotes({ now: () => Date.now() }), { order: bidOrder, side: "bid", fetchImpl: relayFetch({ validUntil: until }).fetchImpl });
+  if (result.remainingSec > 0 && result.remainingSec <= 30) ok("a sell quote with a short life is accepted and reports its life");
+  else bad("a short sell quote was accepted without its life: " + JSON.stringify({ remainingSec: result.remainingSec }));
+} catch (error) {
+  bad("a short sell quote was refused by the buy margin: " + JSON.stringify(error && (error.code || error.message)) + " " + JSON.stringify(error && error.params));
+}
 
 console.log("=== 2a) THE DENYLIST CHECKS THE CLIENT ON A BID ===");
 try {
