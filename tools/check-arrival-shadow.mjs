@@ -311,7 +311,8 @@ console.log("=== 11) THE WITNESS TOP INSIDE THE SAME SLICE DOES NOT COMPLETE THE
 
 console.log("=== 12) A STALE EXACT NODE DOES NOT INFLATE THE TARGET ===");
 {
-  const result = await shadow({ fromHeight: 106, witnessTop: 120, exactStaleHeight: 1001, exactThird: true });
+  const result = await shadow({ fromHeight: 106, witnessTop: 120, exactStaleHeight: 1001, exactThird: true,
+    witnessOperators: ["W", "X"] });
   if (result.exact && result.exact.absent === true) ok("two synced exact nodes still establish absence");
   else bad("stale exact absence: " + JSON.stringify(result.exact || result.exactError));
   if (result.witness.completed === true) ok("a stale exact height does not keep an honest witness below the target");
@@ -337,6 +338,12 @@ console.log("=== 14) THE SHADOW NAMES ITS WITNESS QUORUM ===");
   if (one.witness.quorum && one.witness.quorum.ok === false && one.witness.quorum.completed.join(",") === "W") {
     ok("one completed witness is below the required quorum");
   } else bad("single witness quorum: " + JSON.stringify(one.witness.quorum));
+
+  const oneAbsent = await shadow({ fromHeight: 106, witnessTop: 120, witnessOperators: ["W"] });
+  if (oneAbsent.exact && oneAbsent.exact.absent === true && oneAbsent.agrees === false
+    && oneAbsent.problems.includes("witness:no-quorum")) {
+    ok("one completed witness cannot agree on absence");
+  } else bad("single-witness absence: " + JSON.stringify({ agrees: oneAbsent.agrees, problems: oneAbsent.problems }));
 
   const duplicate = await shadow({ witnessTop: 119, exactInfoHeight: 120, witnessOperators: ["W", "W"] });
   if (duplicate.witness.quorum && duplicate.witness.quorum.ok === false

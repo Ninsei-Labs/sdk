@@ -657,12 +657,13 @@ export async function verifyArrivalShadow(request) {
     problems.push("exact:no-transaction");
     agrees = false;
   } else if (exact && exact.absent === true) {
-    // ABSENCE NEEDS THE WHOLE SLICE WALK, NOT A SILENT WITNESS. A server that is down, stale or answered a
-    // partial slice has not shown that the money is absent; its missing answer must not become agreement.
-    if (witness.completed && witness.failed.length === 0) agrees = true;
+    // ABSENCE NEEDS THE WHOLE SLICE WALK AND TWO DISTINCT OPERATORS. A server that is down, stale or answered a
+    // partial slice has not shown that the money is absent; one completed operator is also not the exact path's
+    // quorum and must not become agreement. Two instances of one operator count once.
+    if (witness.completed && witness.failed.length === 0 && witness.quorum.ok) agrees = true;
     else {
       agrees = false;
-      problems.push("witness:not-completed");
+      problems.push(witness.completed && witness.failed.length === 0 ? "witness:no-quorum" : "witness:not-completed");
     }
   }
   return { exact, exactError, witness, agrees, problems };
