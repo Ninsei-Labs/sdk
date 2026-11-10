@@ -145,8 +145,9 @@ the node-side contract describes those routes.
 `shadow.exact` still decides; `shadow.agrees` and `shadow.problems` exist for staging and logs. A shadow mismatch must
 never be turned into a refund or a ready mark. `shadow.witness.quorum` names the required two distinct operators,
 the completed ones, the independent ones and whether the quorum is met; two instances of one operator count once.
-On mainnet the Ninsei walker is not one of the two votes, so only `independent` counts. The quorum is evidence
-for the refund path and does not change `agrees` while the shadow is read-only.
+On mainnet the Ninsei walker is not one of the two votes, so only `independent` counts. On absence, `agrees` now
+requires the full slice walk and the same quorum: one completed witness is `witness:no-quorum`, not agreement. The
+shadow still changes no swap state.
 
 ## 8. Retry and idempotency
 
