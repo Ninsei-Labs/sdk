@@ -25,6 +25,9 @@ const R = 17n;
 function isHost(url, host) {
   try { return new URL(url).hostname === host; } catch { return false; }
 }
+function isWitness(url) {
+  try { return /^witness\d*\.example$/.test(new URL(url).hostname); } catch { return false; }
+}
 
 let pass = 0;
 const problems = [];
@@ -80,11 +83,11 @@ function blockFor(height) {
 
 function fetchBoth({ witnessHash = BLOCK_HASH, witnessTop = 119, witnessInfoTop = null, exactInfoHeight = null,
   exactStaleHeight = null, witnessPartialAt = null, witnessPartialTo = null, witnessBroken = null,
-  witnessFailAt = null } = {}) {
+  witnessFailAt = null, network = "stagenet" } = {}) {
   return async (url, init) => {
     const body = JSON.parse(String(init.body || "{}"));
     requests.push({ url, body });
-    if (isHost(url, "witness.example") && url.endsWith("/v1/witness/slice")) {
+    if (isWitness(url) && url.endsWith("/v1/witness/slice")) {
       if (body.height !== undefined || body.txid !== undefined) return { ok: false, status: 400, json: async () => ({}) };
       if (witnessFailAt !== null && Number(body.slice) === Number(witnessFailAt)) {
         return { ok: false, status: 503, json: async () => ({ code: "busy" }) };
@@ -104,15 +107,15 @@ function fetchBoth({ witnessHash = BLOCK_HASH, witnessTop = 119, witnessInfoTop 
       });
       const complete = to === sliceEnd;
       const tip = complete ? null : { height: witnessBroken === "wrong-tip" ? to - 1 : to, hash: blocks[blocks.length - 1].hash };
-      return { ok: true, json: async () => ({ version: 1, network: "stagenet", grid: 20, slice: body.slice,
+      return { ok: true, json: async () => ({ version: 1, network, grid: 20, slice: body.slice,
         from, to, complete: witnessBroken === "claims-complete" ? true : complete, blocks,
         tip: witnessBroken === "claims-complete" ? null : tip }) };
     }
     if (body.method === "get_info") {
       const stale = isHost(url, "b.example") && exactStaleHeight !== null;
-      const height = isHost(url, "witness.example") ? Number(witnessInfoTop ?? witnessTop) + 1
+      const height = isWitness(url) ? Number(witnessInfoTop ?? witnessTop) + 1
         : stale ? Number(exactStaleHeight) : Number(exactInfoHeight ?? 121);
-      return { ok: true, json: async () => ({ result: { height, synchronized: !stale, status: "OK", nettype: "stagenet" } }) };
+      return { ok: true, json: async () => ({ result: { height, synchronized: !stale, status: "OK", nettype: network } }) };
     }
     if (body.method === "get_block") {
       return { ok: true, json: async () => ({ result: blockFor(Number(body.params.height)) }) };
@@ -142,14 +145,19 @@ function fetchEmpty() {
   };
 }
 
-async function shadow({ fromHeight = 100, exactThird = false, expectedAtomic = AMOUNT, ...overrides } = {}) {
+async function shadow({ fromHeight = 100, exactThird = false, expectedAtomic = AMOUNT,
+  witnessOperators = ["W"], network = "stagenet", ...overrides } = {}) {
   const nodes = [{ url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" }];
   if (exactThird) nodes.push({ url: "https://c.example", operator: "C" });
+  const witnessNodes = witnessOperators.map((operator, index) => ({
+    url: index === 0 ? "https://witness.example" : `https://witness${index + 1}.example`,
+    operator, protocol: "witness-v1",
+  }));
   return verifyArrivalShadow({
     nodes,
-    witnessNodes: [{ url: "https://witness.example", operator: "W", protocol: "witness-v1" }],
-    address, viewSecret: VIEW, spendPub, expectedAtomic, minConfirmations: 1,
-    fromHeight, fetch: fetchBoth(overrides),
+    witnessNodes,
+    address, viewSecret: VIEW, spendPub, expectedAtomic, minConfirmations: 1, network,
+    fromHeight, fetch: fetchBoth({ ...overrides, network }),
   });
 }
 
@@ -321,6 +329,40 @@ console.log("=== 13) A LATER SLICE FAILURE DOES NOT ERASE A FOUND CANDIDATE ==="
   if (result.witness.failed.length > 0 && result.witness.checked[0] && result.witness.checked[0].state === "error") {
     ok("the failed slice is named beside the candidate");
   } else bad("candidate failure record: " + JSON.stringify({ failed: result.witness.failed, checked: result.witness.checked }));
+}
+
+console.log("=== 14) THE SHADOW NAMES ITS WITNESS QUORUM ===");
+{
+  const one = await shadow({ witnessTop: 119, exactInfoHeight: 120, witnessOperators: ["W"] });
+  if (one.witness.quorum && one.witness.quorum.ok === false && one.witness.quorum.completed.join(",") === "W") {
+    ok("one completed witness is below the required quorum");
+  } else bad("single witness quorum: " + JSON.stringify(one.witness.quorum));
+
+  const duplicate = await shadow({ witnessTop: 119, exactInfoHeight: 120, witnessOperators: ["W", "W"] });
+  if (duplicate.witness.quorum && duplicate.witness.quorum.ok === false
+    && duplicate.witness.quorum.completed.length === 1) {
+    ok("two instances of one operator count once");
+  } else bad("duplicate operator quorum: " + JSON.stringify(duplicate.witness.quorum));
+
+  const two = await shadow({ witnessTop: 119, exactInfoHeight: 120, witnessOperators: ["W", "X"] });
+  if (two.witness.quorum && two.witness.quorum.ok === true
+    && two.witness.quorum.completed.length === 2) {
+    ok("two distinct completed operators meet the quorum");
+  } else bad("two-operator quorum: " + JSON.stringify(two.witness.quorum));
+
+  const mainnetWalker = await shadow({ network: "mainnet", witnessTop: 119, exactInfoHeight: 120,
+    witnessOperators: ["Ninsei", "X"] });
+  if (mainnetWalker.witness.quorum && mainnetWalker.witness.quorum.ok === false
+    && mainnetWalker.witness.quorum.independent.join(",") === "X") {
+    ok("the Ninsei walker is not one of the two mainnet votes");
+  } else bad("mainnet walker quorum: " + JSON.stringify(mainnetWalker.witness.quorum));
+
+  const mainnetIndependent = await shadow({ network: "mainnet", witnessTop: 119, exactInfoHeight: 120,
+    witnessOperators: ["A", "B"] });
+  if (mainnetIndependent.witness.quorum && mainnetIndependent.witness.quorum.ok === true
+    && mainnetIndependent.witness.quorum.independent.length === 2) {
+    ok("two independent mainnet operators meet the quorum");
+  } else bad("mainnet independent quorum: " + JSON.stringify(mainnetIndependent.witness.quorum));
 }
 
 if (problems.length) {

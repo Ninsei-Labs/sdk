@@ -143,7 +143,10 @@ absence for the blocks it did not see. Only synchronized exact nodes raise that 
 is ignored. The same witness must answer `get_info` and the slice's `get_transactions` reads;
 the node-side contract describes those routes.
 `shadow.exact` still decides; `shadow.agrees` and `shadow.problems` exist for staging and logs. A shadow mismatch must
-never be turned into a refund or a ready mark.
+never be turned into a refund or a ready mark. `shadow.witness.quorum` names the required two distinct operators,
+the completed ones, the independent ones and whether the quorum is met; two instances of one operator count once.
+On mainnet the Ninsei walker is not one of the two votes, so only `independent` counts. The quorum is evidence
+for the refund path and does not change `agrees` while the shadow is read-only.
 
 ## 8. Retry and idempotency
 

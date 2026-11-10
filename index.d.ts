@@ -839,6 +839,14 @@ export interface XmrWitnessShadowReading {
   readonly operator?: string;
   readonly url?: string;
   readonly completed: boolean;
+  /** Distinct operators whose walk covered the target; two instances of one operator count once. */
+  readonly quorum: {
+    readonly required: number;
+    readonly completed: readonly string[];
+    /** On mainnet the Ninsei walker is not one of the two votes; this list excludes it. */
+    readonly independent: readonly string[];
+    readonly ok: boolean;
+  };
   readonly checked: readonly Record<string, unknown>[];
   readonly failed: readonly Record<string, unknown>[];
 }
