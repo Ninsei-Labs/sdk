@@ -244,6 +244,14 @@ console.log("=== 7) THE WALK GUARDS ARE LOAD-BEARING ===");
   else bad("empty range: " + JSON.stringify({ completed: empty.witness.completed }));
 }
 
+console.log("=== 8) A BLOCK THAT ARRIVES DURING THE WALK IS NOT A FAILURE ===");
+{
+  const raced = await shadow({ witnessTop: 116, witnessInfoTop: 115 });
+  if (raced.witness.state === "seen" && raced.witness.completed === true && raced.agrees === true) {
+    ok("a tip one block above the caller's top is accepted");
+  } else bad("tip race: " + JSON.stringify({ state: raced.witness.state, completed: raced.witness.completed, failed: raced.witness.failed, agrees: raced.agrees, problems: raced.problems }));
+}
+
 if (problems.length) {
   console.log("FAILED: " + problems.length + " problem(s) (passed " + pass + ")");
   process.exit(1);

@@ -27,7 +27,8 @@ const witnessHash = (value) => {
 
 /**
  * A full slice below the tip has `grid` blocks. The tip slice ends at the top block, sets `complete: false`, and
- * names that block in `tip`. A partial answer is accepted only when its last block is the top the caller read.
+ * names that block in `tip`. A partial answer is accepted when its last block is at or above the top the caller
+ * read: a newer tip is a block that arrived during the walk, while a tip below it shows a witness that is behind.
  */
 export function parseWitnessSliceBody(body, { network, index, tipHeight = null }) {
   if (!body || typeof body !== "object") throw new SdkError("xmr-no-nodes", { why: "bad-witness-slice" });
@@ -71,7 +72,9 @@ export function parseWitnessSliceBody(body, { network, index, tipHeight = null }
       || String(value.hash).toLowerCase() !== blocks[count - 1].hash) {
       throw new SdkError("xmr-no-nodes", { why: "witness-tip" });
     }
-    if (tipHeight !== null && Number(value.height) !== Number(tipHeight)) {
+    // A TIP AT OR ABOVE THE TOP IS A BLOCK THAT ARRIVED DURING THE WALK. A tip below it is a witness that is
+    // behind the chain the caller already read, and that cannot be evidence of absence.
+    if (tipHeight !== null && Number(value.height) < Number(tipHeight)) {
       throw new SdkError("xmr-no-nodes", { why: "witness-tip-height" });
     }
     tip = { height: Number(value.height), hash: witnessHash(value.hash) };

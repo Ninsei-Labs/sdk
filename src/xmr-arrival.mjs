@@ -467,6 +467,8 @@ async function locateInSlices(node, { expectedAtomic, address, viewSecret, spend
   let best = null;
   let completed = false;
   for (let index = first; index <= last; index++) {
+    // The witness reads its tip at slice time, so a block can arrive between the tip read and this request. The
+    // parser accepts a newer tip and rejects one below the top the walk started from.
     const slice = await readWitnessSlice(node, index, { network, fetchImpl, timeoutMs, tipHeight: toHeight });
     const txs = await readSliceTransactions(node, slice, { fetchImpl, timeoutMs });
     for (const block of slice.blocks) {
