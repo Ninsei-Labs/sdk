@@ -79,7 +79,7 @@ function blockFor(height) {
 }
 
 function fetchBoth({ witnessHash = BLOCK_HASH, witnessTop = 119, witnessInfoTop = null, exactInfoHeight = null,
-  witnessPartialAt = null, witnessPartialTo = null, witnessBroken = null } = {}) {
+  exactStaleHeight = null, witnessPartialAt = null, witnessPartialTo = null, witnessBroken = null } = {}) {
   return async (url, init) => {
     const body = JSON.parse(String(init.body || "{}"));
     requests.push({ url, body });
@@ -105,8 +105,10 @@ function fetchBoth({ witnessHash = BLOCK_HASH, witnessTop = 119, witnessInfoTop 
         tip: witnessBroken === "claims-complete" ? null : tip }) };
     }
     if (body.method === "get_info") {
-      const height = isHost(url, "witness.example") ? Number(witnessInfoTop ?? witnessTop) + 1 : Number(exactInfoHeight ?? 121);
-      return { ok: true, json: async () => ({ result: { height, synchronized: true, status: "OK", nettype: "stagenet" } }) };
+      const stale = isHost(url, "b.example") && exactStaleHeight !== null;
+      const height = isHost(url, "witness.example") ? Number(witnessInfoTop ?? witnessTop) + 1
+        : stale ? Number(exactStaleHeight) : Number(exactInfoHeight ?? 121);
+      return { ok: true, json: async () => ({ result: { height, synchronized: !stale, status: "OK", nettype: "stagenet" } }) };
     }
     if (body.method === "get_block") {
       return { ok: true, json: async () => ({ result: blockFor(Number(body.params.height)) }) };
@@ -136,9 +138,11 @@ function fetchEmpty() {
   };
 }
 
-async function shadow({ fromHeight = 100, ...overrides } = {}) {
+async function shadow({ fromHeight = 100, exactThird = false, ...overrides } = {}) {
+  const nodes = [{ url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" }];
+  if (exactThird) nodes.push({ url: "https://c.example", operator: "C" });
   return verifyArrivalShadow({
-    nodes: [{ url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" }],
+    nodes,
     witnessNodes: [{ url: "https://witness.example", operator: "W", protocol: "witness-v1" }],
     address, viewSecret: VIEW, spendPub, expectedAtomic: AMOUNT, minConfirmations: 1,
     fromHeight, fetch: fetchBoth(overrides),
@@ -210,6 +214,8 @@ console.log("=== 5) A TIP SLICE IS PARTIAL, NOT A REFUSAL ===");
   if (result.witness.state === "seen" && result.witness.completed === false) {
     ok("a witness behind the exact top still finds a transaction but does not complete the walk");
   } else bad("partial witness walk: " + JSON.stringify({ state: result.witness.state, completed: result.witness.completed, failed: result.witness.failed }));
+  if (result.witness.checked[0] && result.witness.checked[0].state === "partial") ok("the witness record names the partial walk");
+  else bad("partial witness state: " + JSON.stringify(result.witness.checked));
   if (result.agrees === true && result.problems.length === 0) ok("the partial tip agrees with the exact reading");
   else bad("partial tip agreement: " + JSON.stringify(result.problems));
   const slices = requests.filter((entry) => isHost(entry.url, "witness.example") && entry.url.endsWith("/v1/witness/slice"));
@@ -284,9 +290,22 @@ console.log("=== 11) THE WITNESS TOP INSIDE THE SAME SLICE DOES NOT COMPLETE THE
   else bad("exact absence: " + JSON.stringify(result.exact || result.exactError));
   if (result.witness.completed === false) ok("a witness that stops inside the same slice did not complete the walk");
   else bad("same-slice witness completed: " + JSON.stringify(result.witness));
+  if (result.witness.checked[0] && result.witness.checked[0].state === "behind") ok("a witness with no transaction above its top is recorded as behind");
+  else bad("same-slice witness state: " + JSON.stringify(result.witness.checked));
   if (result.agrees === false && result.problems.includes("witness:not-completed")) {
     ok("a same-slice witness below the exact top cannot agree on absence");
   } else bad("same-slice witness agreement: " + JSON.stringify({ agrees: result.agrees, problems: result.problems }));
+}
+
+console.log("=== 12) A STALE EXACT NODE DOES NOT INFLATE THE TARGET ===");
+{
+  const result = await shadow({ fromHeight: 106, witnessTop: 120, exactStaleHeight: 1001, exactThird: true });
+  if (result.exact && result.exact.absent === true) ok("two synced exact nodes still establish absence");
+  else bad("stale exact absence: " + JSON.stringify(result.exact || result.exactError));
+  if (result.witness.completed === true) ok("a stale exact height does not keep an honest witness below the target");
+  else bad("stale exact height: " + JSON.stringify(result.witness));
+  if (result.agrees === true && result.problems.length === 0) ok("the honest witness still agrees with the exact reading");
+  else bad("stale exact agreement: " + JSON.stringify({ agrees: result.agrees, problems: result.problems }));
 }
 
 if (problems.length) {

@@ -300,7 +300,7 @@ export async function verifyArrival(request) {
       }
       throw new SdkError("xmr-no-nodes", { tried: nodes.map((n) => n.url), nodes: failed });
     }
-    return { seen: false, state: "pending", absent: completedOperators.size >= 2, txid: txidHint, tip, completedOperators: [...completedOperators], checked: live.map((l) => ({ url: l.node.url, operator: l.node.operator, height: l.info.height })), failed };
+    return { seen: false, state: "pending", absent: completedOperators.size >= 2, txid: txidHint, tip, completedOperators: [...completedOperators], checked: live.map((l) => ({ url: l.node.url, operator: l.node.operator, height: l.info.height, synchronized: l.info.synced })), failed };
   }
 
   // 3. VERIFY ON EVERY NODE: the SAME block hash, the SAME transaction inside it, the confirmations and the money.
@@ -462,15 +462,21 @@ async function readSliceTransactions(node, slice, { fetchImpl, timeoutMs }) {
 // path; both are the highest top the exact sources actually read.
 function exactTopOf(exact) {
   if (!exact || typeof exact !== "object") return null;
-  const tip = intOf(exact.tip);
-  if (tip !== null && tip > 0) return Math.max(0, tip - 1);
+  // THE HEIGHTS THAT BELONG TO A SYNCED EXACT NODE. A stale node can report a height far above the chain it has
+  // actually read; using its number as the target would keep every honest witness below it. Prefer the checked
+  // heights when they exist, and fall back to the tip only for an answer that carries no checked entries.
   const heights = Array.isArray(exact.checked)
     ? exact.checked
       .filter((entry) => entry && entry.synchronized !== false && entry.state !== "stale" && entry.state !== "down")
       .map((entry) => intOf(entry.height))
       .filter((height) => height !== null && height > 0)
     : [];
-  return heights.length ? Math.max(0, Math.max(...heights) - 1) : null;
+  if (Array.isArray(exact.checked) && exact.checked.length) {
+    return heights.length ? Math.max(0, Math.max(...heights) - 1) : null;
+  }
+  const tip = intOf(exact.tip);
+  if (tip !== null && tip > 0) return Math.max(0, tip - 1);
+  return null;
 }
 
 // FIND A PAYMENT THROUGH SLICES. The exact `fromHeight` is local: the witness sees only slice indexes.
@@ -588,7 +594,8 @@ export async function verifyArrivalShadow(request) {
       continue;
     }
     const top = Math.max(0, info.height - 1);
-    checked.push({ url: node.url, operator: node.operator, state: "ok", height: info.height });
+    const entry = { url: node.url, operator: node.operator, state: "ok", height: info.height };
+    checked.push(entry);
     try {
       const found = await locateInSlices(node, {
         expectedAtomic, address: request.address, viewSecret, spendPub, fromHeight, toHeight: top,
@@ -596,12 +603,14 @@ export async function verifyArrivalShadow(request) {
         nowSec, network, fetchImpl, timeoutMs,
       });
       completed = completed || found.completed;
+      if (!found.completed) entry.state = found.located ? "partial" : "behind";
       if (found.located && (!located || found.located.score > located.score)) {
         located = found.located;
         located.operator = node.operator;
         located.url = node.url;
       }
     } catch (error) {
+      entry.state = "error";
       failed.push(failureOf(error, node));
     }
   }
