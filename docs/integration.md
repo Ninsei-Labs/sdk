@@ -139,7 +139,8 @@ order id; a URL without `protocol: "witness-v1"` is refused rather than guessed.
 the slice that contains the tip ends at the top and sets `complete: false` with `tip: {height, hash}`. A tip above the
 top the client read is accepted because a block can arrive during the walk; a tip below it is refused. A walk counts as
 complete only when it reached the highest top any source reported: a witness behind the exact nodes cannot complete an
-absence for the blocks it did not see. The same witness must answer `get_info` and the slice's `get_transactions` reads;
+absence for the blocks it did not see. Only synchronized exact nodes raise that target; a stale or down node's height
+is ignored. The same witness must answer `get_info` and the slice's `get_transactions` reads;
 the node-side contract describes those routes.
 `shadow.exact` still decides; `shadow.agrees` and `shadow.problems` exist for staging and logs. A shadow mismatch must
 never be turned into a refund or a ready mark.
