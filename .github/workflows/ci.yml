@@ -278,7 +278,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: Ninsei-Labs/witness-node
-          ref: 4c519ace4d6d86fdb710c31bbb2626b393799df4 # pinned; bump with the witness-node release
+          ref: 4269e42a6e489449824b5c7923d2e3362f8d1108 # pinned; bump with the witness-node release
           path: witness-node
 
       - name: Run the SDK/witness interop check
