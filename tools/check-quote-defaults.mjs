@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// THE QUOTE LIFETIME AND THE START MARGIN ARE PUBLIC, AND THE START USES THE MARGIN.
+// THE QUOTE LIFETIME, START MARGIN AND PREPARATION ALLOWANCE ARE PUBLIC AND ONE RULE.
 //
-// A node imports DEFAULT_ORDER_QUOTE_TTL_SEC instead of carrying its own copy. The value has to leave room for the
-// margin, and swaps.start has to read the same margin constant rather than a second literal that could drift.
-import { readFileSync } from "node:fs";
-import { DEFAULT_ORDER_QUOTE_TTL_SEC, LOCK_START_MARGIN_SEC, quoteLifeVerdict } from "../src/quotePolicy.mjs";
+// A node imports DEFAULT_ORDER_QUOTE_TTL_SEC instead of carrying its own copy. A buy quote must leave room for the
+// lock block and for the SDK's own preparation; a sell quote is checked only for its own expiry because the node has
+// already funded the escrow.
+import {
+  DEFAULT_ORDER_QUOTE_TTL_SEC, LOCK_START_MARGIN_SEC, START_PREP_SEC, quoteLifeVerdict,
+} from "../src/quotePolicy.mjs";
 
-const swaps = readFileSync(new URL("../src/swaps.mjs", import.meta.url), "utf8");
-const quotes = readFileSync(new URL("../src/quotes.mjs", import.meta.url), "utf8");
 let passed = 0;
 const problems = [];
 const check = (condition, name) => {
@@ -16,16 +16,25 @@ const check = (condition, name) => {
 };
 
 check(LOCK_START_MARGIN_SEC === 30, "the start margin is 30 seconds");
+check(START_PREP_SEC === 15, "the preparation allowance is 15 seconds");
 check(DEFAULT_ORDER_QUOTE_TTL_SEC === 60, "the default quote lifetime is 60 seconds");
-check(DEFAULT_ORDER_QUOTE_TTL_SEC > LOCK_START_MARGIN_SEC, "the default lifetime leaves more than the start margin");
-check(swaps.includes("nowSec + LOCK_START_MARGIN_SEC"), "swaps.start reads the margin constant");
-check(swaps.includes("marginSec: LOCK_START_MARGIN_SEC"), "the quote-expired refusal reports the margin constant");
-check(quotes.includes("quoteLifeVerdict"), "a quote is checked for remaining life when it arrives");
-check(quoteLifeVerdict({ validUntil: 1_000, nowSec: 970 }).code === "quote-too-short",
-  "a quote with exactly the start margin left is refused on arrival");
-check(quoteLifeVerdict({ validUntil: 1_000, nowSec: 969 }).ok === true,
-  "a quote with more than the start margin left is accepted");
-check(quoteLifeVerdict({ validUntil: null, nowSec: 1_000 }).code === "quote-too-short",
+check(DEFAULT_ORDER_QUOTE_TTL_SEC > LOCK_START_MARGIN_SEC + START_PREP_SEC,
+  "the default lifetime leaves more than the margin plus preparation");
+
+const askAt = (left) => quoteLifeVerdict({ validUntil: 1_000, nowSec: 1_000 - left, side: "ask" });
+check(askAt(30).code === "quote-too-short", "a buy with exactly the start margin left is refused");
+check(askAt(45).code === "quote-too-short", "a buy with only the margin plus allowance left is refused");
+check(askAt(60).ok === true, "a buy with the default lifetime left is accepted");
+check(askAt(60).confirmBySec === 1_000 - LOCK_START_MARGIN_SEC - START_PREP_SEC,
+  "the accepted buy names the last second to start it");
+
+const bidAt = (left) => quoteLifeVerdict({ validUntil: 1_000, nowSec: 1_000 - left, side: "bid" });
+check(bidAt(5).ok === true, "a sell with five seconds left is accepted");
+check(bidAt(0).code === "quote-too-short", "a sell with no life left is refused");
+check(bidAt(5).marginSec === 0 && bidAt(5).prepSec === 0,
+  "the sell check reserves no local lock margin");
+
+check(quoteLifeVerdict({ validUntil: null, nowSec: 1_000, side: "ask" }).code === "quote-too-short",
   "an unreadable quote lifetime is refused, not treated as long");
 
 console.log("");

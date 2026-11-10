@@ -1,7 +1,7 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/monero/scan.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
+// THE MONERO INDEXER FOR THE SDK. The browser bundle carries a generated copy; this module is the source the package
+// checks and tests use. Edit it here and regenerate the browser copy with `pnpm run build:sdk:docker` when a bundle
+// change is needed.
+//
 // MONERO INDEXER: we find arrivals at the swap address ourselves by parsing blocks.
 // WHY. Before, arrivals were learned from monero-wallet-rpc through a watch-only wallet, a path that hit a defect
 // (the wallet+keys pair is created and never reopens) and where one instance held one wallet, so scanning 25
@@ -25,6 +25,7 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { UNLOCK_TIME_BLOCK_MAX, unlockStateOf, laterBoundary } from "./unlock.js";
+import { decodeAddressKeys } from "./arrivalRead.js";
 export { UNLOCK_TIME_BLOCK_MAX, unlockStateOf, laterBoundary };
 
 export function keccak(bytes) { return keccak_256(bytes); }
@@ -123,6 +124,31 @@ export function viewKeyFormForAddress(viewSecret, expectedViewPubHex) {
     if (ed25519.Point.BASE.multiply(v).toHex().toLowerCase() === want) return form;
   }
   return false;
+}
+
+// THE KEY MATERIAL MUST BELONG TO THE ADDRESS IT IS SCANNED FOR. A public `scanRange` used to try both byte-order
+// readings of the view key and could count a payment to another address as ours. This is the ONE binding rule: the
+// scanner and both facade paths call it, so a host cannot get a different answer by choosing another entry point.
+// A subaddress or integrated address is refused here; the joint address this SDK builds is primary.
+export function watchedAddressVerdict({ address, viewSecret, spendPub } = {}) {
+  let keys;
+  try {
+    keys = decodeAddressKeys(address);
+  } catch {
+    return { ok: false, code: "bad-input", why: "not-a-monero-address", field: "address" };
+  }
+  if (!keys.network) return { ok: false, code: "bad-input", why: "not-a-primary-address", field: "address" };
+  const wantedSpend = String(spendPub === undefined || spendPub === null ? "" : spendPub).replace(/^0x/, "").toLowerCase();
+  if (!wantedSpend || wantedSpend !== keys.spendPub.toLowerCase()) {
+    return { ok: false, code: "xmr-address-mismatch", field: "spendPub" };
+  }
+  const form = viewKeyFormForAddress(viewSecret, keys.viewPub);
+  if (!form) return { ok: false, code: "xmr-address-mismatch", field: "viewSecret" };
+  const secret = viewSecretCandidates(viewSecret).find(([name]) => name === form)?.[1];
+  if (secret === undefined || secret === null) {
+    return { ok: false, code: "xmr-address-mismatch", field: "viewSecret" };
+  }
+  return { ok: true, address, keys, form, viewSecret: secret, spendPub: keys.spendPub };
 }
 
 export function keyDerivation(txPublicKeyHex, viewSecretHex) {
@@ -415,7 +441,11 @@ export async function fetchTransactions(daemonUrl, hashes, fetchImpl = globalThi
 
 // Parsing one transaction against the watched addresses. watched: [{ address, viewSecret, spendPub }] - viewSecret
 // is taken as a number, LE-hex or BE-hex. The result carries viewKeyForm: the form name that matched.
-export function matchTransaction(tx, watched, { height = null, tipHeight = null, nowSec = null } = {}) {
+//
+// THE KEY BINDING IS A PROPERTY OF THE WATCHED ENTRY, NOT OF THE TRANSACTION. `scanRange` binds every entry once
+// before its block loop and passes the result here; the public `matchTransaction` binds the entries it is given.
+// Re-binding inside the loop made every transaction repeat base58 decoding, keccak and an ed25519 multiplication.
+function matchBoundTransaction(tx, boundWatched, { height = null, tipHeight = null, nowSec = null } = {}) {
   const out = [];
   // BOTH KEY LISTS ARE PART OF THE TRANSACTION. A subaddress output carries its own key under tag 0x04; using only
   // `txPublicKeyFromExtra` drops exactly those outputs.
@@ -436,15 +466,30 @@ export function matchTransaction(tx, watched, { height = null, tipHeight = null,
   const ecdhMasks = ecdh.map((e) => e.mask);
   const outPk = ((tx.rct_signatures || {}).outPk || []);
   const rctVersion = (tx.rct_signatures || {}).type || 2;
-  for (const w of watched) {
+  for (const { entry: w, bound } of boundWatched) {
     const r = findOurOutputs({
       txPublicKeys: keys.txPublicKeys, additionalPublicKeys: keys.additionalPublicKeys,
-      viewSecretHex: w.viewSecret, spendPubHex: w.spendPub,
+      viewSecretHex: bound.viewSecret, spendPubHex: bound.spendPub,
       outputs, ecdhAmounts, ecdhMasks, outPk, rctVersion: Number(rctVersion) || 1,
     });
     if (r.outputs.length) out.push({ address: w.address, index: w.index ?? null, outputs: r.outputs, derivation: r.derivation, viewKeyForm: r.viewKeyForm, unlockTime: Number(tx.unlock_time) || 0, unlock });
   }
   return out;
+}
+
+// THE PUBLIC FORM BINDS EACH WATCHED ENTRY BEFORE IT LOOKS AT THE TRANSACTION. An entry that is not a primary
+// address with this spend key is skipped; the binding cannot be supplied by the caller.
+function bindWatched(watched) {
+  const bound = [];
+  for (const entry of watched) {
+    const verdict = watchedAddressVerdict(entry);
+    if (verdict.ok) bound.push({ entry, bound: verdict });
+  }
+  return bound;
+}
+
+export function matchTransaction(tx, watched, options = {}) {
+  return matchBoundTransaction(tx, bindWatched(watched), options);
 }
 
 // Range scan. Returns per address the sum (receivedAtomic - only the UNLOCKED), hashes, the locked sum
@@ -454,6 +499,9 @@ export async function scanRange({ daemonUrl, fromHeight, toHeight, watched, log 
   if (!(from >= 0) || !(to >= from)) throw new Error("bad height range: " + fromHeight + ".." + toHeight);
   const acc = new Map();
   for (const w of watched) acc.set(w.address, { address: w.address, receivedAtomic: 0n, lockedAtomic: 0n, lockedUntil: null, lockedTxids: [], txids: [], bestHeight: null, outputs: 0, viewKeyForm: null });
+  // BIND ONCE PER WATCHED ADDRESS. The binding does not depend on the transaction, and an invalid entry is skipped
+  // here exactly as the public matcher skips it.
+  const boundWatched = bindWatched(watched);
   const heights = [];
   for (let h = from; h <= to; h++) heights.push(h);
   const missingHeights = [];
@@ -469,7 +517,7 @@ export async function scanRange({ daemonUrl, fromHeight, toHeight, watched, log 
         if (!hashes.length) continue;
         const txs = await fetchTransactions(daemonUrl, hashes, fetchImpl);
         for (const tx of txs) {
-          for (const hit of matchTransaction(tx, watched, { height: h, tipHeight: tipHeight === null || tipHeight === undefined ? to : tipHeight, nowSec })) {
+          for (const hit of matchBoundTransaction(tx, boundWatched, { height: h, tipHeight: tipHeight === null || tipHeight === undefined ? to : tipHeight, nowSec })) {
             const a = acc.get(hit.address);
             if (!a) continue;
             if (hit.viewKeyForm) a.viewKeyForm = hit.viewKeyForm;   // what matched - this goes to the log

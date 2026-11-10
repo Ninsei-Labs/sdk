@@ -155,9 +155,9 @@ interface's: this package holds no user-facing string.
 ### Errors (`error.code`, `SdkError.code`)
 
 `not-implemented`, `bad-input`, `wallet-not-connected`, `wallet-rejected`, `wrong-chain`, `quote-unavailable`,
-`quote-refused`, `address-denied`, `quote-stale`, `recovery-declined`, `recovery-failed`, `storage-unavailable`,
-`server-unavailable`, `server-refused`, `claim-unknown`, `xmr-timeout`, `xmr-locked`, `contract-reverted`,
-`insufficient-funds`, `unknown`.
+`quote-refused`, `quote-too-short`, `quote-expired`, `address-denied`, `quote-stale`, `recovery-declined`,
+`recovery-failed`, `storage-unavailable`, `xmr-address-mismatch`, `server-unavailable`, `server-refused`,
+`claim-unknown`, `xmr-timeout`, `xmr-locked`, `contract-reverted`, `insufficient-funds`, `unknown`.
 
 Three refusals that are easy to merge into one are named DIFFERENTLY, because the advice differs:
 `server-unavailable` — the service did not answer (retry); `server-refused` — it answered and did not accept (its
@@ -179,8 +179,14 @@ in the package; a host that needs an indicative book keeps it in the host.
 ```js
 const offer = await sdk.quotes.firmRelay({ relayUrl, features, order, side: "ask", recoveryKey, xmrAmount });
 offer.orderQuote;   // the signed quote the factory takes
-offer.startRequest; // quote, order, orderQuote, counterparty and recovery salt for swaps.start
+offer.startRequest; // quote, order, orderQuote, counterparty, recovery salt and predicted escrow for swaps.start
 ```
+
+A buy quote must keep `LOCK_START_MARGIN_SEC` (30 s) plus `START_PREP_SEC` (15 s) after the relay answer has been
+verified. `quotes.firmRelay` refuses a shorter one with `quote-too-short` before a confirmation is shown, and returns
+`remainingSec` / `confirmBySec` so the host can show the time left and disable its button. A bid quote is checked only
+for its own expiry: the node has already funded the escrow and the client opens no wallet. The lock step then checks only
+the 30 s margin: the preparation was already spent between the answer and the send.
 
 ## Selling and claiming
 
@@ -301,10 +307,11 @@ receipt, a receipt without `OrderCreated`, or an event from another factory is `
 hash, and `swaps.start` does not save an escrow or retire a recovery number in that state.
 
 The predicted escrow and its salt are written to the pending record before the funding transaction is sent. A retry
-after a late receipt or a process restart finds that record by quote id or salt and reads the same transaction; it
-does not build a second side or send a second deposit. An explicit wallet rejection clears the pending mark so the
-person can sign again. A transaction that was already mined is stopped by the escrow state guard; one still in the
-mempool can make the resend revert and cost gas, but cannot create a second deposit.
+after a late receipt or a process restart finds that record by the salt, the chain, the factory and the predicted
+escrow, and reads the same transaction; it does not build a second side or send a second deposit. An explicit wallet
+rejection clears the pending mark so the person can sign again. A transaction that was already mined is stopped by
+the escrow state guard; one still in the mempool can make the resend revert and cost gas, but cannot create a second
+deposit.
 
 The wallet adapter accepts the standard Monero network names (`mainnet`, `stagenet`, `testnet`, `fakechain`) and
 still checks the address shape, so a mainnet withdrawal is not refused because the demo registry lists only

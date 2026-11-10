@@ -246,15 +246,6 @@ export function createQuotes({ config, now = () => Date.now(), evmCall = null, e
         side,
       });
       const quote = result.quote;
-      // A QUOTE THAT IS ALREADY AT THE START MARGIN CANNOT BECOME A SWAP. The proof and the record work take
-      // seconds; refusing at the lock would show the person a confirmation that was never going to reach the wallet.
-      // The check is here, on arrival, with its own code so the caller asks again without showing confirm.
-      const answerNowSec = Math.floor(Number(now()) / 1000);
-      const life = quoteLifeVerdict({ validUntil: quote.validUntil, nowSec: answerNowSec });
-      if (!life.ok) {
-        fail("quote-too-short", { step: "answer", validUntil: Number.isFinite(Number(quote.validUntil)) ? Number(quote.validUntil) : null,
-          now: answerNowSec, remainingSec: life.remainingSec, marginSec: life.marginSec });
-      }
       requirePinnedCashier(quote, "relay", config);
       // THE NODE HALF IS NOT A DECORATION. The answer's proof must stand in THIS order's context and the proven
       // point must be the one the quote commits to. For ask that is the claimer's commitment; for bid the node
@@ -381,7 +372,20 @@ export function createQuotes({ config, now = () => Date.now(), evmCall = null, e
       const marketAsset = request.market && String(request.market).includes(":")
         ? String(request.market).split(":").slice(1).join(":") : null;
       const asset = String(order.asset || marketAsset || "").trim();
+      // THE LIFE CHECK RUNS AFTER ALL THE WORK THE ANSWER NEEDS. The proof, the predict and the registry reads
+      // happen first; a quote that had 31 s on arrival has less by now, and showing a confirmation would waste the
+      // person's time only to refuse at the lock. A sell (bid) is checked by its own expiry alone: its escrow is
+      // already funded, so there is no local lock to prepare and no margin to reserve.
+      const answerNowSec = Math.floor(Number(now()) / 1000);
+      const life = quoteLifeVerdict({ validUntil: quote.validUntil, nowSec: answerNowSec, side });
+      if (!life.ok) {
+        fail("quote-too-short", { step: "answer", side,
+          validUntil: Number.isFinite(Number(quote.validUntil)) ? Number(quote.validUntil) : null,
+          now: answerNowSec, remainingSec: life.remainingSec, marginSec: life.marginSec,
+          prepSec: life.prepSec, confirmBySec: life.confirmBySec });
+      }
       const startQuote = { ...quote, viewHalfClaimer: derived.makerViewHalf, xmrAmount: signedAtomic, readyWindow,
+        escrow, remainingSec: life.remainingSec, confirmBySec: life.confirmBySec,
         ...(asset ? { asset, token: asset.toLowerCase() } : {}),
         // A STABLE ID FOR THE PENDING-FUNDING RECORD. The signed nonce is the one value every relay answer carries.
         ...(quote.nonce !== undefined && quote.nonce !== null ? { id: String(quote.nonce) } : {}) };
@@ -408,7 +412,10 @@ export function createQuotes({ config, now = () => Date.now(), evmCall = null, e
           counterparty: startCounterparty,
           recoveryKey: request.recoveryKey,
           recoverySalt: order.salt,
+          escrow,
         },
+        remainingSec: life.remainingSec,
+        confirmBySec: life.confirmBySec,
         // THE SHAPE `swaps.start` TAKES: the proof and the claimer commitment travel with the view half, so a
         // caller can pass this object as `counterparty` without rebuilding the relay fields.
         counterparty: startCounterparty,

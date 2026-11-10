@@ -64,6 +64,10 @@ export function createRecord(input, { order = null, side: knownSide = null, stor
     if (atomic <= 0n) throw new SdkError("bad-input", { field: "expectedAtomic" });
     escrow.expectedAtomic = atomic.toString();
   }
+  // THE ORDER IDENTITY SURVIVES A RELOAD. Pending funding is resumed only for the same chain, factory and predicted
+  // escrow; the salt alone does not prove that a record belongs to this start.
+  if (input.chainId !== undefined && input.chainId !== null) escrow.chainId = String(input.chainId);
+  if (input.factory !== undefined && input.factory !== null) escrow.factory = String(input.factory);
   // THE SIDE'S ENCRYPTION KEY - only the public one: the private one stays with the side and never enters the record.
   if (side.enc && side.enc.pub) escrow.encPub = norm(side.enc.pub);
   const record = { ...swap, escrow };

@@ -5,7 +5,7 @@
 // order and halves -> server -> watching the Monero address. A lock without a recovery file is a lock with nothing
 // to open it with if the browser is lost, so the confirmation stands BEFORE anything that locks funds.
 import { SdkError } from "./errors.mjs";
-import { LOCK_START_MARGIN_SEC } from "./quotePolicy.mjs";
+import { quoteLifeVerdict } from "./quotePolicy.mjs";
 import { SDK_VERSION } from "./version.mjs";
 import * as engine from "./engine.mjs";
 // The name is NOT `record`: inside start there is a variable with that name, and referencing the module before it
@@ -268,6 +268,11 @@ export const recordInputOf = (request, xmrNetwork = null) => {
     // tie the created escrow to the provider node's record, and without it the node cannot take the ETH
     // (sdk/src/swap-flow.mjs: quoteId: quote.id -> swap.orderQuoteId).
     orderQuoteId: pass(quote.id),
+    // THE PENDING-FUNDING IDENTITY. A retry without the relay answer still has to prove that the record it found
+    // belongs to the same order; the salt alone is not enough, so the chain, the factory and the predicted escrow
+    // are stored beside it.
+    chainId: pass((request.order && request.order.chainId) ?? (request.orderQuote && request.orderQuote.chainId)),
+    factory: pass((request.order && request.order.factory) ?? (request.orderQuote && request.orderQuote.factory)),
     // WHERE TO WITHDRAW XMR: part of the record, not a detail of the screen - the progress screen exports the file by it.
     receiveAddress: pass(request.receiveTo),
     // WHAT THE PERSON SAW: the maker, its spread, the fee, the rate and the quote signature. Screen data, but it must
@@ -321,33 +326,57 @@ export function sellWatchTimeoutMs({ configuredMs = 1_200_000, readyBySec = null
   return Math.max(configured, (readyAt - now + SELL_WATCH_MARGIN_SEC) * 1000);
 }
 
-// A PENDING FUNDING IS RESUMED ONLY FOR THE SAME QUOTE, NOT MERELY THE SAME NONCE. The quote id is the maker's
-// nonce; a second offer can reuse it. The salt is the client's own binding to the terms and the predicted escrow,
-// so an id match without the same salt is a different order.
-export function samePendingFunding(swap, quoteId, salt) {
+// A PENDING FUNDING IS RESUMED ONLY FOR THE SAME ORDER, NOT MERELY THE SAME NONCE. The quote nonce is the maker's
+// value and a second offer can reuse it. The identity is the client's salt together with the chain, the factory and
+// the predicted escrow: those four values are the order the record was built for. A record that names no predicted
+// escrow cannot prove it is the same order and is not resumed.
+const pendingSalt = (value) => String(value === undefined || value === null ? "" : value).replace(/^0x/i, "").toLowerCase();
+const pendingAddress = (value) => String(value === undefined || value === null ? "" : value).replace(/^0x/i, "").toLowerCase();
+function pendingFundingIdentity(swap) {
+  const escrow = swap && swap.escrow && typeof swap.escrow === "object" ? swap.escrow : {};
+  const order = swap && swap.order && typeof swap.order === "object" ? swap.order : {};
+  const quote = swap && swap.quote && typeof swap.quote === "object" ? swap.quote : {};
+  return {
+    salt: pendingSalt(escrow.salt ?? (swap && swap.recoverySalt)),
+    chainId: Number(order.chainId ?? quote.chainId ?? (swap && swap.chainId) ?? escrow.chainId),
+    factory: pendingAddress(order.factory ?? quote.factory ?? (swap && swap.factory) ?? escrow.factory),
+    escrow: pendingAddress(escrow.address ?? (swap && swap.predictedEscrow)),
+  };
+}
+
+export function samePendingFunding(swap, identity = {}) {
   if (!swap || !(swap.fundingPending === true || (swap.escrow && swap.escrow.fundingPending === true))) return false;
-  const id = String(quoteId || "");
-  const saltHex = String(salt || "").replace(/^0x/i, "").toLowerCase();
-  if (!id && !saltHex) return false;
-  const recordedId = String(swap.orderQuoteId || "");
-  const recordedSalt = String((swap.escrow && swap.escrow.salt) || swap.recoverySalt || "").replace(/^0x/i, "").toLowerCase();
-  if (id && recordedId === id) return Boolean(saltHex && recordedSalt === saltHex);
-  return Boolean(saltHex && recordedSalt === saltHex);
+  const recorded = pendingFundingIdentity(swap);
+  const wanted = {
+    salt: pendingSalt(identity.salt),
+    chainId: Number(identity.chainId),
+    factory: pendingAddress(identity.factory),
+    escrow: pendingAddress(identity.escrow),
+  };
+  if (!wanted.salt || !wanted.factory || !wanted.escrow || !Number.isSafeInteger(wanted.chainId) || wanted.chainId <= 0) return false;
+  return recorded.salt === wanted.salt
+    && recorded.chainId === wanted.chainId
+    && recorded.factory === wanted.factory
+    && recorded.escrow === wanted.escrow;
 }
 
 /**
  * WHAT A PENDING RECORD MEANS FOR THIS START.
  * `salt-required` is the expensive branch made loud: a caller that knows only the nonce of a pending record cannot
- * prove it is the same order, and falling through would build a second deposit. The caller must bring the salt (or
- * let the record be resolved by its own salt), not guess.
+ * prove it is the same order, and falling through would build a second deposit. The caller must bring the full
+ * identity (salt, chain, factory, predicted escrow), not guess.
  */
-export function pendingFundingVerdict(swap, quoteId, salt) {
+export function pendingFundingVerdict(swap, identity = {}) {
   const pending = Boolean(swap && (swap.fundingPending === true || (swap.escrow && swap.escrow.fundingPending === true)));
   if (!pending) return "not-pending";
-  const id = String(quoteId || "");
-  const saltHex = String(salt || "").replace(/^0x/i, "").toLowerCase();
-  if (id && String(swap.orderQuoteId || "") === id && !saltHex) return "salt-required";
-  return samePendingFunding(swap, id, saltHex) ? "resume" : "different";
+  const salt = pendingSalt(identity.salt);
+  const quoteId = String(identity.quoteId === undefined || identity.quoteId === null ? "" : identity.quoteId);
+  if (!salt) {
+    // THE QUOTE ID CAN SELECT THE RECORD, BUT IT CANNOT PROVE THE ORDER. Only a record that the caller named by the
+    // same quote id is this branch; an unrelated pending record must not block a new start.
+    return !quoteId || String(swap.orderQuoteId || "") === quoteId ? "salt-required" : "different";
+  }
+  return samePendingFunding(swap, identity) ? "resume" : "different";
 }
 
 // THE RECORD OF A SALE, FOUND BY ITS ESCROW. `sellWatch` is called from a reloaded page with the address in hand,
@@ -432,12 +461,14 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
   // A START THAT ENDED WITH A SENT TRANSACTION AND NO RECEIPT IS RESUMED, NOT RESENT. The transaction hash and the
   // predicted escrow are kept on the record; a retry of the same quote reads that receipt instead of building a
   // second side and sending a second deposit.
-  const pendingFundingOf = (quoteId, salt) => {
-    const id = String(quoteId || "");
-    const saltHex = String(salt || "").replace(/^0x/i, "").toLowerCase();
-    if (!id && !saltHex) return null;
+  const pendingFundingOf = (identity) => {
+    const salt = pendingSalt(identity && identity.salt);
+    const quoteId = String(identity && identity.quoteId !== undefined && identity.quoteId !== null ? identity.quoteId : "");
+    // WITHOUT EITHER HANDLE NOTHING CAN SELECT A RECORD. With a quote id the loop below can still name the record and
+    // refuse it as salt-required instead of silently starting a second deposit.
+    if (!salt && !quoteId) return null;
     for (const swap of records()) {
-      const verdict = pendingFundingVerdict(swap, id, saltHex);
+      const verdict = pendingFundingVerdict(swap, identity);
       if (verdict === "salt-required") {
         throw new SdkError("bad-input", { field: "recoverySalt", why: "required-for-pending-funding" });
       }
@@ -836,10 +867,20 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
 
       // RESUME BEFORE ANY NEW SIDE OR SEND. The previous start may have sent the deposit and lost the receipt;
       // reusing its hash is the only way to learn the escrow without a second payment.
-      const quoteForResume = (request.orderQuote && request.orderQuote.id) || (request.quote && request.quote.id) || null;
       const saltForResume = request.recoverySalt || (request.order && request.order.salt) ||
         (request.orderQuote && request.orderQuote.salt) || null;
-      const pendingRecord = pendingFundingOf(quoteForResume, saltForResume);
+      const pendingRecord = pendingFundingOf({
+        salt: saltForResume,
+        // THE QUOTE ID IS ONLY A SELECTOR. It lets a salt-less retry name the pending row and be refused loudly, but
+        // it never replaces the salt/chain/factory/escrow proof below.
+        quoteId: (request.orderQuote && request.orderQuote.id) || (request.quote && request.quote.id) || null,
+        chainId: (request.order && request.order.chainId) ?? (request.orderQuote && request.orderQuote.chainId)
+          ?? (request.quote && request.quote.chainId),
+        factory: (request.order && request.order.factory) ?? (request.orderQuote && request.orderQuote.factory)
+          ?? (request.quote && request.quote.factory),
+        escrow: request.escrow || request.predictedEscrow || (request.quote && request.quote.escrow)
+          || (request.orderQuote && request.orderQuote.escrow) || null,
+      });
       if (pendingRecord) {
         const resumed = await resumePendingFunding(pendingRecord, request);
         if (resumed) return resumed;
@@ -1094,8 +1135,20 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         // THE CLOCK IS THE SDK'S OWN SEAM, IN MILLISECONDS, LIKE EVERY OTHER NOW IN THE FACADE.
         const nowMs = typeof now === "function" ? Number(now()) : Date.now();
         const nowSec = Math.floor(nowMs / 1000);
-        if (!Number.isSafeInteger(until) || !Number.isSafeInteger(nowSec) || until <= nowSec + LOCK_START_MARGIN_SEC) {
-          throw new SdkError("quote-expired", { validUntil: Number.isFinite(until) ? until : null, now: Number.isFinite(nowSec) ? nowSec : null, marginSec: LOCK_START_MARGIN_SEC, step: "lock" });
+        // THE PREPARATION WAS ALREADY PAID FOR AT THE ANSWER. This check runs after the proof, the record and the
+        // chain reads; requiring START_PREP_SEC again would refuse a quote that the answer accepted and spent those
+        // seconds on. Only the next-block margin remains between here and the send.
+        const life = quoteLifeVerdict({ validUntil: until, nowSec, side: "ask", prepSec: 0 });
+        if (!life.ok) {
+          throw new SdkError("quote-expired", {
+            validUntil: Number.isFinite(until) ? until : null,
+            now: Number.isFinite(nowSec) ? nowSec : null,
+            remainingSec: life.remainingSec,
+            marginSec: life.marginSec,
+            prepSec: life.prepSec,
+            confirmBySec: life.confirmBySec,
+            step: "lock",
+          });
         }
       }
       lockRequest.quote = request.orderQuote || null;

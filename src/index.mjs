@@ -288,7 +288,7 @@ export { SdkError, ERROR_CODES, ERROR_META, ERROR_SIDES, STEP_CODES, CHECK_CODES
 export { SDK_VERSION } from "./version.mjs";
 // THE QUOTE LIFETIME AND THE START MARGIN ARE ONE PUBLIC DEFAULT. A node imports the lifetime, so its signed quote
 // cannot be shorter than the margin the SDK enforces before it opens the wallet.
-export { LOCK_START_MARGIN_SEC, DEFAULT_ORDER_QUOTE_TTL_SEC } from "./quotePolicy.mjs";
+export { LOCK_START_MARGIN_SEC, START_PREP_SEC, DEFAULT_ORDER_QUOTE_TTL_SEC } from "./quotePolicy.mjs";
 
 // THE LEVEL WALK IS ON THE PACKAGE SURFACE. A maker publishes a level set (chunks of volume with their own prices)
 // and both the node and the client compute a firm price by WALKING it - the client must reach the SAME price before

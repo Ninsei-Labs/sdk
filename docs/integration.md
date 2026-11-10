@@ -52,10 +52,17 @@ The host normally follows this sequence:
 2. Call `quotes.firmRelay` for the flow; there is no direct quote route in the SDK.
 3. Show the signed terms and the recovery key to the person.
 4. Call `swaps.start` with the quote, the wallet and the confirmation that the recovery key is saved. A relay answer
-   carries `startRequest` with the quote, order, orderQuote, counterparty and recovery salt; add your wallet,
-   `receiveTo` and height and pass it through.
+   carries `startRequest` with the quote, order, orderQuote, counterparty, recovery salt and predicted escrow; add
+   your wallet, `receiveTo` and height and pass it through.
 5. Watch the Monero arrival with `swaps.watch`.
 6. Mark ready only after the arrival is confirmed; claiming and refunding are separate actions.
+
+A buy quote must keep `LOCK_START_MARGIN_SEC` (30 s) plus `START_PREP_SEC` (15 s) of life after the relay answer has
+been verified. If less is left, `quotes.firmRelay` refuses with `quote-too-short` before the host shows a confirmation.
+The answer also carries `remainingSec` and `confirmBySec`, so the host can show the time left and disable its confirm
+button at the deadline. A sell quote is checked only against its own expiry: the node has already funded the escrow
+and the client opens no wallet. The lock step then checks only the 30 s margin, because the preparation was already
+spent between the answer and the send.
 
 The SDK refuses to lock funds until the host confirms that the recovery key is saved. Do not reorder these steps in
 the UI: the recovery file is the only way to recover the XMR if the tab is lost.
@@ -161,8 +168,8 @@ bytes on an idempotent retry where the SDK provides one, and never turn a timeou
 
 Every refusal carries a stable code and parameters; the host maps codes to its own copy. Never display a raw
 exception or a code as a user-facing sentence. Important groups include quote refusals, `wrong-chain`,
-`wrong-account`, `storage-unavailable`, `claim-unknown`, `xmr-timeout`, `xmr-locked`, `contract-reverted`,
-`wallet-rejected` and `not-implemented`.
+`wrong-account`, `storage-unavailable`, `claim-unknown`, `xmr-timeout`, `xmr-locked`, `xmr-address-mismatch`,
+`quote-too-short`, `contract-reverted`, `wallet-rejected` and `not-implemented`.
 
 See `src/codes.mjs` and `index.d.ts` for the current unions. Code values are part of the integration contract; a
 new code is a compatibility event and should be called out in the release notes.

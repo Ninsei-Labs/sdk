@@ -8,9 +8,10 @@
 //
 // Run: node tools/check-arrival-extra-keys.mjs
 import { ed25519, keccak256 } from "../src/primitives.mjs";
+import { addressFromKeys } from "../engine/monero/address.js";
 import {
   amountMaskCommitment, bytesToHex, derivedOutputKey, hashToScalar, hexToBytes, keyDerivation,
-  matchTransaction, scalarToBytesLE, txKeysFromExtra, varint,
+  matchTransaction, scalarToBytesLE, txKeysFromExtra, varint, scanRange,
 } from "../engine/monero/scan.js";
 
 const G = ed25519.Point.BASE;
@@ -41,11 +42,13 @@ function factor(label, scalarLE) {
   buf.set(name, 0); buf.set(scalarLE, name.length);
   return keccak256(buf);
 }
-function fixture({ additional = true } = {}) {
+function fixture({ additional = true, view = VIEW } = {}) {
   const spendPub = G.multiply(SPEND).toHex();
+  const viewPub = G.multiply(view).toHex();
+  const address = addressFromKeys({ network: "stagenet", spendPub, viewPub }, { keccak256 });
   const primary = G.multiply(R0).toHex();
   const additionalKey = G.multiply(R1).toHex();
-  const derivation = keyDerivation(additionalKey, VIEW);
+  const derivation = keyDerivation(additionalKey, view);
   const scalar = hashToScalar(derivation, varint(1));
   const scalarLE = scalarToBytesLE(scalar);
   const amount = xorBytes(le8(AMOUNT), factor("amount", scalarLE));
@@ -73,6 +76,7 @@ function fixture({ additional = true } = {}) {
     additionalKey,
     derivation: bytesToHex(derivation),
     spendPub,
+    address,
   };
 }
 
@@ -87,10 +91,10 @@ console.log("=== 1) THE EXTRA PARSER READS TAG 0x04 ===");
   } else bad("additional keys: " + JSON.stringify(keys.additionalPublicKeys));
 }
 
-console.log("=== 2) THE SUBADDRESS OUTPUT IS FOUND FROM ITS OWN KEY ===");
+console.log("=== 2) THE OUTPUT DERIVED FROM ITS OWN ADDITIONAL KEY IS FOUND ===");
 {
   const f = fixture();
-  const hit = matchTransaction(f.tx, [{ address: "subaddress", viewSecret: VIEW, spendPub: f.spendPub }], { height: 100 });
+  const hit = matchTransaction(f.tx, [{ address: f.address, viewSecret: VIEW, spendPub: f.spendPub }], { height: 100 });
   const outputs = hit[0] ? hit[0].outputs : [];
   if (outputs.length === 1 && outputs[0].index === 1) ok("only output 1 is ours");
   else bad("owned outputs: " + JSON.stringify(outputs.map((o) => o.index)));
@@ -105,7 +109,7 @@ console.log("=== 2) THE SUBADDRESS OUTPUT IS FOUND FROM ITS OWN KEY ===");
 console.log("=== 3) WITHOUT TAG 0x04 THE SAME OUTPUT IS ABSENT, NOT GUESSED ===");
 {
   const f = fixture({ additional: false });
-  const hit = matchTransaction(f.tx, [{ address: "subaddress", viewSecret: VIEW, spendPub: f.spendPub }], { height: 100 });
+  const hit = matchTransaction(f.tx, [{ address: f.address, viewSecret: VIEW, spendPub: f.spendPub }], { height: 100 });
   if (hit.length === 0) ok("the main key alone does not invent an arrival");
   else bad("a missing additional key still produced " + hit.length + " hit(s)");
 }
@@ -115,7 +119,7 @@ console.log("=== 4) THE ADDITIONAL KEY IS BOUND TO ITS OUTPUT INDEX ===");
   const f = fixture();
   const wrong = structuredClone(f.tx);
   wrong.extra = [0x01, ...hexToBytes(f.primary), 0x04, 0x01, ...hexToBytes(f.additionalKey)];
-  const hit = matchTransaction(wrong, [{ address: "subaddress", viewSecret: VIEW, spendPub: f.spendPub }], { height: 100 });
+  const hit = matchTransaction(wrong, [{ address: f.address, viewSecret: VIEW, spendPub: f.spendPub }], { height: 100 });
   if (hit.length === 0) ok("key 0 cannot claim output 1");
   else bad("the wrong-index key produced " + hit.length + " hit(s)");
 }
@@ -132,14 +136,44 @@ console.log("=== 5) PADDING BEFORE THE KEY IS SKIPPED ===");
 console.log("=== 6) A MALFORMED EXTRA KEY DOES NOT HIDE THE REAL OUTPUT ===");
 {
   const f = fixture();
-  const bad = { ...f.tx, extra: [0x01, ...hexToBytes("ff".repeat(32)), ...f.tx.extra] };
+  const poisoned = { ...f.tx, extra: [0x01, ...hexToBytes("ff".repeat(32)), ...f.tx.extra] };
   let hit = null;
   let error = null;
-  try { hit = matchTransaction(bad, [{ address: "subaddress", viewSecret: VIEW, spendPub: f.spendPub }], { height: 100 }); }
+  try { hit = matchTransaction(poisoned, [{ address: f.address, viewSecret: VIEW, spendPub: f.spendPub }], { height: 100 }); }
   catch (e) { error = e; }
   if (!error && hit.length === 1 && hit[0].outputs.length === 1 && hit[0].outputs[0].index === 1) {
     ok("the decoder skips the bad key and still finds output 1");
   } else bad("bad extra key -> " + (error ? error.message : JSON.stringify(hit)));
+}
+
+console.log("=== 7) THE OTHER BYTE-ORDER READING IS NOT A SECOND ADDRESS ===");
+{
+  // A 64-hex watch string has two readings: the number it spells (1) and the little-endian bytes (2^248). The
+  // address names the view point 1*G, so the LE reading belongs to a different address even though the string is
+  // the same. The scanner must not count a payment to that other point.
+  const viewHex = "00".repeat(31) + "01";
+  const named = fixture({ view: 1n });
+  const other = fixture({ view: 1n << 248n });
+  const hit = matchTransaction(other.tx, [{ address: named.address, viewSecret: viewHex, spendPub: named.spendPub }], { height: 100 });
+  if (hit.length === 0) ok("a payment to the other byte-order reading is not our arrival");
+  else bad("the other byte-order reading produced " + hit.length + " hit(s)");
+  const scanFetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (url.endsWith("/json_rpc")) {
+      return { ok: true, json: async () => ({ result: { json: JSON.stringify({ tx_hashes: ["aa"] }) } }) };
+    }
+    if (url.endsWith("/get_transactions")) {
+      return { ok: true, json: async () => ({ txs: [{ tx_hash: "aa" }], txs_as_json: [JSON.stringify(other.tx)] }) };
+    }
+    throw new Error("unexpected route " + url);
+  };
+  const scanned = await scanRange({
+    daemonUrl: "https://node.example", fromHeight: 100, toHeight: 100,
+    watched: [{ address: named.address, viewSecret: viewHex, spendPub: named.spendPub }], fetchImpl: scanFetch,
+  });
+  const row = scanned.results[0] || {};
+  if (row.receivedAtomic === 0n && (row.txids || []).length === 0) ok("the public scanRange applies the same address binding");
+  else bad("scanRange counted the other byte-order reading: " + JSON.stringify({ received: String(row.receivedAtomic), txids: row.txids }));
 }
 
 console.log("");
