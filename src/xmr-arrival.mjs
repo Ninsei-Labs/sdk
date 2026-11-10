@@ -482,7 +482,6 @@ async function locateInSlices(node, { expectedAtomic, address, viewSecret, spend
   if (target < fromHeight || toHeight < fromHeight) return { located: null, completed: false };
   const first = witnessSliceIndex(fromHeight);
   const last = witnessSliceIndex(Math.min(toHeight, target));
-  const completeAt = witnessSliceIndex(target);
   let best = null;
   let completed = false;
   for (let index = first; index <= last; index++) {
@@ -511,14 +510,14 @@ async function locateInSlices(node, { expectedAtomic, address, viewSecret, spend
       }
     }
     // THE WHOLE SLICE WAS READ. A perfect candidate lets the walk stop after this slice, not after a block:
-    // the last witness request is still a fixed slice, never the payout height. `completed` means the full
-    // requested slice range was walked up to the highest top any source reported; a partial tip slice is the end
-    // of that range only when the witness actually reached that top.
+    // the last witness request is still a fixed slice, never the payout height. Completion is judged by the
+    // LAST BLOCK the witness actually served, not by the slice index: a witness can stop inside the same
+    // 20-block window as the target and still be behind it.
     if (best && best.score === 7) {
-      completed = index === completeAt;
+      completed = slice.to >= target;
       break;
     }
-    if (index === last) completed = index === completeAt;
+    if (index === last) completed = slice.to >= target;
   }
   return { located: best, completed };
 }

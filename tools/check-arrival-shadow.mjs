@@ -277,6 +277,18 @@ console.log("=== 10) A WITNESS BELOW THE EXACT TOP DOES NOT PROVE ABSENCE ===");
   } else bad("short witness agreement: " + JSON.stringify({ agrees: result.agrees, problems: result.problems }));
 }
 
+console.log("=== 11) THE WITNESS TOP INSIDE THE SAME SLICE DOES NOT COMPLETE THE WALK ===");
+{
+  const result = await shadow({ fromHeight: 106, witnessTop: 112, exactInfoHeight: 119 });
+  if (result.exact && result.exact.absent === true) ok("the exact path reports absence below the exact top");
+  else bad("exact absence: " + JSON.stringify(result.exact || result.exactError));
+  if (result.witness.completed === false) ok("a witness that stops inside the same slice did not complete the walk");
+  else bad("same-slice witness completed: " + JSON.stringify(result.witness));
+  if (result.agrees === false && result.problems.includes("witness:not-completed")) {
+    ok("a same-slice witness below the exact top cannot agree on absence");
+  } else bad("same-slice witness agreement: " + JSON.stringify({ agrees: result.agrees, problems: result.problems }));
+}
+
 if (problems.length) {
   console.log("FAILED: " + problems.length + " problem(s) (passed " + pass + ")");
   process.exit(1);
