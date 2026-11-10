@@ -61,7 +61,8 @@ A buy quote must keep `LOCK_START_MARGIN_SEC` (30 s) plus `START_PREP_SEC` (15 s
 been verified. If less is left, `quotes.firmRelay` refuses with `quote-too-short` before the host shows a confirmation.
 The answer also carries `remainingSec` and `confirmBySec`, so the host can show the time left and disable its confirm
 button at the deadline. A sell quote is checked only against its own expiry: the node has already funded the escrow
-and the client opens no wallet.
+and the client opens no wallet. The lock step then checks only the 30 s margin, because the preparation was already
+spent between the answer and the send.
 
 The SDK refuses to lock funds until the host confirms that the recovery key is saved. Do not reorder these steps in
 the UI: the recovery file is the only way to recover the XMR if the tab is lost.

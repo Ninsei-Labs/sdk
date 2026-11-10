@@ -441,7 +441,11 @@ export async function fetchTransactions(daemonUrl, hashes, fetchImpl = globalThi
 
 // Parsing one transaction against the watched addresses. watched: [{ address, viewSecret, spendPub }] - viewSecret
 // is taken as a number, LE-hex or BE-hex. The result carries viewKeyForm: the form name that matched.
-export function matchTransaction(tx, watched, { height = null, tipHeight = null, nowSec = null } = {}) {
+//
+// THE KEY BINDING IS A PROPERTY OF THE WATCHED ENTRY, NOT OF THE TRANSACTION. `scanRange` binds every entry once
+// before its block loop and passes the result here; the public `matchTransaction` binds the entries it is given.
+// Re-binding inside the loop made every transaction repeat base58 decoding, keccak and an ed25519 multiplication.
+function matchBoundTransaction(tx, boundWatched, { height = null, tipHeight = null, nowSec = null } = {}) {
   const out = [];
   // BOTH KEY LISTS ARE PART OF THE TRANSACTION. A subaddress output carries its own key under tag 0x04; using only
   // `txPublicKeyFromExtra` drops exactly those outputs.
@@ -462,11 +466,7 @@ export function matchTransaction(tx, watched, { height = null, tipHeight = null,
   const ecdhMasks = ecdh.map((e) => e.mask);
   const outPk = ((tx.rct_signatures || {}).outPk || []);
   const rctVersion = (tx.rct_signatures || {}).type || 2;
-  for (const w of watched) {
-    // ONLY THE FORM THAT BELONGS TO THIS ADDRESS IS TRIED. A watched entry with another byte-order reading, another
-    // spend key, or a subaddress is not a match; it cannot be made one by calling the public scanner directly.
-    const bound = watchedAddressVerdict(w);
-    if (!bound.ok) continue;
+  for (const { entry: w, bound } of boundWatched) {
     const r = findOurOutputs({
       txPublicKeys: keys.txPublicKeys, additionalPublicKeys: keys.additionalPublicKeys,
       viewSecretHex: bound.viewSecret, spendPubHex: bound.spendPub,
@@ -477,6 +477,21 @@ export function matchTransaction(tx, watched, { height = null, tipHeight = null,
   return out;
 }
 
+// THE PUBLIC FORM BINDS EACH WATCHED ENTRY BEFORE IT LOOKS AT THE TRANSACTION. An entry that is not a primary
+// address with this spend key is skipped; the binding cannot be supplied by the caller.
+function bindWatched(watched) {
+  const bound = [];
+  for (const entry of watched) {
+    const verdict = watchedAddressVerdict(entry);
+    if (verdict.ok) bound.push({ entry, bound: verdict });
+  }
+  return bound;
+}
+
+export function matchTransaction(tx, watched, options = {}) {
+  return matchBoundTransaction(tx, bindWatched(watched), options);
+}
+
 // Range scan. Returns per address the sum (receivedAtomic - only the UNLOCKED), hashes, the locked sum
 // (lockedAtomic) with its boundary (lockedUntil) and the best (highest) height of a found output.
 export async function scanRange({ daemonUrl, fromHeight, toHeight, watched, log = () => {}, concurrency = 4, nowSec = null, tipHeight = null, fetchImpl = globalThis.fetch }) {
@@ -484,6 +499,9 @@ export async function scanRange({ daemonUrl, fromHeight, toHeight, watched, log 
   if (!(from >= 0) || !(to >= from)) throw new Error("bad height range: " + fromHeight + ".." + toHeight);
   const acc = new Map();
   for (const w of watched) acc.set(w.address, { address: w.address, receivedAtomic: 0n, lockedAtomic: 0n, lockedUntil: null, lockedTxids: [], txids: [], bestHeight: null, outputs: 0, viewKeyForm: null });
+  // BIND ONCE PER WATCHED ADDRESS. The binding does not depend on the transaction, and an invalid entry is skipped
+  // here exactly as the public matcher skips it.
+  const boundWatched = bindWatched(watched);
   const heights = [];
   for (let h = from; h <= to; h++) heights.push(h);
   const missingHeights = [];
@@ -499,7 +517,7 @@ export async function scanRange({ daemonUrl, fromHeight, toHeight, watched, log 
         if (!hashes.length) continue;
         const txs = await fetchTransactions(daemonUrl, hashes, fetchImpl);
         for (const tx of txs) {
-          for (const hit of matchTransaction(tx, watched, { height: h, tipHeight: tipHeight === null || tipHeight === undefined ? to : tipHeight, nowSec })) {
+          for (const hit of matchBoundTransaction(tx, boundWatched, { height: h, tipHeight: tipHeight === null || tipHeight === undefined ? to : tipHeight, nowSec })) {
             const a = acc.get(hit.address);
             if (!a) continue;
             if (hit.viewKeyForm) a.viewKeyForm = hit.viewKeyForm;   // what matched - this goes to the log

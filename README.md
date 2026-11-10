@@ -185,7 +185,8 @@ offer.startRequest; // quote, order, orderQuote, counterparty, recovery salt and
 A buy quote must keep `LOCK_START_MARGIN_SEC` (30 s) plus `START_PREP_SEC` (15 s) after the relay answer has been
 verified. `quotes.firmRelay` refuses a shorter one with `quote-too-short` before a confirmation is shown, and returns
 `remainingSec` / `confirmBySec` so the host can show the time left and disable its button. A bid quote is checked only
-for its own expiry: the node has already funded the escrow and the client opens no wallet.
+for its own expiry: the node has already funded the escrow and the client opens no wallet. The lock step then checks only
+the 30 s margin: the preparation was already spent between the answer and the send.
 
 ## Selling and claiming
 

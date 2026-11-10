@@ -275,10 +275,13 @@ try {
 } catch (error) { bad("valid adapter call failed: " + JSON.stringify(error && (error.code || error.message)) + " " + JSON.stringify(error && error.params)); }
 
 console.log("=== 1b) A BUY QUOTE MUST KEEP THE START MARGIN AND THE PREPARATION TIME ===");
+// A FIXED CLOCK, NOT A SECOND Date.now(). The quote's lifetime and the adapter's answer must be measured from the
+// same instant; otherwise a slow run can turn a 60 s case into a 44 s one and the check fails on timing, not logic.
+const lifeNowMs = Math.floor(Date.now() / 1000) * 1000;
 for (const [left, expected] of [[30, "quote-too-short"], [31, "quote-too-short"], [45, "quote-too-short"], [60, null]]) {
-  const until = Math.floor(Date.now() / 1000) + left;
+  const until = Math.floor(lifeNowMs / 1000) + left;
   try {
-    const result = await call(makeQuotes({ now: () => Date.now() }), { fetchImpl: relayFetch({ validUntil: until }).fetchImpl });
+    const result = await call(makeQuotes({ now: () => lifeNowMs }), { fetchImpl: relayFetch({ validUntil: until }).fetchImpl });
     if (expected === null && result.remainingSec > 45 && result.confirmBySec === until - 45) {
       ok("a buy with " + left + " s left is accepted and reports its confirm deadline");
     } else bad("a buy with " + left + " s left was accepted without the expected life: " + JSON.stringify({ remainingSec: result.remainingSec, confirmBySec: result.confirmBySec }));

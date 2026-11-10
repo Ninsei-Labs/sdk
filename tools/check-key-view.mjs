@@ -32,14 +32,21 @@ const quote = { ...order, provider: order.claimer,
   edPointClaimer: maker.spendPoint, feeBps: 0, fee: "0", feeRecipient: addr("77"),
   validUntil: now + 600, nonce: "1", xmrAmount: "1000000000000", claimTip: "0", commitHalfLocker: "0x" + "a1".repeat(32), edPointLocker: "0x" + "a2".repeat(32), edViewPointLocker: "0x" + "a3".repeat(32) };
 quote.signature = signQuoteDigest({ crypto: primitives, digest: quoteDigest({ crypto: primitives, quote }), privateKey: makerKey });
+// A COPY OF THE SAME SIGNED QUOTE WITH ANOTHER LIFETIME. The lock check runs after the answer's preparation was paid;
+// the case below needs a quote that is already inside the answer's combined window but outside the next-block margin.
+const quoteForLock = (validUntil) => {
+  const copy = { ...quote, validUntil };
+  copy.signature = signQuoteDigest({ crypto: primitives, digest: quoteDigest({ crypto: primitives, quote: copy }), privateKey: makerKey });
+  return copy;
+};
 
 let pass = 0;
 const fails = [];
 const ok = (m) => { pass += 1; console.log("  ok    " + m); };
 const bad = (m) => { fails.push(m); console.log("  FAIL  " + m); };
 
-async function startWith(view, salt = order.salt, extra = {}, autoSalt = false) {
-  setStorage(memoryStorage());
+async function startWith(view, salt = order.salt, extra = {}, autoSalt = false, options = {}) {
+  if (options.fresh !== false) setStorage(memoryStorage());
   let sent = 0;
   let atSend = null;
   const wallet = { chainId: async () => order.chainId, address: async () => order.locker,
@@ -49,10 +56,13 @@ async function startWith(view, salt = order.salt, extra = {}, autoSalt = false) 
     commitHalfClaimer: quote.commitHalfClaimer, ...extra };
   if (view === "missing") delete counterparty.viewHalfClaimer;
   else counterparty.viewHalfClaimer = view;
-  const request = { quote: { id: "q", chain: "arbitrum-sepolia", asset: "ETH", amount: 1, size: 1 }, order, orderQuote: quote,
+  const activeOrder = options.order || order;
+  const activeQuote = Object.prototype.hasOwnProperty.call(options, "quote") ? options.quote : quote;
+  const request = { quote: { id: "q", chain: "arbitrum-sepolia", asset: "ETH", amount: 1, size: 1, xmrAmount: quote.xmrAmount }, order: activeOrder, orderQuote: activeQuote,
     counterparty, recoveryKey: WORDS, ...(autoSalt ? {} : { recoverySalt: salt }),
     receiveTo: "synthetic-xmr-destination", restoreHeight: 100, wallet, onRecoveryKey: async () => true };
   const result = await createSwaps({ mode: "live", xmrNetwork: "stagenet", logs: async () => [],
+    now: options.nowMs === undefined ? null : () => options.nowMs,
     call: async ({ data }) => (data.startsWith(FACTORY_METHODS.predict) ? "0x" + "0".repeat(24) + "88".repeat(20) : "0x"),
   }).start(request).catch((error) => error);
   return { result, sent, atSend };
@@ -125,6 +135,19 @@ async function startPending({ fresh = true, receipt = { status: "0x1", logs: [],
   return { result, sent };
 }
 
+console.log("=== 1c2) A PENDING ROW WITHOUT ITS SALT IS REFUSED, NOT STARTED AGAIN ===");
+{
+  const first = await startPending();
+  const noSaltOrder = { ...order, salt: "", xmrAmount: quote.xmrAmount };
+  const second = await startWith(derived.makerViewHalf, "", {}, false, { fresh: false, order: noSaltOrder, quote: null });
+  if (first.result && first.result.step === "funding-pending" && second.result &&
+      second.result.code === "bad-input" && second.result.params && second.result.params.field === "recoverySalt" && second.sent === 0) {
+    ok("a pending quote id without a salt is refused instead of opening a second deposit");
+  } else {
+    bad("salt-less pending retry: " + JSON.stringify({ first: first.result && first.result.step, code: second.result && second.result.code, params: second.result && second.result.params, sent: second.sent }));
+  }
+}
+
 console.log("=== 1d) A RECEIPT WITHOUT THE EVENT IS NOT xmr-incoming ===");
 {
   const { result, sent } = await startPending();
@@ -144,6 +167,20 @@ console.log("=== 1d1) THE PENDING RECORD IS WRITTEN BEFORE THE SEND ===");
       /^0x8{40}$/i.test(String(atSendPending.escrow.address || "")) && !after) {
     ok("the pending record exists at send time and a rejected wallet clears it for a retry");
   } else bad("pre-send record: " + JSON.stringify({ code: result && result.code, sent, atSend: atSendPending && atSendPending.escrow, after }));
+}
+
+console.log("=== 1d1b) THE LOCK RESERVES THE NEXT BLOCK, NOT THE PREPARATION AGAIN ===");
+{
+  // 35 s left: inside the answer's 45 s window, outside the lock's 30 s margin. The preparation was already spent
+  // between the answer and this send, so the lock must not charge START_PREP_SEC a second time.
+  const fixedSec = Math.floor(Date.now() / 1000);
+  const { result, sent } = await startWith(derived.makerViewHalf, order.salt, {}, false,
+    { quote: quoteForLock(fixedSec + 35), nowMs: fixedSec * 1000 });
+  if (result && result.code === "wallet-rejected" && sent === 1) {
+    ok("a quote with 35 s left reaches the lock after the answer already paid the preparation");
+  } else {
+    bad("lock life: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
+  }
 }
 
 console.log("=== 1d2) A RETRY READS THE SAME HASH AND DOES NOT SEND AGAIN ===");

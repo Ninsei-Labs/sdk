@@ -369,7 +369,13 @@ export function samePendingFunding(swap, identity = {}) {
 export function pendingFundingVerdict(swap, identity = {}) {
   const pending = Boolean(swap && (swap.fundingPending === true || (swap.escrow && swap.escrow.fundingPending === true)));
   if (!pending) return "not-pending";
-  if (!pendingSalt(identity.salt)) return "salt-required";
+  const salt = pendingSalt(identity.salt);
+  const quoteId = String(identity.quoteId === undefined || identity.quoteId === null ? "" : identity.quoteId);
+  if (!salt) {
+    // THE QUOTE ID CAN SELECT THE RECORD, BUT IT CANNOT PROVE THE ORDER. Only a record that the caller named by the
+    // same quote id is this branch; an unrelated pending record must not block a new start.
+    return !quoteId || String(swap.orderQuoteId || "") === quoteId ? "salt-required" : "different";
+  }
   return samePendingFunding(swap, identity) ? "resume" : "different";
 }
 
@@ -456,7 +462,11 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
   // predicted escrow are kept on the record; a retry of the same quote reads that receipt instead of building a
   // second side and sending a second deposit.
   const pendingFundingOf = (identity) => {
-    if (!pendingSalt(identity && identity.salt)) return null;
+    const salt = pendingSalt(identity && identity.salt);
+    const quoteId = String(identity && identity.quoteId !== undefined && identity.quoteId !== null ? identity.quoteId : "");
+    // WITHOUT EITHER HANDLE NOTHING CAN SELECT A RECORD. With a quote id the loop below can still name the record and
+    // refuse it as salt-required instead of silently starting a second deposit.
+    if (!salt && !quoteId) return null;
     for (const swap of records()) {
       const verdict = pendingFundingVerdict(swap, identity);
       if (verdict === "salt-required") {
@@ -861,6 +871,9 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         (request.orderQuote && request.orderQuote.salt) || null;
       const pendingRecord = pendingFundingOf({
         salt: saltForResume,
+        // THE QUOTE ID IS ONLY A SELECTOR. It lets a salt-less retry name the pending row and be refused loudly, but
+        // it never replaces the salt/chain/factory/escrow proof below.
+        quoteId: (request.orderQuote && request.orderQuote.id) || (request.quote && request.quote.id) || null,
         chainId: (request.order && request.order.chainId) ?? (request.orderQuote && request.orderQuote.chainId)
           ?? (request.quote && request.quote.chainId),
         factory: (request.order && request.order.factory) ?? (request.orderQuote && request.orderQuote.factory)
@@ -1122,7 +1135,10 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         // THE CLOCK IS THE SDK'S OWN SEAM, IN MILLISECONDS, LIKE EVERY OTHER NOW IN THE FACADE.
         const nowMs = typeof now === "function" ? Number(now()) : Date.now();
         const nowSec = Math.floor(nowMs / 1000);
-        const life = quoteLifeVerdict({ validUntil: until, nowSec, side: "ask" });
+        // THE PREPARATION WAS ALREADY PAID FOR AT THE ANSWER. This check runs after the proof, the record and the
+        // chain reads; requiring START_PREP_SEC again would refuse a quote that the answer accepted and spent those
+        // seconds on. Only the next-block margin remains between here and the send.
+        const life = quoteLifeVerdict({ validUntil: until, nowSec, side: "ask", prepSec: 0 });
         if (!life.ok) {
           throw new SdkError("quote-expired", {
             validUntil: Number.isFinite(until) ? until : null,

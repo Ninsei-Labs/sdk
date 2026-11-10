@@ -65,7 +65,7 @@ console.log("=== 5) A PENDING FUNDING IS RESUMED ONLY FOR THE SAME ORDER ===");
   const chainId = 42161;
   const identity = { salt: "aa".repeat(32), chainId, factory, escrow };
   const otherIdentity = { ...identity, escrow: other };
-  const pending = { fundingPending: true, order: { chainId, factory },
+  const pending = { fundingPending: true, orderQuoteId: "q", order: { chainId, factory },
     escrow: { salt: "aa".repeat(32), address: escrow, fundingPending: true } };
   if (samePendingFunding(pending, identity)) ok("the same salt, chain, factory and escrow resumes");
   else bad("the same identity did not resume");
@@ -83,6 +83,12 @@ console.log("=== 5) A PENDING FUNDING IS RESUMED ONLY FOR THE SAME ORDER ===");
   if (pendingFundingVerdict(pending, {}) === "salt-required") {
     ok("an identity without a salt is refused instead of falling through to a new deposit");
   } else bad("a salt-less identity was not refused: " + pendingFundingVerdict(pending, {}));
+  if (pendingFundingVerdict(pending, { quoteId: "q" }) === "salt-required") {
+    ok("a quote id names the pending record but still requires its salt");
+  } else bad("a salt-less quote id was not refused: " + pendingFundingVerdict(pending, { quoteId: "q" }));
+  if (pendingFundingVerdict(pending, { quoteId: "other" }) === "different") {
+    ok("an unrelated quote id does not block a new start");
+  } else bad("an unrelated quote id became salt-required: " + pendingFundingVerdict(pending, { quoteId: "other" }));
   if (pendingFundingVerdict(pending, identity) === "resume") ok("the verdict resumes with the full identity");
   else bad("the verdict did not resume with the full identity");
 }
