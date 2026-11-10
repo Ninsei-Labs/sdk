@@ -78,8 +78,8 @@ function blockFor(height) {
   return { block_header: { hash }, tx_hashes: height === 105 ? [TXID] : [] };
 }
 
-function fetchBoth({ witnessHash = BLOCK_HASH, witnessTop = 119, witnessInfoTop = null, witnessPartialAt = null,
-  witnessPartialTo = null, witnessBroken = null } = {}) {
+function fetchBoth({ witnessHash = BLOCK_HASH, witnessTop = 119, witnessInfoTop = null, exactInfoHeight = null,
+  witnessPartialAt = null, witnessPartialTo = null, witnessBroken = null } = {}) {
   return async (url, init) => {
     const body = JSON.parse(String(init.body || "{}"));
     requests.push({ url, body });
@@ -105,7 +105,7 @@ function fetchBoth({ witnessHash = BLOCK_HASH, witnessTop = 119, witnessInfoTop 
         tip: witnessBroken === "claims-complete" ? null : tip }) };
     }
     if (body.method === "get_info") {
-      const height = isHost(url, "witness.example") ? Number(witnessInfoTop ?? witnessTop) + 1 : 121;
+      const height = isHost(url, "witness.example") ? Number(witnessInfoTop ?? witnessTop) + 1 : Number(exactInfoHeight ?? 121);
       return { ok: true, json: async () => ({ result: { height, synchronized: true, status: "OK", nettype: "stagenet" } }) };
     }
     if (body.method === "get_block") {
@@ -207,8 +207,9 @@ console.log("=== 5) A TIP SLICE IS PARTIAL, NOT A REFUSAL ===");
 {
   requests.length = 0;
   const result = await shadow({ witnessTop: 115 });
-  if (result.witness.state === "seen" && result.witness.completed === true) ok("the witness walk completes on a partial tip slice");
-  else bad("partial witness walk: " + JSON.stringify({ state: result.witness.state, completed: result.witness.completed, failed: result.witness.failed }));
+  if (result.witness.state === "seen" && result.witness.completed === false) {
+    ok("a witness behind the exact top still finds a transaction but does not complete the walk");
+  } else bad("partial witness walk: " + JSON.stringify({ state: result.witness.state, completed: result.witness.completed, failed: result.witness.failed }));
   if (result.agrees === true && result.problems.length === 0) ok("the partial tip agrees with the exact reading");
   else bad("partial tip agreement: " + JSON.stringify(result.problems));
   const slices = requests.filter((entry) => isHost(entry.url, "witness.example") && entry.url.endsWith("/v1/witness/slice"));
@@ -246,10 +247,34 @@ console.log("=== 7) THE WALK GUARDS ARE LOAD-BEARING ===");
 
 console.log("=== 8) A BLOCK THAT ARRIVES DURING THE WALK IS NOT A FAILURE ===");
 {
-  const raced = await shadow({ witnessTop: 116, witnessInfoTop: 115 });
+  const raced = await shadow({ witnessTop: 116, witnessInfoTop: 115, exactInfoHeight: 117 });
   if (raced.witness.state === "seen" && raced.witness.completed === true && raced.agrees === true) {
     ok("a tip one block above the caller's top is accepted");
   } else bad("tip race: " + JSON.stringify({ state: raced.witness.state, completed: raced.witness.completed, failed: raced.witness.failed, agrees: raced.agrees, problems: raced.problems }));
+}
+
+console.log("=== 9) A LAGGING WITNESS CANNOT COMPLETE THE ABSENCE ===");
+{
+  const result = await shadow({ fromHeight: 117, witnessTop: 115 });
+  if (result.exact && result.exact.absent === true) ok("the exact path reports absence above the witness top");
+  else bad("exact absence: " + JSON.stringify(result.exact || result.exactError));
+  if (result.witness.completed === false) ok("the witness did not complete a walk above its own top");
+  else bad("lagging witness completed: " + JSON.stringify(result.witness));
+  if (result.agrees === false && result.problems.includes("witness:not-completed")) {
+    ok("absence above a lagging witness top is not agreement");
+  } else bad("lagging witness agreement: " + JSON.stringify({ agrees: result.agrees, problems: result.problems }));
+}
+
+console.log("=== 10) A WITNESS BELOW THE EXACT TOP DOES NOT PROVE ABSENCE ===");
+{
+  const result = await shadow({ fromHeight: 106, witnessTop: 118 });
+  if (result.exact && result.exact.absent === true) ok("the exact path reports absence below the exact top");
+  else bad("exact absence: " + JSON.stringify(result.exact || result.exactError));
+  if (result.witness.completed === false) ok("the witness walk did not reach the exact top");
+  else bad("short witness completed: " + JSON.stringify(result.witness));
+  if (result.agrees === false && result.problems.includes("witness:not-completed")) {
+    ok("a witness below the exact top cannot agree on absence");
+  } else bad("short witness agreement: " + JSON.stringify({ agrees: result.agrees, problems: result.problems }));
 }
 
 if (problems.length) {

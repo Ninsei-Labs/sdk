@@ -456,10 +456,33 @@ async function readSliceTransactions(node, slice, { fetchImpl, timeoutMs }) {
   return new Map(txs.map((tx) => [String(tx.tx_hash || "").toLowerCase(), tx]));
 }
 
+// THE TOP THE WALK MUST REACH. A witness may be behind the exact nodes, and a walk that stops at the witness's
+// own top must not count as a completed walk: the blocks above it were never read by any source that claimed
+// absence. The exact `verifyArrival` reports its tip on the absence path and the checked heights on the arrived
+// path; both are the highest top the exact sources actually read.
+function exactTopOf(exact) {
+  if (!exact || typeof exact !== "object") return null;
+  const tip = intOf(exact.tip);
+  if (tip !== null && tip > 0) return Math.max(0, tip - 1);
+  const heights = Array.isArray(exact.checked)
+    ? exact.checked
+      .filter((entry) => entry && entry.synchronized !== false && entry.state !== "stale" && entry.state !== "down")
+      .map((entry) => intOf(entry.height))
+      .filter((height) => height !== null && height > 0)
+    : [];
+  return heights.length ? Math.max(0, Math.max(...heights) - 1) : null;
+}
+
 // FIND A PAYMENT THROUGH SLICES. The exact `fromHeight` is local: the witness sees only slice indexes.
-async function locateInSlices(node, { expectedAtomic, address, viewSecret, spendPub, fromHeight, toHeight, nowSec, network, fetchImpl, timeoutMs }) {
+async function locateInSlices(node, { expectedAtomic, address, viewSecret, spendPub, fromHeight, toHeight, targetTop = toHeight, nowSec, network, fetchImpl, timeoutMs }) {
+  const target = intOf(targetTop);
+  if (target === null) throw new SdkError("bad-input", { field: "targetTop" });
+  // A WITNESS BEHIND THE FIRST BLOCK HAS NOT READ THE RANGE. The slice walk below would otherwise mark its last
+  // slice complete and let a lagging witness vouch for a payment it never saw.
+  if (target < fromHeight || toHeight < fromHeight) return { located: null, completed: false };
   const first = witnessSliceIndex(fromHeight);
-  const last = witnessSliceIndex(toHeight);
+  const last = witnessSliceIndex(Math.min(toHeight, target));
+  const completeAt = witnessSliceIndex(target);
   let best = null;
   let completed = false;
   for (let index = first; index <= last; index++) {
@@ -468,6 +491,10 @@ async function locateInSlices(node, { expectedAtomic, address, viewSecret, spend
     const slice = await readWitnessSlice(node, index, { network, fetchImpl, timeoutMs, tipHeight: toHeight });
     const txs = await readSliceTransactions(node, slice, { fetchImpl, timeoutMs });
     for (const block of slice.blocks) {
+      // THE SLICE IS A FIXED WINDOW; THE SWAP STARTS AT `fromHeight`. Blocks before the birth height may contain
+      // an earlier transfer to the same address, and counting them would make the slice walk disagree with the
+      // exact walk that starts at the birth height.
+      if (block.height < fromHeight) continue;
       for (const txid of block.txids) {
         const tx = txs.get(txid);
         if (!tx) continue;
@@ -485,13 +512,13 @@ async function locateInSlices(node, { expectedAtomic, address, viewSecret, spend
     }
     // THE WHOLE SLICE WAS READ. A perfect candidate lets the walk stop after this slice, not after a block:
     // the last witness request is still a fixed slice, never the payout height. `completed` means the full
-    // requested slice range was walked up to the tip; a partial tip slice is the end of that range, not an
-    // early stop.
+    // requested slice range was walked up to the highest top any source reported; a partial tip slice is the end
+    // of that range only when the witness actually reached that top.
     if (best && best.score === 7) {
-      completed = index === last;
+      completed = index === completeAt;
       break;
     }
-    if (index === last) completed = true;
+    if (index === last) completed = index === completeAt;
   }
   return { located: best, completed };
 }
@@ -546,6 +573,9 @@ export async function verifyArrivalShadow(request) {
   const checked = [];
   const failed = [];
   const staleWitnesses = [];
+  // THE WALK MUST REACH THE HIGHEST TOP ANY SOURCE READ. A witness that is behind the exact nodes cannot prove
+  // absence in the blocks it has not seen; its own `toHeight` is therefore not the completion target.
+  const exactTop = exactTopOf(exact);
   let located = null;
   let completed = false;
   for (const node of witnessNodes) {
@@ -563,6 +593,7 @@ export async function verifyArrivalShadow(request) {
     try {
       const found = await locateInSlices(node, {
         expectedAtomic, address: request.address, viewSecret, spendPub, fromHeight, toHeight: top,
+        targetTop: exactTop === null ? top : Math.max(top, exactTop),
         nowSec, network, fetchImpl, timeoutMs,
       });
       completed = completed || found.completed;
