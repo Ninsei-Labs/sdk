@@ -28,6 +28,9 @@
 // client scans blocks from the swap's birth height (a few dozen blocks).
 import { SdkError } from "./errors.mjs";
 import * as engine from "./engine.mjs";
+import {
+  WITNESS_SLICE_BLOCKS, parseWitnessSliceBody, witnessSliceEnd, witnessSliceIndex, witnessSliceStart,
+} from "./witness-slice.mjs";
 
 const isStr = (v) => typeof v === "string" && v.length > 0;
 const intOf = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.trunc(n) : null; };
@@ -438,64 +441,13 @@ export async function verifyArrival(request) {
 // `verifyArrival`: the production decision still uses the exact walk until an independent operator serves
 // witness-v1. `verifyArrivalShadow` runs both and compares them without changing ready, refund or any swap state.
 
-export const WITNESS_SLICE_BLOCKS = 20;
+export { WITNESS_SLICE_BLOCKS, witnessSliceEnd, witnessSliceIndex, witnessSliceStart, parseWitnessSliceBody };
 
-export function witnessSliceIndex(height) {
-  const value = Number(height);
-  if (!Number.isSafeInteger(value) || value < 0) throw new SdkError("bad-input", { field: "height" });
-  return Math.floor(value / WITNESS_SLICE_BLOCKS);
-}
-
-export function witnessSliceStart(index) {
-  const value = Number(index);
-  if (!Number.isSafeInteger(value) || value < 0) throw new SdkError("bad-input", { field: "slice" });
-  return value * WITNESS_SLICE_BLOCKS;
-}
-
-export function witnessSliceEnd(index) {
-  return witnessSliceStart(index) + WITNESS_SLICE_BLOCKS - 1;
-}
-
-const witnessHash = (value) => {
-  const text = String(value || "").replace(/^0x/, "").toLowerCase();
-  return /^[0-9a-f]{64}$/.test(text) ? text : null;
-};
-
-function assertWitnessSliceBody(body, { network, index }) {
-  if (!body || typeof body !== "object") throw new SdkError("xmr-no-nodes", { why: "bad-witness-slice" });
-  if (Number(body.version) !== 1) throw new SdkError("xmr-no-nodes", { why: "bad-witness-version" });
-  if (String(body.network) !== String(network)) throw new SdkError("xmr-no-nodes", { why: "witness-network" });
-  if (Number(body.grid) !== WITNESS_SLICE_BLOCKS) throw new SdkError("xmr-no-nodes", { why: "witness-grid" });
-  if (Number(body.slice) !== index) throw new SdkError("xmr-no-nodes", { why: "witness-slice" });
-  if (Number(body.from) !== witnessSliceStart(index) || Number(body.to) !== witnessSliceEnd(index)) {
-    throw new SdkError("xmr-no-nodes", { why: "witness-bounds" });
-  }
-  if (!Array.isArray(body.blocks) || body.blocks.length !== WITNESS_SLICE_BLOCKS) {
-    throw new SdkError("xmr-no-nodes", { why: "witness-block-count" });
-  }
-  const blocks = body.blocks.map((block, i) => {
-    if (!block || Number(block.height) !== witnessSliceStart(index) + i) {
-      throw new SdkError("xmr-no-nodes", { why: "witness-height" });
-    }
-    const hash = witnessHash(block.hash);
-    if (!hash) throw new SdkError("xmr-no-nodes", { why: "witness-hash" });
-    if (!Array.isArray(block.txids)) throw new SdkError("xmr-no-nodes", { why: "witness-txids" });
-    const txids = block.txids.map((txid) => {
-      const value = witnessHash(txid);
-      if (!value) throw new SdkError("xmr-no-nodes", { why: "witness-txid" });
-      return value;
-    });
-    return { height: Number(block.height), hash, txids };
-  });
-  return { version: 1, network: String(network), grid: WITNESS_SLICE_BLOCKS, slice: index,
-    from: body.from, to: body.to, blocks };
-}
-
-async function readWitnessSlice(node, index, { network, fetchImpl, timeoutMs }) {
+async function readWitnessSlice(node, index, { network, fetchImpl, timeoutMs, tipHeight = null }) {
   if (node.protocol !== "witness-v1") throw new SdkError("xmr-no-nodes", { node: node.url, why: "no-slice-witness" });
   const body = await call(node, "/v1/witness/slice",
     { version: 1, network, grid: WITNESS_SLICE_BLOCKS, slice: index }, fetchImpl, timeoutMs);
-  return assertWitnessSliceBody(body, { network, index });
+  return parseWitnessSliceBody(body, { network, index, tipHeight });
 }
 
 // ALL THE TRANSACTIONS OF A SLICE, IN ONE REQUEST. The request names the whole slice's txids, not the one
@@ -513,9 +465,11 @@ async function locateInSlices(node, { expectedAtomic, address, viewSecret, spend
   const first = witnessSliceIndex(fromHeight);
   const last = witnessSliceIndex(toHeight);
   let best = null;
-  let completed = true;
+  let completed = false;
   for (let index = first; index <= last; index++) {
-    const slice = await readWitnessSlice(node, index, { network, fetchImpl, timeoutMs });
+    // The witness reads its tip at slice time, so a block can arrive between the tip read and this request. The
+    // parser accepts a newer tip and rejects one below the top the walk started from.
+    const slice = await readWitnessSlice(node, index, { network, fetchImpl, timeoutMs, tipHeight: toHeight });
     const txs = await readSliceTransactions(node, slice, { fetchImpl, timeoutMs });
     for (const block of slice.blocks) {
       for (const txid of block.txids) {
@@ -535,11 +489,13 @@ async function locateInSlices(node, { expectedAtomic, address, viewSecret, spend
     }
     // THE WHOLE SLICE WAS READ. A perfect candidate lets the walk stop after this slice, not after a block:
     // the last witness request is still a fixed slice, never the payout height. `completed` means the full
-    // requested slice range was walked, so it stays false on an early stop.
+    // requested slice range was walked up to the tip; a partial tip slice is the end of that range, not an
+    // early stop.
     if (best && best.score === 7) {
       completed = index === last;
       break;
     }
+    if (index === last) completed = true;
   }
   return { located: best, completed };
 }
