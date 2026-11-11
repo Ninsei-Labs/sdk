@@ -9,6 +9,7 @@ import {
   CHAINS,
   DEPLOYMENTS,
   DEPLOYMENT_CHAINS,
+  FACTORY_HISTORY,
   KNOWN_FACTORY_CODES,
   deploymentFor,
 } from "../engine/core/config.js";
@@ -64,6 +65,36 @@ for (const [network, pin] of Object.entries(DEPLOYMENTS)) {
   check(chain.vm === "evm" && pin.vm === "evm", `${network}: a live pin is not the EVM shape this guard checks`);
 }
 
+// 3. The factory history contains the current factory exactly once, keeps old factories ordered by block, and
+// never mixes a live factory into the retired list.
+for (const [network, pin] of Object.entries(DEPLOYMENTS)) {
+  const history = FACTORY_HISTORY[network];
+  check(Array.isArray(history) && history.length > 0, `${network}: FACTORY_HISTORY is missing`);
+  if (!Array.isArray(history)) continue;
+  const addresses = history.map((entry) => String(entry.address).toLowerCase());
+  check(new Set(addresses).size === addresses.length, `${network}: FACTORY_HISTORY repeats an address`);
+  const live = history.filter((entry) => entry.status === "live");
+  check(live.length === 1, `${network}: FACTORY_HISTORY has ${live.length} live factories, expected one`);
+  if (live.length === 1) {
+    check(live[0].address.toLowerCase() === pin.escrow.address.toLowerCase(),
+      `${network}: the live history entry is not the current factory`);
+    check(live[0].deploymentBlock === pin.escrow.deploymentBlock,
+      `${network}: the live history block is not the pin block`);
+  }
+  const blocks = history.map((entry) => Number(entry.deploymentBlock));
+  check(blocks.every((block) => Number.isSafeInteger(block) && block > 0), `${network}: a history entry has no block`);
+  check(blocks.every((block, i) => i === 0 || block >= blocks[i - 1]), `${network}: history is not ordered by block`);
+  check(history.filter((entry) => entry.status === "retired").every((entry) => Boolean(entry.release && entry.release.tag)),
+    `${network}: a retired history entry has no release tag`);
+}
+for (const network of Object.keys(FACTORY_HISTORY)) {
+  check(Boolean(DEPLOYMENTS[network]), `${network}: FACTORY_HISTORY has no deployment pin`);
+}
+
 console.log(problems.length ? `FAILED: ${problems.length}` : `deployment pins: ${Object.keys(DEPLOYMENTS).length} networks current`);
+if (!problems.length) {
+  const historyCount = Object.values(FACTORY_HISTORY).reduce((sum, list) => sum + list.length, 0);
+  console.log(`  ok    ${Object.keys(DEPLOYMENTS).length} live pins and ${historyCount} factory history entries are current`);
+}
 for (const problem of problems) console.log(`  FAIL  ${problem}`);
 process.exit(problems.length ? 1 : 0);

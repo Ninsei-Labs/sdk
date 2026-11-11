@@ -3,7 +3,7 @@
 // Everything below this header is identical to the source.
 
 // VM-neutral deployment pins generated from deployments/<vm>/<network>.json. No address table is copied below.
-import { DEPLOYMENTS, DEPLOYMENT_CHAINS, DEPLOYMENT_VMS, deploymentFor } from "./deployments.generated.js";
+import { DEPLOYMENTS, DEPLOYMENT_CHAINS, DEPLOYMENT_VMS, FACTORY_HISTORY, deploymentFor } from "./deployments.generated.js";
 
 // Demo configuration. Every number a user sees lives here. Values come from the litepaper and are marked as demo data in the UI.
 //
@@ -790,7 +790,7 @@ export const KNOWN_FACTORY_CODES = Object.freeze(Object.fromEntries(
     .map((deployment) => [deployment.network, [...deployment.knownFactoryCodes]]),
 ));
 
-export { DEPLOYMENTS, DEPLOYMENT_CHAINS, DEPLOYMENT_VMS, deploymentFor };
+export { DEPLOYMENTS, DEPLOYMENT_CHAINS, DEPLOYMENT_VMS, FACTORY_HISTORY, deploymentFor };
 
 export function knownFactoryCodesFor(chainOrId) {
   const id = typeof chainOrId === "string" ? chainOrId : chainOrId && chainOrId.id;

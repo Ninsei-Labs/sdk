@@ -5,12 +5,13 @@
 //
 // Run:  node tools/gen-deployment-pins.mjs --write
 //       node tools/gen-deployment-pins.mjs --check
-import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const MANIFESTS = join(ROOT, "deployments");
+const HISTORY = join(MANIFESTS, "history");
 const OUTPUT = join(ROOT, "engine", "core", "deployments.generated.js");
 
 const addressPattern = /^0x[0-9a-fA-F]{40}$/;
@@ -27,7 +28,7 @@ function walk(dir, out = []) {
   for (const name of readdirSync(dir)) {
     const file = join(dir, name);
     if (statSync(file).isDirectory()) {
-      if (name !== "archive") walk(file, out);
+      if (name !== "archive" && name !== "history") walk(file, out);
     } else if (name.endsWith(".json")) {
       out.push(file);
     }
@@ -105,6 +106,45 @@ function normalize(manifest, file) {
   };
 }
 
+function normalizeHistory(manifest, file) {
+  const label = relative(ROOT, file).replaceAll("\\", "/");
+  if (manifest.schema !== 1) fail(`${label}: history schema is ${JSON.stringify(manifest.schema)}, expected 1`);
+  if (manifest.vm !== "evm") fail(`${label}: history vm ${JSON.stringify(manifest.vm)} has no validator yet`);
+  if (typeof manifest.network !== "string" || !networkPattern.test(manifest.network)) fail(`${label}: bad network`);
+  if (typeof manifest.chainRef !== "string" || !positiveInteger.test(manifest.chainRef)) fail(`${label}: bad chainRef`);
+  if (manifest.caip2 !== `eip155:${manifest.chainRef}`) fail(`${label}: caip2 does not match chainRef`);
+  if (!Array.isArray(manifest.factories) || manifest.factories.length === 0) fail(`${label}: factories is empty`);
+
+  const seen = new Set();
+  const factories = manifest.factories.map((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) fail(`${label}: factories[${index}] is not an object`);
+    if (!addressPattern.test(entry.address || "")) fail(`${label}: factories[${index}].address is not an address`);
+    const address = entry.address.toLowerCase();
+    if (seen.has(address)) fail(`${label}: duplicate factory ${entry.address}`);
+    seen.add(address);
+    const block = Number(entry.deploymentBlock);
+    if (!Number.isSafeInteger(block) || block <= 0) fail(`${label}: factories[${index}].deploymentBlock is not a positive integer`);
+    const tag = entry.release && entry.release.tag;
+    if (typeof tag !== "string" || !tag.trim()) fail(`${label}: factories[${index}].release.tag is empty`);
+    return { address: entry.address, deploymentBlock: block, release: { tag } };
+  });
+  return { network: manifest.network, factories };
+}
+
+function readHistoryFiles() {
+  if (!existsSync(HISTORY)) return [];
+  const files = [];
+  const visit = (dir) => {
+    for (const name of readdirSync(dir)) {
+      const file = join(dir, name);
+      if (statSync(file).isDirectory()) visit(file);
+      else if (name.endsWith(".json")) files.push(file);
+    }
+  };
+  visit(HISTORY);
+  return files.sort();
+}
+
 function generate() {
   const entries = walk(MANIFESTS).sort();
   if (!entries.length) fail("no deployment manifests under deployments/");
@@ -119,8 +159,30 @@ function generate() {
     deployments[normalized.network] = normalized;
   }
   const data = Object.fromEntries(Object.entries(deployments).sort(([a], [b]) => a.localeCompare(b)));
+  const history = {};
+  for (const file of readHistoryFiles()) {
+    const normalized = normalizeHistory(JSON.parse(readFileSync(file, "utf8")), file);
+    if (!deployments[normalized.network]) fail(`history network ${normalized.network} has no deployment manifest`);
+    if (history[normalized.network]) fail(`duplicate history for ${normalized.network}`);
+    history[normalized.network] = normalized.factories;
+  }
+  const factoryHistory = {};
+  for (const [network, pin] of Object.entries(data)) {
+    const current = {
+      address: pin.escrow.address,
+      deploymentBlock: pin.escrow.deploymentBlock,
+      release: pin.release,
+      status: "live",
+    };
+    const previous = (history[network] || []).map((entry) => ({ ...entry, status: "retired" }));
+    if (previous.some((entry) => entry.address.toLowerCase() === current.address.toLowerCase())) {
+      fail(`${network}: the current factory is also in history`);
+    }
+    factoryHistory[network] = [...previous, current].sort((a, b) => a.deploymentBlock - b.deploymentBlock);
+  }
   return `// GENERATED FILE - do not edit. Run: node tools/gen-deployment-pins.mjs --write
 // Source: deployments/<vm>/<network>.json, copied from the reviewed contract release manifest.
+// Factory history: deployments/history/<vm>/<network>.json, reviewed old factories for recovery.
 const freeze = (value) => {
   if (value && typeof value === "object") {
     Object.freeze(value);
@@ -130,10 +192,12 @@ const freeze = (value) => {
 };
 
 const DATA = ${JSON.stringify(data, null, 2)};
+const HISTORY_DATA = ${JSON.stringify(factoryHistory, null, 2)};
 
 export const DEPLOYMENTS = freeze(DATA);
 export const DEPLOYMENT_CHAINS = freeze(Object.keys(DATA).sort());
 export const DEPLOYMENT_VMS = freeze([...new Set(Object.values(DATA).map((d) => d.vm))].sort());
+export const FACTORY_HISTORY = freeze(HISTORY_DATA);
 
 // Accept a network id, a CAIP-2, or an EVM chain id. No fallback to another network: an unknown deployment is null.
 export function deploymentFor(chainOrId) {

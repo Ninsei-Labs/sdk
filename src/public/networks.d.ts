@@ -102,7 +102,16 @@ export interface DeploymentPin {
   readonly knownFactoryCodes: readonly string[];
 }
 
+/** One factory that served a network, including the current one. */
+export interface FactoryHistoryEntry {
+  readonly address: string;
+  readonly deploymentBlock: number;
+  readonly release: { readonly tag: string | null; readonly commit?: string | null; readonly [field: string]: unknown };
+  readonly status: "live" | "retired";
+}
+
 export declare const DEPLOYMENTS: Readonly<Record<string, DeploymentPin>>;
+export declare const FACTORY_HISTORY: Readonly<Record<string, readonly FactoryHistoryEntry[]>>;
 export declare const DEPLOYMENT_CHAINS: readonly string[];
 export declare const DEPLOYMENT_VMS: readonly string[];
 export declare function deploymentFor(
