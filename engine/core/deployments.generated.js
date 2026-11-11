@@ -1,5 +1,6 @@
 // GENERATED FILE - do not edit. Run: node tools/gen-deployment-pins.mjs --write
 // Source: deployments/<vm>/<network>.json, copied from the reviewed contract release manifest.
+// Factory history: deployments/history/<vm>/<network>.json, reviewed old factories for recovery.
 const freeze = (value) => {
   if (value && typeof value === "object") {
     Object.freeze(value);
@@ -84,10 +85,42 @@ const DATA = {
     ]
   }
 };
+const HISTORY_DATA = {
+  "arbitrum-sepolia": [
+    {
+      "address": "0x3ee25f12758ec28e5b3045d16132d89cd0bf341f",
+      "deploymentBlock": 318911595,
+      "release": {
+        "tag": "contracts-testnet-2026.10.21"
+      },
+      "status": "retired"
+    },
+    {
+      "address": "0x69b5a6878b542960af4d239ecc60ad1c9e3e6932",
+      "deploymentBlock": 323014007,
+      "release": {
+        "tag": "contracts-testnet-2026.10.26"
+      },
+      "status": "retired"
+    },
+    {
+      "address": "0x245d3a4ac4b98d713f6c5130b56cd5d550f8cefe",
+      "deploymentBlock": 326005419,
+      "release": {
+        "tag": "contracts-testnet-2026.11.04",
+        "commit": "930366a387c0c696bda6f5c038f23617447ebb78",
+        "toolchain": "0.8.38",
+        "deployedAt": "2026-11-04T15:00:55.822Z"
+      },
+      "status": "live"
+    }
+  ]
+};
 
 export const DEPLOYMENTS = freeze(DATA);
 export const DEPLOYMENT_CHAINS = freeze(Object.keys(DATA).sort());
 export const DEPLOYMENT_VMS = freeze([...new Set(Object.values(DATA).map((d) => d.vm))].sort());
+export const FACTORY_HISTORY = freeze(HISTORY_DATA);
 
 // Accept a network id, a CAIP-2, or an EVM chain id. No fallback to another network: an unknown deployment is null.
 export function deploymentFor(chainOrId) {

@@ -1,3 +1,9 @@
+## 0.59.0 — 2026-11-11
+
+- `FACTORY_HISTORY` is generated from the reviewed deployment manifests and `deployments/history/<vm>/<network>.json`. It lists the current factory as `live` and older factories as `retired`, each with its deployment block and release tag, so a recovery page can find old orders without a second hand-written address table.
+- The deployment pin check is part of the full `pnpm run check` battery; it verifies the generated pins, the current `CHAINS`/`KNOWN_FACTORY_CODES` values, and the order and uniqueness of the factory history.
+- The EVM deployment history for `arbitrum-sepolia` carries the two factories before `contracts-testnet-2026.11.04`; the current factory comes from the reviewed manifest.
+
 ## 0.58.0 — 2026-11-10
 
 - `swaps.verifyArrivalShadow` runs the exact arrival walk and the fixed-slice witness-v1 walk side by side. The witness request carries only `{version, network, grid, slice}` (20 blocks aligned to multiples of 20), never the start height, payout block, txid or order id; a node without `protocol: "witness-v1"` is refused rather than guessed. The exact verdict still decides, so this is the staging path before an independent operator serves the protocol.

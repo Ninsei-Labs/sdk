@@ -14,5 +14,6 @@ export {
   DEPLOYMENTS,
   DEPLOYMENT_CHAINS,
   DEPLOYMENT_VMS,
+  FACTORY_HISTORY,
   deploymentFor,
 } from "../../engine/core/config.js";
