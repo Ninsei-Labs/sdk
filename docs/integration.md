@@ -73,28 +73,27 @@ encryption envelope in the host, and do not pass a bid answer to `swaps.start` (
 
 ## 5. Sell flow
 
-`swaps.startSell` records the one-time address, the escrow, our half, the chosen `claimSender`, the expectations and
-the relay origin that answered the quote. It sends no transaction. The same offer retried returns the same record
-with `resumed: true`; a changed commitment, claim sender or relay origin is refused rather than silently resumed.
+`swaps.startSell` records the one-time address, the escrow, our half, the expectations and the relay origin that
+answered the quote. It sends no transaction. The same offer retried returns the same record with `resumed: true`; a
+changed commitment or relay origin is refused rather than silently resumed. A stored `claimSender` is a legacy
+single-sender fallback, not a pin: the ordered list passed to `claimViaRelay` is the authority.
 
 There are two claim paths, and the host picks by what the seller holds:
 
 - `swaps.sellClaim({ id }, wallet)` - the own-wallet path. The claimer signs the claim, so the wallet must hold
   enough native coin for gas. This path is unchanged, and `actions.claim` still refuses a sender that is not the
   claimer.
-- `swaps.claimViaRelay({ id })` - the no-wallet path. The seller has XMR and no ETH; the escrow pays the signed
-  `claimTip` to the sender, so the relay that answered the quote submits the half. The sender is a listed maker
-  OTHER than the deal's maker, chosen by the client and stored by `startSell` as `claimSender`; no wallet is created
-  or used and the client signs no chain transaction.
+- `swaps.claimViaRelay({ id, claimSenders })` - the no-wallet path. The seller has XMR and no ETH; the escrow pays
+  the signed `claimTip` to the sender, so the relay that answered the quote submits the half. The client passes an
+  ordered list with the relay's own sender first, then other listed makers; no wallet is created or used and the
+  client signs no chain transaction.
 
-`claimViaRelay` requires a sell record with a positive `claimTip` and the stored sender, escrow and half. A record
-made before the sender was stored may pass `claimSender` once; it is stored on the record then. A sender naming the
-deal's maker or its quote key owner is refused before the half leaves the client. It does not take a relay from the
-caller after the quote: an optional `relayUrl` may repeat the stored origin, and any other origin is refused with
-`bad-input`. The node's refusal keeps its own code under `quote-refused.params.code`. A timeout, a reset or a body
-without a real transaction hash is `claim-unknown`: the claim may already be sent, so read the escrow before acting
-again, and never treat the lost answer as a success. Only a validated txid is returned. The half is never logged or
-written by this path.
+The SDK tries one sender at a time for a 15-30 s slot. A refusal moves on at once; an accepted txid or
+`claim-unknown` is followed by reading the escrow until it says `claimed` or the slot ends. The deal's maker and
+its quote-key owner are refused before the half leaves the client. When the list is exhausted the result is
+`state: "claim-yourself"` with `t1` and `secondsLeft`; `sellClaim` remains the fallback. It does not take a relay
+from the caller after the quote: an optional `relayUrl` may repeat the stored origin, and any other origin is
+refused with `bad-input`. The half is never logged or written by this path.
 
 The sell record also keeps the node's signed `readyWindow`. `sellWatch`, the late-arrival boundary and
 `refundIfXmrMissing` use its `readyMinSeconds`/`readyMaxSeconds`; a record without the window is refused with
@@ -108,8 +107,9 @@ before signing and then pass the expected sender to the wallet adapter. The adap
 transaction is not sent.
 
 A claim reveals the claimer's half. `actions.claim` and `swaps.sellClaim` send a claim only from the claimer's own
-wallet. A seller with no wallet uses `swaps.claimViaRelay`; it returns only a real txid, refuses a foreign relay
-origin and reports a lost answer as `claim-unknown`, never as success.
+wallet. A seller with no wallet uses `swaps.claimViaRelay`; it returns `claimed` only when the escrow itself reads
+claimed, refuses a foreign relay origin and reports an exhausted sender list as `claim-yourself` with the time left
+before `t1`.
 
 ## 7. Recovery
 
@@ -156,7 +156,7 @@ shadow still changes no swap state.
 | Quote | A retry is a new quote unless the host reuses the same signed answer. Do not treat a timeout as a successful quote. |
 | `swaps.start` | Reuse the same quote and recovery salt. The SDK resumes an existing record when the terms match; a changed offer is refused. |
 | `swaps.startSell` | The same offer resumes the same record; a changed commitment is `quote-refused`. |
-| `swaps.claimViaRelay` | A `claim-unknown` answer means the claim MAY have been sent. Read the escrow before calling again; do not resend the half on a guess. |
+| `swaps.claimViaRelay` | A `claim-unknown` answer means the claim MAY have been sent. The SDK reads the escrow for the rest of that sender's slot and then moves to the next sender; do not resend the half on a guess. |
 | `actions.markReady` / `claim` / `refund` | Do not send a second transaction while the first outcome is unknown. Keep the transaction hash and re-read the receipt; a repeated call is not a substitute for an unknown receipt. |
 | `swaps.watch` | The wait may be repeated; it reads the same Monero address and does not create an order. |
 | `recovery.open` | Pure local parsing; safe to repeat. |

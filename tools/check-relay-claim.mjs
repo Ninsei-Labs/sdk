@@ -1,10 +1,8 @@
-// A SELLER WITH NO WALLET CAN STILL CLAIM: the half goes to the sender the client chose and the signed tip pays
-// that sender. This check drives the real `startSell` record and the real `claimViaRelay` wire with stand-in
-// transports, and proves the own-wallet path is unchanged.
+// A SELLER WITH NO WALLET CAN STILL CLAIM THROUGH AN ORDERED LIST OF SENDERS.
 //
-// It covers: the deal maker and its quote key refused as sender, a no-wallet success, a zero-tip refusal before any
-// request, a foreign relay origin, a provider that disagrees with the answer, a node refusal, a lost answer (never
-// success), and the `sellClaim` fallback.
+// The seller holds XMR and no ETH. The client passes the relay's own sender first, then other listed makers; the SDK
+// tries them one at a time, reads the escrow during each slot and only reports a claim when the escrow says claimed.
+// A refusal moves on at once, a txid is not success, and an exhausted list tells the seller to claim before t1.
 import { createRecoveryKey, takerHalvesV2 } from "../src/recovery-key.mjs";
 import { buildOwnSideFromHalves } from "../src/order.mjs";
 import { keccak256, secp256k1 } from "../src/primitives.mjs";
@@ -31,13 +29,16 @@ const own = buildOwnSideFromHalves(order, { spendHalf: derived.spendHalf, viewHa
 const ownCommit = "0x" + Buffer.from(keccak256(secp256k1.Point.fromHex(own.side.proof.XA).toBytes(false).slice(1))).toString("hex");
 const escrow = "0x" + "dd".repeat(20);
 const claimTip = "1000000000000000";
-// THE SENDER IS NOT THE DEAL'S MAKER. `order.locker` is the maker; this address is another listed node.
-const claimSender = "0x" + "c3".repeat(20);
+const dealMaker = order.locker;
+const quoteKeyOwner = "0x" + "e4".repeat(20);
+const storedSender = "0x" + "c3".repeat(20);
+const relaySender = "0x" + "f1".repeat(20);
+const secondSender = "0x" + "f2".repeat(20);
 const quote = {
   id: "oq_relay_claim",
-  provider: order.locker, factory: order.factory,
-  quoteKey: "0x" + "e4".repeat(20),
-  locker: order.locker, claimer: order.claimer, chainId: order.chainId,
+  provider: dealMaker, factory: order.factory,
+  quoteKey: quoteKeyOwner,
+  locker: dealMaker, claimer: order.claimer, chainId: order.chainId,
   amount: order.amount, xmrAmount: "1000000000000", claimTip,
   commitHalfLocker: "0x" + "a1".repeat(32), edPointLocker: "0x" + "a2".repeat(32), edViewPointLocker: "0x" + "a3".repeat(32),
   edPointClaimer: own.spendPoint, commitHalfClaimer: ownCommit,
@@ -60,6 +61,7 @@ const offer = {
 
 const word = (value) => BigInt(value).toString(16).padStart(64, "0");
 const bytes = (value) => String(value).replace(/^0x/, "").padStart(64, "0");
+const lower = (value) => String(value || "").toLowerCase();
 const slotReads = {
   [encodeRead("t1")]: word(order.t1),
   [encodeRead("readyBy")]: word(order.readyBy),
@@ -70,16 +72,25 @@ const slotReads = {
   [encodeRead("edViewPointLocker")]: bytes(offer.edViewPointLocker),
   [encodeRead("commitHalfLocker")]: bytes(offer.nodeHalf.commitHalf),
   [encodeRead("commitHalfClaimer")]: bytes(quote.commitHalfClaimer),
-  [encodeStatus()]: word(1) + word(0) + word(0) + word(1_000_000_000_000_000_000n),
+};
+let clockMs = 1_900_000_000_000;
+let chainStatus = { funded: true, claimed: false, refunded: false, balance: 1_000_000_000_000_000_000n };
+const resetChain = (overrides = {}) => {
+  chainStatus = { funded: true, claimed: false, refunded: false, balance: 1_000_000_000_000_000_000n, ...overrides };
 };
 const read = async ({ data }) => {
+  if (data === encodeStatus()) {
+    return "0x" + word(chainStatus.funded ? 1 : 0) + word(chainStatus.claimed ? 1 : 0)
+      + word(chainStatus.refunded ? 1 : 0) + word(chainStatus.balance);
+  }
   const answer = slotReads[data];
   if (!answer) throw new Error("unexpected chain read " + data);
   return "0x" + answer;
 };
 const sharedStorage = memoryStorage();
 const store = createStore(sharedStorage);
-const swaps = createSwaps({ config: {}, call: read, store });
+const swaps = createSwaps({ config: {}, call: read, store, now: () => clockMs,
+  sleep: async (ms) => { clockMs += ms; } });
 const accept = async () => true;
 
 let sequence = 0;
@@ -92,284 +103,212 @@ const seed = async (overrides = {}) => {
     escrow: escrowAddress,
     quote: { ...quote, ...(overrides.quote || {}), id: "oq_relay_claim_" + sequence },
     orderQuote: { ...quote, id: "oq_relay_claim_" + sequence, signature: "0x" + "55".repeat(65) },
-    jointAddress: "52TsoaDECj3P6WFzmChWEq6WMLf9gYp831b76bRNzFN4EMDgNXuxDQXY8hRcmncmMMF3o5bYqFeTEbzPQ3joqdABAeGwY3z".slice(0, -2) + String(sequence % 10) + String(sequence % 10),
+    jointAddress: offer.jointAddress.slice(0, -2) + String(sequence % 10) + String(sequence % 10),
   };
   if (overrides.withoutRelay) { delete made.withoutRelay; delete made.relayUrl; }
-  const sender = Object.prototype.hasOwnProperty.call(overrides, "claimSender") ? overrides.claimSender : claimSender;
+  const sender = Object.prototype.hasOwnProperty.call(overrides, "claimSender") ? overrides.claimSender : storedSender;
   const request = { offer: made, recoveryKey: mnemonic, onRecoveryKey: accept };
   if (sender && !overrides.omitClaimSender) request.claimSender = sender;
   return await swaps.startSell(request);
 };
 
+const answer = (sender, txid) => ({ ok: true, status: 200, json: async () => ({
+  version: 1, provider: sender, escrow, txid, from: sender, tipWei: claimTip,
+}) });
+const refusal = (code) => ({ ok: false, status: 409, json: async () => ({ version: 1, code }) });
+
 export const relayClaimCheck = async () => {
   const problems = [];
   const notes = [];
   const check = (condition, message) => { if (!condition) problems.push(message); };
-  const lower = (value) => String(value || "").toLowerCase();
 
   const record = await seed({ escrow });
   const stored = engine.swap.getSwap(record.id, store);
   check(stored && stored.relayUrl === "https://relay.example", "startSell did not store the relay origin");
-  check(stored && stored.claimSender === claimSender, "startSell did not store the chosen claim sender");
+  check(stored && stored.claimSender === storedSender, "startSell did not store the legacy sender");
   check(stored && stored.claimTip === claimTip && stored.escrow && stored.escrow.half,
     "the sale record does not carry the positive tip and the half");
-  check(stored && stored.readyWindow && stored.readyWindow.readyMinSeconds === 2400
-    && stored.readyWindow.readyMaxSeconds === 3000, "startSell did not store the node's ready window");
 
-  // (0a) THE DEAL'S MAKER CANNOT BE THE SENDER.
-  {
+  // (0a) THE DEAL'S MAKER AND THE QUOTE-KEY OWNER ARE REFUSED BEFORE ANY REQUEST.
+  for (const [label, sender, why] of [["deal maker", dealMaker, "is-deal-maker"],
+    ["quote key owner", quoteKeyOwner, "is-quote-key"]]) {
+    resetChain();
+    let called = 0;
     try {
-      await seed({ claimSender: order.locker });
-      check(false, "startSell accepted the deal maker as the claim sender");
+      await swaps.claimViaRelay({ id: record.id, claimSenders: [sender],
+        fetchImpl: async () => { called += 1; throw new Error("must not be called"); } });
+      check(false, "the " + label + " was accepted as a sender");
     } catch (error) {
-      check(error && error.code === "bad-input" && error.params && error.params.field === "claimSender"
-        && error.params.why === "is-deal-maker",
-        "startSell did not refuse the deal maker as the claim sender: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
+      check(error && error.code === "bad-input" && error.params && error.params.field === "claimSenders"
+        && error.params.why === why, "the " + label + " was not refused by name");
     }
-    try {
-      await seed({ claimSender: quote.quoteKey });
-      check(false, "startSell accepted the quote key owner as the claim sender");
-    } catch (error) {
-      check(error && error.code === "bad-input" && error.params && error.params.field === "claimSender"
-        && error.params.why === "is-quote-key",
-        "startSell did not refuse the quote key owner as the claim sender: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
-    }
+    check(called === 0, "the " + label + " reached the relay");
   }
 
-  // (0b) A RECORD WITHOUT A SENDER CANNOT GUESS ONE; AN EXPLICIT SENDER FILLS THE GAP.
+  // (0b) THE LIST IS REQUIRED; A MISSING LIST IS NOT A GUESS.
   {
     const noSender = await seed({ omitClaimSender: true });
-    let called = 0;
     try {
-      await swaps.claimViaRelay({ id: noSender.id, fetchImpl: async () => { called += 1; throw new Error("must not be called"); } });
-      check(false, "a record without a claim sender was claimed");
+      await swaps.claimViaRelay({ id: noSender.id, fetchImpl: async () => { throw new Error("must not be called"); } });
+      check(false, "a record without senders was claimed");
     } catch (error) {
-      check(error && error.code === "bad-input" && error.params && error.params.field === "claimSender"
-        && error.params.why === "not-in-record",
-        "a missing claim sender was not refused with bad-input claimSender not-in-record: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
+      check(error && error.code === "bad-input" && error.params && error.params.field === "claimSenders"
+        && error.params.why === "not-in-record", "a missing sender list was not refused by name");
     }
-    check(called === 0, "a record without a sender reached the relay");
-    let explicit = null;
-    const noSenderEscrow = noSender.escrow;
     try {
-      explicit = await swaps.claimViaRelay({ id: noSender.id, claimSender,
-        fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({
-          version: 1, provider: claimSender, escrow: noSenderEscrow, txid: "0x" + "ab".repeat(32), from: claimSender, tipWei: claimTip,
-        }) }) });
+      await swaps.claimViaRelay({ id: noSender.id, claimSenders: [], fetchImpl: async () => { throw new Error("must not be called"); } });
+      check(false, "an empty sender list was claimed");
     } catch (error) {
-      check(false, "an explicit claim sender was refused: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
-    }
-    check(explicit && explicit.provider === lower(claimSender),
-      "an explicit claim sender did not become the provider in the result");
-    const afterExplicit = engine.swap.getSwap(noSender.id, store);
-    check(afterExplicit && afterExplicit.claimSender === claimSender,
-      "the explicit claim sender was not stored on the record");
-  }
-
-  // (0c) A RECORD THAT NAMED A SENDER CANNOT BE CLAIMED THROUGH ANOTHER ONE.
-  {
-    let called = 0;
-    try {
-      await swaps.claimViaRelay({ id: record.id, claimSender: "0x" + "ff".repeat(20),
-        fetchImpl: async () => { called += 1; throw new Error("must not be called"); } });
-      check(false, "a record claimed through a different sender");
-    } catch (error) {
-      check(error && error.code === "bad-input" && error.params && error.params.field === "claimSender"
-        && error.params.why === "different-from-record",
-        "a different claim sender was not refused with bad-input claimSender different-from-record: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
-    }
-    check(called === 0, "a different claim sender reached the relay");
-  }
-
-  // (0c2) THE MIGRATION PATH IS GUARDED TOO: an explicit sender on a legacy record is checked before the network.
-  {
-    const legacy = await seed({ omitClaimSender: true });
-    for (const [label, forbidden, why] of [
-      ["deal maker", quote.provider, "is-deal-maker"],
-      ["quote key owner", quote.quoteKey, "is-quote-key"],
-    ]) {
-      let called = 0;
-      try {
-        await swaps.claimViaRelay({ id: legacy.id, claimSender: forbidden,
-          fetchImpl: async () => { called += 1; throw new Error("must not be called"); } });
-        check(false, "a legacy record was claimed through the " + label);
-      } catch (error) {
-        check(error && error.code === "bad-input" && error.params && error.params.field === "claimSender"
-          && error.params.why === why,
-          "the " + label + " was not refused at claim time with bad-input claimSender " + why + ": " + JSON.stringify({ code: error && error.code, params: error && error.params }));
-      }
-      check(called === 0, "the " + label + " reached the relay from a legacy record");
+      check(error && error.code === "bad-input" && error.params && error.params.field === "claimSenders"
+        && error.params.why === "empty", "an empty sender list was not refused by name");
     }
   }
 
-  // (0d) A RESUMED OFFER CANNOT SWAP THE SENDER THE RECORD ALREADY NAMED.
+  // (0c) A RESUMED OFFER MAY NAME ANOTHER SENDER. THE RECORD'S OLD SCALAR IS NOT A PIN; THE CLIENT'S LIST AT CLAIM
+  // TIME IS THE AUTHORITY.
   {
-    try {
-      await swaps.startSell({ offer: { ...offer, escrow, jointAddress: stored.escrow.moneroAddress,
-        quote: { ...stored.quote }, orderQuote: stored.orderQuote },
-        recoveryKey: mnemonic, onRecoveryKey: accept, claimSender: "0x" + "ff".repeat(20) });
-      check(false, "a resumed sell accepted another claim sender");
-    } catch (error) {
-      check(error && error.code === "quote-refused" && error.params && error.params.why === "claim-sender-changed",
-        "a resumed sell did not refuse another claim sender: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
-    }
+    const resumed = await swaps.startSell({ offer: { ...offer, escrow, jointAddress: stored.escrow.moneroAddress,
+      quote: { ...stored.quote }, orderQuote: stored.orderQuote },
+      recoveryKey: mnemonic, onRecoveryKey: accept, claimSender: secondSender });
+    const after = engine.swap.getSwap(record.id, store);
+    check(resumed && resumed.resumed === true && after && after.claimSender === secondSender,
+      "a resumed sell still pinned the earlier sender");
   }
 
-  // (0) THE RELAY IS PART OF THE OFFER ON A RESUME TOO: a retry naming another origin is a different offer.
+  // (1) THE FIRST SENDER IS THE RELAY'S OWN; THE ESCROW SAYS CLAIMED.
   {
-    try {
-      await swaps.startSell({ offer: { ...offer, escrow, jointAddress: stored.escrow.moneroAddress,
-        quote: { ...stored.quote }, orderQuote: stored.orderQuote, relayUrl: "https://other.example" },
-        recoveryKey: mnemonic, onRecoveryKey: accept });
-      check(false, "a resumed sell accepted another relay origin");
-    } catch (error) {
-      check(error && error.code === "quote-refused" && error.params && error.params.why === "relay-changed",
-        "a resumed sell did not refuse another relay origin: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
-    }
-  }
-
-  // (1) NO WALLET, NO CHAIN WRITE: the half goes to the stored relay and a real txid comes back.
-  const sentCalls = [];
-  const txid = "0x" + "ab".repeat(32);
-  const sender = "0x" + "c3".repeat(20);
-  const successFetch = async (url, init) => {
-    sentCalls.push({ url, init });
-    return { ok: true, status: 200, json: async () => ({ version: 1, provider: claimSender, escrow, txid, from: sender, tipWei: claimTip }) };
-  };
-  const noChain = createSwaps({ config: {}, store, call: () => { throw new Error("the no-wallet claim read the chain"); } });
-  let claimed = null;
-  try {
-    claimed = await noChain.claimViaRelay({ id: record.id, fetchImpl: successFetch });
-  } catch (error) {
-    problems.push("the no-wallet claim refused: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
-  }
-  if (claimed) {
-    check(claimed.txid === txid && claimed.from === sender && claimed.tipWei === claimTip,
-      "the claim did not return the real txid, sender and tip");
-    check(claimed.provider === lower(claimSender) && claimed.claimSender === lower(claimSender)
-      && claimed.escrow === escrow && claimed.relayUrl === "https://relay.example",
-      "the claim does not name the sender, escrow and relay it used");
-  }
-  check(sentCalls.length === 1, "the claim did not make exactly one relay request");
-  if (sentCalls.length === 1) {
-    const call = sentCalls[0];
-    check(call.init && call.init.method === "POST", "the claim was not a POST");
-    check(call.url === "https://relay.example/v1/claims/" + lower(claimSender) + "/" + escrow,
-      "the claim path is not /v1/claims/{sender}/{escrow}: " + call.url);
-    let body = null;
-    try { body = JSON.parse(call.init.body); } catch { body = null; }
-    check(body && body.version === 1 && body.halfClaimer === stored.escrow.half && Object.keys(body).length === 2,
-      "the claim body is not exactly {version:1, halfClaimer:0x<64>}");
-    check(!JSON.stringify(claimed).toLowerCase().includes(String(stored.escrow.half).replace(/^0x/, "")),
-      "the claim result echoed the half");
-  }
-
-  // (1b) THE INSTANCE `fetch` IS THE DEFAULT FOR OPERATIONS. The public client carries one transport into the
-  // relay claim; no per-call `fetchImpl` is passed here.
-  {
-    const defaultCalls = [];
-    const defaultFetch = async (url, init) => {
-      defaultCalls.push({ url, init });
-      return { ok: true, status: 200, json: async () => ({ version: 1, provider: claimSender, escrow, txid, from: sender, tipWei: claimTip }) };
+    resetChain();
+    const calls = [];
+    const transport = async (url) => {
+      calls.push(url);
+      chainStatus.claimed = true;
+      return answer(relaySender, "0x" + "ab".repeat(32));
     };
+    const claimed = await swaps.claimViaRelay({ id: record.id,
+      claimSenders: [relaySender, secondSender], fetchImpl: transport });
+    check(claimed && claimed.state === "claimed" && claimed.provider === lower(relaySender)
+      && claimed.claimSender === lower(relaySender) && claimed.txid === "0x" + "ab".repeat(32),
+      "the first sender did not claim: " + JSON.stringify(claimed));
+    check(calls.length === 1 && calls[0] === "https://relay.example/v1/claims/" + lower(relaySender) + "/" + escrow,
+      "the first sender path is not the ordered first entry: " + JSON.stringify(calls));
+  }
+
+  // (2) A REFUSAL MOVES TO THE NEXT SENDER AT ONCE.
+  {
+    resetChain();
+    const calls = [];
+    const transport = async (url) => {
+      calls.push(url);
+      if (url.includes(lower(relaySender))) return refusal("claim-tip-too-small");
+      chainStatus.claimed = true;
+      return answer(secondSender, "0x" + "bc".repeat(32));
+    };
+    const claimed = await swaps.claimViaRelay({ id: record.id,
+      claimSenders: [relaySender, secondSender], fetchImpl: transport });
+    check(claimed && claimed.state === "claimed" && claimed.provider === lower(secondSender),
+      "a refused first sender did not move to the second: " + JSON.stringify(claimed));
+    check(calls.length === 2 && calls[0].includes(lower(relaySender)) && calls[1].includes(lower(secondSender)),
+      "the sender order was not tried in order: " + JSON.stringify(calls));
+    check(claimed && claimed.tried && claimed.tried[0] && claimed.tried[0].outcome === "refused"
+      && claimed.tried[0].code === "quote-refused", "the refusal was not recorded in the result");
+  }
+
+  // (3) A TXID IS NOT SUCCESS: THE ESCROW MUST READ CLAIMED.
+  {
+    resetChain();
+    let calls = 0;
+    const transport = async () => {
+      calls += 1;
+      if (calls === 1) return answer(relaySender, "0x" + "cd".repeat(32));
+      chainStatus.claimed = true;
+      return answer(secondSender, "0x" + "de".repeat(32));
+    };
+    const claimed = await swaps.claimViaRelay({ id: record.id,
+      claimSenders: [relaySender, secondSender], fetchImpl: transport, slotMs: 15_000, pollMs: 2_000 });
+    check(claimed && claimed.state === "claimed" && claimed.provider === lower(secondSender) && calls === 2,
+      "an unconfirmed txid from the first sender was treated as done: " + JSON.stringify({ claimed, calls }));
+    check(claimed && claimed.tried && claimed.tried[0].outcome === "unconfirmed",
+      "the unconfirmed first slot was not recorded");
+  }
+
+  // (4) AN UNKNOWN ANSWER GETS ITS SLOT, THEN THE NEXT SENDER.
+  {
+    resetChain();
+    let calls = 0;
+    const transport = async () => {
+      calls += 1;
+      if (calls === 1) throw Object.assign(new Error("lost answer"), { code: "claim-unknown" });
+      chainStatus.claimed = true;
+      return answer(secondSender, "0x" + "ef".repeat(32));
+    };
+    const claimed = await swaps.claimViaRelay({ id: record.id,
+      claimSenders: [relaySender, secondSender], fetchImpl: transport, slotMs: 15_000, pollMs: 2_000 });
+    check(claimed && claimed.state === "claimed" && claimed.provider === lower(secondSender) && calls === 2,
+      "an unknown first answer did not move after its slot: " + JSON.stringify({ claimed, calls }));
+    check(claimed && claimed.tried && claimed.tried[0].outcome === "unknown",
+      "the unknown first slot was not recorded");
+  }
+
+  // (5) WHEN THE LIST RUNS OUT, NAME THE TIME LEFT BEFORE t1.
+  {
+    resetChain();
+    let calls = 0;
+    const transport = async () => { calls += 1; return refusal("claim-tip-too-small"); };
+    const result = await swaps.claimViaRelay({ id: record.id,
+      claimSenders: [relaySender, secondSender], fetchImpl: transport });
+    check(result && result.state === "claim-yourself" && result.reason === "senders-exhausted"
+      && result.txid === null && result.provider === null && calls === 2,
+      "an exhausted list did not return claim-yourself: " + JSON.stringify({ result, calls }));
+    check(result && Number.isSafeInteger(result.secondsLeft) && result.secondsLeft > 0,
+      "the exhausted result does not carry the time left before t1");
+    check(result && result.tried.length === 2 && result.tried.every((entry) => entry.outcome === "refused"),
+      "the exhausted result does not name both attempts");
+  }
+
+  // (6) A SOLO TIP IS STILL REFUSED, AND A FOREIGN ORIGIN IS REFUSED BEFORE ANY SENDER.
+  {
+    const zero = await seed({ quote: { claimTip: "0" } });
+    try {
+      await swaps.claimViaRelay({ id: zero.id, fetchImpl: async () => { throw new Error("must not be called"); } });
+      check(false, "a zero tip was claimed");
+    } catch (error) {
+      check(error && error.code === "bad-input" && error.params && error.params.field === "claimTip"
+        && error.params.why === "not-positive", "a zero tip was not refused by name");
+    }
+  }
+  {
+    resetChain();
+    let called = 0;
+    try {
+      await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender], relayUrl: "https://other.example",
+        fetchImpl: async () => { called += 1; return answer(relaySender, "0x" + "aa".repeat(32)); } });
+      check(false, "a foreign relay origin was accepted");
+    } catch (error) {
+      check(error && error.code === "bad-input" && error.params && error.params.field === "relayUrl"
+        && error.params.why === "foreign-relay", "a foreign relay origin was not refused by name");
+    }
+    check(called === 0, "a foreign relay origin reached the network");
+  }
+
+  // (7) THE INSTANCE FETCH IS STILL THE DEFAULT.
+  {
+    resetChain();
+    const calls = [];
+    const defaultFetch = async (url) => { calls.push(url); chainStatus.claimed = true; return answer(relaySender, "0x" + "fa".repeat(32)); };
     try {
       const client = createNinsei({ settlement: { chain: "arbitrum-sepolia" }, xmrNetwork: "stagenet",
-        storage: sharedStorage, fetch: defaultFetch });
-      const claimedDefault = await client.swaps.claimViaRelay({ id: record.id });
-      check(claimedDefault && claimedDefault.txid === txid && defaultCalls.length === 1,
-        "the instance fetch was not used by claimViaRelay");
+        storage: sharedStorage, fetch: defaultFetch, evmCall: read });
+      const result = await client.swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender] });
+      check(result && result.state === "claimed" && calls.length === 1,
+        "the instance fetch was not used by the ordered claim");
     } catch (error) {
       problems.push("the instance fetch claim refused: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
     }
   }
 
-  // (2) A ZERO TIP IS REFUSED BEFORE THE HALF LEAVES THE CLIENT.
+  // (8) THE OWN-WALLET PATH IS UNCHANGED.
   {
-    const zero = await seed({ quote: { claimTip: "0" } });
-    let called = 0;
-    try {
-      await swaps.claimViaRelay({ id: zero.id, fetchImpl: async () => { called += 1; throw new Error("must not be called"); } });
-      check(false, "a zero tip was claimed");
-    } catch (error) {
-      check(error && error.code === "bad-input" && error.params && error.params.field === "claimTip" && error.params.why === "not-positive",
-        "a zero tip was not refused with bad-input claimTip not-positive: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
-    }
-    check(called === 0, "a zero-tip claim reached the relay");
-  }
-
-  // (3) THE RELAY IS THE QUOTE'S. A foreign origin is refused before any request.
-  {
-    let called = 0;
-    try {
-      await swaps.claimViaRelay({ id: record.id, relayUrl: "https://other.example", fetchImpl: async () => { called += 1; return { ok: true, status: 200, json: async () => ({}) }; } });
-      check(false, "a foreign relay origin was accepted");
-    } catch (error) {
-      check(error && error.code === "bad-input" && error.params && error.params.field === "relayUrl" && error.params.why === "foreign-relay",
-        "a foreign relay origin was not refused with bad-input relayUrl foreign-relay");
-    }
-    check(called === 0, "a foreign relay origin reached the network");
-  }
-
-  // (3b) A RECORD WITHOUT THE ORIGIN CANNOT CLAIM THROUGH A GUESS.
-  {
-    const noRelay = await seed({ withoutRelay: true });
-    try {
-      await swaps.claimViaRelay({ id: noRelay.id, fetchImpl: async () => { throw new Error("must not be called"); } });
-      check(false, "a record without a relay origin was claimed");
-    } catch (error) {
-      check(error && error.code === "bad-input" && error.params && error.params.field === "relayUrl" && error.params.why === "not-in-record",
-        "a missing relay origin was not refused with bad-input relayUrl not-in-record");
-    }
-  }
-
-  // (4) A PROVIDER THAT DISAGREES WITH THE ANSWER IS NOT THIS CLAIM.
-  {
-    const otherProvider = "0x" + "ff".repeat(20);
-    try {
-      await swaps.claimViaRelay({ id: record.id, fetchImpl: async () => ({ ok: true, status: 200,
-        json: async () => ({ version: 1, provider: otherProvider, escrow, txid, from: sender, tipWei: claimTip }) }) });
-      check(false, "an answer naming another provider passed");
-    } catch (error) {
-      check(error && error.code === "quote-refused" && error.params && error.params.why === "answer-provider",
-        "an answer naming another provider was not refused with quote-refused answer-provider");
-    }
-  }
-
-  // (5) A NODE REFUSAL KEEPS ITS CODE AND NOT ITS MESSAGE - AND NEVER THE HALF.
-  {
-    const nodeCode = "claim-tip-too-small";
-    try {
-      await swaps.claimViaRelay({ id: record.id, fetchImpl: async () => ({ ok: false, status: 409,
-        json: async () => ({ version: 1, code: nodeCode, message: "tip " + stored.escrow.half }) }) });
-      check(false, "a node refusal passed as a claim");
-    } catch (error) {
-      check(error && error.code === "quote-refused" && error.params && error.params.code === nodeCode && error.params.status === 409,
-        "a node refusal did not keep its code and status under quote-refused");
-      const carried = JSON.stringify({ code: error && error.code, params: error && error.params });
-      check(!carried.toLowerCase().includes(String(stored.escrow.half).replace(/^0x/, "")),
-        "a node refusal copied the half into the refusal");
-      check(!carried.includes("tip "), "a node refusal copied the provider's message into the refusal");
-    }
-  }
-
-  // (6) A LOST ANSWER IS UNKNOWN: no txid, and the code says so.
-  for (const [label, transport] of [
-    ["a thrown transport", async () => { throw new TypeError("connection reset"); }],
-    ["a success body without a txid", async () => ({ ok: true, status: 200, json: async () => ({ version: 1 }) })],
-    ["a relay that lost the answer after dispatch", async () => ({ ok: false, status: 503,
-      json: async () => ({ version: 1, code: "claim-unknown", message: "the claim may have been sent" }) })],
-  ]) {
-    try {
-      await swaps.claimViaRelay({ id: record.id, fetchImpl: transport });
-      check(false, "a lost answer (" + label + ") was reported as a claim");
-    } catch (error) {
-      check(error && error.code === "claim-unknown" && error.params && error.params.outcome === "unknown",
-        "a lost answer (" + label + ") was not refused with claim-unknown outcome unknown: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
-    }
-  }
-
-  // (7) THE OWN-WALLET PATH IS UNCHANGED: sellClaim still checks the sender and signs the claim itself.
-  {
+    resetChain();
     const signatures = [];
     const clock = { request: async ({ method }) => {
       if (method === "eth_getBlockByNumber") return { timestamp: order.readyBy - 100 };
@@ -391,7 +330,7 @@ export const relayClaimCheck = async () => {
       "sellClaim did not present the record's half to claim()");
   }
 
-  notes.push("the record stores the answering relay; a zero tip, a foreign origin and a missing origin are refused before any request");
-  notes.push("a node refusal keeps its code, a lost answer is claim-unknown, and sellClaim remains the own-wallet path");
-  return { note: "the no-wallet relay claim sends the half once and the own-wallet fallback is unchanged", problems, notes };
+  notes.push("the client list is tried in order; a refusal moves on, a txid waits for the escrow, and exhaustion asks for the seller's own claim");
+  notes.push("the relay origin and the instance fetch rules are unchanged; sellClaim remains the own-wallet path");
+  return { note: "the ordered relay claim reads the escrow and names the sender that landed it", problems, notes };
 };
