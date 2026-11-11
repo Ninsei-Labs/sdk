@@ -663,14 +663,13 @@ export interface SwapsApi {
   sellClaim(request: SellClaimRequest, wallet: WalletAdapter): Promise<unknown>;
   /**
    * CLAIM THE ETH ON A SELL WITHOUT A WALLET. The seller holds XMR and no ETH, so the signed `claimTip` pays the
-   * sender. The half goes to the sender the client chose - a listed maker OTHER than the deal's maker - through
-   * the relay that answered the quote (`POST /v1/claims/{sender}/{escrow}`). No wallet is created or used and no
-   * chain transaction is signed.
+   * sender. `claimSenders` is the client's ordered list - the relay's own sender first, then the listed makers -
+   * sent one at a time through the relay (`POST /v1/claims/{sender}/{escrow}`). Each sender gets a 15-30 s slot; a
+   * refusal moves on, a txid or unknown answer is followed by reading the escrow, and only `claimed` on chain is
+   * success. When the list is exhausted the result is `claim-yourself` with the time left before `t1`.
    *
-   * The sender is stored by `startSell`; a request may supply `claimSender` only when the record has none, and
-   * may never name the deal's maker. `relayUrl` may restate the stored origin; a different origin is refused. A
-   * node refusal is `quote-refused` with its own code in `params.code`; a lost answer is `claim-unknown` (the
-   * claim may have been sent), never success.
+   * The deal's maker and its quote-key owner are refused before the half leaves the client. No wallet is created or
+   * used and no chain transaction is signed. `relayUrl` may restate the stored origin; a different origin is refused.
    */
   claimViaRelay(request: RelayClaimRequest): Promise<RelayClaimResult>;
   /**
@@ -969,9 +968,9 @@ export interface SellStartRequest {
   /** The verified `quotes.firmRelay` answer for the bid side. */
   readonly offer: FirmRelayAnswer;
   /**
-   * The sender the client chose for a later no-ETH claim: a listed maker other than the deal's maker. It is
-   * stored with the record so a reload claims through the same node; the relay route names it as `provider`.
-   * Omitted for a record that will only use the own-wallet path.
+   * Optional legacy single sender stored for a no-ETH claim. The ordered list passed to `claimViaRelay` is the
+   * authority; this scalar is only a one-element fallback for callers written before the list existed. A sender
+   * naming the deal's maker or its quote-key owner is refused.
    */
   readonly claimSender?: string;
   /** The twelve-word key; required only when no key is stored yet. */
@@ -996,7 +995,7 @@ export interface SellStart {
   readonly xmrAmount: string;
   readonly claimTip: string | null;
   readonly orderQuote: Readonly<Record<string, unknown>> | null;
-  /** The no-wallet claim sender stored by `startSell`, or null when only the own-wallet path is available. */
+  /** The legacy single sender stored by `startSell`, or null when the client supplies the list at claim time. */
   readonly claimSender: string | null;
   readonly readyWindow: ReadyWindow | null;
   readonly resumed: boolean;
@@ -1013,33 +1012,69 @@ export interface SellClaimRequest {
 
 /**
  * THE NO-WALLET CLAIM'S INPUTS. `id` names the sell record made by `startSell`; the escrow, half and signed tip
- * come from it. `claimSender` is the list-member node that will send the claim: it must be a listed maker other than
- * the deal's maker, and is normally stored by `startSell`. `relayUrl` is optional and may only repeat the origin
+ * come from it. `claimSenders` is the client's ordered list: the relay's own sender first, then the listed makers.
+ * Each entry is checked for the deal's maker and its quote-key owner. The old scalar `claimSender` is accepted as a
+ * one-element fallback for callers written before the list. `relayUrl` is optional and may only repeat the origin
  * stored with the record - a foreign origin is refused.
  */
 export interface RelayClaimRequest {
   readonly id: string;
-  /** Only for a record made before the sender was stored; it may never name the deal's maker. */
+  /** Ordered senders. Tried one at a time; the first that lands a claim on chain wins. */
+  readonly claimSenders?: readonly string[];
+  /** One-element fallback for a caller written before `claimSenders`; may never name the deal's maker. */
   readonly claimSender?: string;
   readonly relayUrl?: string;
+  /** One sender's slot; clamped to 15-30 s. Default 20 s. */
+  readonly slotMs?: number;
+  /** How often the escrow is read during a slot. Default 2 s. */
+  readonly pollMs?: number;
   readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number;
 }
 
-/** The claim the relay sent for the record. Only a validated on-chain transaction hash is returned here. */
-export interface RelayClaimResult {
+/** One sender's outcome in a list claim. */
+export interface RelayClaimAttempt {
+  readonly sender: string;
+  readonly outcome: "refused" | "unknown" | "unconfirmed";
+  readonly code?: string | null;
+  readonly params?: Readonly<Record<string, unknown>> | null;
+  readonly txid?: string | null;
+}
+
+/** The claim has landed: the escrow itself reads `claimed`, not merely a txid answer. */
+export interface RelayClaimed {
+  readonly state: "claimed";
   readonly id: string;
-  /** The sender the client chose; `claimSender` repeats it for callers that think in that name. */
-  readonly provider: string;
-  readonly claimSender: string;
+  /** The sender whose slot found the claim; null when the escrow already read claimed before the first POST. */
+  readonly provider: string | null;
+  readonly claimSender: string | null;
   readonly escrow: string;
   readonly relayUrl: string;
-  readonly txid: string;
-  /** The address that sent the claim transaction (the sender node's sender, not the seller). */
-  readonly from: string;
-  /** The signed tip, in wei, paid out of the claim. */
+  /** The txid when an answer carried one; `null` when the claim was found on chain without it. */
+  readonly txid: string | null;
+  readonly from: string | null;
   readonly tipWei: string;
+  readonly tried: readonly RelayClaimAttempt[];
 }
+
+/** No sender landed the claim. The seller must send `sellClaim` before `t1`. */
+export interface RelayClaimYourself {
+  readonly state: "claim-yourself";
+  readonly reason: "senders-exhausted" | "escrow-refunded";
+  readonly id: string;
+  readonly provider: null;
+  readonly claimSender: null;
+  readonly escrow: string;
+  readonly relayUrl: string;
+  readonly txid: null;
+  readonly from: null;
+  readonly tipWei: string;
+  readonly t1: number | null;
+  readonly secondsLeft: number | null;
+  readonly tried: readonly RelayClaimAttempt[];
+}
+
+export type RelayClaimResult = RelayClaimed | RelayClaimYourself;
 
 export interface SellWatchRequest {
   /** The escrow predicted by the relay adapter. */

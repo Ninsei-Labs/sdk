@@ -415,7 +415,7 @@ function swapByEscrow(store, escrow) {
   return null;
 }
 
-export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork = null, call = null, fetchImpl = null, now = null, evmBlock = null, store = engine.store,
+export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork = null, call = null, fetchImpl = null, now = null, sleep = null, evmBlock = null, store = engine.store,
   // THE MONERO TIMINGS ARE BROUGHT BY THE CONFIGURATION: the watch's rate and timeout live in config.limits. There is
   // no server step and no route table to consult.
   config = null,
@@ -459,6 +459,14 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
   // network read made by this client (height probes, relay quote/claim, witness verification) uses `fetchImpl`.
   const withDefaultFetch = (request) => (fetchImpl && request && typeof request === "object"
     && typeof request.fetch !== "function" ? { ...request, fetch: fetchImpl } : request);
+  // THE SLOT CLOCK IS A SEAM. A real caller uses wall time and a timer; a check can advance both, so a 15-30 s
+  // slot is exercised without making the suite wait for it.
+  const clockMs = () => {
+    const value = typeof now === "function" ? Number(now()) : Date.now();
+    return Number.isFinite(value) ? value : Date.now();
+  };
+  const sleepFor = typeof sleep === "function" ? sleep
+    : (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   // ONE BLOCK FOR THE SELL GATE. A block read is a seam like the contract read: `evmBlock` from the interface
   // wins, then the wallet's own provider. The number pins every escrow read below to the same state; the
   // timestamp is the chain's clock, not the device's.
@@ -1465,8 +1473,9 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
 
     /**
      * START A SELL FROM A VERIFIED RELAY OFFER. The offer is the result of `quotes.firmRelay` for the bid side;
-     * the record keeps the one-time address, the escrow, our half, the chosen claim sender and the order
-     * expectations, so a reload can continue with `get` + `sellWatch` + `sellClaim`. This method sends nothing.
+     * the record keeps the one-time address, the escrow, our half, the order expectations and the relay origin, so a
+     * reload can continue with `get` + `sellWatch` + `sellClaim`. The optional `claimSender` is a legacy
+     * single-sender fallback; `claimViaRelay` takes the client's ordered list at claim time. This method sends nothing.
      */
     async startSell(request) {
       if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
@@ -1526,8 +1535,13 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
           throw new SdkError("quote-refused", { step: "sell-record", why: "offer-changed" });
         }
         const storedSender = existing.claimSender ? addressTextOf(existing.claimSender, "claimSender") : null;
-        if (requestedSender && storedSender && requestedSender !== storedSender) {
-          throw new SdkError("quote-refused", { step: "sell-record", why: "claim-sender-changed" });
+        // THE OLD SCALAR IS NOT A PIN. A reload may name another sender or bring the ordered list at claim time; the
+        // record keeps the latest scalar only for callers that still use it.
+        if (requestedSender && requestedSender !== storedSender) {
+          existing.claimSender = requestedSender;
+          delete existing.claimSenders;
+          try { engine.swap.saveSwap(existing, store); }
+          catch { throw new SdkError("storage-unavailable", { step: "save-claim-sender" }); }
         }
         // THE RELAY IS PART OF THE VERIFIED OFFER. A claim later goes to the origin that answered this quote, so
         // a resumed offer naming another origin is a different offer; one that now names the same origin fills a
@@ -1541,11 +1555,6 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
           existing.relayUrl = offerRelay;
           try { engine.swap.saveSwap(existing, store); }
           catch { throw new SdkError("storage-unavailable", { step: "save-relay" }); }
-        }
-        if (requestedSender && !storedSender) {
-          existing.claimSender = requestedSender;
-          try { engine.swap.saveSwap(existing, store); }
-          catch { throw new SdkError("storage-unavailable", { step: "save-claim-sender" }); }
         }
         const storedWindow = existing.readyWindow || existing.sellWindow || null;
         if (offerWindow && storedWindow) {
@@ -1699,15 +1708,12 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
      * CLAIM THE ETH ON A SELL WITHOUT A WALLET.
      *
      * The seller holds XMR and no ETH, so the escrow pays the signed `claimTip` to whoever submits the claim.
-     * This method sends the half to the sender the client chose - a listed maker other than the deal's maker - and
-     * the relay posts it to `POST /v1/claims/{sender}/{escrow}`. It NEVER creates or uses a wallet and never signs a
-     * chain transaction; `sellClaim` remains the own-wallet path.
-     *
-     * A record must come from `startSell`, carry a POSITIVE `claimTip`, and name the sender, escrow and half. The
-     * sender is stored by `startSell`; a request may supply `claimSender` only when the record has none, and may
-     * never name the deal's maker. `relayUrl` is only a restatement of the stored origin: a different one is refused
-     * rather than obeyed. A vanished answer is `claim-unknown` (the claim may have been sent), never success; only a
-     * real txid returns.
+     * `claimSenders` is the client's ordered list: the relay's own sender first, then the listed makers. The SDK
+     * sends the half to one sender at a time through `POST /v1/claims/{sender}/{escrow}`; a refusal moves on at once,
+     * a txid or unknown answer is followed by reading the escrow for the rest of that sender's 15-30 s slot, and
+     * only `claimed` on chain is success. An exhausted list returns `state: "claim-yourself"` with the time left
+     * before `t1`. The deal's maker and its quote-key owner are refused before the half leaves the client. This
+     * method never creates or uses a wallet and never signs a chain transaction; `sellClaim` remains that path.
      */
     async claimViaRelay(request = {}) {
       if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
@@ -1743,35 +1749,47 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
           }
         }
       }
+      const quoteKeyOwner = quote.quoteKey === undefined || quote.quoteKey === null
+        || String(quote.quoteKey).trim() === "" ? null : addressTextOf(quote.quoteKey, "quoteKey");
       const storedSenderRaw = swap.claimSender === undefined || swap.claimSender === null
         || String(swap.claimSender).trim() === "" ? null : swap.claimSender;
       const requestedSenderRaw = request.claimSender === undefined || request.claimSender === null
         || String(request.claimSender).trim() === "" ? null : request.claimSender;
-      const storedSender = storedSenderRaw ? addressTextOf(storedSenderRaw, "claimSender") : null;
-      const requestedSender = requestedSenderRaw ? addressTextOf(requestedSenderRaw, "claimSender") : null;
-      if (storedSender && requestedSender && storedSender !== requestedSender) {
-        throw new SdkError("bad-input", { field: "claimSender", why: "different-from-record" });
+      // THE ORDER IS THE CLIENT'S, NOT THE RECORD'S. A list passed now wins; the old scalar and the stored value are
+      // only one-element fallbacks for callers written before the list existed. Neither is a pin: the next sender is
+      // tried when this one refuses or its slot ends.
+      if (request.claimSenders !== undefined && !Array.isArray(request.claimSenders)) {
+        throw new SdkError("bad-input", { field: "claimSenders", why: "not-an-array" });
       }
-      const sender = storedSender || requestedSender;
-      if (!sender) throw new SdkError("bad-input", { field: "claimSender", why: "not-in-record" });
-      if (sender === maker) throw new SdkError("bad-input", { field: "claimSender", why: "is-deal-maker" });
-      const quoteKeyOwner = quote.quoteKey === undefined || quote.quoteKey === null
-        || String(quote.quoteKey).trim() === "" ? null : addressTextOf(quote.quoteKey, "quoteKey");
-      if (quoteKeyOwner && sender === quoteKeyOwner) {
-        throw new SdkError("bad-input", { field: "claimSender", why: "is-quote-key" });
+      const explicitList = Array.isArray(request.claimSenders) ? request.claimSenders : null;
+      if (explicitList && explicitList.length === 0) {
+        throw new SdkError("bad-input", { field: "claimSenders", why: "empty" });
       }
-      // AN OLDER RECORD KEEPS THE SENDER ONCE IT IS USED. A reload must not be forced to remember a second input.
-      if (!storedSender && requestedSender) {
-        swap.claimSender = requestedSender;
-        try { engine.swap.saveSwap(swap, store); }
-        catch { throw new SdkError("storage-unavailable", { step: "save-claim-sender" }); }
+      if (explicitList && requestedSenderRaw) {
+        throw new SdkError("bad-input", { field: "claimSenders", why: "with-claim-sender" });
       }
+      const rawSenders = explicitList || (requestedSenderRaw ? [requestedSenderRaw] : null)
+        || (Array.isArray(swap.claimSenders) ? swap.claimSenders : null)
+        || (storedSenderRaw ? [storedSenderRaw] : []);
+      if (!rawSenders.length) throw new SdkError("bad-input", { field: "claimSenders", why: "not-in-record" });
+      const senders = [];
+      for (const raw of rawSenders) {
+        if (raw === undefined || raw === null || String(raw).trim() === "") {
+          throw new SdkError("bad-input", { field: "claimSenders", why: "empty" });
+        }
+        const sender = addressTextOf(raw, "claimSenders");
+        if (sender === maker) throw new SdkError("bad-input", { field: "claimSenders", why: "is-deal-maker" });
+        if (quoteKeyOwner && sender === quoteKeyOwner) {
+          throw new SdkError("bad-input", { field: "claimSenders", why: "is-quote-key" });
+        }
+        if (!senders.includes(sender)) senders.push(sender);
+      }
+      if (!senders.length) throw new SdkError("bad-input", { field: "claimSenders", why: "not-in-record" });
       if (escrowRecord.address === undefined || escrowRecord.address === null || escrowRecord.address === "") {
         throw new SdkError("bad-input", { field: "escrow", why: "not-in-record" });
       }
       const escrow = addressTextOf(escrowRecord.address, "escrow");
       const halfClaimer = halfTextOf(escrowRecord.half);
-
       // THE ORIGIN IS THE QUOTE'S, NOT THE CALLER'S. The record stores the relay that answered; a request may
       // repeat it (with a trailing slash), but may not choose another one after the quote.
       if (swap.relayUrl === undefined || swap.relayUrl === null || swap.relayUrl === "") {
@@ -1783,14 +1801,89 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
           throw new SdkError("bad-input", { field: "relayUrl", why: "foreign-relay" });
         }
       }
+      // A LIST IS NOT A PIN. It is saved only as the fallback for a reload whose caller no longer has the relay's
+      // answer; a later request that brings its own order ignores it.
+      if (!Array.isArray(swap.claimSenders) || swap.claimSenders.length !== senders.length
+        || swap.claimSenders.some((value, index) => String(value).toLowerCase() !== senders[index])) {
+        swap.claimSenders = senders;
+        swap.claimSender = senders[0];
+        try { engine.swap.saveSwap(swap, store); }
+        catch { throw new SdkError("storage-unavailable", { step: "save-claim-senders" }); }
+      }
 
       const timeoutMs = Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0
         ? Number(request.timeoutMs) : 20_000;
-      const claimed = await postRelayClaim({
-        relayUrl, provider: sender, escrow, halfClaimer, expectedTipWei: tip,
-        fetchImpl: request.fetchImpl || fetchImpl || null, timeoutMs,
+      // ONE SENDER AT A TIME, EACH WITH ITS OWN SLOT. Refusal moves on immediately; an accepted/unknown answer is
+      // followed by reading the escrow until it says claimed or the slot ends. A txid alone is never success.
+      const slotMs = Number.isFinite(Number(request.slotMs)) && Number(request.slotMs) > 0
+        ? Math.min(30_000, Math.max(15_000, Number(request.slotMs))) : 20_000;
+      const pollMs = Number.isFinite(Number(request.pollMs)) && Number(request.pollMs) > 0
+        ? Math.min(slotMs, Number(request.pollMs)) : 2_000;
+      const readStatus = async () => {
+        try { return await flow.orderStatus(escrow, { call: reader }); } catch { return null; }
+      };
+      const t1Raw = order.t1 ?? (swap.expect && swap.expect.t1);
+      const t1 = Number.isSafeInteger(Number(t1Raw)) && Number(t1Raw) > 0 ? Number(t1Raw) : null;
+      const secondsLeft = () => (t1 === null ? null : Math.max(0, t1 - Math.floor(clockMs() / 1000)));
+      const claimedByEscrow = (sender = null, answer = null, tried = []) => ({
+        id, state: "claimed", provider: sender, claimSender: sender, escrow, relayUrl,
+        txid: answer ? answer.txid : null, from: (answer && answer.from) || null,
+        tipWei: (answer && answer.tipWei) || tip.toString(), tried,
       });
-      return { id, provider: sender, claimSender: sender, escrow, relayUrl, txid: claimed.txid, from: claimed.from, tipWei: claimed.tipWei };
+      // A CLAIM THAT ALREADY LANDED IS NOT A REASON TO SEND THE HALF AGAIN. The caller may have lost the answer on
+      // the previous attempt; read the escrow before the first POST, and read it once more before returning
+      // `claim-yourself`, so a late claim cannot be reported as "claim yourself".
+      const initial = await readStatus();
+      if (initial && initial.isClaimed) return claimedByEscrow();
+      let refunded = Boolean(initial && initial.isRefunded);
+      const tried = [];
+      if (!refunded) for (const sender of senders) {
+        let answer = null;
+        let failure = null;
+        try {
+          answer = await postRelayClaim({
+            relayUrl, provider: sender, escrow, halfClaimer, expectedTipWei: tip,
+            fetchImpl: request.fetchImpl || fetchImpl || null, timeoutMs,
+          });
+        } catch (error) {
+          failure = error;
+        }
+        // A REFUSAL IS THE SENDER'S ANSWER, NOT A CLAIM IN FLIGHT. Move to the next one at once; only an unknown
+        // outcome (or a txid, which is not yet a claim on chain) deserves the slot.
+        if (failure && failure.code !== "claim-unknown") {
+          tried.push({ sender, outcome: "refused", code: failure.code || "unknown",
+            params: failure.params || null });
+          continue;
+        }
+        const slotEnd = clockMs() + slotMs;
+        for (;;) {
+          const status = await readStatus();
+          if (status && status.isClaimed) {
+            swap.claimSender = sender;
+            try { engine.swap.saveSwap(swap, store); } catch { /* the chain already says claimed */ }
+            return claimedByEscrow(sender, answer, tried);
+          }
+          if (status && status.isRefunded) { refunded = true; break; }
+          const left = slotEnd - clockMs();
+          if (left <= 0) break;
+          await sleepFor(Math.min(pollMs, left));
+        }
+        tried.push({ sender, outcome: failure ? "unknown" : "unconfirmed",
+          txid: answer ? answer.txid : null, code: failure ? failure.code : null });
+        if (refunded) break;
+      }
+
+      // THE LAST LOOK BEFORE THE FALLBACK. A claim can land after the last slot ended or while a later sender is
+      // refusing; the seller must not be sent to `sellClaim` on an escrow that is already closed as claimed.
+      const finalStatus = await readStatus();
+      if (finalStatus && finalStatus.isClaimed) {
+        try { engine.swap.saveSwap(swap, store); } catch { /* the chain already says claimed */ }
+        return claimedByEscrow(null, null, tried);
+      }
+      if (finalStatus && finalStatus.isRefunded) refunded = true;
+      return { id, state: "claim-yourself", reason: refunded ? "escrow-refunded" : "senders-exhausted",
+        provider: null, claimSender: null, escrow, relayUrl, txid: null, from: null, tipWei: tip.toString(),
+        t1, secondsLeft: secondsLeft(), tried };
     },
 
     /**
