@@ -56,17 +56,46 @@ export function unrunCheckScripts(scripts, files) {
   const names = namedScripts(files).map((n) => n.name);
   const named = new Set(names);
   // `pnpm run check` and `pnpm run coverage` run the whole registry, so a named step for every registry key is
-  // not needed. External `check:*` scripts still need their own workflow step.
-  if (names.includes("check") || names.includes("coverage")) {
+  // not needed. A wrapper such as `check:dex` that only expands to registry keys is covered by the same pass.
+  const coverageRuns = names.includes("check") || names.includes("coverage");
+  if (coverageRuns) {
     for (const key of registryCheckNames()) named.add("check:" + key);
   }
-  return Object.keys(scripts).filter((name) => name.startsWith("check:") && !named.has(name)).sort();
+  return Object.keys(scripts).filter((name) => {
+    if (!name.startsWith("check:") || named.has(name)) return false;
+    if (coverageRuns && registryKeysForScript(name).length) return false;
+    return true;
+  }).sort();
 }
 
 const scripts = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).scripts || {};
 const files = {};
 for (const entry of readdirSync(WORKFLOWS)) {
   if (entry.endsWith(".yml") || entry.endsWith(".yaml")) files[".github/workflows/" + entry] = readFileSync(join(WORKFLOWS, entry), "utf8");
+}
+
+// A NAMED STEP FOR A REGISTERED CHECK RUNS IT TWICE: once here and once under `coverage`. The registry is the
+// single list the coverage step walks; external check scripts (live, anvil, teeth, pack) are the only ones that
+// still need a named step. Keep both the package command and the workflow honest.
+function registryKeysForScript(name) {
+  const registry = new Set(registryCheckNames());
+  const direct = name.startsWith("check:") ? name.slice(6) : "";
+  if (direct && registry.has(direct)) return [direct];
+  const command = scripts[name] || "";
+  const keys = new Set();
+  for (const match of command.matchAll(/--only=([^\s"']+)/g)) {
+    for (const key of match[1].split(",")) if (registry.has(key)) keys.add(key);
+  }
+  return [...keys];
+}
+
+export function registryNamedSteps(files) {
+  const found = [];
+  for (const step of namedScripts(files)) {
+    const keys = registryKeysForScript(step.name);
+    if (keys.length) found.push({ where: step.where, name: step.name, keys });
+  }
+  return found;
 }
 
 console.log("=== EVERY pnpm run IN CI NAMES A SCRIPT ===");
@@ -81,6 +110,19 @@ console.log("=== EVERY check:* SCRIPT IS RUN BY A WORKFLOW ===");
 const unrun = unrunCheckScripts(scripts, files);
 if (!unrun.length) ok("every check:* script has a workflow step");
 else bad("check scripts no workflow runs: " + JSON.stringify(unrun));
+
+console.log("=== NO NAMED STEP RUNS A REGISTERED CHECK ===");
+const duplicates = registryNamedSteps(files);
+if (!duplicates.length) ok("no named step repeats a check that coverage already runs");
+else bad("named steps repeat registered checks: " + JSON.stringify(duplicates));
+
+console.log("=== BREAKING RUN: a named registered check reddens ===");
+{
+  const broken = { ...files, ".github/workflows/ci.yml": (files[".github/workflows/ci.yml"] || "") + "\n      - run: pnpm run check:deployment-pins\n" };
+  if (registryNamedSteps(broken).some((step) => step.name === "check:deployment-pins")) {
+    ok("breaking run REDDENS: a named deployment-pins step is caught");
+  } else bad("breaking run does not catch a named registered check");
+}
 
 console.log("=== BREAKING RUN: a dropped script reddens ===");
 {
