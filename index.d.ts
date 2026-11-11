@@ -1165,6 +1165,14 @@ export interface StartRequest {
    * without it (`bad-input { step: "fund-order" }`): the factory takes a signed quote, not bare order terms.
    */
   readonly orderQuote?: QuoteLike;
+  /**
+   * OPTIONAL CROSS-CHECK, NOT A REQUIREMENT. A reloaded retry derives this address from the signed quote; when the
+   * caller already has it, the value is compared with that prediction and a different value is refused. A request
+   * without it resumes the same pending record from the quote alone.
+   */
+  readonly escrow?: string;
+  /** Alias for `escrow` accepted by the same cross-check. */
+  readonly predictedEscrow?: string;
   /** The swap direction for the record. Default - `buy`. */
   readonly side?: "buy" | "sell";
   /** Where to receive: for a purchase - the Monero address, for a sale - the EVM address. */
