@@ -81,11 +81,22 @@ function blockFor(height) {
   return { block_header: { hash }, tx_hashes: height === 105 ? [TXID] : [] };
 }
 
-function fetchBoth({ witnessHash = BLOCK_HASH, witnessTop = 119, witnessInfoTop = null, exactInfoHeight = null,
+function witnessIndex(url) {
+  try {
+    const match = /^witness(\d*)\.example$/.exec(new URL(url).hostname);
+    return match ? (match[1] ? Number(match[1]) - 1 : 0) : -1;
+  } catch { return -1; }
+}
+const perWitness = (values, index, fallback) => Array.isArray(values) && index >= 0 && index < values.length
+  ? values[index] : fallback;
+
+function fetchBoth({ witnessHash = BLOCK_HASH, witnessHashes = null, witnessTop = 119, witnessTops = null,
+  witnessTxids = null, witnessInfoTop = null, exactInfoHeight = null,
   exactStaleHeight = null, witnessPartialAt = null, witnessPartialTo = null, witnessBroken = null,
   witnessFailAt = null, network = "stagenet" } = {}) {
   return async (url, init) => {
     const body = JSON.parse(String(init.body || "{}"));
+    const witnessAt = isWitness(url) ? witnessIndex(url) : -1;
     requests.push({ url, body });
     if (isWitness(url) && url.endsWith("/v1/witness/slice")) {
       if (body.height !== undefined || body.txid !== undefined) return { ok: false, status: 400, json: async () => ({}) };
@@ -94,15 +105,16 @@ function fetchBoth({ witnessHash = BLOCK_HASH, witnessTop = 119, witnessInfoTop 
       }
       const from = Number(body.slice) * Number(body.grid);
       const sliceEnd = from + Number(body.grid) - 1;
+      const ownTop = perWitness(witnessTops, witnessAt, witnessTop);
       const limit = witnessPartialAt !== null && Number(body.slice) === Number(witnessPartialAt)
-        ? Number(witnessPartialTo) : Number(witnessTop);
+        ? Number(witnessPartialTo) : ownTop;
       const to = Math.min(sliceEnd, limit);
       const blocks = Array.from({ length: to - from + 1 }, (_, i) => {
         const height = from + i;
         return {
           height,
-          hash: height === 105 ? witnessHash : String(height).padStart(64, "0"),
-          txids: height === 105 ? [TXID] : [],
+          hash: height === 105 ? perWitness(witnessHashes, witnessAt, witnessHash) : String(height).padStart(64, "0"),
+          txids: height === 105 && perWitness(witnessTxids, witnessAt, TXID) ? [TXID] : [],
         };
       });
       const complete = to === sliceEnd;
@@ -113,7 +125,7 @@ function fetchBoth({ witnessHash = BLOCK_HASH, witnessTop = 119, witnessInfoTop 
     }
     if (body.method === "get_info") {
       const stale = isHost(url, "b.example") && exactStaleHeight !== null;
-      const height = isWitness(url) ? Number(witnessInfoTop ?? witnessTop) + 1
+      const height = isWitness(url) ? Number(perWitness(witnessTops, witnessAt, witnessInfoTop ?? witnessTop)) + 1
         : stale ? Number(exactStaleHeight) : Number(exactInfoHeight ?? 121);
       return { ok: true, json: async () => ({ result: { height, synchronized: !stale, status: "OK", nettype: network } }) };
     }
@@ -370,6 +382,57 @@ console.log("=== 14) THE SHADOW NAMES ITS WITNESS QUORUM ===");
     && mainnetIndependent.witness.quorum.independent.length === 2) {
     ok("two independent mainnet operators meet the quorum");
   } else bad("mainnet independent quorum: " + JSON.stringify(mainnetIndependent.witness.quorum));
+}
+
+console.log("=== 15) COMPLETION USES THE HIGHEST TOP, NOT EACH WITNESS TOP ===");
+{
+  const result = await shadow({ fromHeight: 106, witnessTop: 119, exactInfoHeight: 120,
+    witnessOperators: ["W", "X"], witnessTops: [119, 139] });
+  const short = result.witness.checked.find((entry) => entry.operator === "W");
+  if (result.witness.quorum && result.witness.quorum.ok === false
+    && result.witness.quorum.completed.join(",") === "X"
+    && short && short.state !== "ok") {
+    ok("a witness below another witness top does not count as completed");
+  } else {
+    bad("cross-witness top: " + JSON.stringify({ quorum: result.witness.quorum, checked: result.witness.checked,
+      completed: result.witness.completed, agrees: result.agrees, problems: result.problems }));
+  }
+  if (result.agrees === false && result.problems.includes("witness:no-quorum")) {
+    ok("an absence behind the highest witness top is not agreement");
+  } else bad("cross-witness absence: " + JSON.stringify({ agrees: result.agrees, problems: result.problems }));
+}
+
+console.log("=== 16) A CONTRADICTING WITNESS IS NAMED, NOT HIDDEN BY THE FIRST CANDIDATE ===");
+{
+  const differentHash = await shadow({ witnessTop: 119, exactInfoHeight: 120,
+    witnessOperators: ["W", "X"], witnessHashes: [BLOCK_HASH, "c".repeat(64)] });
+  const named = (differentHash.witness.disagreements || []).some((entry) =>
+    entry.field === "blockHash" && entry.operators.includes("W") && entry.operators.includes("X"));
+  if (differentHash.agrees === false && differentHash.problems.includes("blockHash") && named) {
+    ok("two witnesses on different blocks disagree and both operators are named");
+  } else {
+    bad("witness disagreement: " + JSON.stringify({ agrees: differentHash.agrees, problems: differentHash.problems,
+      disagreements: differentHash.witness.disagreements, observations: differentHash.witness.observations }));
+  }
+
+  const empty = await shadow({ witnessTop: 119, exactInfoHeight: 120,
+    witnessOperators: ["W", "X"], witnessTxids: [TXID, null] });
+  const emptyNamed = (empty.witness.disagreements || []).some((entry) =>
+    entry.field === "seen" && entry.operators.join(",") === "W,X");
+  if (empty.agrees === false && empty.problems.includes("witness:disagreement") && emptyNamed) {
+    ok("a witness that reports the payment and one that completes empty do not agree");
+  } else {
+    bad("witness empty disagreement: " + JSON.stringify({ agrees: empty.agrees, problems: empty.problems,
+      disagreements: empty.witness.disagreements, observations: empty.witness.observations }));
+  }
+
+  const reversed = await shadow({ witnessTop: 119, exactInfoHeight: 120,
+    witnessOperators: ["W", "X"], witnessHashes: ["c".repeat(64), BLOCK_HASH] });
+  if (reversed.agrees === false && reversed.problems.includes("blockHash")) {
+    ok("the disagreement is order-independent when the mismatching witness is first");
+  } else {
+    bad("reversed witness disagreement: " + JSON.stringify({ agrees: reversed.agrees, problems: reversed.problems }));
+  }
 }
 
 if (problems.length) {

@@ -108,7 +108,7 @@ export function claimTipVerdict({ claimTipWei = 0, baseFeeWei = null, priorityFe
 }
 
 export function createQuotes({ config, now = () => Date.now(), evmCall = null, evmCode = null, evmBlock = null,
-  providerAllowed = null, knownFactoryCodes = null, knownImplementationCodes = null, denylist = null }) {
+  providerAllowed = null, knownFactoryCodes = null, knownImplementationCodes = null, denylist = null, fetchImpl = null }) {
   // THE INTERFACE'S FACTORY POLICY (#103): the code hashes of factories it is willing to trade through
   // (extcodehash semantics = keccak256 of the runtime code). An EMPTY list is "no policy" (like
   // allowedProviders); a NON-EMPTY one refuses any factory whose code is not on it. Lower-cased once.
@@ -225,7 +225,7 @@ export function createQuotes({ config, now = () => Date.now(), evmCall = null, e
       const result = await requestFirmQuote({
         relayUrl: request.relayUrl,
         partner: request.partner,
-        fetchImpl: request.fetchImpl,
+        fetchImpl: request.fetchImpl || fetchImpl,
         timeoutMs: request.timeoutMs,
         features,
         terms: {

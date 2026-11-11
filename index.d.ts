@@ -53,7 +53,8 @@ export interface NinseiOptions {
   storage?: StorageAdapter;
   /** "live" - real nodes and chain; "sim" - a sandbox (mocks, accelerated time, failure scenarios). */
   mode?: "live" | "sim";
-  /** An injected fetch function (SSR, tests, your own transport). */
+  /** An injected fetch function (SSR, tests, your own transport). It is the client default for relay quotes/claims,
+   * Monero height probes and witness checks; a per-call `fetchImpl` still wins. */
   fetch?: FetchLike;
   /** The clock. In "sim" the SDK uses it to accelerate time. */
   now?: () => number;
@@ -1164,6 +1165,14 @@ export interface StartRequest {
    * without it (`bad-input { step: "fund-order" }`): the factory takes a signed quote, not bare order terms.
    */
   readonly orderQuote?: QuoteLike;
+  /**
+   * OPTIONAL CROSS-CHECK, NOT A REQUIREMENT. A reloaded retry derives this address from the signed quote; when the
+   * caller already has it, the value is compared with that prediction and a different value is refused. A request
+   * without it resumes the same pending record from the quote alone.
+   */
+  readonly escrow?: string;
+  /** Alias for `escrow` accepted by the same cross-check. */
+  readonly predictedEscrow?: string;
   /** The swap direction for the record. Default - `buy`. */
   readonly side?: "buy" | "sell";
   /** Where to receive: for a purchase - the Monero address, for a sale - the EVM address. */
@@ -1189,7 +1198,7 @@ export interface StartRequest {
   restoreHeight?: number;
   /** Monero nodes for that one measurement; absent - the configured nodes for the swap's network. */
   xmrNodes?: readonly (string | { readonly url: string })[];
-  /** The fetch used for the height measurement (tests); absent - the global fetch. */
+  /** The fetch used for the height measurement (tests); absent - the client's `fetch`, otherwise the global fetch. */
   fetchImpl?: typeof fetch;
   /**
    * Hand the key backup to the interface, ONCE, when this call created the key. `true` - the person saved it;

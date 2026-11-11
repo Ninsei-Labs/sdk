@@ -48,6 +48,32 @@ const request = (overrides = {}) => ({
   fromHeight: 120, txid: null, fetch: fetchFor({ synchronized: false }), ...overrides,
 });
 
+// A SHADOW FIXTURE WITH TWO WITNESSES AT DIFFERENT TOPS. The exact nodes and W reach block 120; X reaches block 139.
+// Nothing was paid, so the highest-top rule is what decides whether W's shorter walk counts as evidence.
+const shadowTopFetch = async (url, init) => {
+  const body = JSON.parse(String(init.body || "{}"));
+  if (String(url).endsWith("/v1/witness/slice")) {
+    const top = isHost(url, "x.example") ? 139 : 120;
+    const from = Number(body.slice) * Number(body.grid);
+    const to = Math.min(from + Number(body.grid) - 1, top);
+    const blocks = Array.from({ length: Math.max(0, to - from + 1) }, (_, i) => {
+      const height = from + i;
+      return { height, hash: String(height).padStart(64, "0"), txids: [] };
+    });
+    return { ok: true, status: 200, json: async () => ({ version: 1, network: "stagenet", grid: 20,
+      slice: body.slice, from, to, complete: to === from + Number(body.grid) - 1, blocks,
+      tip: to === from + Number(body.grid) - 1 ? null : { height: to, hash: blocks[blocks.length - 1].hash } }) };
+  }
+  if (body.method === "get_info") {
+    const height = isHost(url, "x.example") ? 140 : 121;
+    return { ok: true, status: 200, json: async () => ({ result: { height, synchronized: true, status: "OK", nettype: "stagenet" } }) };
+  }
+  if (body.method === "get_block") {
+    return { ok: true, status: 200, json: async () => ({ result: { block_header: { hash: "a".repeat(64) }, tx_hashes: [] } }) };
+  }
+  return { ok: true, status: 200, json: async () => ({ txs: [], txs_as_json: [] }) };
+};
+
 async function mutatedLadder(from, to, name) {
   const source = readFileSync(join(ROOT, "src", "xmr-arrival.mjs"), "utf8").replace(/\r\n/g, "\n");
   const at = source.indexOf(from);
@@ -109,8 +135,32 @@ try {
     problems: absentShadow.problems,
   }));
 
+  const shadowTopRequest = {
+    ...request({ fetch: shadowTopFetch }),
+    witnessNodes: [
+      { url: "https://w.example", operator: "W", protocol: "witness-v1" },
+      { url: "https://x.example", operator: "X", protocol: "witness-v1" },
+    ],
+  };
+  const topAware = await real.verifyArrivalShadow(shadowTopRequest);
+  if (topAware.exact && topAware.exact.absent === true
+    && topAware.witness.completed === true && topAware.witness.quorum.ok === false
+    && topAware.agrees === false) {
+    ok("the shorter witness does not complete against the highest top");
+  } else bad("highest-top guard", JSON.stringify({ quorum: topAware.witness.quorum,
+    checked: topAware.witness.checked, agrees: topAware.agrees, problems: topAware.problems }));
+
+  const topMutant = await mutatedLadder(
+    "const targetTop = highestTop === null ? top : Math.max(top, highestTop);",
+    "const targetTop = top;", "highest-top");
+  const mutantTop = await topMutant.verifyArrivalShadow(shadowTopRequest);
+  if (mutantTop.agrees === true && mutantTop.witness.quorum.ok === true) {
+    ok("removing the common target makes the shorter witness agree (the guard is load-bearing)");
+  } else bad("highest-top mutation", JSON.stringify({ quorum: mutantTop.witness.quorum,
+    agrees: mutantTop.agrees, problems: mutantTop.problems }));
+
   const noWitnessEvidence = await mutatedLadder(
-    "if (witness.completed && witness.failed.length === 0 && witness.quorum.ok) agrees = true;",
+    "if (witness.completed && witness.failed.length === 0 && witness.quorum.ok && !witnessDisagreements.length) agrees = true;",
     "if (true) agrees = true;", "no-witness-evidence");
   const mutantShadow = await noWitnessEvidence.verifyArrivalShadow(shadowRequest);
   if (mutantShadow.agrees === true) {

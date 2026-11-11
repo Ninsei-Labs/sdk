@@ -114,7 +114,7 @@ console.log("=== 1c) A SALT THE QUOTE DID NOT CARRY IS REFUSED ===");
   else bad("salt mismatch: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
 }
 
-async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 }, funded = false, withId = true, escrow = null } = {}) {
+async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 }, funded = false, withId = true, withQuote = true, withSignature = true, escrow = null } = {}) {
   if (fresh) setStorage(memoryStorage());
   let sent = 0;
   const wallet = { chainId: async () => order.chainId, address: async () => order.locker,
@@ -122,7 +122,8 @@ async function startPending({ fresh = true, receipt = { status: "0x1", logs: [],
     receipt: async () => receipt };
   const counterparty = { proof: maker.side.proof, edPointClaimer: maker.spendPoint,
     commitHalfClaimer: quote.commitHalfClaimer, viewHalfClaimer: derived.makerViewHalf };
-  const request = { quote: { ...(withId ? { id: "q" } : {}), chain: "arbitrum-sepolia", asset: "ETH", amount: 1, size: 1 }, order, orderQuote: quote,
+  const activeQuote = withSignature ? quote : { ...quote, signature: undefined };
+  const request = { quote: { ...(withId ? { id: "q" } : {}), chain: "arbitrum-sepolia", asset: "ETH", amount: 1, size: 1 }, order, ...(withQuote ? { orderQuote: activeQuote } : {}),
     counterparty, recoveryKey: WORDS, recoverySalt: order.salt, receiveTo: "synthetic-xmr-destination",
     restoreHeight: 100, wallet, onRecoveryKey: async () => true, ...(escrow ? { escrow } : {}) };
   const fundedStatus = "0x" + [1, 0, 0, 0].map((value) => BigInt(value).toString(16).padStart(64, "0")).join("");
@@ -133,6 +134,74 @@ async function startPending({ fresh = true, receipt = { status: "0x1", logs: [],
     },
   }).start(request).catch((error) => error);
   return { result, sent };
+}
+
+console.log("=== 1c3) A RELOADED PENDING RETRY FINDS THE SAME ESCROW ===");
+{
+  const first = await startPending();
+  const second = await startPending({ fresh: false });
+  const records = Object.keys((loadState() || {}).swaps || {});
+  if (first.result && first.result.step === "funding-pending" &&
+      second.result && second.result.step === "funding-pending" &&
+      second.result.id === first.result.id && second.sent === 0 && records.length === 1) {
+    ok("a retry without an escrow field resumes the pending record and leaves one record");
+  } else {
+    bad("pending retry: " + JSON.stringify({ first: first.result && first.result.step,
+      second: second.result && second.result.step, same: second.result && first.result && second.result.id === first.result.id,
+      sent: second.sent, records }));
+  }
+}
+
+console.log("=== 1c4) A DIFFERENT ESCROW ON RETRY IS REFUSED, NOT SENT AGAIN ===");
+{
+  const first = await startPending();
+  const second = await startPending({ fresh: false, escrow: "0x" + "77".repeat(20) });
+  if (first.result && first.result.step === "funding-pending" &&
+      second.result && second.result.code === "bad-input" && second.result.params &&
+      second.result.params.why === "escrow-mismatch" && second.sent === 0) {
+    ok("a retry naming another escrow is refused by name");
+  } else {
+    bad("wrong escrow retry: " + JSON.stringify({ code: second.result && second.result.code,
+      params: second.result && second.result.params, sent: second.sent }));
+  }
+}
+
+console.log("=== 1c5) A RETRY WITHOUT THE SIGNED QUOTE IS REFUSED, NOT SENT AGAIN ===");
+{
+  const first = await startPending();
+  const second = await startPending({ fresh: false, withSignature: false });
+  if (first.result && first.result.step === "funding-pending" &&
+      second.result && second.result.code === "bad-input" && second.result.params &&
+      second.result.params.why === "required-for-pending-funding" && second.sent === 0) {
+    ok("a retry that cannot name the predicted escrow is refused by name");
+  } else {
+    bad("missing quote retry: " + JSON.stringify({ code: second.result && second.result.code,
+      params: second.result && second.result.params, sent: second.sent }));
+  }
+}
+
+console.log("=== 1c6) A PENDING RECORD WRITTEN BEFORE THE IDENTITY FIELDS IS MATCHED BY ITS REMAINING FIELDS ===");
+{
+  const first = await startPending();
+  const state = loadState();
+  const record = Object.values((state && state.swaps) || {})[0];
+  if (!record) bad("old-record fixture: no pending record");
+  else {
+    delete record.chainId;
+    delete record.factory;
+    if (record.order) { delete record.order.chainId; delete record.order.factory; }
+    if (record.quote) { delete record.quote.chainId; delete record.quote.factory; }
+    if (record.escrow) { delete record.escrow.chainId; delete record.escrow.factory; }
+    saveState(state);
+    const second = await startPending({ fresh: false });
+    if (first.result && first.result.step === "funding-pending" &&
+        second.result && second.result.step === "funding-pending" && second.sent === 0) {
+      ok("an old pending record is matched by salt and predicted escrow");
+    } else {
+      bad("old-record retry: " + JSON.stringify({ code: second.result && second.result.code,
+        params: second.result && second.result.params, step: second.result && second.result.step, sent: second.sent }));
+    }
+  }
 }
 
 console.log("=== 1c2) A PENDING ROW WITHOUT ITS SALT IS REFUSED, NOT STARTED AGAIN ===");
@@ -193,7 +262,7 @@ console.log("=== 1d2) A RETRY READS THE SAME HASH AND DOES NOT SEND AGAIN ===");
   const second = await startPending({ fresh: false, receipt: { status: "0x1", logs: [created], blockNumber: 11 }, escrow: predicted });
   if (predicted && second.result && second.result.step === "xmr-incoming" && second.result.escrow === predicted && second.sent === 0) {
     ok("the retry reads the pending hash, saves the escrow and sends nothing");
-  } else bad("pending retry: " + JSON.stringify({ ctor: second.result && second.result.constructor && second.result.constructor.name, keys: second.result && Object.keys(second.result), code: second.result && second.result.code, msg: second.result && second.result.message, sent: second.sent }));
+  } else bad("pending retry: " + JSON.stringify({ ctor: second.result && second.result.constructor && second.result.constructor.name, code: second.result && second.result.code, params: second.result && second.result.params, msg: second.result && second.result.message, sent: second.sent }));
 }
 
 console.log("=== 1d2b) A RETRY WITHOUT AN ORDER ID FINDS THE SALT-KEYED PENDING RECORD ===");

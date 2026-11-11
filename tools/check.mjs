@@ -2560,6 +2560,7 @@ const coverageMergeCheck = () => {
 };
 const backupConfirmationCheck = () => runScriptCheck("check-backup-confirmation.mjs", "backup confirmation");
 const keyViewCheck = () => runScriptCheck("check-key-view.mjs", "key view");
+const pendingTeethCheck = () => runScriptCheck("check-pending-teeth.mjs", "pending funding teeth");
 const relayViewCheck = () => runScriptCheck("check-relay-view.mjs", "relay view");
 const relayTermsCheck = () => runScriptCheck("check-relay-terms.mjs", "relay terms");
 const factoryPolicyCheck = () => runScriptCheck("check-factory-policy.mjs", "factory policy");
@@ -2638,6 +2639,7 @@ const CHECKS = {
   "coverage-merge": coverageMergeCheck,
   "backup-confirmation": backupConfirmationCheck,
   "key-view": keyViewCheck,
+  "pending-teeth": pendingTeethCheck,
   "relay-view": relayViewCheck,
   "relay-terms": relayTermsCheck,
   "factory-policy": factoryPolicyCheck,

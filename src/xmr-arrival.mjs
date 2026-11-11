@@ -522,7 +522,7 @@ async function locateInSlices(node, { expectedAtomic, address, viewSecret, spend
         const amountVerified = hit[0].outputs.every((o) => o.amountVerified === true);
         const locked = hit[0].unlock && hit[0].unlock.locked === true;
         const score = (amountAtomic >= expectedAtomic ? 4 : 0) + (amountVerified ? 2 : 0) + (locked ? 0 : 1);
-        const candidate = { txid, height: block.height, blockHash: block.hash, amountAtomic, score };
+        const candidate = { txid, height: block.height, blockHash: block.hash, amountAtomic, locked, score };
         if (!best || score > best.score || (score === best.score && amountAtomic > best.amountAtomic)) best = candidate;
       }
     }
@@ -589,12 +589,13 @@ export async function verifyArrivalShadow(request) {
   const checked = [];
   const failed = [];
   const staleWitnesses = [];
-  // THE WALK MUST REACH THE HIGHEST TOP ANY SOURCE READ. A witness that is behind the exact nodes cannot prove
-  // absence in the blocks it has not seen; its own `toHeight` is therefore not the completion target.
+  const readable = [];
+  const observations = [];
+  // THE WALK MUST REACH THE HIGHEST TOP ANY SOURCE READ. A witness that is behind the exact nodes OR behind another
+  // witness cannot prove absence in the blocks it has not seen; its own `toHeight` is therefore not the completion
+  // target. Collect every top first, then walk against the common target.
   const exactTop = exactTopOf(exact);
-  let located = null;
-  let completed = false;
-  const completedWitnessOperators = new Set();
+  let highestTop = exactTop;
   for (const node of witnessNodes) {
     if (node.protocol !== "witness-v1") { failed.push({ url: node.url, operator: node.operator, code: "no-slice-witness" }); continue; }
     let info;
@@ -608,10 +609,18 @@ export async function verifyArrivalShadow(request) {
     const top = Math.max(0, info.height - 1);
     const entry = { url: node.url, operator: node.operator, state: "ok", height: info.height };
     checked.push(entry);
+    highestTop = highestTop === null ? top : Math.max(highestTop, top);
+    readable.push({ node, top, entry });
+  }
+  let located = null;
+  let completed = false;
+  const completedWitnessOperators = new Set();
+  for (const { node, top, entry } of readable) {
+    const targetTop = highestTop === null ? top : Math.max(top, highestTop);
     try {
       const found = await locateInSlices(node, {
         expectedAtomic, address: request.address, viewSecret, spendPub, fromHeight, toHeight: top,
-        targetTop: exactTop === null ? top : Math.max(top, exactTop),
+        targetTop,
         nowSec, network, fetchImpl, timeoutMs,
       });
       completed = completed || found.completed;
@@ -620,10 +629,20 @@ export async function verifyArrivalShadow(request) {
         failed.push(failureOf(found.failure, node));
         entry.state = "error";
       } else if (!found.completed) entry.state = found.located ? "partial" : "behind";
-      if (found.located && (!located || found.located.score > located.score)) {
-        located = found.located;
-        located.operator = node.operator;
-        located.url = node.url;
+      if (found.located) {
+        observations.push({
+          operator: node.operator || node.url, url: node.url, seen: true, completed: found.completed,
+          txid: found.located.txid, height: found.located.height, blockHash: found.located.blockHash,
+          amountAtomic: found.located.amountAtomic.toString(), locked: found.located.locked === true,
+        });
+        if (!located || found.located.score > located.score) {
+          located = found.located;
+          located.operator = node.operator;
+          located.url = node.url;
+        }
+      } else if (found.completed) {
+        observations.push({ operator: node.operator || node.url, url: node.url, seen: false, completed: true,
+          txid: null, height: null, blockHash: null, amountAtomic: null, locked: null });
       }
     } catch (error) {
       entry.state = "error";
@@ -637,21 +656,85 @@ export async function verifyArrivalShadow(request) {
   const required = 2;
   const witnessQuorum = { required, completed: completedOperators, independent: independentOperators,
     ok: (network === "mainnet" ? independentOperators.length : completedOperators.length) >= required };
+
+  // ONE OPINION PER OPERATOR, THEN COMPARE THE OPINIONS. A second instance of the same operator may repeat the
+  // first, but it may not silently contradict it; a different operator that reports another block, amount or
+  // unlock state is a disagreement even when its own walk completed. Without this the first matching candidate
+  // hid the contradiction only because of its score or iteration order.
+  const normalizedObservation = (observation) => ({
+    operator: String(observation.operator || observation.url || ""),
+    seen: observation.seen === true,
+    txid: observation.txid === null || observation.txid === undefined ? null : String(observation.txid).toLowerCase(),
+    height: observation.height === null || observation.height === undefined ? null : Number(observation.height),
+    blockHash: observation.blockHash === null || observation.blockHash === undefined
+      ? null : String(observation.blockHash).toLowerCase(),
+    amountAtomic: observation.amountAtomic === null || observation.amountAtomic === undefined
+      ? null : String(observation.amountAtomic),
+    locked: observation.locked === null || observation.locked === undefined ? null : observation.locked === true,
+  });
+  const observationField = (a, b) => {
+    for (const field of ["seen", "txid", "height", "blockHash", "amountAtomic", "locked"]) {
+      if (a[field] !== b[field]) return field;
+    }
+    return null;
+  };
+  const groups = new Map();
+  for (const observation of observations) {
+    const normalized = normalizedObservation(observation);
+    const key = normalized.operator.toLowerCase();
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(normalized);
+  }
+  const witnessDisagreements = [];
+  for (const [operator, entries] of groups) {
+    for (let i = 1; i < entries.length; i += 1) {
+      const field = observationField(entries[0], entries[i]);
+      if (field) witnessDisagreements.push({ operators: [operator], field, against: "same-operator" });
+    }
+  }
+  const representatives = [...groups.values()].map((entries) => entries[0]);
+  for (let i = 1; i < representatives.length; i += 1) {
+    const field = observationField(representatives[0], representatives[i]);
+    if (field) witnessDisagreements.push({ operators: [representatives[0].operator, representatives[i].operator], field });
+  }
+  const witnessEvidence = { observations: representatives, disagreements: witnessDisagreements };
+
   const witness = located
     ? { state: "seen", txid: located.txid, height: located.height, blockHash: located.blockHash,
         amountAtomic: located.amountAtomic.toString(), operator: located.operator, url: located.url, completed, checked, failed,
-        quorum: witnessQuorum }
+        ...witnessEvidence, quorum: witnessQuorum }
     : { state: "pending", txid: null, height: null, blockHash: null, amountAtomic: null, completed, checked, failed,
-        quorum: witnessQuorum };
+        ...witnessEvidence, quorum: witnessQuorum };
 
   const problems = [];
   let agrees = null;
   if (exactError) problems.push("exact:" + exactError.code);
   if (located && exact && exact.txid) {
-    if (String(exact.txid).toLowerCase() !== located.txid) problems.push("txid");
-    if (Number(exact.height) !== located.height) problems.push("height");
-    if (String(exact.blockHash || "").toLowerCase() !== located.blockHash) problems.push("blockHash");
-    if (String(exact.amountAtomic ?? "") !== located.amountAtomic.toString()) problems.push("amount");
+    const add = (token) => { if (!problems.includes(token)) problems.push(token); };
+    for (const observation of representatives) {
+      if (!observation.seen) {
+        add("witness:txid");
+        witnessDisagreements.push({ operators: [observation.operator], field: "seen", against: "exact" });
+        continue;
+      }
+      if (String(exact.txid).toLowerCase() !== observation.txid) {
+        add("txid");
+        witnessDisagreements.push({ operators: [observation.operator], field: "txid", against: "exact" });
+      }
+      if (Number(exact.height) !== observation.height) {
+        add("height");
+        witnessDisagreements.push({ operators: [observation.operator], field: "height", against: "exact" });
+      }
+      if (String(exact.blockHash || "").toLowerCase() !== observation.blockHash) {
+        add("blockHash");
+        witnessDisagreements.push({ operators: [observation.operator], field: "blockHash", against: "exact" });
+      }
+      if (String(exact.amountAtomic ?? "") !== observation.amountAtomic) {
+        add("amount");
+        witnessDisagreements.push({ operators: [observation.operator], field: "amountAtomic", against: "exact" });
+      }
+    }
+    if (witnessDisagreements.length) add("witness:disagreement");
     agrees = problems.length === 0;
   } else if (located) {
     problems.push("exact:no-transaction");
@@ -660,10 +743,11 @@ export async function verifyArrivalShadow(request) {
     // ABSENCE NEEDS THE WHOLE SLICE WALK AND TWO DISTINCT OPERATORS. A server that is down, stale or answered a
     // partial slice has not shown that the money is absent; one completed operator is also not the exact path's
     // quorum and must not become agreement. Two instances of one operator count once.
-    if (witness.completed && witness.failed.length === 0 && witness.quorum.ok) agrees = true;
+    if (witness.completed && witness.failed.length === 0 && witness.quorum.ok && !witnessDisagreements.length) agrees = true;
     else {
       agrees = false;
       problems.push(witness.completed && witness.failed.length === 0 ? "witness:no-quorum" : "witness:not-completed");
+      if (witnessDisagreements.length) problems.push("witness:disagreement");
     }
   }
   return { exact, exactError, witness, agrees, problems };
