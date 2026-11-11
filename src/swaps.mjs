@@ -344,6 +344,26 @@ function pendingFundingIdentity(swap) {
   };
 }
 
+// THE PENDING ROW CAN BE FOUND WITHOUT ITS ESCROW. A reloaded retry has the salt, chain and factory, but it has
+// no request escrow; the address must be predicted from the signed quote before the row can prove it is the same
+// order. This base match only selects a row that *might* be resumed; it never authorises a send.
+function samePendingBase(swap, identity = {}) {
+  if (!swap || !(swap.fundingPending === true || (swap.escrow && swap.escrow.fundingPending === true))) return false;
+  const recorded = pendingFundingIdentity(swap);
+  const wanted = {
+    salt: pendingSalt(identity.salt),
+    chainId: Number(identity.chainId),
+    factory: pendingAddress(identity.factory),
+  };
+  if (!wanted.salt || !wanted.factory || !Number.isSafeInteger(wanted.chainId) || wanted.chainId <= 0) return false;
+  // Records written before the identity gained chain/factory still have the salt. They may be matched on what they
+  // have, but the caller still has to name the same predicted address; a partial record is never a free pass.
+  if (recorded.salt !== wanted.salt) return false;
+  if (recorded.factory && recorded.factory !== wanted.factory) return false;
+  if (Number.isSafeInteger(recorded.chainId) && recorded.chainId > 0 && recorded.chainId !== wanted.chainId) return false;
+  return true;
+}
+
 export function samePendingFunding(swap, identity = {}) {
   if (!swap || !(swap.fundingPending === true || (swap.escrow && swap.escrow.fundingPending === true))) return false;
   const recorded = pendingFundingIdentity(swap);
@@ -354,10 +374,12 @@ export function samePendingFunding(swap, identity = {}) {
     escrow: pendingAddress(identity.escrow),
   };
   if (!wanted.salt || !wanted.factory || !wanted.escrow || !Number.isSafeInteger(wanted.chainId) || wanted.chainId <= 0) return false;
-  return recorded.salt === wanted.salt
-    && recorded.chainId === wanted.chainId
-    && recorded.factory === wanted.factory
-    && recorded.escrow === wanted.escrow;
+  if (recorded.salt !== wanted.salt || recorded.escrow !== wanted.escrow) return false;
+  // A RECORD WRITTEN BEFORE THE IDENTITY FIELDS STILL HAS ONE OPINION: its salt and its escrow address. Missing
+  // chain/factory fields are wildcards only for that old shape; a record that carries them must match them exactly.
+  if (Number.isSafeInteger(recorded.chainId) && recorded.chainId > 0 && recorded.chainId !== wanted.chainId) return false;
+  if (recorded.factory && recorded.factory !== wanted.factory) return false;
+  return true;
 }
 
 /**
@@ -393,7 +415,7 @@ function swapByEscrow(store, escrow) {
   return null;
 }
 
-export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork = null, call = null, now = null, evmBlock = null, store = engine.store,
+export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork = null, call = null, fetchImpl = null, now = null, evmBlock = null, store = engine.store,
   // THE MONERO TIMINGS ARE BROUGHT BY THE CONFIGURATION: the watch's rate and timeout live in config.limits. There is
   // no server step and no route table to consult.
   config = null,
@@ -411,6 +433,32 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
   // substitute your own. Otherwise the lock step could not be checked beyond predicting the address - and "the address
   // from the receipt" would remain an argument on trust, not a verified property.
   const reader = typeof call === "function" ? call : engine.evm.readContract;
+  // A RELOADED RETRY DOES NOT CARRY THE ESCROW. It still carries the signed order quote and the order terms, so the
+  // same factory predict() the send would use can name the address before the pending row is compared. A missing
+  // quote or a failed read is a refusal by name, never permission to send a second deposit.
+  const predictedEscrowForRetry = async (request) => {
+    const quote = request && request.orderQuote;
+    const order = request && request.order;
+    if (!quote || typeof quote !== "object" || !quote.signature) return null;
+    const factory = (order && order.factory) || quote.factory;
+    if (!factory) return null;
+    const lockerHalf = {
+      commitHalfLocker: (order && order.commitHalfLocker) ?? quote.commitHalfLocker,
+      edPointLocker: (order && order.edPointLocker) ?? quote.edPointLocker,
+      edViewPointLocker: (order && order.edViewPointLocker) ?? quote.edViewPointLocker,
+    };
+    if (!lockerHalf.commitHalfLocker || !lockerHalf.edPointLocker || !lockerHalf.edViewPointLocker) return null;
+    try {
+      const raw = await reader({ to: factory, data: engine.evm.encodePredict({ ...quote, ...lockerHalf, factory }) });
+      return engine.evm.decodeAddress(raw);
+    } catch {
+      return null;
+    }
+  };
+  // THE INSTANCE TRANSPORT IS THE DEFAULT, NOT BACKGROUND MAGIC. A per-call `fetch` still wins; otherwise every
+  // network read made by this client (height probes, relay quote/claim, witness verification) uses `fetchImpl`.
+  const withDefaultFetch = (request) => (fetchImpl && request && typeof request === "object"
+    && typeof request.fetch !== "function" ? { ...request, fetch: fetchImpl } : request);
   // ONE BLOCK FOR THE SELL GATE. A block read is a seam like the contract read: `evmBlock` from the interface
   // wins, then the wallet's own provider. The number pins every escrow read below to the same state; the
   // timestamp is the chain's clock, not the device's.
@@ -451,7 +499,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
     const listed = Array.isArray(request.xmrNodes) ? request.xmrNodes
       : (config && typeof config.nodesFor === "function" ? config.nodesFor(moneroNetwork) : []);
     return startHeightFromNodes({ nodes: listed, network: moneroNetwork,
-      fetchImpl: request.fetchImpl || (typeof fetch === "function" ? fetch : null) });
+      fetchImpl: request.fetchImpl || fetchImpl || (typeof fetch === "function" ? fetch : null) });
   }
   const records = () => {
     const state = store.loadState();
@@ -732,13 +780,13 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
 
     // THE ARRIVAL VERDICT WITHOUT THE WATCH LOOP, and the deadline check as a separate call: an interface may
     // want to run both itself. The watch uses exactly these, so there is one decision, not two.
-    verifyArrival: (request) => xmrArrival.verifyArrival(request),
+    verifyArrival: (request) => xmrArrival.verifyArrival(withDefaultFetch(request)),
     /**
      * SHADOW THE FIXED-SLICE WITNESS WITHOUT CHANGING THE DECISION. It runs the exact check and the witness-v1
      * slice check and returns both; `witnessNodes` must carry `{protocol: "witness-v1"}`. Nothing here opens
      * `ready` or refunds. It exists so the protocol can be exercised before an independent operator serves it.
      */
-    verifyArrivalShadow: (request) => xmrArrival.verifyArrivalShadow(request),
+    verifyArrivalShadow: (request) => xmrArrival.verifyArrivalShadow(withDefaultFetch(request)),
     assertTimeForConfirmations: (request) => xmrArrival.assertTimeForConfirmations(request),
 
     /**
@@ -762,7 +810,8 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
      * arrival check and the real refund.
      */
     async refundIfXmrMissing(request = {}, deps = {}) {
-      const verify = typeof deps.verify === "function" ? deps.verify : xmrArrival.verifyArrival;
+      const verify = typeof deps.verify === "function" ? deps.verify
+        : (request) => xmrArrival.verifyArrival(withDefaultFetch(request));
       const refund = typeof deps.refund === "function" ? deps.refund : actions.refund;
       const nowOf = typeof deps.now === "function" ? deps.now : () => Math.floor(Date.now() / 1000);
       if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
@@ -869,7 +918,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       // reusing its hash is the only way to learn the escrow without a second payment.
       const saltForResume = request.recoverySalt || (request.order && request.order.salt) ||
         (request.orderQuote && request.orderQuote.salt) || null;
-      const pendingRecord = pendingFundingOf({
+      const resumeIdentity = {
         salt: saltForResume,
         // THE QUOTE ID IS ONLY A SELECTOR. It lets a salt-less retry name the pending row and be refused loudly, but
         // it never replaces the salt/chain/factory/escrow proof below.
@@ -880,7 +929,31 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
           ?? (request.quote && request.quote.factory),
         escrow: request.escrow || request.predictedEscrow || (request.quote && request.quote.escrow)
           || (request.orderQuote && request.orderQuote.escrow) || null,
-      });
+      };
+      // A RELOADED RETRY HAS NO ESCROW FIELD. Find the pending row by the part it does have, then let the factory
+      // predict the address from the same signed terms the send uses. If that address cannot be named, the retry is
+      // refused by name; it must not fall through to a new deposit.
+      let pendingRecord = null;
+      if (records().some((swap) => samePendingBase(swap, resumeIdentity))) {
+        const predicted = await predictedEscrowForRetry(request);
+        if (!predicted) {
+          throw new SdkError("bad-input", { field: "escrow", why: "required-for-pending-funding" });
+        }
+        const named = pendingAddress(resumeIdentity.escrow);
+        if (resumeIdentity.escrow && !named) {
+          throw new SdkError("bad-input", { field: "escrow", why: "unreadable" });
+        }
+        if (named && named !== pendingAddress(predicted)) {
+          throw new SdkError("bad-input", { field: "escrow", why: "escrow-mismatch" });
+        }
+        resumeIdentity.escrow = predicted;
+        pendingRecord = pendingFundingOf(resumeIdentity);
+        if (!pendingRecord) {
+          throw new SdkError("bad-input", { field: "escrow", why: "pending-funding-unresolved" });
+        }
+      } else {
+        pendingRecord = pendingFundingOf(resumeIdentity);
+      }
       if (pendingRecord) {
         const resumed = await resumePendingFunding(pendingRecord, request);
         if (resumed) return resumed;
@@ -1364,7 +1437,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         // holds the view key), so it is not consulted when the client verifies. A disagreement or locked money
         // throws its own code above and closes the button; one operator / few confirmations name a WAITING state.
         if (verifyRequest) {
-          const verdict = await xmrArrival.verifyArrival({ ...verifyRequest, nowSec: Math.floor(Date.now() / 1000) });
+          const verdict = await xmrArrival.verifyArrival(withDefaultFetch({ ...verifyRequest, nowSec: Math.floor(Date.now() / 1000) }));
           last.verify = verdict;
           if (!verdict.seen) {
             if (Date.now() - started >= timeoutMs) {
@@ -1715,7 +1788,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         ? Number(request.timeoutMs) : 20_000;
       const claimed = await postRelayClaim({
         relayUrl, provider: sender, escrow, halfClaimer, expectedTipWei: tip,
-        fetchImpl: request.fetchImpl || null, timeoutMs,
+        fetchImpl: request.fetchImpl || fetchImpl || null, timeoutMs,
       });
       return { id, provider: sender, claimSender: sender, escrow, relayUrl, txid: claimed.txid, from: claimed.from, tipWei: claimed.tipWei };
     },

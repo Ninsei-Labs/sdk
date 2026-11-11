@@ -214,7 +214,7 @@ export function createNinsei(options) {
   const quotes = createQuotes({ config, now: o.now || (() => Date.now()), evmCall: o.evmCall || null,
     evmCode: o.evmCode || null, evmBlock: o.evmBlock || null,
     providerAllowed, knownFactoryCodes, knownImplementationCodes,
-    denylist });
+    denylist, fetchImpl: o.fetch || null });
   // THE SAME CHAIN-READ SEAM AS THE LOCK AND THE CORE: checking the slots and signing must go one way, otherwise
   // part of the check goes past the wallet and part does not.
   const actions = createActions({ call: o.evmCall });
@@ -271,7 +271,7 @@ export function createNinsei(options) {
     // before signing.
     // THE CHAIN READER GOES INTO THE SWAP START: it will check the escrow address, the order state and the fee
     // before signing. The Monero watch reads the chain through the same seam; there is no backend watcher.
-    swaps: createSwaps({ preflight, mode: o.mode, xmrNetwork: o.xmrNetwork, call: o.evmCall, now: o.now || null, evmBlock: o.evmBlock || null, store,
+    swaps: createSwaps({ preflight, mode: o.mode, xmrNetwork: o.xmrNetwork, call: o.evmCall, fetchImpl: o.fetch || null, now: o.now || null, evmBlock: o.evmBlock || null, store,
       // THE LOG SEAM FOR THE DECLINE CHECK: the watch asks the escrow for its `Declined` event on every tick, so
       // a declined order stops the wait at once instead of running to `xmr-timeout`.
       logs: o.evmLogs || null,

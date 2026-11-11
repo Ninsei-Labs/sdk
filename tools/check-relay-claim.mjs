@@ -9,6 +9,7 @@ import { createRecoveryKey, takerHalvesV2 } from "../src/recovery-key.mjs";
 import { buildOwnSideFromHalves } from "../src/order.mjs";
 import { keccak256, secp256k1 } from "../src/primitives.mjs";
 import { createSwaps } from "../src/swaps.mjs";
+import { createNinsei } from "../src/index.mjs";
 import * as engine from "../src/engine.mjs";
 import { createStore, memoryStorage } from "../engine/core/store.js";
 import { encodeRead, encodeStatus } from "../engine/evm/escrow.js";
@@ -76,7 +77,8 @@ const read = async ({ data }) => {
   if (!answer) throw new Error("unexpected chain read " + data);
   return "0x" + answer;
 };
-const store = createStore(memoryStorage());
+const sharedStorage = memoryStorage();
+const store = createStore(sharedStorage);
 const swaps = createSwaps({ config: {}, call: read, store });
 const accept = async () => true;
 
@@ -260,6 +262,25 @@ export const relayClaimCheck = async () => {
       "the claim body is not exactly {version:1, halfClaimer:0x<64>}");
     check(!JSON.stringify(claimed).toLowerCase().includes(String(stored.escrow.half).replace(/^0x/, "")),
       "the claim result echoed the half");
+  }
+
+  // (1b) THE INSTANCE `fetch` IS THE DEFAULT FOR OPERATIONS. The public client carries one transport into the
+  // relay claim; no per-call `fetchImpl` is passed here.
+  {
+    const defaultCalls = [];
+    const defaultFetch = async (url, init) => {
+      defaultCalls.push({ url, init });
+      return { ok: true, status: 200, json: async () => ({ version: 1, provider: claimSender, escrow, txid, from: sender, tipWei: claimTip }) };
+    };
+    try {
+      const client = createNinsei({ settlement: { chain: "arbitrum-sepolia" }, xmrNetwork: "stagenet",
+        storage: sharedStorage, fetch: defaultFetch });
+      const claimedDefault = await client.swaps.claimViaRelay({ id: record.id });
+      check(claimedDefault && claimedDefault.txid === txid && defaultCalls.length === 1,
+        "the instance fetch was not used by claimViaRelay");
+    } catch (error) {
+      problems.push("the instance fetch claim refused: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
+    }
   }
 
   // (2) A ZERO TIP IS REFUSED BEFORE THE HALF LEAVES THE CLIENT.

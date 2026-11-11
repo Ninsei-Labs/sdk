@@ -110,7 +110,7 @@ try {
   }));
 
   const noWitnessEvidence = await mutatedLadder(
-    "if (witness.completed && witness.failed.length === 0 && witness.quorum.ok) agrees = true;",
+    "if (witness.completed && witness.failed.length === 0 && witness.quorum.ok && !witnessDisagreements.length) agrees = true;",
     "if (true) agrees = true;", "no-witness-evidence");
   const mutantShadow = await noWitnessEvidence.verifyArrivalShadow(shadowRequest);
   if (mutantShadow.agrees === true) {
