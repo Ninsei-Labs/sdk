@@ -1768,8 +1768,9 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       if (explicitList && requestedSenderRaw) {
         throw new SdkError("bad-input", { field: "claimSenders", why: "with-claim-sender" });
       }
-      const rawSenders = explicitList || (Array.isArray(swap.claimSenders) ? swap.claimSenders : null)
-        || (requestedSenderRaw ? [requestedSenderRaw] : (storedSenderRaw ? [storedSenderRaw] : []));
+      const rawSenders = explicitList || (requestedSenderRaw ? [requestedSenderRaw] : null)
+        || (Array.isArray(swap.claimSenders) ? swap.claimSenders : null)
+        || (storedSenderRaw ? [storedSenderRaw] : []);
       if (!rawSenders.length) throw new SdkError("bad-input", { field: "claimSenders", why: "not-in-record" });
       const senders = [];
       for (const raw of rawSenders) {
@@ -1821,9 +1822,22 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       const readStatus = async () => {
         try { return await flow.orderStatus(escrow, { call: reader }); } catch { return null; }
       };
+      const t1Raw = order.t1 ?? (swap.expect && swap.expect.t1);
+      const t1 = Number.isSafeInteger(Number(t1Raw)) && Number(t1Raw) > 0 ? Number(t1Raw) : null;
+      const secondsLeft = () => (t1 === null ? null : Math.max(0, t1 - Math.floor(clockMs() / 1000)));
+      const claimedByEscrow = (sender = null, answer = null, tried = []) => ({
+        id, state: "claimed", provider: sender, claimSender: sender, escrow, relayUrl,
+        txid: answer ? answer.txid : null, from: (answer && answer.from) || null,
+        tipWei: (answer && answer.tipWei) || tip.toString(), tried,
+      });
+      // A CLAIM THAT ALREADY LANDED IS NOT A REASON TO SEND THE HALF AGAIN. The caller may have lost the answer on
+      // the previous attempt; read the escrow before the first POST, and read it once more before returning
+      // `claim-yourself`, so a late claim cannot be reported as "claim yourself".
+      const initial = await readStatus();
+      if (initial && initial.isClaimed) return claimedByEscrow();
+      let refunded = Boolean(initial && initial.isRefunded);
       const tried = [];
-      let refunded = false;
-      for (const sender of senders) {
+      if (!refunded) for (const sender of senders) {
         let answer = null;
         let failure = null;
         try {
@@ -1845,9 +1859,9 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         for (;;) {
           const status = await readStatus();
           if (status && status.isClaimed) {
-            return { id, state: "claimed", provider: sender, claimSender: sender, escrow, relayUrl,
-              txid: answer ? answer.txid : null, from: (answer && answer.from) || null,
-              tipWei: (answer && answer.tipWei) || tip.toString(), tried };
+            swap.claimSender = sender;
+            try { engine.swap.saveSwap(swap, store); } catch { /* the chain already says claimed */ }
+            return claimedByEscrow(sender, answer, tried);
           }
           if (status && status.isRefunded) { refunded = true; break; }
           const left = slotEnd - clockMs();
@@ -1859,12 +1873,17 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         if (refunded) break;
       }
 
-      const t1Raw = order.t1 ?? (swap.expect && swap.expect.t1);
-      const t1 = Number.isSafeInteger(Number(t1Raw)) && Number(t1Raw) > 0 ? Number(t1Raw) : null;
-      const secondsLeft = t1 === null ? null : Math.max(0, t1 - Math.floor(clockMs() / 1000));
+      // THE LAST LOOK BEFORE THE FALLBACK. A claim can land after the last slot ended or while a later sender is
+      // refusing; the seller must not be sent to `sellClaim` on an escrow that is already closed as claimed.
+      const finalStatus = await readStatus();
+      if (finalStatus && finalStatus.isClaimed) {
+        try { engine.swap.saveSwap(swap, store); } catch { /* the chain already says claimed */ }
+        return claimedByEscrow(null, null, tried);
+      }
+      if (finalStatus && finalStatus.isRefunded) refunded = true;
       return { id, state: "claim-yourself", reason: refunded ? "escrow-refunded" : "senders-exhausted",
         provider: null, claimSender: null, escrow, relayUrl, txid: null, from: null, tipWei: tip.toString(),
-        t1, secondsLeft, tried };
+        t1, secondsLeft: secondsLeft(), tried };
     },
 
     /**

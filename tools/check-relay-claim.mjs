@@ -112,8 +112,8 @@ const seed = async (overrides = {}) => {
   return await swaps.startSell(request);
 };
 
-const answer = (sender, txid) => ({ ok: true, status: 200, json: async () => ({
-  version: 1, provider: sender, escrow, txid, from: sender, tipWei: claimTip,
+const answer = (sender, txid, at = escrow) => ({ ok: true, status: 200, json: async () => ({
+  version: 1, provider: sender, escrow: at, txid, from: sender, tipWei: claimTip,
 }) });
 const refusal = (code) => ({ ok: false, status: 409, json: async () => ({ version: 1, code }) });
 
@@ -179,8 +179,8 @@ export const relayClaimCheck = async () => {
   {
     resetChain();
     const calls = [];
-    const transport = async (url) => {
-      calls.push(url);
+    const transport = async (url, init) => {
+      calls.push({ url, init });
       chainStatus.claimed = true;
       return answer(relaySender, "0x" + "ab".repeat(32));
     };
@@ -189,8 +189,16 @@ export const relayClaimCheck = async () => {
     check(claimed && claimed.state === "claimed" && claimed.provider === lower(relaySender)
       && claimed.claimSender === lower(relaySender) && claimed.txid === "0x" + "ab".repeat(32),
       "the first sender did not claim: " + JSON.stringify(claimed));
-    check(calls.length === 1 && calls[0] === "https://relay.example/v1/claims/" + lower(relaySender) + "/" + escrow,
-      "the first sender path is not the ordered first entry: " + JSON.stringify(calls));
+    check(calls.length === 1 && calls[0].url === "https://relay.example/v1/claims/" + lower(relaySender) + "/" + escrow,
+      "the first sender path is not the ordered first entry: " + JSON.stringify(calls.map((entry) => entry.url)));
+    if (calls.length === 1) {
+      const body = JSON.parse(calls[0].init && calls[0].init.body || "{}");
+      check(calls[0].init && calls[0].init.method === "POST", "the claim was not a POST");
+      check(body.version === 1 && body.halfClaimer === stored.escrow.half && Object.keys(body).length === 2,
+        "the claim body is not exactly {version:1, halfClaimer}");
+      check(!JSON.stringify(claimed).toLowerCase().includes(String(stored.escrow.half).replace(/^0x/, "")),
+        "the result echoed the half");
+    }
   }
 
   // (2) A REFUSAL MOVES TO THE NEXT SENDER AT ONCE.
@@ -210,7 +218,9 @@ export const relayClaimCheck = async () => {
     check(calls.length === 2 && calls[0].includes(lower(relaySender)) && calls[1].includes(lower(secondSender)),
       "the sender order was not tried in order: " + JSON.stringify(calls));
     check(claimed && claimed.tried && claimed.tried[0] && claimed.tried[0].outcome === "refused"
-      && claimed.tried[0].code === "quote-refused", "the refusal was not recorded in the result");
+      && claimed.tried[0].code === "quote-refused" && claimed.tried[0].params
+      && claimed.tried[0].params.code === "claim-tip-too-small" && claimed.tried[0].params.status === 409,
+      "the refusal was not recorded with its code and status");
   }
 
   // (3) A TXID IS NOT SUCCESS: THE ESCROW MUST READ CLAIMED.
@@ -263,6 +273,116 @@ export const relayClaimCheck = async () => {
       "the exhausted result does not carry the time left before t1");
     check(result && result.tried.length === 2 && result.tried.every((entry) => entry.outcome === "refused"),
       "the exhausted result does not name both attempts");
+  }
+
+  // (5a) AN ESCROW THAT IS ALREADY CLAIMED IS NOT A REASON TO SEND THE HALF OR TO SAY CLAIM-YOURSELF.
+  {
+    resetChain({ claimed: true });
+    let calls = 0;
+    const result = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender],
+      fetchImpl: async () => { calls += 1; return answer(relaySender, "0x" + "a1".repeat(32)); } });
+    check(result && result.state === "claimed" && result.provider === null && result.txid === null && calls === 0,
+      "an already claimed escrow was sent again or reported as claim-yourself: " + JSON.stringify({ result, calls }));
+  }
+
+  // (5b) A CLAIM LANDING WHILE THE NEXT SENDER REFUSES IS STILL CLAIMED, NOT CLAIM-YOURSELF.
+  {
+    resetChain();
+    let calls = 0;
+    const transport = async () => {
+      calls += 1;
+      if (calls === 1) return answer(relaySender, "0x" + "a2".repeat(32));
+      chainStatus.claimed = true;
+      return refusal("claim-tip-too-small");
+    };
+    const result = await swaps.claimViaRelay({ id: record.id,
+      claimSenders: [relaySender, secondSender], fetchImpl: transport, slotMs: 15_000, pollMs: 2_000 });
+    check(result && result.state === "claimed" && result.provider === null && calls === 2,
+      "a late claim was reported as claim-yourself: " + JSON.stringify({ result, calls }));
+  }
+
+  // (5c) A REFUNDED ESCROW IS NAMED, NOT SENT TO SELLCLAIM AS IF IT WERE STILL OPEN.
+  {
+    resetChain({ refunded: true });
+    let calls = 0;
+    const result = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender],
+      fetchImpl: async () => { calls += 1; return refusal("claim-tip-too-small"); } });
+    check(result && result.state === "claim-yourself" && result.reason === "escrow-refunded" && calls === 0,
+      "a refunded escrow was not named: " + JSON.stringify({ result, calls }));
+  }
+
+  // (5d) EVERY LOST-ANSWER SHAPE ENDS IN CLAIM-YOURSELF AFTER THE SENDER'S SLOT.
+  for (const [label, transport] of [
+    ["a thrown transport", async () => { throw new TypeError("connection reset"); }],
+    ["a success body without a txid", async () => ({ ok: true, status: 200, json: async () => ({ version: 1 }) })],
+    ["a 503 claim-unknown", async () => ({ ok: false, status: 503, json: async () => ({ version: 1, code: "claim-unknown" }) })],
+  ]) {
+    resetChain();
+    const result = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender], fetchImpl: transport,
+      slotMs: 15_000, pollMs: 2_000 });
+    check(result && result.state === "claim-yourself" && result.tried[0] && result.tried[0].outcome === "unknown",
+      "a lost answer (" + label + ") was not kept in its slot: " + JSON.stringify({ result }));
+  }
+
+  // (5e) THE LIST SHAPE AND THE LEGACY FALLBACKS ARE NAMED.
+  {
+    let called = 0;
+    try {
+      await swaps.claimViaRelay({ id: record.id, claimSenders: "not-an-array",
+        fetchImpl: async () => { called += 1; throw new Error("must not be called"); } });
+      check(false, "a non-array sender list was accepted");
+    } catch (error) {
+      check(error && error.code === "bad-input" && error.params && error.params.field === "claimSenders"
+        && error.params.why === "not-an-array", "a non-array sender list was not refused");
+    }
+    check(called === 0, "a non-array sender list reached the relay");
+    try {
+      await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender], claimSender: secondSender,
+        fetchImpl: async () => { called += 1; throw new Error("must not be called"); } });
+      check(false, "a list and a scalar sender were accepted together");
+    } catch (error) {
+      check(error && error.code === "bad-input" && error.params && error.params.why === "with-claim-sender",
+        "a list and a scalar sender were not refused");
+    }
+
+    resetChain();
+    const deduped = [];
+    const shared = async (url) => { deduped.push(url); chainStatus.claimed = true; return answer(relaySender, "0x" + "a3".repeat(32)); };
+    const result = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender, relaySender], fetchImpl: shared });
+    check(result && result.state === "claimed" && deduped.length === 1,
+      "a duplicated sender was tried twice");
+
+    resetChain();
+    const legacy = await seed({ omitClaimSender: true });
+    resetChain();
+    check(chainStatus.claimed === false, "fixture reset left claimed=true");
+    const legacyFetch = async () => { chainStatus.claimed = true; return answer(storedSender, "0x" + "a4".repeat(32), legacy.escrow); };
+    resetChain();
+    const legacyResult = await swaps.claimViaRelay({ id: legacy.id, claimSender: storedSender, fetchImpl: legacyFetch });
+    check(legacyResult && legacyResult.state === "claimed" && legacyResult.provider === lower(storedSender),
+      "the legacy scalar sender was not accepted as a fallback: " + JSON.stringify({ legacyResult, claimed: chainStatus.claimed }));
+
+    resetChain();
+    const storedResult = await swaps.claimViaRelay({ id: record.id,
+      fetchImpl: async () => { chainStatus.claimed = true; return answer(relaySender, "0x" + "a5".repeat(32)); } });
+    check(storedResult && storedResult.state === "claimed" && storedResult.provider === lower(relaySender),
+      "the stored sender list was not used as a fallback: " + JSON.stringify(storedResult));
+  }
+
+  // (5f) A RECORD WITHOUT THE RELAY ORIGIN IS STILL REFUSED BEFORE THE SENDER LOOP.
+  {
+    resetChain();
+    const noRelay = await seed({ withoutRelay: true });
+    let called = 0;
+    try {
+      await swaps.claimViaRelay({ id: noRelay.id, claimSenders: [relaySender],
+        fetchImpl: async () => { called += 1; throw new Error("must not be called"); } });
+      check(false, "a record without a relay origin was claimed");
+    } catch (error) {
+      check(error && error.code === "bad-input" && error.params && error.params.field === "relayUrl"
+        && error.params.why === "not-in-record", "a missing relay origin was not refused by name");
+    }
+    check(called === 0, "a record without a relay origin reached the network");
   }
 
   // (6) A SOLO TIP IS STILL REFUSED, AND A FOREIGN ORIGIN IS REFUSED BEFORE ANY SENDER.

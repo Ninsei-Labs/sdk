@@ -1045,8 +1045,9 @@ export interface RelayClaimAttempt {
 export interface RelayClaimed {
   readonly state: "claimed";
   readonly id: string;
-  readonly provider: string;
-  readonly claimSender: string;
+  /** The sender whose slot found the claim; null when the escrow already read claimed before the first POST. */
+  readonly provider: string | null;
+  readonly claimSender: string | null;
   readonly escrow: string;
   readonly relayUrl: string;
   /** The txid when an answer carried one; `null` when the claim was found on chain without it. */
