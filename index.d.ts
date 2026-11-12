@@ -54,7 +54,8 @@ export interface NinseiOptions {
   /** "live" - real nodes and chain; "sim" - a sandbox (mocks, accelerated time, failure scenarios). */
   mode?: "live" | "sim";
   /** An injected fetch function (SSR, tests, your own transport). It is the client default for relay quotes/claims,
-   * Monero height probes and witness checks; a per-call `fetchImpl` still wins. */
+   * Monero height probes and witness checks; per-call `fetchImpl` wins for relay quote/claim and `fetch` wins for
+   * arrival/witness checks. */
   fetch?: FetchLike;
   /** The clock. In "sim" the SDK uses it to accelerate time. */
   now?: () => number;
@@ -822,6 +823,8 @@ export interface XmrArrivalRequest {
   readonly fromHeight?: number | null;
   readonly nowSec?: number;
   readonly timeoutMs?: number;
+  /** The transport for node and witness reads; absent - the client's `fetch`, otherwise the global fetch. */
+  readonly fetch?: FetchLike;
 }
 
 /** The slice check's extra input: independent witnesses that serve witness-v1. */
