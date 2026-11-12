@@ -1354,17 +1354,21 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       const wantExpect = request.expect !== undefined && request.expect !== null;
       const wantWallet = request.wallet !== undefined && request.wallet !== null;
       if (wantExpect !== wantWallet) throw new SdkError("bad-input", { field: wantExpect ? "wallet" : "expect" });
-      if (wantExpect && !(request.escrow || request.address)) throw new SdkError("bad-input", { field: "escrow" });
-      const storedSwap = (() => { try { return engine.swap.getSwap(id, store); } catch { return null; } })();
+      // THE RECORD IS READ ONCE. It supplies the escrow for the auto ready-mark and the joint Monero address for
+      // the result; `request.address` was never part of the public watch request.
+      const record = (() => { try { return engine.swap.getSwap(id, store); } catch { return null; } })();
+      const storedSwap = record;
+      const escrowAddress = request.escrow || (record && record.escrow && record.escrow.address) || null;
+      if (wantExpect && !escrowAddress) throw new SdkError("bad-input", { field: "escrow" });
       const readyWindowRaw = request.readyWindow || (storedSwap && (storedSwap.readyWindow || storedSwap.sellWindow)) || null;
       const pollMs = Number.isFinite(Number(request.pollMs)) && Number(request.pollMs) > 0 ? Number(request.pollMs) : limitOf("watchPollMs", 5000);
       const timeoutMs = Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0 ? Number(request.timeoutMs) : limitOf("watchTimeoutMs", 1_200_000);
       // THE CONFIRMATION TARGET - FROM THE CONFIGURATION (one number, the owner's decision: 10).
       const minConfirmations = Number.isFinite(Number(request.minConfirmations)) && Number(request.minConfirmations) > 0
         ? Math.trunc(Number(request.minConfirmations)) : limitOf("xmrConfirmations", 10);
-      // THE CLIENT-SIDE CHECK IS OPT-IN BY ITS DATA: it needs the joint address, the joint view secret and the
-      // joint spend public key - all of which the client has and the backend no longer needs. Without them the
-      // watch keeps the service's answer (notifications only); with them the CLIENT decides.
+      // THE CLIENT-SIDE CHECK IS THE WATCH: it needs the joint address, the joint view secret and the joint spend
+      // public key - all of which the client has and the backend no longer needs. Without them the wait is refused
+      // by name (`bad-input`/`verify`); the retired service answer is not a fallback.
       const verifyRequest = request.verify && typeof request.verify === "object"
         ? { ...request.verify,
             nodes: Array.isArray(request.verify.nodes) ? request.verify.nodes
@@ -1387,6 +1391,13 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       // the spend public key. Without them there is nothing to wait on: a named refusal, not a request to the
       // page's own origin and not a fallback to a retired backend.
       if (!verifyRequest) throw new SdkError("bad-input", { field: "verify", why: "required" });
+      // THE JOINT MONERO ADDRESS IS THE ONE THE CLIENT CHECKS, NOT THE ESCROW. `verify.address` is the joint address;
+      // the record's `moneroAddress` is the same value after a reload. The EVM escrow never leaves this method as
+      // the XMR address, and it is the only address the auto ready-mark may receive.
+      const moneroAddress = typeof verifyRequest.address === "string" && verifyRequest.address
+        ? verifyRequest.address
+        : (record && record.escrow && record.escrow.moneroAddress) || null;
+      if (!moneroAddress) throw new SdkError("bad-input", { field: "verify.address", why: "not-in-record" });
       const started = Date.now();
       // --- THE MAKER'S DECLINE: THE WAIT IS NOT STARTED AT ALL (issue #40). -------------------------------------
       // A decline leaves the escrow `refunded`, so nothing in the state says "do not wait any longer": without
@@ -1401,9 +1412,6 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       // A STORAGE THAT CANNOT BE READ IS NOT A REASON TO REFUSE THE WAIT: the record is what makes the state
       // durable, and the escrow may also arrive in the request. The watch is not a new user of the store - and it
       // must not start failing where it did not before.
-      let record = null;
-      try { record = engine.swap.getSwap(id, store); } catch { record = null; }
-      const escrowAddress = request.escrow || (record && record.escrow && record.escrow.address) || null;
       // FROM THE ESCROW'S BIRTH HEIGHT when the record knows it: the event cannot be older than the funding, and
       // walking the whole chain every tick is a cost with no answer behind it.
       const fromBlock = blockBoundaryOf(record && record.escrow
@@ -1452,7 +1460,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       let last = null;
       for (;;) {
         await readDeclineLogs();
-        last = { address: request.address || escrowAddress, expectedXmr: request.expectedXmr ?? null, status: null };
+        last = { address: moneroAddress, expectedXmr: request.expectedXmr ?? null, status: null };
         // THE DECLINE IS THE ESCROW'S EVENT, NOT THE SERVICE'S WORD. The legacy backend's `declined` status used
         // to become a settlement and end the wait; it no longer does. A service answer is at most a notification.
         const declineNow = declineOf({ logs: chainDecline.logs, escrow: escrowAddress, at: Date.now() });
@@ -1482,7 +1490,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
             source: "client" };
           if (wantExpect && wantWallet) {
             verified.marked = await actions.markReady(
-              { escrow: request.escrow || last.address, expect: request.expect, onStep: request.onStep }, request.wallet);
+              { escrow: escrowAddress, expect: request.expect, onStep: request.onStep }, request.wallet);
           } else {
             verified.next = "mark-ready";
           }

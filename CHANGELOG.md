@@ -1,3 +1,13 @@
+## 0.60.0 — 2026-11-13
+
+- `swaps.watch` keeps the joint Monero address apart from the EVM escrow: the result carries the address the client checked, and the automatic ready mark always signs against the escrow. A typed watch no longer returns the escrow as its `address`; the legacy untyped `request.address` is not read. `verify` remains mandatory, so a watch without the client's own check is refused by name instead of falling back to a retired service answer.
+- The claim window is read from the escrow before a sender is tried: a funded escrow that is already refunded reports `state: "claim-window"` with `reason: "escrow-refunded"`, not `claim-yourself`.
+- `claimViaRelay` writes each sender to the record before its POST. A reload skips a refused or unconfirmed sender, while a `sending` or `unknown` attempt stops with `claim-unknown` and `why: "previous-sender-unknown"` so the half is not sent twice. `timeoutMs` is capped at 120 s, `slotMs` is clamped to 15-30 s, and `pollMs` is at least 250 ms and no longer than the slot.
+- `startSell` stores the client's ordered `claimSenders` once, including the relay-published `claimSender` when present; a later `claimViaRelay({ id })` uses the stored list without repeating it.
+- `sweep.restore` inherits the instance `fetch` transport, and a per-call `fetchImpl` still wins. A retry whose factory prediction cannot be read is `quote-factory-unchecked` with `why: "predict-failed"`, not a missing escrow.
+- The recovery salt is canonicalised before the pending lookup, the arrival shadow raises its target to a witness tip served during the walk, and a failed witness walk is `witness:not-completed` rather than agreement.
+- The supported version line is `0.60.x`; the package version and the baked-in `SDK_VERSION` move together.
+
 ## 0.59.0 — 2026-11-11
 
 - `FACTORY_HISTORY` is generated from the reviewed deployment manifests and `deployments/history/<vm>/<network>.json`. It lists the current factory as `live` and older factories as `retired`, each with its deployment block and release tag, so a recovery page can find old orders without a second hand-written address table.

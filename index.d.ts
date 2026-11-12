@@ -689,17 +689,17 @@ export interface SwapsApi {
    */
   claimViaRelay(request: RelayClaimRequest): Promise<RelayClaimResult>;
   /**
-   * WAIT FOR THE XMR TO ARRIVE at the order's joint address. The polling uses the same request as the page's
-   * (GET /swaps/{id}), the rate and the timeout - from `config.limits` and overridable here.
-   * It arrived - the FACT is returned (the amount, the confirmations, the txid); we did not wait - a refusal with
-   * the CODE `xmr-timeout`, separate from the others: "the wait expired" is a state of the money, not a breakdown.
+   * WAIT FOR THE XMR TO ARRIVE at the order's joint address. The polling is the client's own `verify` walk; there
+   * is no backend status call. The rate and the timeout come from `config.limits` and are overridable here.
+   * It arrived - the FACT is returned (the amount, the confirmations, the txid, and the joint Monero address); we did
+   * not wait - a refusal with the CODE `xmr-timeout`, separate from the others: "the wait expired" is a state of the
+   * money, not a breakdown.
    * XMR ON THE ADDRESS BUT LOCKED BY `unlock_time` is a THIRD answer with its own code `xmr-locked` (the boundary,
    * a height or a date, is in `params.until`): locked funds are NOT an arrival, and nothing is signed under them.
    * IF `expect` AND `wallet` ARE PASSED, then after the arrival the ready mark (actions.markReady) is called with
-   * THESE expectations: the slot check against the chain stands in it before the signature. Without them the step
-   * names the next one (`next: "mark-ready"`) and signs nothing.
-   * THE MAKER DECLINED - THE WAIT STOPS AT ONCE (issue #40): the escrow's `Declined` event and the service's
-   * `declined` + `compliance` status are BOTH asked on every tick, and either one ends the wait with
+   * THESE expectations and the EVM escrow: the slot check against the chain stands in it before the signature.
+   * Without them the step names the next one (`next: "mark-ready"`) and signs nothing.
+   * THE MAKER DECLINED - THE WAIT STOPS AT ONCE (issue #40): the escrow's `Declined` event ends the wait with
    * `SwapDeclinedWatch` instead of running to `xmr-timeout` about an order whose ETH is already back. Nothing is
    * signed, and the decline is written into the record, so every later read of the swap reports the same state.
    */
@@ -1153,7 +1153,7 @@ export interface SellWatchResult {
 export interface SwapWatchRequest {
   /** The local swap record identifier. */
   readonly id: string;
-  /** The escrow address for the ready mark (mandatory when `expect` and `wallet` are passed). */
+  /** The escrow address for the ready mark (mandatory when `expect` and `wallet` are passed and the record has none). */
   readonly escrow?: string;
   /** How often to ask the state. Default - `config.limits.watchPollMs`. */
   readonly pollMs?: number;
@@ -1168,7 +1168,7 @@ export interface SwapWatchRequest {
   /**
    * CLIENT-SIDE ARRIVAL CHECK (issue #85). With this the CLIENT decides: it reads the chain itself and `ready`
    * opens only when two operators agree. The backend's `seen` is then only a notification and does not open the
-   * button. Without it the watch keeps the service's answer.
+   * button. `verify` is mandatory: without it the watch refuses with `bad-input`.
    */
   readonly verify?: Omit<XmrArrivalRequest, "minConfirmations">;
   /** The confirmation target before `ready`. Default - `config.limits.xmrConfirmations` (10). */
@@ -1210,8 +1210,9 @@ export interface SwapDeclinedWatch {
 export interface SwapWatch {
   readonly seen: true;
   readonly id: string;
+  /** The joint Monero address the client checked - never the EVM escrow. */
   readonly address: string | null;
-  /** The watch state at the service (awaiting_funding | funded | ready | ...). */
+  /** The legacy service status; null because the watch no longer asks a service. */
   readonly status: string | null;
   readonly expectedXmr: number | null;
   readonly receivedXmr: number;
