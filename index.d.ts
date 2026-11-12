@@ -558,6 +558,8 @@ export interface FirmRelayAnswer {
   }>;
   /** The relay origin that answered. `startSell` stores it for the later no-wallet claim. */
   readonly relayUrl: string;
+  /** The sender `GET /v1/relay` publishes for claims; null when the relay did not name one. */
+  readonly claimSender: string | null;
   readonly relay: string | null;
   readonly offered: number | null;
   readonly forwarded: Readonly<Record<string, unknown>> | null;
@@ -1065,7 +1067,7 @@ export interface RelayClaimed {
 /** No sender landed the claim. The seller must send `sellClaim` before `t1`. */
 export interface RelayClaimYourself {
   readonly state: "claim-yourself";
-  readonly reason: "senders-exhausted" | "escrow-refunded";
+  readonly reason: "senders-exhausted";
   readonly id: string;
   readonly provider: null;
   readonly claimSender: null;
@@ -1456,7 +1458,7 @@ export interface SweepRestoreRequest {
      */
     readonly trustedNode?: boolean;
   };
-  /** The fetch used for `get_block`; absent - the global fetch. */
+  /** The fetch used for `get_block`; absent - the instance `fetch` from `createNinsei`, then the global fetch. */
   readonly fetchImpl?: typeof fetch;
 }
 

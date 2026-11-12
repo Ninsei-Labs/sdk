@@ -210,8 +210,9 @@ signed by the client:
 
 ```js
 const sell = await sdk.swaps.startSell({ offer });
+const relaySender = offer.claimSender; // GET /v1/relay; the relay origin that answered
 const claimed = await sdk.swaps.claimViaRelay({ id: sell.id,
-  claimSenders: [relaySender, ...otherListedMakers] });
+  claimSenders: [...(relaySender ? [relaySender] : []), ...otherListedMakers] });
 if (claimed.state === "claimed") {
   claimed.txid;    // the claim transaction, or null when the escrow itself showed claimed
   claimed.from;    // the sender node's claim sender
@@ -247,7 +248,8 @@ sender allows the next, while an attempt left `sending` or `unknown` stops with 
 `why: "previous-sender-unknown"` instead of resending the half. An `unconfirmed` sender is skipped as well. A
 sender's slot starts when it is entered, not when its POST returns; `pollMs` has a 250 ms floor and `timeoutMs` a
 120 s ceiling. The relay gate also reserves the settlement margin, so `sellWatch` can still report its own-wallet
-`claim-open` while `claimViaRelay` has already stopped.
+`claim-open` while `claimViaRelay` has already stopped. A refunded escrow is `claim-window` with
+`reason: "escrow-refunded"`, not a request to claim; recovery is the next step.
 
 `actions.claim` is unchanged: it still sends only from the claimer's own wallet, because the half is revealed by
 whoever sends the claim.

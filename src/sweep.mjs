@@ -175,7 +175,7 @@ const feeOf = async (wallet, signed) => {
   return /^\d+$/.test(text) ? text : null;
 };
 
-export function createSweep({ call = null }) {
+export function createSweep({ call = null, fetchImpl = null } = {}) {
   // THE NAME IS NEEDED BY THE OBJECT ITSELF: `run` calls `api.plan(...)` - the step order is held by the plan and
   // the withdrawal living in one object, not in two copies. During a manual merge of branches the object was left
   // unnamed, and the withdrawal failed with "api is not defined": not a refusal, but a breakdown. `node --check`
@@ -336,7 +336,14 @@ export function createSweep({ call = null }) {
     // spendable - re-check the spent status once. The wallet is the same withdrawal adapter `sign` takes; the page
     // no longer decides when a second pass is needed.
     async restore(request) {
-      return await restoreWallet(request || {});
+      const merged = { ...(request || {}) };
+      if (merged.fetchImpl !== undefined && merged.fetchImpl !== null && typeof merged.fetchImpl !== "function") {
+        throw new SdkError("bad-input", { field: "fetchImpl" });
+      }
+      // THE INSTANCE TRANSPORT REACHES THE WINDOW AND KEY-IMAGE READS TOO. A per-call `fetchImpl` still wins;
+      // without this fallback a Tor/proxy caller's restore would silently use the page's global fetch.
+      if (typeof merged.fetchImpl !== "function" && typeof fetchImpl === "function") merged.fetchImpl = fetchImpl;
+      return await restoreWallet(merged);
     },
 
     // THE WITHDRAWAL ITSELF. The wallet arrives as an adapter (the WASM and the worker live with whoever builds the

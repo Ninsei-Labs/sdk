@@ -451,8 +451,12 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
     try {
       const raw = await reader({ to: factory, data: engine.evm.encodePredict({ ...quote, ...lockerHalf, factory }) });
       return engine.evm.decodeAddress(raw);
-    } catch {
-      return null;
+    } catch (error) {
+      // A RETRY MUST NOT REPORT A CHAIN READ AS A MISSING ARGUMENT. The caller already brought the signed quote;
+      // "bring an escrow" cannot fix a factory that did not answer. A coded refusal keeps its own identity; a bare
+      // transport/decode failure becomes the factory check that could not be made.
+      if (error instanceof SdkError) throw error;
+      throw new SdkError("quote-factory-unchecked", { step: "factory", why: "predict-failed" });
     }
   };
   // THE INSTANCE TRANSPORT IS THE DEFAULT, NOT BACKGROUND MAGIC. A per-call `fetch` still wins; otherwise every
@@ -1915,7 +1919,10 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         throw new SdkError("claim-unknown", { step: "relay-claim", why: "previous-sender-unknown" });
       }
       if (!pendingSenders.length) {
-        return { id, state: "claim-yourself", reason: refunded ? "escrow-refunded" : "senders-exhausted",
+        // THE RESUME PATH MUST NAME A REFUND LIKE THE FINAL PATH DOES. All senders may already be recorded as tried
+        // when the escrow moves to refunded; `claim-yourself` would send the seller to `sellClaim` on a closed order.
+        if (refunded) return windowResult("escrow-refunded", priorTried);
+        return { id, state: "claim-yourself", reason: "senders-exhausted",
           provider: null, claimSender: null, escrow, relayUrl, txid: null, from: null, tipWei: tip.toString(),
           t1, secondsLeft: secondsLeft(), tried: priorTried };
       }
@@ -1998,9 +2005,10 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       }
       if (finalStatus.isRefunded) refunded = true;
       if (!finalStatus.isFunded) return windowResult("not-funded", tried);
+      if (refunded) return windowResult("escrow-refunded", tried);
       const finalGate = await windowOf();
       if (!finalGate.ok) return windowResult(finalGate.reason, tried);
-      return { id, state: "claim-yourself", reason: refunded ? "escrow-refunded" : "senders-exhausted",
+      return { id, state: "claim-yourself", reason: "senders-exhausted",
         provider: null, claimSender: null, escrow, relayUrl, txid: null, from: null, tipWei: tip.toString(),
         t1, secondsLeft: secondsLeft(), tried };
     },
