@@ -116,6 +116,27 @@ const cases = [
     wants: "with a foreign half",
   },
   {
+    check: "relay-claim", source: "src/swaps.mjs",
+    name: "the relay claim window guard is removed",
+    from: "if (!gate.ok) return windowResult(gate.reason, tried);",
+    to: "if (false) return windowResult(gate.reason, tried);",
+    wants: "did not stop before the relay",
+  },
+  {
+    check: "relay-claim", source: "src/swaps.mjs",
+    name: "an unread escrow is no longer named",
+    from: "throw new SdkError(\"claim-unknown\", { step: \"relay-claim\", why: \"escrow-unread\",\n            detail: String((error && error.message) || error).slice(0, 160) });",
+    to: "throw new Error(\"escrow-unread\");",
+    wants: "unread escrow",
+  },
+  {
+    check: "key-view", source: "src/swaps.mjs",
+    name: "the pending salt is no longer canonicalised",
+    from: "saltForResume = rawSaltForResume === null || rawSaltForResume === undefined || rawSaltForResume === \"\"\n          ? null : recoverySaltOf(rawSaltForResume);",
+    to: "saltForResume = rawSaltForResume;",
+    wants: "bigint salt retry",
+  },
+  {
     check: "relay-adapter", source: "src/config.mjs",
     name: "the cashier is dropped from the network projection",
     from: "    cashier: chain.escrow.cashier || null,", to: "",
