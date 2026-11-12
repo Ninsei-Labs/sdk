@@ -1864,6 +1864,8 @@ export const refusalsCheck = () => {
  */
 export const DECLINE_ESCROW = "0x" + "e5".repeat(20);
 export const DECLINE_OTHER = "0x" + "d4".repeat(20);
+/** A valid Monero address, deliberately DIFFERENT from the escrow: the watch returns this address, not the EVM one. */
+const DECLINE_JOINT = "59DnddZzVBCevVg9YB3zCs24DSRH4ByS2FMBafPpYxSEB6FMegQNEbtNzbLjrrEUPNAg9NhK5uMiiAZpAvENBS4D4mEPcRq";
 
 /**
  * THE EVENT'S TOPIC, PINNED AS A LITERAL AND CROSS-CHECKED AGAINST AN INDEPENDENT HASH. The literal pins the
@@ -1898,7 +1900,7 @@ const declineRecord = (engine, { escrow = DECLINE_ESCROW, birthHeight = 12 } = {
   const swap = engine.swap.createSwap({
     side: "buy", chainMode: "live", network: "local-anvil",
     payToken: "eth", payAmount: 0.01, xmrAmount: 0.5, rate: 2_000, fee: 0.1,
-    makerId: "check-maker", makerName: "check-maker", receiveAddress: "59DnddZzVBCevVg9YB3zCs24DSRH4ByS2FMBafPpYxSEB6FMegQNEbtNzbLjrrEUPNAg9NhK5uMiiAZpAvENBS4D4mEPcRq",
+    makerId: "check-maker", makerName: "check-maker", receiveAddress: DECLINE_JOINT,
   });
   swap.escrow = { ...(swap.escrow || {}), address: escrow, birthHeight };
   engine.swap.saveSwap(swap);
@@ -1984,12 +1986,17 @@ export const declineCheck = async () => {
   const chainOnly = declineFacade(swapsMod, {
     logs: () => Promise.resolve([logFrom(DECLINE_ESCROW, decline.DECLINED_TOPIC0)]),
   });
-  const verifyStub = { nodes: [], address: DECLINE_ESCROW, viewSecret: "0x01", spendPub: "0x02", expectedAtomic: "1" };
+  const verifyStub = { nodes: [], address: DECLINE_JOINT, viewSecret: "0x01", spendPub: "0x02", expectedAtomic: "1" };
   const chainOutcome = await watchOutcome("the watch on the escrow's Declined event",
     () => chainOnly.swaps.watch({ id: eventRecord.id, escrow: DECLINE_ESCROW, verify: verifyStub, pollMs: 1, timeoutMs: 25,
       readyWindow: { readyMinSeconds: 2400, readyMaxSeconds: 3000, side: "ask" } }));
   if (!(chainOutcome && chainOutcome.declined === true && chainOutcome.source === "event")) {
     problems.push(`the escrow's Declined event did not stop the wait: ${JSON.stringify(chainOutcome)}`);
+  }
+  // THE RESULT CARRIES THE JOINT MONERO ADDRESS, NOT THE ESCROW. The old code returned the EVM escrow here when
+  // `verify.address` was supplied without the untyped `request.address`; this case fails on that code by name.
+  if (!(chainOutcome && chainOutcome.address === DECLINE_JOINT && chainOutcome.escrow === DECLINE_ESCROW)) {
+    problems.push(`the watch returned address ${JSON.stringify(chainOutcome && chainOutcome.address)} for escrow ${JSON.stringify(chainOutcome && chainOutcome.escrow)}, not the joint Monero address ${DECLINE_JOINT}`);
   }
 
   // (f) THE STATE, ONCE SEEN, IS WRITTEN INTO THE RECORD: every surface that reads the record reports the decline

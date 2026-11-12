@@ -22,7 +22,7 @@ Report suspected vulnerabilities through GitHub's private **Report a vulnerabili
 The supported versions, scope, response targets, safe-harbor rules and disclosure process are in
 [`SECURITY.md`](SECURITY.md).
 
-## State (0.59.0)
+## State (0.60.0)
 
 | Surface | State |
 |---|---|
@@ -34,7 +34,7 @@ The supported versions, scope, response targets, safe-harbor rules and disclosur
 | `quotes.firmRelay` | works: a firm quote through a relay, built from one recovery key; the node half is DLEQ-checked |
 | `swaps.list` / `swaps.get` | read state from storage (and after a page reload) |
 | `swaps.start` | holds the order: guards → recovery file and the person's confirmation → order → locking funds → **watching the Monero address**; no backend is required; returns the named state `step: "xmr-incoming"` |
-| `swaps.watch` | waits for XMR at the joint address with the CLIENT's own check: `verify` carries the joint address, view secret, spend public key and witness nodes. Arrived — returns the fact (amount, confirmations, txid); did not wait — a refusal with `xmr-timeout`; funds barred by `unlock_time` — `xmr-locked`; the maker DECLINED — `SwapDeclinedWatch` (`declined: true`, `terminal: "declined"`), every action off; with expectations and a wallet, places the ready mark after the arrival |
+| `swaps.watch` | waits for XMR at the joint address with the CLIENT's own check: `verify` carries the joint address, view secret, spend public key and witness nodes, and is mandatory — without it the watch refuses with `bad-input`. Arrived — returns the fact (amount, confirmations, txid) and the joint address; did not wait — a refusal with `xmr-timeout`; funds barred by `unlock_time` — `xmr-locked`; the maker DECLINED — `SwapDeclinedWatch` (`declined: true`, `terminal: "declined"`), every action off; with expectations and a wallet, places the ready mark after the arrival against the escrow, never against the Monero address |
 | `swaps.verifyArrivalShadow` | the staging path for witness-v1: runs the exact walk and the fixed-slice walk side by side, without changing ready or refund. The slice request carries only the grid and slice; a node must name `protocol: "witness-v1"` |
 | `swaps.startSell` / `swaps.sellClaim` / `swaps.claimViaRelay` | a sell is recorded from the verified relay offer; `sellClaim` claims from the claimer's own wallet, `claimViaRelay` claims with no wallet through the client's ordered sender list, paid by the signed `claimTip` |
 | `wallet.balances` | works: the native coin and tokens, in minimal units |
@@ -218,7 +218,7 @@ if (claimed.state === "claimed") {
   claimed.from;    // the sender node's claim sender
   claimed.tipWei;  // the signed tip paid out of the claim
 } else if (claimed.state === "claim-window") {
-  claimed.reason;  // not-ready | window-closed | settlement-margin | not-funded | unreadable
+  claimed.reason;  // not-ready | window-closed | settlement-margin | not-funded | unreadable | escrow-refused | escrow-refunded
 } else {
   claimed.secondsLeft; // no sender landed it: claim yourself before t1
 }
