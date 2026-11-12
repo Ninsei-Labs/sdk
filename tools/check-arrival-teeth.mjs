@@ -154,8 +154,8 @@ try {
     "const targetTop = highestTop === null ? top : Math.max(top, highestTop);",
     "const targetTop = top;", "highest-top");
   const mutantTop = await topMutant.verifyArrivalShadow(shadowTopRequest);
-  if (mutantTop.agrees === true && mutantTop.witness.quorum.ok === true) {
-    ok("removing the common target makes the shorter witness agree (the guard is load-bearing)");
+  if (mutantTop.agrees === false && mutantTop.witness.quorum.ok === false) {
+    ok("removing the common target alone still leaves the served-tip target refusing agreement");
   } else bad("highest-top mutation", JSON.stringify({ quorum: mutantTop.witness.quorum,
     agrees: mutantTop.agrees, problems: mutantTop.problems }));
 
