@@ -91,8 +91,32 @@ try {
     .sellWatch({ escrow, pollMs: 1, timeoutMs: 2_000 });
   check(result.state === "claim-open" && result.claimOpen === true && result.ready === false,
     "a funded order past readyBy reports the open claim");
+  check(result.t1 === readyBy + 3_600 && result.secondsLeft === 3_599,
+    "the open claim carries t1 and the seconds left");
   check(calls >= 1, "the open claim needs no extra wait");
 } catch (error) { check(false, "claim-open path failed: " + JSON.stringify(error && (error.code || error.message))); }
+
+console.log("=== 4a) THE CLAIM WINDOW CLOSES AT t1 ===");
+for (const [label, at] of [["at t1", 1_700_003_600], ["inside the last minute", 1_700_003_570]]) {
+  try {
+    const readyBy = 1_700_000_000;
+    const t1 = 1_700_003_600;
+    const reader = async ({ data }) => {
+      if (data === engine.evm.ESCROW_METHODS.status) return status(true, false, false, 5n);
+      if (data === engine.evm.ESCROW_METHODS.ready) return word(0n);
+      if (data === engine.evm.ESCROW_METHODS.readyBy) return word(BigInt(readyBy));
+      if (data === engine.evm.ESCROW_METHODS.t1) return word(BigInt(t1));
+      if (data === engine.evm.ESCROW_METHODS.termsHash) return "0x" + "00".repeat(32);
+      throw new Error("unexpected selector " + data);
+    };
+    const result = await swapsWith(reader, { now: () => at * 1000 })
+      .sellWatch({ escrow, pollMs: 1, timeoutMs: 2_000 });
+    check(result.state === "claim-window-closed" && result.claimOpen === false && result.ready === false,
+      label + " does not report an open claim");
+    check(result.secondsLeft === Math.max(0, t1 - at),
+      label + " carries the seconds left at the closed window");
+  } catch (error) { check(false, label + " path failed: " + JSON.stringify(error && (error.code || error.message))); }
+}
 
 console.log("=== 5) THE ADDRESS IS REQUIRED ===");
 try {

@@ -53,7 +53,7 @@ const cases = [
   {
     check: "sell-watch", source: "src/swaps.mjs",
     name: "the claim-open report is removed",
-    from: "if (at !== null && at >= Number(deadlines.readyBy)) {", to: "if (false) {",
+    from: "if (Number.isSafeInteger(readyBy) && Number.isSafeInteger(t1) && at !== null && at >= readyBy) {", to: "if (false) {",
     wants: "claim-open",
   },
   {
