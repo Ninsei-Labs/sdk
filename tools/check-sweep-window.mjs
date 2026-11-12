@@ -6,6 +6,7 @@
 //
 // BREAKING RUNS: the window path is bypassed by a copy of the module in the same shape the other checks use.
 import { restoreWallet, windowTxHashes } from "../src/sweep-restore.mjs";
+import { createSweep } from "../src/sweep.mjs";
 
 const fake = ({ balance = 0n, scanTxs = true, scanFails = false } = {}) => {
   const calls = [];
@@ -153,6 +154,22 @@ export const sweepWindowCheck = async () => {
     "a failed scan lost the surface");
   check(scanFailed.calls.some((call) => call[0] === "rescan"), "the full scan did not run after the failed scan");
   notes.push("a failed scanTxs falls back to the full scan and names the step");
+
+  // THE INSTANCE TRANSPORT REACHES THE RESTORE WINDOW. A Tor/proxy caller passes `fetch` once to the facade; a
+  // restore that used the global fetch would show the user's IP to the node and bypass the proxy.
+  {
+    const instanceCalls = [];
+    const instance = createSweep({ fetchImpl: async (url) => {
+      instanceCalls.push(String(url));
+      return { ok: true, status: 200, json: async () => ({ result: { tx_hashes: [] } }) };
+    } });
+    const instanceWallet = fake({ balance: 0n });
+    const restored = await instance.restore({ wallet: instanceWallet.wallet, fromHeight: 100,
+      window: { nodeUrl: "http://127.0.0.1:9", toHeight: 110, tipHeight: 900 } });
+    check(restored && restored.total === "0", "the instance-fetch restore did not report its balance");
+    check(instanceCalls.length === 11, `the instance fetch did not read the window: ${instanceCalls.length} calls`);
+    notes.push("the facade's fetch is used by restore instead of the global fetch");
+  }
 
   return { note: "the withdrawal window scans only the lock and falls back on an empty or unreadable one", problems, notes };
 };

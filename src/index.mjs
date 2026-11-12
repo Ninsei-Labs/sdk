@@ -280,7 +280,7 @@ export function createNinsei(options) {
       createRecord: o.createRecord }),
     // XMR WITHDRAWAL: parsing the file and requesting data work; the withdrawal itself is named (the Monero
     // wallet as an adapter).
-    sweep: createSweep({ call: o.evmCall }),
+    sweep: createSweep({ call: o.evmCall, fetchImpl: o.fetch || null }),
   });
 }
 

@@ -139,12 +139,23 @@ export async function requestFirmQuote({
     || wireText(published.relayId, "relay.relayId") !== wireText(response.body.relay, "relay")) {
     throw new SdkError("quote-refused", { step: "relay-info", why: "relay" });
   }
+  // THE OPERATOR'S OWN CLAIM SENDER. `GET /v1/relay` publishes the address the relay submits claims from; it is the
+  // first entry in the seller's ordered list. A malformed value is refused here rather than handed to a claim path.
+  let claimSender = null;
+  if (published.claimSender !== undefined && published.claimSender !== null
+    && String(published.claimSender).trim() !== "") {
+    claimSender = wireText(published.claimSender, "relay.claimSender").toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(claimSender)) {
+      throw new SdkError("quote-refused", { step: "relay-info", why: "claim-sender" });
+    }
+  }
   return {
     ...verified,
     // THE ORIGIN THAT ANSWERED, KEPT FOR THE LATER CLAIM. The seller has no wallet, so the claim goes back to the
     // same relay through `swaps.claimViaRelay`; the record stores this value and a different origin is refused.
     relayUrl: base,
     relay: response.body.relay ?? null,
+    claimSender,
     offered: response.body.offered ?? null,
     forwarded: response.body.forwarded ?? null,
     answer,

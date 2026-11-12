@@ -96,7 +96,8 @@ margin (plus a slot and time for the seller's own claim) it returns `state: "cla
 posts nothing. An unread escrow is `claim-unknown` with `why: "escrow-unread"`, never `claim-yourself`. A relay
 answer such as `claim-not-ready` or `claim-window-closed` stops the list instead of passing the half to the next
 sender. When the list is exhausted the result is `state: "claim-yourself"` with `t1` and `secondsLeft`; `sellClaim`
-remains the fallback. It does not take a relay from the caller after the quote: an optional `relayUrl` may repeat the
+remains the fallback. A refunded escrow is `state: "claim-window"` with `reason: "escrow-refunded"`, not a request
+to claim; recovery is the next step. It does not take a relay from the caller after the quote: an optional `relayUrl` may repeat the
 stored origin, and any other origin is refused with `bad-input`. The half is never logged or written by this path.
 
 The sell record also keeps the node's signed `readyWindow`. `sellWatch`, the late-arrival boundary and

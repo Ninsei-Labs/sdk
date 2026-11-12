@@ -347,8 +347,8 @@ export const relayClaimCheck = async () => {
     let calls = 0;
     const result = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender],
       fetchImpl: async () => { calls += 1; return refusal("claim-tip-too-small"); } });
-    check(result && result.state === "claim-yourself" && result.reason === "escrow-refunded" && calls === 0,
-      "a refunded escrow was not named: " + JSON.stringify({ result, calls }));
+    check(result && result.state === "claim-window" && result.reason === "escrow-refunded" && calls === 0,
+      "a refunded escrow was not named as a closed claim window: " + JSON.stringify({ result, calls }));
   }
 
   // (5d) EVERY LOST-ANSWER SHAPE ENDS IN CLAIM-YOURSELF AFTER THE SENDER'S SLOT.

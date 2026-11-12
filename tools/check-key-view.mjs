@@ -123,7 +123,7 @@ console.log("=== 1c1) A MALFORMED SALT IS REFUSED BY NAME, NOT IGNORED ===");
   } else bad("malformed salt: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
 }
 
-async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 }, funded = false, withId = true, withQuote = true, withSignature = true, escrow = null, recoverySalt = order.salt, orderSalt = order.salt } = {}) {
+async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 }, funded = false, withId = true, withQuote = true, withSignature = true, escrow = null, recoverySalt = order.salt, orderSalt = order.salt, predictThrows = false } = {}) {
   if (fresh) setStorage(memoryStorage());
   let sent = 0;
   const wallet = { chainId: async () => order.chainId, address: async () => order.locker,
@@ -138,6 +138,7 @@ async function startPending({ fresh = true, receipt = { status: "0x1", logs: [],
   const fundedStatus = "0x" + [1, 0, 0, 0].map((value) => BigInt(value).toString(16).padStart(64, "0")).join("");
   const result = await createSwaps({ mode: "live", xmrNetwork: "stagenet", logs: async () => [],
     call: async ({ data }) => {
+      if (predictThrows && data.startsWith(FACTORY_METHODS.predict)) throw new Error("factory read failed");
       if (data === encodeStatus()) return funded ? fundedStatus : "0x";
       return data.startsWith(FACTORY_METHODS.predict) ? "0x" + "0".repeat(24) + "88".repeat(20) : "0x";
     },
@@ -237,6 +238,21 @@ console.log("=== 1c3) A BIGINT SALT RESUMES THE SAME PENDING DEPOSIT ===");
     bad("bigint salt retry: " + JSON.stringify({ first: first.result && first.result.step,
       code: second.result && second.result.code, params: second.result && second.result.params,
       step: second.result && second.result.step, sent: second.sent }));
+  }
+}
+
+console.log("=== 1c3b) A FAILED PREDICT ON RETRY IS NOT A MISSING ESCROW ===");
+{
+  const first = await startPending();
+  const second = await startPending({ fresh: false, predictThrows: true });
+  if (first.result && first.result.step === "funding-pending" &&
+      second.result && second.result.code === "quote-factory-unchecked" &&
+      second.result.params && second.result.params.step === "factory" &&
+      second.result.params.why === "predict-failed" && second.sent === 0) {
+    ok("a factory read failure on retry is named as predict-failed, not as a missing escrow");
+  } else {
+    bad("predict retry: " + JSON.stringify({ first: first.result && first.result.step,
+      code: second.result && second.result.code, params: second.result && second.result.params, sent: second.sent }));
   }
 }
 

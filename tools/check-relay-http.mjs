@@ -246,7 +246,7 @@ function fakeFetch({ ok = true, status = 200, body = null, error = null, relay =
   const calls = [];
   const info = relay
     ? { relayKey, ...relay }
-    : { version: 1, relayId: "test-relay", relayKey, feeRecipient: "0x" + "99".repeat(20), feeBps: "0" };
+    : { version: 1, relayId: "test-relay", relayKey, claimSender: "0x" + "c1".repeat(20), feeRecipient: "0x" + "99".repeat(20), feeBps: "0" };
   return {
     calls,
     fetchImpl: async (url, init) => {
@@ -289,6 +289,8 @@ try {
   const result = await call({ fetchImpl: success.fetchImpl });
   if (result.quote.amount === built.terms.order.amount && result.answer.type === "quote") ok("the answer is verified and returned");
   else bad("the returned answer did not carry the quote");
+  if (result.claimSender === "0x" + "c1".repeat(20)) ok("the relay's published claim sender is returned");
+  else bad("the published claim sender was dropped: " + JSON.stringify(result.claimSender));
   const sent = success.calls.find((item) => String(item.url).endsWith("/v1/quote"));
   if (sent && sent.url === "https://relay.example/v1/quote") ok("the endpoint is POST <relay>/v1/quote");
   else bad("unexpected endpoint: " + (sent && sent.url));
@@ -301,6 +303,21 @@ try {
     ok("the payload string and the partner label are sent exactly");
   } else bad("the request body changed: " + JSON.stringify(Object.keys(sentBody)));
 } catch (error) { bad("valid answer refused: " + JSON.stringify({ code: error && error.code, params: error && error.params, message: error && error.message })); }
+
+console.log("=== 1a3) A MALFORMED PUBLISHED CLAIM SENDER IS REFUSED ===");
+{
+  const badSender = fakeFetch({ body: relayBody(makeAnswer(built)),
+    relay: { version: 1, relayId: "test-relay", claimSender: "not-an-address",
+      feeRecipient: "0x" + "99".repeat(20), feeBps: "0" } });
+  try {
+    await call({ fetchImpl: badSender.fetchImpl });
+    bad("a malformed published claim sender passed");
+  } catch (error) {
+    if (error && error.code === "quote-refused" && error.params && error.params.why === "claim-sender") {
+      ok("a malformed published claim sender is refused");
+    } else bad("wrong claim sender code: " + JSON.stringify(error && (error.code || error.message)));
+  }
+}
 
 console.log("=== 1a2) THE PUBLISHED FEE MUST MATCH THE SIGNED QUOTE ===");
 {
