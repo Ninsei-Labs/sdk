@@ -636,6 +636,18 @@ export const relayClaimCheck = async () => {
       "a slow POST stretched the sender slot: " + JSON.stringify({ posts, statusReads }));
   }
 
+  // (12) A TINY POLL IS FLOORED, SO ONE SLOT CANNOT BURN THE CHAIN.
+  {
+    resetAttempts();
+    resetChain();
+    statusReads = 0;
+    clockMs = 1_900_000_000_000;
+    const result = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender], slotMs: 15_000, pollMs: 1,
+      fetchImpl: async () => answer(relaySender, "0x" + "ad".repeat(32)) });
+    check(result && result.state === "claim-yourself" && statusReads <= 70,
+      "a one-millisecond poll was not floored: " + JSON.stringify({ statusReads }));
+  }
+
   notes.push("the client list is tried in order; a refusal moves on, a txid waits for the escrow, and exhaustion asks for the seller's own claim");
   notes.push("the relay origin and the instance fetch rules are unchanged; sellClaim remains the own-wallet path");
   return { note: "the ordered relay claim reads the escrow and names the sender that landed it", problems, notes };
