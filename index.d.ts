@@ -55,7 +55,7 @@ export interface NinseiOptions {
   mode?: "live" | "sim";
   /** An injected fetch function (SSR, tests, your own transport). It is the client default for relay quotes/claims,
    * Monero height probes and witness checks; per-call `fetchImpl` wins for relay quote/claim and `fetch` wins for
-   * arrival/witness checks. */
+   * arrival/witness checks. An arrival request may override it with its own `fetch`. */
   fetch?: FetchLike;
   /** The clock. In "sim" the SDK uses it to accelerate time. */
   now?: () => number;
