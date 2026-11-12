@@ -1583,7 +1583,6 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
           || !same(existing.escrow && existing.escrow.moneroAddress, offer.jointAddress)) {
           throw new SdkError("quote-refused", { step: "sell-record", why: "offer-changed" });
         }
-        const storedSender = existing.claimSender ? addressTextOf(existing.claimSender, "claimSender") : null;
         const storedList = Array.isArray(existing.claimSenders) ? existing.claimSenders : null;
         // THE OLD SCALAR IS NOT A PIN. A reload may name another sender or bring the ordered list at claim time; the
         // record keeps the latest list and its first sender for callers that still use the scalar. An offer-only
@@ -1599,11 +1598,6 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
           existing.claimSender = claimSenders[0];
           try { engine.swap.saveSwap(existing, store); }
           catch { throw new SdkError("storage-unavailable", { step: "save-claim-senders" }); }
-        } else if (requestedSender && requestedSender !== storedSender) {
-          existing.claimSender = requestedSender;
-          delete existing.claimSenders;
-          try { engine.swap.saveSwap(existing, store); }
-          catch { throw new SdkError("storage-unavailable", { step: "save-claim-sender" }); }
         }
         // THE RELAY IS PART OF THE VERIFIED OFFER. A claim later goes to the origin that answered this quote, so
         // a resumed offer naming another origin is a different offer; one that now names the same origin fills a
