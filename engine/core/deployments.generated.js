@@ -1,6 +1,6 @@
 // GENERATED FILE - do not edit. Run: node tools/gen-deployment-pins.mjs --write
 // Source: deployments/<vm>/<network>.json, copied from the reviewed contract release manifest.
-// Factory history: deployments/history/<vm>/<network>.json, reviewed old factories for recovery.
+// Factory history: deployments/history/<vm>/<network>.json, mainnet-only retired factories for recovery.
 const freeze = (value) => {
   if (value && typeof value === "object") {
     Object.freeze(value);
@@ -87,22 +87,6 @@ const DATA = {
 };
 const HISTORY_DATA = {
   "arbitrum-sepolia": [
-    {
-      "address": "0x3ee25f12758ec28e5b3045d16132d89cd0bf341f",
-      "deploymentBlock": 318911595,
-      "release": {
-        "tag": "contracts-testnet-2026.10.21"
-      },
-      "status": "retired"
-    },
-    {
-      "address": "0x69b5a6878b542960af4d239ecc60ad1c9e3e6932",
-      "deploymentBlock": 323014007,
-      "release": {
-        "tag": "contracts-testnet-2026.10.26"
-      },
-      "status": "retired"
-    },
     {
       "address": "0x245d3a4ac4b98d713f6c5130b56cd5d550f8cefe",
       "deploymentBlock": 326005419,
