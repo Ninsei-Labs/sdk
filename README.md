@@ -224,7 +224,9 @@ if (claimed.state === "claimed") {
 }
 ```
 
-`claimSenders` is the client's ordered list: the relay's own sender first, then other listed makers. The SDK tries
+`claimSenders` is the client's ordered list: the relay's own sender first, then other listed makers. `startSell`
+accepts the same list (or the relay answer's published `claimSender`) and stores it, so a later
+`claimViaRelay({ id })` can use the record without repeating the list. The SDK tries
 one sender at a time for a 15-30 s slot. A refusal moves on at once; a txid is not success - the SDK reads the
 escrow until it says `claimed` or the slot ends. The deal's maker and its quote-key owner are refused before the
 half leaves the client. When the list is exhausted the result is `state: "claim-yourself"` with `t1` and

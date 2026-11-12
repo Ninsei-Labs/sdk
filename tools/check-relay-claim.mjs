@@ -113,9 +113,11 @@ const seed = async (overrides = {}) => {
     jointAddress: offer.jointAddress.slice(0, -2) + String(sequence % 10) + String(sequence % 10),
   };
   if (overrides.withoutRelay) { delete made.withoutRelay; delete made.relayUrl; }
+  if (overrides.offerClaimSender) made.claimSender = overrides.offerClaimSender;
   const sender = Object.prototype.hasOwnProperty.call(overrides, "claimSender") ? overrides.claimSender : storedSender;
   const request = { offer: made, recoveryKey: mnemonic, onRecoveryKey: accept };
   if (sender && !overrides.omitClaimSender) request.claimSender = sender;
+  if (Array.isArray(overrides.claimSenders)) request.claimSenders = overrides.claimSenders;
   return await swaps.startSell(request);
 };
 
@@ -142,6 +144,41 @@ export const relayClaimCheck = async () => {
   check(stored && stored.claimSender === storedSender, "startSell did not store the legacy sender");
   check(stored && stored.claimTip === claimTip && stored.escrow && stored.escrow.half,
     "the sale record does not carry the positive tip and the half");
+
+  // (0b) THE LIST IS STORED AT START AND USED WITHOUT REPEATING IT AT CLAIM.
+  {
+    const listed = await seed({ claimSenders: [secondSender, relaySender], omitClaimSender: true });
+    check(listed && listed.claimSender === lower(secondSender)
+      && Array.isArray(listed.claimSenders) && listed.claimSenders[0] === lower(secondSender)
+      && listed.claimSenders[1] === lower(relaySender),
+      "startSell did not store the ordered sender list: " + JSON.stringify({ listed }));
+    const urls = [];
+    const claimed = await swaps.claimViaRelay({ id: listed.id, fetchImpl: async (url) => {
+      urls.push(url);
+      chainStatus.claimed = true;
+      return answer(secondSender, "0x" + "af".repeat(32), listed.escrow);
+    } });
+    check(claimed && claimed.state === "claimed" && claimed.provider === lower(secondSender)
+      && urls.length === 1 && urls[0].includes(lower(secondSender)),
+      "claimViaRelay did not use the startSell list: " + JSON.stringify({ claimed, urls }));
+  }
+
+  // (0c) THE RELAY'S PUBLISHED SENDER FILLS A RECORD THAT HAS NO LIST.
+  {
+    resetChain();
+    const offered = await seed({ offerClaimSender: secondSender, omitClaimSender: true });
+    check(offered && offered.claimSender === lower(secondSender)
+      && Array.isArray(offered.claimSenders) && offered.claimSenders.length === 1
+      && offered.claimSenders[0] === lower(secondSender),
+      "an offer-only sender was not stored as the list: " + JSON.stringify({ offered }));
+    const again = await swaps.startSell({ offer: { ...offer, claimSender: relaySender,
+      escrow: offered.escrow, quote: { ...quote, id: "oq_offer_only_again" },
+      orderQuote: { ...quote, id: "oq_offer_only_again", signature: "0x" + "55".repeat(65) },
+      jointAddress: offered.address }, recoveryKey: mnemonic, onRecoveryKey: accept });
+    check(again && again.resumed === true && again.claimSender === lower(secondSender)
+      && Array.isArray(again.claimSenders) && again.claimSenders[0] === lower(secondSender),
+      "a resume replaced the client's stored sender list: " + JSON.stringify({ again }));
+  }
   // THE OWN-WALLET PATH IS THE ORACLE FOR THE RELAY: at the same state and clock it must sign exactly when the
   // relay path is allowed to publish the half.
   const selfClaimSigns = async (atSec) => {
@@ -661,6 +698,28 @@ export const relayClaimCheck = async () => {
       fetchImpl: async () => answer(relaySender, "0x" + "ad".repeat(32)) });
     check(result && result.state === "claim-yourself" && statusReads <= 70,
       "a one-millisecond poll was not floored: " + JSON.stringify({ statusReads }));
+  }
+
+  // (13) A HUGE TIMEOUT IS CAPPED BEFORE IT REACHES THE HTTP TIMER. The timer is the only observable seam;
+  // if the HTTP layer moves to AbortSignal.timeout, this probe moves with it.
+  {
+    resetAttempts();
+    resetChain();
+    clockMs = 1_900_000_000_000;
+    const originalSetTimeout = globalThis.setTimeout;
+    const delays = [];
+    globalThis.setTimeout = (fn, ms, ...args) => {
+      delays.push(Number(ms));
+      return originalSetTimeout(fn, ms, ...args);
+    };
+    try {
+      await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender], timeoutMs: 999_999,
+        fetchImpl: async () => answer(relaySender, "0x" + "ae".repeat(32)) });
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+    }
+    check(delays.includes(120_000) && !delays.some((ms) => ms > 120_000),
+      "the HTTP timeout was not capped at 120 s: " + JSON.stringify({ delays }));
   }
 
   notes.push("the client list is tried in order; a refusal moves on, a txid waits for the escrow, and exhaustion asks for the seller's own claim");

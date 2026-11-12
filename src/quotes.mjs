@@ -10,6 +10,7 @@ import { claimGasGiftWei } from "../engine/evm/claimGas.js";
 import { takerHalvesV2, recoverySaltOf } from "./recovery-key.mjs";
 import { acceptCounterpartyChunked, buildOwnSideFromHalvesChunked, jointAddress } from "./order.mjs";
 import { requestFirmQuote } from "./relayFirmClient.mjs";
+import { predictEscrow } from "./predictEscrow.mjs";
 import { readReadyWindow } from "./readyWindow.mjs";
 import { quoteLifeVerdict } from "./quotePolicy.mjs";
 // THE CHAIN READ NEEDED TO ASK THE REGISTRY WHO OWNS THE KEY. The selector is COMPUTED from the signature, not
@@ -290,11 +291,7 @@ export function createQuotes({ config, now = () => Date.now(), evmCall = null, e
         : { commitHalfLocker: nodeHalf.commitHalf, edPointLocker: nodeHalf.edPoint, edViewPointLocker: result.edViewPointLocker };
       let escrow = null;
       try {
-        const predicted = await evmCall({
-          to: quote.factory,
-          data: engine.evm.encodePredict({ ...result.orderQuote, ...lockerHalf, signature: result.orderQuote.signature }),
-        });
-        escrow = engine.evm.decodeAddress(predicted);
+        escrow = await predictEscrow({ quote: result.orderQuote, lockerHalf, call: evmCall });
       } catch {
         fail("quote-escrow-unchecked", { step: "factory", why: "predict-failed", factory: quote.factory });
       }
