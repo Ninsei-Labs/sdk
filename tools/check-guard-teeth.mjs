@@ -125,8 +125,8 @@ const cases = [
   {
     check: "relay-claim", source: "src/swaps.mjs",
     name: "an unread escrow is no longer named",
-    from: "throw new SdkError(\"claim-unknown\", { step: \"relay-claim\", why: \"escrow-unread\",",
-    to: "throw new Error(\"escrow-unread\"),",
+    from: "throw new SdkError(\"claim-unknown\", { step: \"relay-claim\", why: \"escrow-unread\",\n            detail: String((error && error.message) || error).slice(0, 160) });",
+    to: "throw new Error(\"escrow-unread\");",
     wants: "unread escrow",
   },
   {

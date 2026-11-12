@@ -924,6 +924,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
 
       // RESUME BEFORE ANY NEW SIDE OR SEND. The previous start may have sent the deposit and lost the receipt;
       // reusing its hash is the only way to learn the escrow without a second payment.
+      const explicitSalt = request.recoverySalt;
       const rawSaltForResume = request.recoverySalt || (request.order && request.order.salt) ||
         (request.orderQuote && request.orderQuote.salt) || null;
       // THE SALT THAT MATCHES THE PENDING ROW IS THE CANONICAL ONE. A caller may pass a number or a bigint
@@ -933,7 +934,14 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       try {
         saltForResume = rawSaltForResume === null || rawSaltForResume === undefined || rawSaltForResume === ""
           ? null : recoverySaltOf(rawSaltForResume);
-      } catch { saltForResume = null; }
+      } catch {
+        // AN INVALID SALT THE CALLER NAMED IS A REFUSAL, NOT "NO SALT". Falling through to the salt-less path
+        // would hide a malformed input behind a different diagnosis; an absent salt is the only case that may.
+        if (explicitSalt !== undefined && explicitSalt !== null && String(explicitSalt).trim() !== "") {
+          throw new SdkError("bad-input", { field: "recoverySalt", why: "unreadable" });
+        }
+        saltForResume = null;
+      }
       const resumeIdentity = {
         salt: saltForResume,
         // THE QUOTE ID IS ONLY A SELECTOR. It lets a salt-less retry name the pending row and be refused loudly, but

@@ -114,6 +114,15 @@ console.log("=== 1c) A SALT THE QUOTE DID NOT CARRY IS REFUSED ===");
   else bad("salt mismatch: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
 }
 
+console.log("=== 1c1) A MALFORMED SALT IS REFUSED BY NAME, NOT IGNORED ===");
+{
+  const { result, sent } = await startWith(derived.makerViewHalf, "not-a-salt");
+  if (result && result.code === "bad-input" && result.params && result.params.field === "recoverySalt" &&
+      result.params.why === "unreadable" && sent === 0) {
+    ok("a malformed recoverySalt is named before the pending lookup");
+  } else bad("malformed salt: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
+}
+
 async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 }, funded = false, withId = true, withQuote = true, withSignature = true, escrow = null, recoverySalt = order.salt, orderSalt = order.salt } = {}) {
   if (fresh) setStorage(memoryStorage());
   let sent = 0;
