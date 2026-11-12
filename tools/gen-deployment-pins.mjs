@@ -163,6 +163,11 @@ function generate() {
   for (const file of readHistoryFiles()) {
     const normalized = normalizeHistory(JSON.parse(readFileSync(file, "utf8")), file);
     if (!deployments[normalized.network]) fail(`history network ${normalized.network} has no deployment manifest`);
+    // HISTORY IS MAINNET ONLY. A development chain replaces its factory on every switch; a retired entry there
+    // would make recovery search addresses no user should depend on. Add mainnet chain ids here when they ship.
+    if (normalized.chainRef !== "42161") {
+      fail(`${normalized.network}: factory history is mainnet-only (chain 42161)`);
+    }
     if (history[normalized.network]) fail(`duplicate history for ${normalized.network}`);
     history[normalized.network] = normalized.factories;
   }
@@ -182,7 +187,7 @@ function generate() {
   }
   return `// GENERATED FILE - do not edit. Run: node tools/gen-deployment-pins.mjs --write
 // Source: deployments/<vm>/<network>.json, copied from the reviewed contract release manifest.
-// Factory history: deployments/history/<vm>/<network>.json, reviewed old factories for recovery.
+// Factory history: deployments/history/<vm>/<network>.json, mainnet-only retired factories for recovery.
 const freeze = (value) => {
   if (value && typeof value === "object") {
     Object.freeze(value);
