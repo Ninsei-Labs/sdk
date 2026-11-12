@@ -169,9 +169,22 @@ export interface NinseiOptions {
   createRecord?: (request: StartRequest) => Promise<SwapRecord> | SwapRecord;
 }
 
+/** One durable sender attempt on a sell record, written before the relay POST. */
+export interface StoredClaimAttempt {
+  readonly sender: string;
+  readonly at?: number;
+  readonly outcome: "sending" | "refused" | "unknown" | "unconfirmed" | "claimed";
+  readonly code?: string | null;
+  readonly params?: Readonly<Record<string, unknown>> | null;
+  readonly txid?: string | null;
+}
+
 /** The result of assembling the swap record: the record itself, your own side and what is missing. */
 export interface SwapRecord {
-  readonly swap: Readonly<Record<string, unknown>>;
+  readonly swap: Readonly<Record<string, unknown>> & {
+    /** The ordered claim attempts; absent on records written before the journal existed. */
+    readonly claimAttempts?: readonly StoredClaimAttempt[];
+  };
   /** Our side of the order: halves, points, the proof and the encryption key. The shape is set by the builder. */
   readonly side: unknown;
   /** What the record is missing: for a start that is the counterparty's half (`counterparty-half`). */
@@ -982,6 +995,8 @@ export interface SellStartRequest {
    * naming the deal's maker or its quote-key owner is refused.
    */
   readonly claimSender?: string;
+  /** The ordered senders stored for a later `claimViaRelay`; the relay's published sender is prepended. */
+  readonly claimSenders?: readonly string[];
   /** The twelve-word key; required only when no key is stored yet. */
   readonly recoveryKey?: string | { readonly mnemonic: string };
   /** The recovery file's passphrase. In memory; the interface puts it on disk if it deems fit. */
@@ -1006,6 +1021,8 @@ export interface SellStart {
   readonly orderQuote: Readonly<Record<string, unknown>> | null;
   /** The legacy single sender stored by `startSell`, or null when the client supplies the list at claim time. */
   readonly claimSender: string | null;
+  /** The ordered senders stored by `startSell`; empty when the client supplies the list at claim time. */
+  readonly claimSenders: readonly string[];
   readonly readyWindow: ReadyWindow | null;
   readonly resumed: boolean;
   readonly next: "send-xmr";

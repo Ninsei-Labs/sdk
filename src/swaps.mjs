@@ -15,6 +15,7 @@ import * as recordModule from "./record.mjs";
 // The order: our own side is built by the engine's builder, the counterparty's side is verified and accepted, and
 // the joint address is assembled from the halves. There are no formulas of our own in the core - see order.mjs.
 import { buildOwnSideFromHalvesKnown, contextOf, halfHex, norm, normalizeCounterpartyView, orderStepChunked } from "./order.mjs";
+import { predictEscrow } from "./predictEscrow.mjs";
 // Locking the funds: sending goes through the already-finished step (`lock.send`), the wallet is an adapter from outside.
 import * as lock from "./lock.mjs";
 import * as flow from "./swap-flow.mjs";
@@ -449,8 +450,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
     };
     if (!lockerHalf.commitHalfLocker || !lockerHalf.edPointLocker || !lockerHalf.edViewPointLocker) return null;
     try {
-      const raw = await reader({ to: factory, data: engine.evm.encodePredict({ ...quote, ...lockerHalf, factory }) });
-      return engine.evm.decodeAddress(raw);
+      return await predictEscrow({ quote, order, call: reader });
     } catch (error) {
       // A RETRY MUST NOT REPORT A CHAIN READ AS A MISSING ARGUMENT. The caller already brought the signed quote;
       // "bring an escrow" cannot fix a factory that did not answer. A coded refusal keeps its own identity; a bare
@@ -1532,11 +1532,40 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         || String(quote.quoteKey).trim() === "" ? null : addressTextOf(quote.quoteKey, "quoteKey");
       const requestedSender = request.claimSender === undefined || request.claimSender === null
         || String(request.claimSender).trim() === "" ? null : addressTextOf(request.claimSender, "claimSender");
+      const requestedList = request.claimSenders === undefined || request.claimSenders === null
+        ? null : request.claimSenders;
+      if (requestedList !== null && !Array.isArray(requestedList)) {
+        throw new SdkError("bad-input", { field: "claimSenders", why: "not-an-array" });
+      }
+      if (requestedList && requestedList.length === 0) {
+        throw new SdkError("bad-input", { field: "claimSenders", why: "empty" });
+      }
+      if (requestedList && requestedSender) {
+        throw new SdkError("bad-input", { field: "claimSenders", why: "with-claim-sender" });
+      }
       if (requestedSender && requestedSender === dealMaker) {
         throw new SdkError("bad-input", { field: "claimSender", why: "is-deal-maker" });
       }
       if (requestedSender && quoteKeyOwner && requestedSender === quoteKeyOwner) {
         throw new SdkError("bad-input", { field: "claimSender", why: "is-quote-key" });
+      }
+      const offerSender = offer.claimSender === undefined || offer.claimSender === null
+        || String(offer.claimSender).trim() === "" ? null : addressTextOf(offer.claimSender, "offer.claimSender");
+      // THE STORED LIST IS BUILT HERE, ONCE. The relay's published claimSender is the default first sender; a caller
+      // that brings its own ordered list owns the order. The scalar remains a one-element fallback for older callers.
+      const explicitSenders = requestedList || (requestedSender ? [requestedSender] : null);
+      const rawSenders = explicitSenders || (offerSender ? [offerSender] : []);
+      const claimSenders = [];
+      for (const raw of rawSenders) {
+        if (raw === undefined || raw === null || String(raw).trim() === "") {
+          throw new SdkError("bad-input", { field: "claimSenders", why: "empty" });
+        }
+        const sender = addressTextOf(raw, "claimSenders");
+        if (sender === dealMaker) throw new SdkError("bad-input", { field: "claimSenders", why: "is-deal-maker" });
+        if (quoteKeyOwner && sender === quoteKeyOwner) {
+          throw new SdkError("bad-input", { field: "claimSenders", why: "is-quote-key" });
+        }
+        if (!claimSenders.includes(sender)) claimSenders.push(sender);
       }
       // THE RECORD IS FOUND BEFORE A SECOND ONE IS MADE. The same offer retried after a reload yields the same
       // one-time address and escrow; a second record would be a second promise about one deal.
@@ -1555,9 +1584,22 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
           throw new SdkError("quote-refused", { step: "sell-record", why: "offer-changed" });
         }
         const storedSender = existing.claimSender ? addressTextOf(existing.claimSender, "claimSender") : null;
+        const storedList = Array.isArray(existing.claimSenders) ? existing.claimSenders : null;
         // THE OLD SCALAR IS NOT A PIN. A reload may name another sender or bring the ordered list at claim time; the
-        // record keeps the latest scalar only for callers that still use it.
-        if (requestedSender && requestedSender !== storedSender) {
+        // record keeps the latest list and its first sender for callers that still use the scalar. An offer-only
+        // sender fills a record that has no list; it never replaces a list the client already chose.
+        if (explicitSenders && claimSenders.length && (!storedList || storedList.length !== claimSenders.length
+          || storedList.some((value, index) => String(value).toLowerCase() !== claimSenders[index]))) {
+          existing.claimSenders = claimSenders;
+          existing.claimSender = claimSenders[0];
+          try { engine.swap.saveSwap(existing, store); }
+          catch { throw new SdkError("storage-unavailable", { step: "save-claim-senders" }); }
+        } else if (!explicitSenders && !storedList && claimSenders.length) {
+          existing.claimSenders = claimSenders;
+          existing.claimSender = claimSenders[0];
+          try { engine.swap.saveSwap(existing, store); }
+          catch { throw new SdkError("storage-unavailable", { step: "save-claim-senders" }); }
+        } else if (requestedSender && requestedSender !== storedSender) {
           existing.claimSender = requestedSender;
           delete existing.claimSenders;
           try { engine.swap.saveSwap(existing, store); }
@@ -1593,6 +1635,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
           xmrAmount: (existing.escrow && existing.escrow.xmrAmount) || quote.xmrAmount,
           claimTip: existing.claimTip || quote.claimTip, orderQuote: existing.orderQuote || offer.orderQuote,
           claimSender: existing.claimSender || null,
+          claimSenders: Array.isArray(existing.claimSenders) ? existing.claimSenders : [],
           readyWindow: existing.readyWindow || existing.sellWindow || null,
           resumed: true, next: "send-xmr" };
       }
@@ -1662,9 +1705,12 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       swap.orderQuote = offer.orderQuote || null;
       swap.quote = quote;
       swap.claimTip = quote.claimTip || null;
-      // THE CLAIM SENDER IS PART OF THE OFFER, NOT A LATER CHOICE. Keeping it means a reload cannot silently
+      // THE CLAIM SENDER IS PART OF THE OFFER, NOT A LATER CHOICE. Keeping the list means a reload cannot silently
       // send the half to a different node than the one the client selected.
-      if (requestedSender) swap.claimSender = requestedSender;
+      if (claimSenders.length) {
+        swap.claimSenders = claimSenders;
+        swap.claimSender = claimSenders[0];
+      }
       swap.expect = {
         chainId, factory: order.factory, locker: order.locker, claimer: order.claimer, amount: String(order.amount),
         readyBy: order.readyBy, t1: order.t1, salt: order.salt,
@@ -1701,6 +1747,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       return { id: swap.id, side: "sell", escrow: offer.escrow, address: offer.jointAddress,
         xmrAmount: quote.xmrAmount, claimTip: quote.claimTip || null, orderQuote: offer.orderQuote || null,
         claimSender: swap.claimSender || null,
+        claimSenders: Array.isArray(swap.claimSenders) ? swap.claimSenders : [],
         readyWindow: swap.readyWindow || null, resumed: false, next: "send-xmr" };
     },
 
