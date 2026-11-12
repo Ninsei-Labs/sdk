@@ -1828,13 +1828,15 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       }
 
       const timeoutMs = Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0
-        ? Number(request.timeoutMs) : 20_000;
+        ? Math.min(120_000, Number(request.timeoutMs)) : 20_000;
       // ONE SENDER AT A TIME, EACH WITH ITS OWN SLOT. Refusal moves on immediately; an accepted/unknown answer is
       // followed by reading the escrow until it says claimed or the slot ends. A txid alone is never success.
       const slotMs = Number.isFinite(Number(request.slotMs)) && Number(request.slotMs) > 0
         ? Math.min(30_000, Math.max(15_000, Number(request.slotMs))) : 20_000;
+      // A POLL UNDER 250 ms only burns chain reads, and a timeout above two minutes would hide a stuck sender
+      // behind a wait the caller does not expect.
       const pollMs = Number.isFinite(Number(request.pollMs)) && Number(request.pollMs) > 0
-        ? Math.min(slotMs, Number(request.pollMs)) : 2_000;
+        ? Math.min(slotMs, Math.max(250, Number(request.pollMs))) : 2_000;
       const readStatus = async () => {
         try { return await flow.orderStatus(escrow, { call: reader }); }
         catch (error) {
@@ -1899,10 +1901,46 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       if (!initial.isFunded) return windowResult("not-funded", []);
       let refunded = Boolean(initial.isRefunded);
       const tried = [];
-      if (!refunded) for (const sender of senders) {
+      // A SENDER THAT MAY HAVE RECEIVED THE HALF IS NOT TRIED AGAIN AFTER A RELOAD. The record gets the sender
+      // before the POST, so a crash or a lost answer leaves a durable trace. A refused sender may be skipped; an
+      // attempt left in flight or unknown stops the list with claim-unknown, because the half may already be out.
+      const priorAttempts = Array.isArray(swap.claimAttempts) ? swap.claimAttempts : [];
+      const attempted = new Set(priorAttempts.map((entry) => String(entry && entry.sender || "").toLowerCase()));
+      const pendingSenders = senders.filter((sender) => !attempted.has(String(sender).toLowerCase()));
+      const priorTried = priorAttempts.map((entry) => ({
+        sender: entry.sender, outcome: entry.outcome || "unknown", code: entry.code || null,
+        params: entry.params || null, txid: entry.txid || null,
+      }));
+      if (priorAttempts.some((entry) => entry && (entry.outcome === "sending" || entry.outcome === "unknown"))) {
+        throw new SdkError("claim-unknown", { step: "relay-claim", why: "previous-sender-unknown" });
+      }
+      if (!pendingSenders.length) {
+        return { id, state: "claim-yourself", reason: refunded ? "escrow-refunded" : "senders-exhausted",
+          provider: null, claimSender: null, escrow, relayUrl, txid: null, from: null, tipWei: tip.toString(),
+          t1, secondsLeft: secondsLeft(), tried: priorTried };
+      }
+      const persistAttempts = (entry, outcome, extra = {}) => {
+        if (entry) Object.assign(entry, { outcome, ...extra });
+        try { engine.swap.saveSwap(swap, store); }
+        catch { throw new SdkError("storage-unavailable", { step: "save-claim-attempt" }); }
+      };
+      const beginAttempt = (sender) => {
+        const entry = { sender, at: Math.floor(clockMs() / 1000), outcome: "sending" };
+        swap.claimAttempts = [...(Array.isArray(swap.claimAttempts) ? swap.claimAttempts : []), entry];
+        persistAttempts(entry, "sending");
+        return entry;
+      };
+      const finishAttempt = (entry, outcome, extra = {}) => {
+        try { persistAttempts(entry, outcome, extra); } catch { /* the chain answer is already known */ }
+      };
+      if (!refunded) for (const sender of pendingSenders) {
         const gate = await windowOf();
         if (!gate.ok) return windowResult(gate.reason, tried);
         if (gate.t1 !== null) t1 = gate.t1;
+        const attempt = beginAttempt(sender);
+        // THE SLOT STARTS WHEN THE SENDER IS ENTERED, NOT WHEN ITS POST RETURNS. A slow POST must not stretch the
+        // 15-30 s slot into twice the advertised time.
+        const slotStartedAt = clockMs();
         let answer = null;
         let failure = null;
         try {
@@ -1918,8 +1956,10 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         // different: it says the order itself is closed, so trying another sender would publish the half for no
         // reason. Read the escrow and stop.
         if (failure && failure.code !== "claim-unknown") {
-          tried.push({ sender, outcome: "refused", code: failure.code || "unknown",
-            params: failure.params || null });
+          const refused = { sender, outcome: "refused", code: failure.code || "unknown",
+            params: failure.params || null };
+          tried.push(refused);
+          finishAttempt(attempt, "refused", { code: refused.code, params: refused.params });
           if (STOP_ESCROW_CODES.has(String((failure.params && failure.params.code) || ""))) {
             const stopped = await readStatus();
             if (stopped.isClaimed) return claimedByEscrow(sender, null, tried);
@@ -1928,11 +1968,12 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
           }
           continue;
         }
-        const slotEnd = clockMs() + slotMs;
+        const slotEnd = slotStartedAt + slotMs;
         for (;;) {
           const status = await readStatus();
           if (status && status.isClaimed) {
             swap.claimSender = sender;
+            finishAttempt(attempt, "claimed", { txid: answer ? answer.txid : null });
             try { engine.swap.saveSwap(swap, store); } catch { /* the chain already says claimed */ }
             return claimedByEscrow(sender, answer, tried);
           }
@@ -1941,8 +1982,10 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
           if (left <= 0) break;
           await sleepFor(Math.min(pollMs, left));
         }
-        tried.push({ sender, outcome: failure ? "unknown" : "unconfirmed",
-          txid: answer ? answer.txid : null, code: failure ? failure.code : null });
+        const ended = { sender, outcome: failure ? "unknown" : "unconfirmed",
+          txid: answer ? answer.txid : null, code: failure ? failure.code : null };
+        tried.push(ended);
+        finishAttempt(attempt, ended.outcome, { txid: ended.txid, code: ended.code });
         if (refunded) break;
       }
 

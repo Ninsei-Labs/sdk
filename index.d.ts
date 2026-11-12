@@ -1030,10 +1030,11 @@ export interface RelayClaimRequest {
   readonly relayUrl?: string;
   /** One sender's slot; clamped to 15-30 s. Default 20 s. */
   readonly slotMs?: number;
-  /** How often the escrow is read during a slot. Default 2 s. */
+  /** How often the escrow is read during a slot; clamped to at least 250 ms. Default 2 s. */
   readonly pollMs?: number;
-  readonly fetchImpl?: typeof fetch;
+  /** HTTP timeout per sender; capped at 120 s. Default 20 s. */
   readonly timeoutMs?: number;
+  readonly fetchImpl?: typeof fetch;
 }
 
 /** One sender's outcome in a list claim. */
