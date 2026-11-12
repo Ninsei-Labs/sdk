@@ -6,6 +6,7 @@
 // and the buyer cannot withdraw after the funds are locked.
 //
 // Run: node tools/check-key-view.mjs
+import { createHash } from "node:crypto";
 import { createSwaps } from "../src/swaps.mjs";
 import { buildOwnSideFromHalves } from "../src/order.mjs";
 import { primitives } from "../src/primitives.mjs";
@@ -123,7 +124,7 @@ console.log("=== 1c1) A MALFORMED SALT IS REFUSED BY NAME, NOT IGNORED ===");
   } else bad("malformed salt: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
 }
 
-async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 }, funded = false, withId = true, withQuote = true, withSignature = true, escrow = null, recoverySalt = order.salt, orderSalt = order.salt, predictThrows = false } = {}) {
+async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 }, funded = false, withId = true, withQuote = true, withSignature = true, escrow = null, recoverySalt = order.salt, orderSalt = order.salt, predictThrows = false, predictFromData = false, quotePatch = {}, orderPatch = {} } = {}) {
   if (fresh) setStorage(memoryStorage());
   let sent = 0;
   const wallet = { chainId: async () => order.chainId, address: async () => order.locker,
@@ -131,8 +132,9 @@ async function startPending({ fresh = true, receipt = { status: "0x1", logs: [],
     receipt: async () => receipt };
   const counterparty = { proof: maker.side.proof, edPointClaimer: maker.spendPoint,
     commitHalfClaimer: quote.commitHalfClaimer, viewHalfClaimer: derived.makerViewHalf };
-  const activeQuote = withSignature ? quote : { ...quote, signature: undefined };
-  const request = { quote: { ...(withId ? { id: "q" } : {}), chain: "arbitrum-sepolia", asset: "ETH", amount: 1, size: 1 }, order: { ...order, salt: orderSalt }, ...(withQuote ? { orderQuote: activeQuote } : {}),
+  const baseQuote = withSignature ? quote : { ...quote, signature: undefined };
+  const activeQuote = { ...baseQuote, ...quotePatch };
+  const request = { quote: { ...(withId ? { id: "q" } : {}), chain: "arbitrum-sepolia", asset: "ETH", amount: 1, size: 1 }, order: { ...order, salt: orderSalt, ...orderPatch }, ...(withQuote ? { orderQuote: activeQuote } : {}),
     counterparty, recoveryKey: WORDS, recoverySalt, receiveTo: "synthetic-xmr-destination",
     restoreHeight: 100, wallet, onRecoveryKey: async () => true, ...(escrow ? { escrow } : {}) };
   const fundedStatus = "0x" + [1, 0, 0, 0].map((value) => BigInt(value).toString(16).padStart(64, "0")).join("");
@@ -140,7 +142,11 @@ async function startPending({ fresh = true, receipt = { status: "0x1", logs: [],
     call: async ({ data }) => {
       if (predictThrows && data.startsWith(FACTORY_METHODS.predict)) throw new Error("factory read failed");
       if (data === encodeStatus()) return funded ? fundedStatus : "0x";
-      return data.startsWith(FACTORY_METHODS.predict) ? "0x" + "0".repeat(24) + "88".repeat(20) : "0x";
+      if (data.startsWith(FACTORY_METHODS.predict)) {
+        if (predictFromData) return "0x" + "0".repeat(24) + createHash("sha256").update(String(data)).digest("hex").slice(-40);
+        return "0x" + "0".repeat(24) + "88".repeat(20);
+      }
+      return "0x";
     },
   }).start(request).catch((error) => error);
   return { result, sent };
@@ -252,6 +258,22 @@ console.log("=== 1c3b) A FAILED PREDICT ON RETRY IS NOT A MISSING ESCROW ===");
     ok("a factory read failure on retry is named as predict-failed, not as a missing escrow");
   } else {
     bad("predict retry: " + JSON.stringify({ first: first.result && first.result.step,
+      code: second.result && second.result.code, params: second.result && second.result.params, sent: second.sent }));
+  }
+}
+
+console.log("=== 1c3c) A RETRY THAT PREDICTS A DIFFERENT ESCROW IS REFUSED ===");
+{
+  const first = await startPending({ predictFromData: true });
+  const second = await startPending({ fresh: false, predictFromData: true,
+    quotePatch: { edPointLocker: "0x" + "a9".repeat(32) } });
+  if (first.result && first.result.step === "funding-pending" &&
+      second.result && second.result.code === "bad-input" &&
+      second.result.params && second.result.params.field === "escrow" &&
+      second.result.params.why === "pending-funding-unresolved" && second.sent === 0) {
+    ok("a retry whose calldata predicts another escrow does not resume the pending row");
+  } else {
+    bad("predict-from-data retry: " + JSON.stringify({ first: first.result && first.result.step,
       code: second.result && second.result.code, params: second.result && second.result.params, sent: second.sent }));
   }
 }

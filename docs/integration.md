@@ -38,8 +38,10 @@ isolated; do not reuse a storage adapter between tenants.
 | `evmCode` | Factory/implementation code checks | `(address: string) => Promise<hex>`; without it the code-hash policy cannot be applied. |
 | `evmBlock` | Quote tip and block-time checks | `(tag?) => Promise<{ timestamp, baseFeePerGas?, baseFeeWei?, priorityFeePerGas?, maxPriorityFeePerGas?, gasPrice?, ... }>`; the priority fee may be explicit or derived from `gasPrice - baseFee`; an unread block is a named refusal, not zero. |
 | `evmLogs` | Decline and order event reads | `({ address, topics, fromBlock, toBlock }) => Promise<logs>`. |
-| `fetch` | HTTP and Monero-node probes | `fetch`-compatible function. The client uses it as the default transport for relay quotes/claims, Monero height probes and witness checks; a per-call `fetchImpl` still wins. |
+| `fetch` | HTTP and Monero-node probes | `fetch`-compatible function. The client uses it as the default transport for relay quotes/claims, Monero height probes and witness checks; a per-call `fetchImpl` wins for relay quote/claim and `fetch` wins for arrival/witness checks. |
 | `createRecord` | A host-owned swap record | Optional capability. The default record builder is part of the SDK. |
+
+Arrival and witness requests also accept a per-call `fetch`; it wins over the instance `fetch` and `fetchImpl`.
 
 `driver()` on an EVM wallet must return the same EIP-1193 provider that signs. The SDK uses it for action reads and
 for the latest block; a different provider would let the guard read a different chain than the wallet signs on.
