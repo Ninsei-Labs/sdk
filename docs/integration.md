@@ -90,10 +90,14 @@ There are two claim paths, and the host picks by what the seller holds:
 
 The SDK tries one sender at a time for a 15-30 s slot. A refusal moves on at once; an accepted txid or
 `claim-unknown` is followed by reading the escrow until it says `claimed` or the slot ends. The deal's maker and
-its quote-key owner are refused before the half leaves the client. When the list is exhausted the result is
-`state: "claim-yourself"` with `t1` and `secondsLeft`; `sellClaim` remains the fallback. It does not take a relay
-from the caller after the quote: an optional `relayUrl` may repeat the stored origin, and any other origin is
-refused with `bad-input`. The half is never logged or written by this path.
+its quote-key owner are refused before the half leaves the client. Before every sender the SDK reads the escrow's
+`ready` mark, `readyBy` and `t1`; without the mark before `readyBy`, at or after `t1`, or inside the 120 s settlement
+margin (plus a slot and time for the seller's own claim) it returns `state: "claim-window"` with a named reason and
+posts nothing. An unread escrow is `claim-unknown` with `why: "escrow-unread"`, never `claim-yourself`. A relay
+answer such as `claim-not-ready` or `claim-window-closed` stops the list instead of passing the half to the next
+sender. When the list is exhausted the result is `state: "claim-yourself"` with `t1` and `secondsLeft`; `sellClaim`
+remains the fallback. It does not take a relay from the caller after the quote: an optional `relayUrl` may repeat the
+stored origin, and any other origin is refused with `bad-input`. The half is never logged or written by this path.
 
 The sell record also keeps the node's signed `readyWindow`. `sellWatch`, the late-arrival boundary and
 `refundIfXmrMissing` use its `readyMinSeconds`/`readyMaxSeconds`; a record without the window is refused with

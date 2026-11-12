@@ -63,9 +63,6 @@ const word = (value) => BigInt(value).toString(16).padStart(64, "0");
 const bytes = (value) => String(value).replace(/^0x/, "").padStart(64, "0");
 const lower = (value) => String(value || "").toLowerCase();
 const slotReads = {
-  [encodeRead("t1")]: word(order.t1),
-  [encodeRead("readyBy")]: word(order.readyBy),
-  [encodeRead("ready")]: word(1),
   [encodeRead("termsHash")]: "00".repeat(32),
   [encodeRead("edPointLocker")]: bytes(offer.nodeHalf.edPoint),
   [encodeRead("edPointClaimer")]: bytes(quote.edPointClaimer),
@@ -74,15 +71,23 @@ const slotReads = {
   [encodeRead("commitHalfClaimer")]: bytes(quote.commitHalfClaimer),
 };
 let clockMs = 1_900_000_000_000;
+let readyMark = 1;
+let t1Sec = order.t1;
+let readyBySec = order.readyBy;
+let statusUnreadable = false;
 let chainStatus = { funded: true, claimed: false, refunded: false, balance: 1_000_000_000_000_000_000n };
 const resetChain = (overrides = {}) => {
   chainStatus = { funded: true, claimed: false, refunded: false, balance: 1_000_000_000_000_000_000n, ...overrides };
 };
 const read = async ({ data }) => {
   if (data === encodeStatus()) {
+    if (statusUnreadable) throw new Error("escrow status is unreadable");
     return "0x" + word(chainStatus.funded ? 1 : 0) + word(chainStatus.claimed ? 1 : 0)
       + word(chainStatus.refunded ? 1 : 0) + word(chainStatus.balance);
   }
+  if (data === encodeRead("ready")) return "0x" + word(readyMark);
+  if (data === encodeRead("t1")) return "0x" + word(t1Sec);
+  if (data === encodeRead("readyBy")) return "0x" + word(readyBySec);
   const answer = slotReads[data];
   if (!answer) throw new Error("unexpected chain read " + data);
   return "0x" + answer;
@@ -448,6 +453,67 @@ export const relayClaimCheck = async () => {
     check(signatures.length === 1 && signatures[0].data.startsWith("0xbd66528a")
       && signatures[0].data.toLowerCase().endsWith(String(stored.escrow.half).replace(/^0x/, "").toLowerCase()),
       "sellClaim did not present the record's half to claim()");
+  }
+
+  // (9) THE CLAIM WINDOW IS NOT THE RELAY'S TO WIDEN. Every boundary is checked BEFORE the half is posted, and a
+  // boundary refusal names the window instead of asking the seller to claim.
+  {
+    const cases = [
+      ["before readyBy without the mark", { ready: 0, nowSec: order.readyBy - 100 }, "not-ready"],
+      ["at t1", { ready: 1, nowSec: order.t1 }, "window-closed"],
+      ["inside the settlement margin", { ready: 1, nowSec: order.t1 - 100 }, "settlement-margin"],
+      ["unfunded escrow", { ready: 1, nowSec: Math.floor(1_900_000_000_000 / 1000), chain: { funded: false } }, "not-funded"],
+    ];
+    for (const [label, options, reason] of cases) {
+      resetChain(options.chain || {});
+      readyMark = options.ready;
+      t1Sec = order.t1;
+      readyBySec = order.readyBy;
+      statusUnreadable = false;
+      clockMs = options.nowSec * 1000;
+      let calls = 0;
+      const result = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender, secondSender],
+        fetchImpl: async () => { calls += 1; chainStatus.claimed = true; return answer(relaySender, "0x" + "f0".repeat(32)); } });
+      check(result && result.state === "claim-window" && result.reason === reason && calls === 0,
+        label + " did not stop before the relay: " + JSON.stringify({ result, calls }));
+      check(result && result.tried && result.tried.length === 0, label + " recorded a sender it never tried");
+    }
+
+    // AFTER readyBy THE CONTRACT ALLOWS A CLAIM WITHOUT THE MARK. The client must not turn that into a blanket
+    // not-ready refusal: this is the legal no-mark branch.
+    resetChain();
+    readyMark = 0;
+    t1Sec = order.t1;
+    readyBySec = order.readyBy;
+    statusUnreadable = false;
+    clockMs = (order.readyBy + 10) * 1000;
+    let calls = 0;
+    const open = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender],
+      fetchImpl: async () => { calls += 1; chainStatus.claimed = true; return answer(relaySender, "0x" + "f1".repeat(32)); } });
+    check(open && open.state === "claimed" && calls === 1,
+      "a claim after readyBy without the mark was refused: " + JSON.stringify({ open, calls }));
+
+    // A FAILED ESCROW READ IS UNKNOWN, NOT "CLAIM YOURSELF". The half may already have landed.
+    resetChain();
+    readyMark = 1;
+    t1Sec = order.t1;
+    readyBySec = order.readyBy;
+    statusUnreadable = true;
+    clockMs = 1_900_000_000_000;
+    let unreadCalls = 0;
+    try {
+      await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender],
+        fetchImpl: async () => { unreadCalls += 1; chainStatus.claimed = true; return answer(relaySender, "0x" + "f2".repeat(32)); } });
+      check(false, "an unread escrow was reported as a claim-yourself");
+    } catch (error) {
+      check(error && error.code === "claim-unknown" && error.params && error.params.why === "escrow-unread",
+        "an unread escrow did not refuse with claim-unknown/escrow-unread");
+    }
+    check(unreadCalls === 0, "an unread escrow still posted the half");
+    statusUnreadable = false;
+    resetChain();
+    readyMark = 1;
+    clockMs = 1_900_000_000_000;
   }
 
   notes.push("the client list is tried in order; a refusal moves on, a txid waits for the escrow, and exhaustion asks for the seller's own claim");

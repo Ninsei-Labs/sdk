@@ -216,6 +216,8 @@ if (claimed.state === "claimed") {
   claimed.txid;    // the claim transaction, or null when the escrow itself showed claimed
   claimed.from;    // the sender node's claim sender
   claimed.tipWei;  // the signed tip paid out of the claim
+} else if (claimed.state === "claim-window") {
+  claimed.reason;  // not-ready | window-closed | settlement-margin | not-funded | unreadable
 } else {
   claimed.secondsLeft; // no sender landed it: claim yourself before t1
 }
@@ -226,6 +228,13 @@ one sender at a time for a 15-30 s slot. A refusal moves on at once; a txid is n
 escrow until it says `claimed` or the slot ends. The deal's maker and its quote-key owner are refused before the
 half leaves the client. When the list is exhausted the result is `state: "claim-yourself"` with `t1` and
 `secondsLeft`. The old scalar `claimSender` remains a one-element fallback for callers written before the list.
+
+The claim window is the escrow's, not the relay's. Before every sender the SDK reads `ready`, `readyBy` and `t1`
+from the chain. Without the ready mark before `readyBy`, at or after `t1`, or inside the 120 s settlement margin
+(plus the sender's slot and time for the seller's own claim), it returns `state: "claim-window"` with a named
+`reason` and posts nothing. An unread escrow is `claim-unknown` with `why: "escrow-unread"`; it is never reported as
+`claim-yourself`. A relay answer such as `claim-not-ready` or `claim-window-closed` stops the list instead of
+passing the half to the next sender.
 
 `claimViaRelay` reads the sell record made by `startSell` and requires a positive `claimTip`, the escrow and the
 half. It posts to the relay origin stored with the record; an optional `relayUrl` may repeat that origin but a

@@ -924,8 +924,16 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
 
       // RESUME BEFORE ANY NEW SIDE OR SEND. The previous start may have sent the deposit and lost the receipt;
       // reusing its hash is the only way to learn the escrow without a second payment.
-      const saltForResume = request.recoverySalt || (request.order && request.order.salt) ||
+      const rawSaltForResume = request.recoverySalt || (request.order && request.order.salt) ||
         (request.orderQuote && request.orderQuote.salt) || null;
+      // THE SALT THAT MATCHES THE PENDING ROW IS THE CANONICAL ONE. A caller may pass a number or a bigint
+      // (`StartRequest.recoverySalt` allows all three); the record holds hex, so the raw value would miss the row
+      // after a reload and start a second deposit. Canonicalise once, before the identity lookup.
+      let saltForResume = null;
+      try {
+        saltForResume = rawSaltForResume === null || rawSaltForResume === undefined || rawSaltForResume === ""
+          ? null : recoverySaltOf(rawSaltForResume);
+      } catch { saltForResume = null; }
       const resumeIdentity = {
         salt: saltForResume,
         // THE QUOTE ID IS ONLY A SELECTOR. It lets a salt-less retry name the pending row and be refused loudly, but
@@ -1820,11 +1828,56 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       const pollMs = Number.isFinite(Number(request.pollMs)) && Number(request.pollMs) > 0
         ? Math.min(slotMs, Number(request.pollMs)) : 2_000;
       const readStatus = async () => {
-        try { return await flow.orderStatus(escrow, { call: reader }); } catch { return null; }
+        try { return await flow.orderStatus(escrow, { call: reader }); }
+        catch (error) {
+          // AN UNREAD ESCROW IS NOT AN OPEN ONE. The caller must not be told to claim a sale whose state we could
+          // not read; the half may already have landed. This is the same unknown state as a lost relay answer.
+          throw new SdkError("claim-unknown", { step: "relay-claim", why: "escrow-unread",
+            detail: String((error && error.message) || error).slice(0, 160) });
+        }
       };
       const t1Raw = order.t1 ?? (swap.expect && swap.expect.t1);
-      const t1 = Number.isSafeInteger(Number(t1Raw)) && Number(t1Raw) > 0 ? Number(t1Raw) : null;
+      let t1 = Number.isSafeInteger(Number(t1Raw)) && Number(t1Raw) > 0 ? Number(t1Raw) : null;
       const secondsLeft = () => (t1 === null ? null : Math.max(0, t1 - Math.floor(clockMs() / 1000)));
+      // THE CLAIM WINDOW BELONGS TO THE CONTRACT, NOT TO THE RELAY. The relay can forward any half it is given, so
+      // the client must refuse to hand it over before `readyBy` without the ready mark, after `t1`, and inside the
+      // settlement margin when neither a sender nor the seller's own claim can still land. The check reads the
+      // escrow's ready mark and both deadlines for EVERY sender, not once for the whole list: a slot can cross a
+      // boundary while the previous sender is being polled.
+      const CLAIM_MARGIN_SEC = 120;
+      const SELLER_CLAIM_SEC = 60;
+      const windowOf = async () => {
+        let deadlines;
+        try { deadlines = await flow.orderDeadlines(escrow, { call: reader }); }
+        catch { return { ok: false, reason: "unreadable" }; }
+        const t1Sec = Number(deadlines.t1);
+        const readyBySec = Number(deadlines.readyBy);
+        const nowSec = Math.floor(clockMs() / 1000);
+        if (![t1Sec, readyBySec, nowSec].every(Number.isSafeInteger)) {
+          return { ok: false, reason: "unreadable" };
+        }
+        let marked;
+        try {
+          const raw = await reader({ to: escrow, data: engine.evm.encodeRead("ready") });
+          marked = BigInt(String(raw || "").replace(/^0x/, "") || "0") !== 0n;
+        } catch { return { ok: false, reason: "unreadable" }; }
+        if (nowSec >= t1Sec) return { ok: false, reason: "window-closed" };
+        // A SEND LANDS IN A LATER BLOCK. The last 120 s belong to the relay's settlement margin, and the seller
+        // still needs a slot plus time for their own claim if the relay cannot land it.
+        if (nowSec + CLAIM_MARGIN_SEC + Math.ceil(slotMs / 1000) + SELLER_CLAIM_SEC >= t1Sec) {
+          return { ok: false, reason: "settlement-margin" };
+        }
+        if (nowSec < readyBySec && !marked) return { ok: false, reason: "not-ready" };
+        return { ok: true, t1: t1Sec, readyBy: readyBySec, nowSec };
+      };
+      const windowResult = (reason, tried) => ({
+        id, state: "claim-window", reason, provider: null, claimSender: null, escrow, relayUrl,
+        txid: null, from: null, tipWei: tip.toString(), t1, secondsLeft: secondsLeft(), tried,
+      });
+      const STOP_ESCROW_CODES = new Set([
+        "claim-not-ready", "claim-window-closed", "claim-settlement-margin",
+        "claim-not-funded", "claim-already-closed", "claim-half-invalid",
+      ]);
       const claimedByEscrow = (sender = null, answer = null, tried = []) => ({
         id, state: "claimed", provider: sender, claimSender: sender, escrow, relayUrl,
         txid: answer ? answer.txid : null, from: (answer && answer.from) || null,
@@ -1834,10 +1887,14 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       // the previous attempt; read the escrow before the first POST, and read it once more before returning
       // `claim-yourself`, so a late claim cannot be reported as "claim yourself".
       const initial = await readStatus();
-      if (initial && initial.isClaimed) return claimedByEscrow();
-      let refunded = Boolean(initial && initial.isRefunded);
+      if (initial.isClaimed) return claimedByEscrow();
+      if (!initial.isFunded) return windowResult("not-funded", []);
+      let refunded = Boolean(initial.isRefunded);
       const tried = [];
       if (!refunded) for (const sender of senders) {
+        const gate = await windowOf();
+        if (!gate.ok) return windowResult(gate.reason, tried);
+        if (gate.t1 !== null) t1 = gate.t1;
         let answer = null;
         let failure = null;
         try {
@@ -1849,10 +1906,18 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
           failure = error;
         }
         // A REFUSAL IS THE SENDER'S ANSWER, NOT A CLAIM IN FLIGHT. Move to the next one at once; only an unknown
-        // outcome (or a txid, which is not yet a claim on chain) deserves the slot.
+        // outcome (or a txid, which is not yet a claim on chain) deserves the slot. An escrow-state refusal is
+        // different: it says the order itself is closed, so trying another sender would publish the half for no
+        // reason. Read the escrow and stop.
         if (failure && failure.code !== "claim-unknown") {
           tried.push({ sender, outcome: "refused", code: failure.code || "unknown",
             params: failure.params || null });
+          if (STOP_ESCROW_CODES.has(String((failure.params && failure.params.code) || ""))) {
+            const stopped = await readStatus();
+            if (stopped.isClaimed) return claimedByEscrow(sender, null, tried);
+            if (stopped.isRefunded) return windowResult("escrow-refunded", tried);
+            return windowResult("escrow-refused", tried);
+          }
           continue;
         }
         const slotEnd = clockMs() + slotMs;
@@ -1876,11 +1941,14 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       // THE LAST LOOK BEFORE THE FALLBACK. A claim can land after the last slot ended or while a later sender is
       // refusing; the seller must not be sent to `sellClaim` on an escrow that is already closed as claimed.
       const finalStatus = await readStatus();
-      if (finalStatus && finalStatus.isClaimed) {
+      if (finalStatus.isClaimed) {
         try { engine.swap.saveSwap(swap, store); } catch { /* the chain already says claimed */ }
         return claimedByEscrow(null, null, tried);
       }
-      if (finalStatus && finalStatus.isRefunded) refunded = true;
+      if (finalStatus.isRefunded) refunded = true;
+      if (!finalStatus.isFunded) return windowResult("not-funded", tried);
+      const finalGate = await windowOf();
+      if (!finalGate.ok) return windowResult(finalGate.reason, tried);
       return { id, state: "claim-yourself", reason: refunded ? "escrow-refunded" : "senders-exhausted",
         provider: null, claimSender: null, escrow, relayUrl, txid: null, from: null, tipWei: tip.toString(),
         t1, secondsLeft: secondsLeft(), tried };

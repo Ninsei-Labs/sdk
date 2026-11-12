@@ -114,7 +114,7 @@ console.log("=== 1c) A SALT THE QUOTE DID NOT CARRY IS REFUSED ===");
   else bad("salt mismatch: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
 }
 
-async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 }, funded = false, withId = true, withQuote = true, withSignature = true, escrow = null } = {}) {
+async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 }, funded = false, withId = true, withQuote = true, withSignature = true, escrow = null, recoverySalt = order.salt, orderSalt = order.salt } = {}) {
   if (fresh) setStorage(memoryStorage());
   let sent = 0;
   const wallet = { chainId: async () => order.chainId, address: async () => order.locker,
@@ -123,8 +123,8 @@ async function startPending({ fresh = true, receipt = { status: "0x1", logs: [],
   const counterparty = { proof: maker.side.proof, edPointClaimer: maker.spendPoint,
     commitHalfClaimer: quote.commitHalfClaimer, viewHalfClaimer: derived.makerViewHalf };
   const activeQuote = withSignature ? quote : { ...quote, signature: undefined };
-  const request = { quote: { ...(withId ? { id: "q" } : {}), chain: "arbitrum-sepolia", asset: "ETH", amount: 1, size: 1 }, order, ...(withQuote ? { orderQuote: activeQuote } : {}),
-    counterparty, recoveryKey: WORDS, recoverySalt: order.salt, receiveTo: "synthetic-xmr-destination",
+  const request = { quote: { ...(withId ? { id: "q" } : {}), chain: "arbitrum-sepolia", asset: "ETH", amount: 1, size: 1 }, order: { ...order, salt: orderSalt }, ...(withQuote ? { orderQuote: activeQuote } : {}),
+    counterparty, recoveryKey: WORDS, recoverySalt, receiveTo: "synthetic-xmr-destination",
     restoreHeight: 100, wallet, onRecoveryKey: async () => true, ...(escrow ? { escrow } : {}) };
   const fundedStatus = "0x" + [1, 0, 0, 0].map((value) => BigInt(value).toString(16).padStart(64, "0")).join("");
   const result = await createSwaps({ mode: "live", xmrNetwork: "stagenet", logs: async () => [],
@@ -214,6 +214,20 @@ console.log("=== 1c2) A PENDING ROW WITHOUT ITS SALT IS REFUSED, NOT STARTED AGA
     ok("a pending quote id without a salt is refused instead of opening a second deposit");
   } else {
     bad("salt-less pending retry: " + JSON.stringify({ first: first.result && first.result.step, code: second.result && second.result.code, params: second.result && second.result.params, sent: second.sent }));
+  }
+}
+
+console.log("=== 1c3) A BIGINT SALT RESUMES THE SAME PENDING DEPOSIT ===");
+{
+  const first = await startPending();
+  const second = await startPending({ fresh: false, recoverySalt: BigInt(order.salt) });
+  if (first.result && first.result.step === "funding-pending" &&
+      second.result && second.result.step === "funding-pending" && second.sent === 0) {
+    ok("a bigint recoverySalt is canonicalised before the pending lookup and sends nothing");
+  } else {
+    bad("bigint salt retry: " + JSON.stringify({ first: first.result && first.result.step,
+      code: second.result && second.result.code, params: second.result && second.result.params,
+      step: second.result && second.result.step, sent: second.sent }));
   }
 }
 

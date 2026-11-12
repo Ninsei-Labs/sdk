@@ -1074,7 +1074,27 @@ export interface RelayClaimYourself {
   readonly tried: readonly RelayClaimAttempt[];
 }
 
-export type RelayClaimResult = RelayClaimed | RelayClaimYourself;
+/**
+ * The half was not handed to any sender because the escrow's own claim window is not open. The caller must not
+ * retry the relay list: the state, not the sender, is the answer.
+ */
+export interface RelayClaimWindow {
+  readonly state: "claim-window";
+  readonly reason: "not-ready" | "window-closed" | "settlement-margin" | "unreadable" | "not-funded" | "escrow-refused" | "escrow-refunded";
+  readonly id: string;
+  readonly provider: null;
+  readonly claimSender: null;
+  readonly escrow: string;
+  readonly relayUrl: string;
+  readonly txid: null;
+  readonly from: null;
+  readonly tipWei: string;
+  readonly t1: number | null;
+  readonly secondsLeft: number | null;
+  readonly tried: readonly RelayClaimAttempt[];
+}
+
+export type RelayClaimResult = RelayClaimed | RelayClaimYourself | RelayClaimWindow;
 
 export interface SellWatchRequest {
   /** The escrow predicted by the relay adapter. */
