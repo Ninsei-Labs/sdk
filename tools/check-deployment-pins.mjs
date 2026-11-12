@@ -86,6 +86,12 @@ for (const [network, pin] of Object.entries(DEPLOYMENTS)) {
   check(blocks.every((block, i) => i === 0 || block >= blocks[i - 1]), `${network}: history is not ordered by block`);
   check(history.filter((entry) => entry.status === "retired").every((entry) => Boolean(entry.release && entry.release.tag)),
     `${network}: a retired history entry has no release tag`);
+  // HISTORY IS MAINNET ONLY. While a network is in development every factory switch replaces the old one; keeping
+  // retired factories there would make recovery search old testnet addresses that no user should depend on.
+  const retired = history.filter((entry) => entry.status === "retired");
+  if (String(pin.chainRef) !== "42161") {
+    check(retired.length === 0, `${network}: retired factory history is mainnet-only (chain 42161)`);
+  }
 }
 for (const network of Object.keys(FACTORY_HISTORY)) {
   check(Boolean(DEPLOYMENTS[network]), `${network}: FACTORY_HISTORY has no deployment pin`);
