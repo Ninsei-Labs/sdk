@@ -168,6 +168,13 @@ export const sweepWindowCheck = async () => {
       window: { nodeUrl: "http://127.0.0.1:9", toHeight: 110, tipHeight: 900 } });
     check(restored && restored.total === "0", "the instance-fetch restore did not report its balance");
     check(instanceCalls.length === 11, `the instance fetch did not read the window: ${instanceCalls.length} calls`);
+    let badFetch = null;
+    try {
+      await instance.restore({ wallet: instanceWallet.wallet, fromHeight: 100, fetchImpl: "not-a-function",
+        window: { nodeUrl: "http://127.0.0.1:9", toHeight: 110, tipHeight: 900 } });
+    } catch (error) { badFetch = error; }
+    check(badFetch && badFetch.code === "bad-input" && badFetch.params && badFetch.params.field === "fetchImpl",
+      "a non-function per-call fetch was silently replaced: " + JSON.stringify(badFetch && badFetch.code));
     notes.push("the facade's fetch is used by restore instead of the global fetch");
   }
 

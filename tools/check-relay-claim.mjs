@@ -617,6 +617,21 @@ export const relayClaimCheck = async () => {
         "an unknown sender was not named as a previous in-flight sender");
     }
     check(retryCalls === 0, "an unknown sender was posted again after reload");
+
+    // A RESUME WHOSE SENDERS ARE ALL TRIED MUST NOT TURN A LATER REFUND INTO A CLAIM INSTRUCTION.
+    resetAttempts();
+    resetChain();
+    const refusedFirst = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender],
+      fetchImpl: async () => refusal("claim-tip-too-small") });
+    check(refusedFirst && refusedFirst.state === "claim-yourself",
+      "the resume-refund fixture did not record a refused sender");
+    resetChain({ refunded: true });
+    let refundPosts = 0;
+    const refundedResume = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender],
+      fetchImpl: async () => { refundPosts += 1; return refusal("claim-tip-too-small"); } });
+    check(refundedResume && refundedResume.state === "claim-window"
+      && refundedResume.reason === "escrow-refunded" && refundPosts === 0,
+      "a refunded escrow on resume was reported as claim-yourself: " + JSON.stringify({ refundedResume, refundPosts }));
   }
 
   // (11) A SLOW POST DOES NOT EXTEND ITS SLOT.

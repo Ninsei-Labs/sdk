@@ -337,6 +337,9 @@ export function createSweep({ call = null, fetchImpl = null } = {}) {
     // no longer decides when a second pass is needed.
     async restore(request) {
       const merged = { ...(request || {}) };
+      if (merged.fetchImpl !== undefined && merged.fetchImpl !== null && typeof merged.fetchImpl !== "function") {
+        throw new SdkError("bad-input", { field: "fetchImpl" });
+      }
       // THE INSTANCE TRANSPORT REACHES THE WINDOW AND KEY-IMAGE READS TOO. A per-call `fetchImpl` still wins;
       // without this fallback a Tor/proxy caller's restore would silently use the page's global fetch.
       if (typeof merged.fetchImpl !== "function" && typeof fetchImpl === "function") merged.fetchImpl = fetchImpl;

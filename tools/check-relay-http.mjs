@@ -317,6 +317,17 @@ console.log("=== 1a3) A MALFORMED PUBLISHED CLAIM SENDER IS REFUSED ===");
       ok("a malformed published claim sender is refused");
     } else bad("wrong claim sender code: " + JSON.stringify(error && (error.code || error.message)));
   }
+  const badType = fakeFetch({ body: relayBody(makeAnswer(built)),
+    relay: { version: 1, relayId: "test-relay", claimSender: { toString: null },
+      feeRecipient: "0x" + "99".repeat(20), feeBps: "0" } });
+  try {
+    await call({ fetchImpl: badType.fetchImpl });
+    bad("a non-string published claim sender passed");
+  } catch (error) {
+    if (error && error.code === "quote-refused" && error.params && error.params.why === "claim-sender") {
+      ok("a non-string published claim sender is refused with the same code");
+    } else bad("wrong non-string claim sender code: " + JSON.stringify(error && (error.code || error.message)));
+  }
 }
 
 console.log("=== 1a2) THE PUBLISHED FEE MUST MATCH THE SIGNED QUOTE ===");

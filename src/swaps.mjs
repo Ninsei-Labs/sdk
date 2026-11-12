@@ -1919,7 +1919,10 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         throw new SdkError("claim-unknown", { step: "relay-claim", why: "previous-sender-unknown" });
       }
       if (!pendingSenders.length) {
-        return { id, state: "claim-yourself", reason: refunded ? "escrow-refunded" : "senders-exhausted",
+        // THE RESUME PATH MUST NAME A REFUND LIKE THE FINAL PATH DOES. All senders may already be recorded as tried
+        // when the escrow moves to refunded; `claim-yourself` would send the seller to `sellClaim` on a closed order.
+        if (refunded) return windowResult("escrow-refunded", priorTried);
+        return { id, state: "claim-yourself", reason: "senders-exhausted",
           provider: null, claimSender: null, escrow, relayUrl, txid: null, from: null, tipWei: tip.toString(),
           t1, secondsLeft: secondsLeft(), tried: priorTried };
       }

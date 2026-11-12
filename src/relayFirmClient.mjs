@@ -142,11 +142,18 @@ export async function requestFirmQuote({
   // THE OPERATOR'S OWN CLAIM SENDER. `GET /v1/relay` publishes the address the relay submits claims from; it is the
   // first entry in the seller's ordered list. A malformed value is refused here rather than handed to a claim path.
   let claimSender = null;
-  if (published.claimSender !== undefined && published.claimSender !== null
-    && String(published.claimSender).trim() !== "") {
-    claimSender = wireText(published.claimSender, "relay.claimSender").toLowerCase();
-    if (!/^0x[0-9a-f]{40}$/.test(claimSender)) {
+  const publishedSender = published.claimSender;
+  if (publishedSender !== undefined && publishedSender !== null) {
+    // A NON-STRING IS NOT AN ADDRESS. Check the type before any coercion: `String({toString: null})` throws before
+    // the refusal can be named, and the caller would see a raw TypeError instead of quote-refused/claim-sender.
+    if (typeof publishedSender !== "string") {
       throw new SdkError("quote-refused", { step: "relay-info", why: "claim-sender" });
+    }
+    if (publishedSender.trim() !== "") {
+      claimSender = publishedSender.trim().toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(claimSender)) {
+        throw new SdkError("quote-refused", { step: "relay-info", why: "claim-sender" });
+      }
     }
   }
   return {
