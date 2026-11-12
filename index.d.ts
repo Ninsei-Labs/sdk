@@ -1112,14 +1112,18 @@ export interface SellWatchRequest {
 
 export interface SellWatchResult {
   readonly escrow: string;
-  readonly state: "ready" | "claim-open" | "claimed" | "refunded";
+  readonly state: "ready" | "claim-open" | "claim-window-closed" | "claimed" | "refunded";
   readonly funded: boolean;
   readonly claimed: boolean;
   readonly refunded: boolean;
   /** `null` for a terminal claim/refund: the ready mark is not part of that answer. */
   readonly ready: boolean | null;
-  /** True when the escrow's readyBy has passed and no ready mark or terminal action was seen. */
+  /** True when the escrow's readyBy has passed, t1 has not, and no ready mark or terminal action was seen. */
   readonly claimOpen: boolean;
+  /** The order's deadline when the answer is about the claim window. */
+  readonly t1?: number | null;
+  /** Seconds from the observed clock to t1, when the answer is about the claim window. */
+  readonly secondsLeft?: number | null;
   readonly balanceWei: string;
   readonly waitedMs: number;
 }

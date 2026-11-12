@@ -2069,13 +2069,23 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
               ready: true, claimOpen: false, balanceWei: String(lastStatus.balance), waitedMs: Date.now() - started };
           }
         }
-        // AFTER readyBy THE CLAIM IS OPEN EVEN WITHOUT THE NODE'S READY MARK. The order is funded, no terminal
-        // action was seen, and the escrow's own deadline has passed; the seller can claim the ETH now.
-        if (lastStatus && lastStatus.isFunded && deadlines && Number.isSafeInteger(Number(deadlines.readyBy))) {
+        // AFTER readyBy THE CLAIM IS OPEN EVEN WITHOUT THE NODE'S READY MARK - BUT ONLY BEFORE t1. Without a
+        // readable t1 the SDK cannot promise a claim window, so it keeps waiting instead of opening one on a
+        // guess. The last 60 s are closed because a claim lands in a later block.
+        if (lastStatus && lastStatus.isFunded && deadlines) {
+          const readyBy = Number(deadlines.readyBy);
+          const t1 = Number(deadlines.t1);
           const at = nowSec();
-          if (at !== null && at >= Number(deadlines.readyBy)) {
+          if (Number.isSafeInteger(readyBy) && Number.isSafeInteger(t1) && at !== null && at >= readyBy) {
+            const secondsLeft = Math.max(0, t1 - at);
+            if (at + 60 >= t1) {
+              return { escrow, state: "claim-window-closed", funded: true, claimed: false, refunded: false,
+                ready: false, claimOpen: false, balanceWei: String(lastStatus.balance), waitedMs: Date.now() - started,
+                t1, secondsLeft };
+            }
             return { escrow, state: "claim-open", funded: true, claimed: false, refunded: false,
-              ready: false, claimOpen: true, balanceWei: String(lastStatus.balance), waitedMs: Date.now() - started };
+              ready: false, claimOpen: true, balanceWei: String(lastStatus.balance), waitedMs: Date.now() - started,
+              t1, secondsLeft };
           }
         }
         if (Date.now() - started >= timeoutMs) {
