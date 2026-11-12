@@ -242,6 +242,13 @@ different one is refused. A node refusal keeps its code under `quote-refused.par
 without a real transaction hash is `claim-unknown`: the claim may have been sent, so the SDK reads the escrow and
 moves on only after the slot. Only an escrow that reads `claimed` is success.
 
+Each sender is written to the record before its POST. A reload skips senders that were already tried; a refused
+sender allows the next, while an attempt left `sending` or `unknown` stops with `claim-unknown` and
+`why: "previous-sender-unknown"` instead of resending the half. An `unconfirmed` sender is skipped as well. A
+sender's slot starts when it is entered, not when its POST returns; `pollMs` has a 250 ms floor and `timeoutMs` a
+120 s ceiling. The relay gate also reserves the settlement margin, so `sellWatch` can still report its own-wallet
+`claim-open` while `claimViaRelay` has already stopped.
+
 `actions.claim` is unchanged: it still sends only from the claimer's own wallet, because the half is revealed by
 whoever sends the claim.
 
