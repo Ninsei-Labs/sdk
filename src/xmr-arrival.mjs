@@ -490,6 +490,7 @@ async function locateInSlices(node, { expectedAtomic, address, viewSecret, spend
   const last = witnessSliceIndex(Math.min(toHeight, target));
   let best = null;
   let completed = false;
+  let servedTop = null;
   let failure = null;
   for (let index = first; index <= last; index++) {
     let slice;
@@ -506,6 +507,9 @@ async function locateInSlices(node, { expectedAtomic, address, viewSecret, spend
       failure = error;
       break;
     }
+    // THE HIGHEST BLOCK THE WITNESS ACTUALLY SERVED. A newer tip can arrive inside the last slice; the caller
+    // uses this to raise the common target, so a walk that stopped at 115 cannot complete a target of 116.
+    servedTop = servedTop === null ? slice.to : Math.max(servedTop, slice.to);
     for (const block of slice.blocks) {
       // THE SLICE IS A FIXED WINDOW; THE SWAP STARTS AT `fromHeight`. Blocks before the birth height may contain
       // an earlier transfer to the same address, and counting them would make the slice walk disagree with the
@@ -536,7 +540,7 @@ async function locateInSlices(node, { expectedAtomic, address, viewSecret, spend
     }
     if (index === last) completed = slice.to >= target;
   }
-  return { located: best, completed, failure };
+  return { located: best, completed, servedTop, failure };
 }
 
 /**
@@ -612,9 +616,7 @@ export async function verifyArrivalShadow(request) {
     highestTop = highestTop === null ? top : Math.max(highestTop, top);
     readable.push({ node, top, entry });
   }
-  let located = null;
-  let completed = false;
-  const completedWitnessOperators = new Set();
+  const walkResults = [];
   for (const { node, top, entry } of readable) {
     const targetTop = highestTop === null ? top : Math.max(top, highestTop);
     try {
@@ -623,30 +625,49 @@ export async function verifyArrivalShadow(request) {
         targetTop,
         nowSec, network, fetchImpl, timeoutMs,
       });
-      completed = completed || found.completed;
-      if (found.completed) completedWitnessOperators.add(node.operator || node.url);
-      if (found.failure) {
-        failed.push(failureOf(found.failure, node));
-        entry.state = "error";
-      } else if (!found.completed) entry.state = found.located ? "partial" : "behind";
-      if (found.located) {
-        observations.push({
-          operator: node.operator || node.url, url: node.url, seen: true, completed: found.completed,
-          txid: found.located.txid, height: found.located.height, blockHash: found.located.blockHash,
-          amountAtomic: found.located.amountAtomic.toString(), locked: found.located.locked === true,
-        });
-        if (!located || found.located.score > located.score) {
-          located = found.located;
-          located.operator = node.operator;
-          located.url = node.url;
-        }
-      } else if (found.completed) {
-        observations.push({ operator: node.operator || node.url, url: node.url, seen: false, completed: true,
-          txid: null, height: null, blockHash: null, amountAtomic: null, locked: null });
-      }
+      walkResults.push({ node, top, entry, found });
     } catch (error) {
       entry.state = "error";
       failed.push(failureOf(error, node));
+    }
+  }
+
+  // THE TARGET CAN MOVE DURING THE WALK. A witness may serve a tip newer than every `get_info` top, and the
+  // parser accepts it; the earlier target would let the other witnesses complete against a block they never read.
+  // Raise the target to the highest served tip and judge completion again, after every walk.
+  for (const { found } of walkResults) {
+    if (found.servedTop === null || found.servedTop === undefined) continue;
+    highestTop = highestTop === null ? found.servedTop : Math.max(highestTop, found.servedTop);
+  }
+
+  let located = null;
+  let completed = false;
+  const completedWitnessOperators = new Set();
+  for (const { node, entry, found } of walkResults) {
+    const finalCompleted = Boolean(found.completed && found.servedTop !== null
+      && highestTop !== null && found.servedTop >= highestTop);
+    if (found.failure) {
+      failed.push(failureOf(found.failure, node));
+      entry.state = "error";
+    } else {
+      entry.state = finalCompleted ? "ok" : (found.located ? "partial" : "behind");
+    }
+    completed = completed || finalCompleted;
+    if (finalCompleted) completedWitnessOperators.add(node.operator || node.url);
+    if (found.located) {
+      observations.push({
+        operator: node.operator || node.url, url: node.url, seen: true, completed: finalCompleted,
+        txid: found.located.txid, height: found.located.height, blockHash: found.located.blockHash,
+        amountAtomic: found.located.amountAtomic.toString(), locked: found.located.locked === true,
+      });
+      if (!located || found.located.score > located.score) {
+        located = found.located;
+        located.operator = node.operator;
+        located.url = node.url;
+      }
+    } else if (finalCompleted) {
+      observations.push({ operator: node.operator || node.url, url: node.url, seen: false, completed: true,
+        txid: null, height: null, blockHash: null, amountAtomic: null, locked: null });
     }
   }
 
@@ -734,6 +755,7 @@ export async function verifyArrivalShadow(request) {
         witnessDisagreements.push({ operators: [observation.operator], field: "amountAtomic", against: "exact" });
       }
     }
+    if (checked.some((entry) => entry.state !== "ok")) add("witness:not-completed");
     if (witnessDisagreements.length) add("witness:disagreement");
     agrees = problems.length === 0;
   } else if (located) {

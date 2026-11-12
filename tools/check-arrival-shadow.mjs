@@ -91,9 +91,9 @@ const perWitness = (values, index, fallback) => Array.isArray(values) && index >
   ? values[index] : fallback;
 
 function fetchBoth({ witnessHash = BLOCK_HASH, witnessHashes = null, witnessTop = 119, witnessTops = null,
-  witnessTxids = null, witnessInfoTop = null, exactInfoHeight = null,
-  exactStaleHeight = null, witnessPartialAt = null, witnessPartialTo = null, witnessBroken = null,
-  witnessFailAt = null, network = "stagenet" } = {}) {
+  witnessTxids = null, witnessInfoTop = null, exactInfoHeight = 120,
+  exactStaleHeight = null, witnessPartialAt = null, witnessPartialTo = null, witnessPartialTos = null,
+  witnessBroken = null, witnessFailAt = null, network = "stagenet" } = {}) {
   return async (url, init) => {
     const body = JSON.parse(String(init.body || "{}"));
     const witnessAt = isWitness(url) ? witnessIndex(url) : -1;
@@ -107,7 +107,7 @@ function fetchBoth({ witnessHash = BLOCK_HASH, witnessHashes = null, witnessTop 
       const sliceEnd = from + Number(body.grid) - 1;
       const ownTop = perWitness(witnessTops, witnessAt, witnessTop);
       const limit = witnessPartialAt !== null && Number(body.slice) === Number(witnessPartialAt)
-        ? Number(witnessPartialTo) : ownTop;
+        ? perWitness(witnessPartialTos, witnessAt, Number(witnessPartialTo)) : ownTop;
       const to = Math.min(sliceEnd, limit);
       const blocks = Array.from({ length: to - from + 1 }, (_, i) => {
         const height = from + i;
@@ -240,8 +240,9 @@ console.log("=== 5) A TIP SLICE IS PARTIAL, NOT A REFUSAL ===");
   } else bad("partial witness walk: " + JSON.stringify({ state: result.witness.state, completed: result.witness.completed, failed: result.witness.failed }));
   if (result.witness.checked[0] && result.witness.checked[0].state === "partial") ok("the witness record names the partial walk");
   else bad("partial witness state: " + JSON.stringify(result.witness.checked));
-  if (result.agrees === true && result.problems.length === 0) ok("the partial tip agrees with the exact reading");
-  else bad("partial tip agreement: " + JSON.stringify(result.problems));
+  if (result.agrees === false && result.problems.includes("witness:not-completed")) {
+    ok("the partial tip cannot agree with the exact reading");
+  } else bad("partial tip agreement: " + JSON.stringify(result.problems));
   const slices = requests.filter((entry) => isHost(entry.url, "witness.example") && entry.url.endsWith("/v1/witness/slice"));
   if (slices.length === 1 && slices[0].body.slice === 5) ok("the last request is still one fixed slice");
   else bad("partial slice requests: " + JSON.stringify(slices.map((entry) => entry.body)));
@@ -275,12 +276,20 @@ console.log("=== 7) THE WALK GUARDS ARE LOAD-BEARING ===");
   else bad("empty range: " + JSON.stringify({ completed: empty.witness.completed }));
 }
 
-console.log("=== 8) A BLOCK THAT ARRIVES DURING THE WALK IS NOT A FAILURE ===");
+console.log("=== 8) A NEW TIP DURING THE WALK RAISES THE TARGET ===");
 {
-  const raced = await shadow({ witnessTop: 116, witnessInfoTop: 115, exactInfoHeight: 117 });
-  if (raced.witness.state === "seen" && raced.witness.completed === true && raced.agrees === true) {
-    ok("a tip one block above the caller's top is accepted");
-  } else bad("tip race: " + JSON.stringify({ state: raced.witness.state, completed: raced.witness.completed, failed: raced.witness.failed, agrees: raced.agrees, problems: raced.problems }));
+  const raced = await shadow({ witnessTop: 115, witnessTops: [115, 115], witnessPartialAt: 5,
+    witnessPartialTos: [115, 116], exactInfoHeight: 115, witnessOperators: ["W", "X"] });
+  const short = raced.witness.checked.find((entry) => entry.operator === "W");
+  if (short && short.state !== "ok") ok("a witness that served 115 is not complete when another served 116");
+  else bad("served-tip target: " + JSON.stringify({ checked: raced.witness.checked }));
+  if (raced.witness.quorum && raced.witness.quorum.ok === false
+    && raced.witness.quorum.completed.join(",") === "X") {
+    ok("the 116 tip raises the common target and leaves W below it");
+  } else bad("served-tip quorum: " + JSON.stringify(raced.witness.quorum));
+  if (raced.agrees === false && raced.problems.includes("witness:not-completed")) {
+    ok("a newer tip served by one witness is not agreement for a witness that never read it");
+  } else bad("served-tip agreement: " + JSON.stringify({ agrees: raced.agrees, problems: raced.problems }));
 }
 
 console.log("=== 9) A LAGGING WITNESS CANNOT COMPLETE THE ABSENCE ===");

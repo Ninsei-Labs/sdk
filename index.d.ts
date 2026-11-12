@@ -849,6 +849,10 @@ export interface XmrWitnessShadowReading {
   };
   readonly checked: readonly Record<string, unknown>[];
   readonly failed: readonly Record<string, unknown>[];
+  /** One opinion per operator: seen/txid/height/blockHash/amount/locked. */
+  readonly observations: readonly Record<string, unknown>[];
+  /** Same-operator and cross-operator contradictions, plus contradictions against the exact reading. */
+  readonly disagreements: readonly Record<string, unknown>[];
 }
 
 /** The exact verdict and the slice reading, side by side. This is not a swap decision. */
