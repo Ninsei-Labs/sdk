@@ -109,6 +109,10 @@ again. A previous `sending` or `unknown` entry is waited out for its slot and th
 `unconfirmed` entry is retried immediately. A temporary refusal, a process restart or a closed tab therefore does
 not permanently remove the seller's only no-wallet path.
 
+The journal is append-only and the SDK does not prune it; a record can grow with every retry. It is diagnostic,
+not a spendable state. A host may trim older entries, but it must keep the latest `sending` or `unknown` entry
+because that slot is waited out before the sender is tried again.
+
 The sell record also keeps the node's signed `readyWindow`. `sellWatch`, the late-arrival boundary and
 `refundIfXmrMissing` use its `readyMinSeconds`/`readyMaxSeconds`; a record without the window is refused with
 `bad-input` and `field: "readyWindow"` instead of falling back to the retired local constants.
