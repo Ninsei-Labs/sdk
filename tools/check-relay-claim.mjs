@@ -947,6 +947,31 @@ export const relayClaimCheck = async () => {
     readyMark = 1;
   }
 
+  // (9j) THE RESUME GATE USES THE SAME LATE-READ RULE. A prior `sending` attempt whose slot has passed must not
+  // report a closing window without reading the escrow once more.
+  {
+    resetChain();
+    resetAttempts();
+    readyMark = 1;
+    t1Sec = order.t1;
+    readyBySec = order.readyBy;
+    clockMs = (order.t1 - 215) * 1000;
+    const resumed = engine.swap.getSwap(record.id, store);
+    resumed.claimAttempts = [{ sender: lower(relaySender), outcome: "sending", at: Math.floor(clockMs / 1000) }];
+    engine.swap.saveSwap(resumed, store);
+    claimOnReady = true;
+    let calls = 0;
+    const result = await swaps.claimViaRelay({ id: record.id,
+      claimSenders: [relaySender, secondSender], slotMs: 20_000, pollMs: 2_000,
+      fetchImpl: async () => { calls += 1; return answer(secondSender, "0x" + "fb".repeat(32)); } }).catch((error) => error);
+    check(result && result.state === "claimed" && calls === 0,
+      "a resumed late claim was reported as a closing window: "
+        + JSON.stringify({ code: result && result.code, state: result && result.state, calls }));
+    claimOnReady = false;
+    clockMs = 1_900_000_000_000;
+    readyMark = 1;
+  }
+
   // (10) A SENDER IS WRITTEN BEFORE ITS SLOT, SO A RELOAD CAN SEE THE IN-FLIGHT ATTEMPT AND WAIT IT OUT.
   {
     resetAttempts();

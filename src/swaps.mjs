@@ -2018,7 +2018,12 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       if (latest && (latest.outcome === "sending" || latest.outcome === "unknown")
         && Number.isFinite(Number(latest.at))) {
         const gate = await windowOf();
-        if (!gate.ok) return windowResult(gate.reason, priorTried);
+        if (!gate.ok) {
+          // A PRIOR ATTEMPT MAY HAVE SENT THE HALF. The same late-read rule as the sender loop applies here: do not
+          // report a closing window without one last escrow read.
+          return priorTried.length ? windowStop(gate.reason, priorTried)
+            : windowResult(gate.reason, priorTried);
+        }
         // AN OLD RECORD MAY CARRY A DEVICE-CLOCK `at` AHEAD OF CHAIN TIME. A slot is 15-30 s by construction, so cap
         // the wait at one slot from the chain clock instead of trusting a future timestamp indefinitely.
         const slotEnd = Math.min(Number(latest.at) + Math.ceil(slotMs / 1000),
