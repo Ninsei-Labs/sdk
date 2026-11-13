@@ -1973,6 +1973,25 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         txid: answer ? answer.txid : null, from: (answer && answer.from) || null,
         tipWei: (answer && answer.tipWei) || tip.toString(), tried,
       });
+      // A WINDOW STOP AFTER SENDS IS NOT A BLIND STOP. The last sender's claim can land just after its slot; before
+      // reporting a closing window, read the escrow once more and let a claimed/refunded/defunded state win.
+      const windowStop = async (reason, currentTried) => {
+        let status;
+        try {
+          status = await readStatus();
+        } catch {
+          // THE WINDOW STOP MUST STAY A RESULT. If the escrow cannot be read, the caller still needs the named
+          // window state; throwing here would change a pre-existing `claim-window` answer into an exception.
+          return windowResult(reason, currentTried);
+        }
+        if (status.isClaimed) {
+          try { engine.swap.saveSwap(swap, store); } catch { /* the chain already says claimed */ }
+          return claimedByEscrow(null, null, currentTried);
+        }
+        if (status.isRefunded) return windowResult("escrow-refunded", currentTried);
+        if (!status.isFunded) return windowResult("not-funded", currentTried);
+        return windowResult(reason, currentTried);
+      };
       // A CLAIM THAT ALREADY LANDED IS NOT A REASON TO SEND THE HALF AGAIN. The caller may have lost the answer on
       // the previous attempt; read the escrow before the first POST, and read it once more before returning
       // `claim-yourself`, so a late claim cannot be reported as "claim yourself".
@@ -1994,7 +2013,12 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       if (latest && (latest.outcome === "sending" || latest.outcome === "unknown")
         && Number.isFinite(Number(latest.at))) {
         const gate = await windowOf();
-        if (!gate.ok) return windowResult(gate.reason, priorTried);
+        if (!gate.ok) {
+          // A PRIOR ATTEMPT MAY HAVE SENT THE HALF. The same late-read rule as the sender loop applies here: do not
+          // report a closing window without one last escrow read.
+          return priorTried.length ? windowStop(gate.reason, priorTried)
+            : windowResult(gate.reason, priorTried);
+        }
         // AN OLD RECORD MAY CARRY A DEVICE-CLOCK `at` AHEAD OF CHAIN TIME. A slot is 15-30 s by construction, so cap
         // the wait at one slot from the chain clock instead of trusting a future timestamp indefinitely.
         const slotEnd = Math.min(Number(latest.at) + Math.ceil(slotMs / 1000),
@@ -2030,7 +2054,10 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       };
       if (!refunded) for (const sender of senders) {
         const gate = await windowOf();
-        if (!gate.ok) return windowResult(gate.reason, tried);
+        if (!gate.ok) {
+          if (tried.length || priorTried.length) return windowStop(gate.reason, tried);
+          return windowResult(gate.reason, tried);
+        }
         if (gate.t1 !== null) t1 = gate.t1;
         const attempt = beginAttempt(sender);
         // THE SLOT STARTS WHEN THE SENDER IS ENTERED, NOT WHEN ITS POST RETURNS. A slow POST must not stretch the
