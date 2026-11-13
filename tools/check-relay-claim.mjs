@@ -77,10 +77,14 @@ let t1Sec = order.t1;
 let readyBySec = order.readyBy;
 let statusUnreadable = false;
 let statusReads = 0;
+let claimOnReady = false;
+let statusUnreadableOnReady = false;
 let chainStatus = { funded: true, claimed: false, refunded: false, balance: 1_000_000_000_000_000_000n };
 const resetChain = (overrides = {}) => {
   chainStatus = { funded: true, claimed: false, refunded: false, balance: 1_000_000_000_000_000_000n, ...overrides };
   chainTimestamp = null;
+  claimOnReady = false;
+  statusUnreadableOnReady = false;
 };
 const read = async ({ data }) => {
   if (data === encodeStatus()) {
@@ -89,7 +93,11 @@ const read = async ({ data }) => {
     return "0x" + word(chainStatus.funded ? 1 : 0) + word(chainStatus.claimed ? 1 : 0)
       + word(chainStatus.refunded ? 1 : 0) + word(chainStatus.balance);
   }
-  if (data === encodeRead("ready")) return "0x" + word(readyMark);
+  if (data === encodeRead("ready")) {
+    if (statusUnreadableOnReady) { statusUnreadable = true; statusUnreadableOnReady = false; }
+    if (claimOnReady) { chainStatus.claimed = true; claimOnReady = false; }
+    return "0x" + word(readyMark);
+  }
   if (data === encodeRead("t1")) return "0x" + word(t1Sec);
   if (data === encodeRead("readyBy")) return "0x" + word(readyBySec);
   const answer = slotReads[data];
@@ -828,6 +836,87 @@ export const relayClaimCheck = async () => {
       "a future-dated attempt was never retried: " + JSON.stringify({ result, calls }));
     check(clockMs - started <= 20_000,
       "a future-dated attempt stalled the resume path: " + JSON.stringify({ moved: clockMs - started }));
+  }
+
+  // (9h) A CLAIM LANDING AFTER THE LAST SLOT IS FOUND BEFORE A WINDOW STOP. The gate closes, but the escrow is
+  // read once more; a late claim must win over a closing-window report.
+  {
+    resetChain();
+    resetAttempts();
+    readyMark = 1;
+    t1Sec = order.t1;
+    readyBySec = order.readyBy;
+    statusUnreadable = false;
+    claimOnReady = false;
+    clockMs = (order.t1 - 215) * 1000;
+    let calls = 0;
+    const result = await swaps.claimViaRelay({ id: record.id,
+      claimSenders: [relaySender, secondSender], slotMs: 20_000, pollMs: 2_000,
+      fetchImpl: async () => {
+        calls += 1;
+        claimOnReady = true;
+        throw Object.assign(new Error("lost answer"), { code: "claim-unknown" });
+      } });
+    check(result && result.state === "claimed" && calls === 1,
+      "a late claim was reported as a closing window: " + JSON.stringify({ result, calls }));
+    clockMs = 1_900_000_000_000;
+    readyMark = 1;
+  }
+
+  // (9i) A FAILED FINAL STATUS READ DOES NOT TURN A WINDOW STOP INTO AN EXCEPTION. The window result keeps its
+  // named reason even when the extra escrow read is unreadable.
+  {
+    resetChain();
+    resetAttempts();
+    readyMark = 1;
+    t1Sec = order.t1;
+    readyBySec = order.readyBy;
+    statusUnreadable = false;
+    statusUnreadableOnReady = false;
+    clockMs = (order.t1 - 215) * 1000;
+    let calls = 0;
+    const result = await swaps.claimViaRelay({ id: record.id,
+      claimSenders: [relaySender, secondSender], slotMs: 20_000, pollMs: 2_000,
+      fetchImpl: async () => {
+        calls += 1;
+        if (calls === 1) {
+          statusUnreadableOnReady = true;
+          throw Object.assign(new Error("lost answer"), { code: "claim-unknown" });
+        }
+        chainStatus.claimed = true;
+        return answer(secondSender, "0x" + "fa".repeat(32));
+      } }).catch((error) => error);
+    check(result && result.state === "claim-window" && result.reason === "settlement-margin" && calls === 1,
+      "an unreadable final escrow replaced the window result with an exception: "
+        + JSON.stringify({ code: result && result.code, state: result && result.state, calls }));
+    statusUnreadable = false;
+    clockMs = 1_900_000_000_000;
+    readyMark = 1;
+  }
+
+  // (9j) THE RESUME GATE USES THE SAME LATE-READ RULE. A prior `sending` attempt whose slot has passed must not
+  // report a closing window without reading the escrow once more.
+  {
+    resetChain();
+    resetAttempts();
+    readyMark = 1;
+    t1Sec = order.t1;
+    readyBySec = order.readyBy;
+    clockMs = (order.t1 - 215) * 1000;
+    const resumed = engine.swap.getSwap(record.id, store);
+    resumed.claimAttempts = [{ sender: lower(relaySender), outcome: "sending", at: Math.floor(clockMs / 1000) }];
+    engine.swap.saveSwap(resumed, store);
+    claimOnReady = true;
+    let calls = 0;
+    const result = await swaps.claimViaRelay({ id: record.id,
+      claimSenders: [relaySender, secondSender], slotMs: 20_000, pollMs: 2_000,
+      fetchImpl: async () => { calls += 1; return answer(secondSender, "0x" + "fb".repeat(32)); } }).catch((error) => error);
+    check(result && result.state === "claimed" && calls === 0,
+      "a resumed late claim was reported as a closing window: "
+        + JSON.stringify({ code: result && result.code, state: result && result.state, calls }));
+    claimOnReady = false;
+    clockMs = 1_900_000_000_000;
+    readyMark = 1;
   }
 
   // (10) A SENDER IS WRITTEN BEFORE ITS SLOT, SO A RELOAD CAN SEE THE IN-FLIGHT ATTEMPT AND WAIT IT OUT.

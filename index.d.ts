@@ -170,7 +170,8 @@ export interface NinseiOptions {
 }
 
 /** One durable sender attempt on a sell record, written before the relay POST. This is a diagnostic journal,
- * not a set of senders that must be skipped on a later call. */
+ * not a set of senders that must be skipped on a later call. The journal is append-only and is not pruned by the
+ * SDK; a host may trim old entries, but must keep the latest `sending`/`unknown` one for its slot wait. */
 export interface StoredClaimAttempt {
   readonly sender: string;
   readonly at?: number;
