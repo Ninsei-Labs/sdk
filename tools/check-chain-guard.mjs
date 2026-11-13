@@ -189,6 +189,7 @@ export const chainGuardCheck = async () => {
       provider: locker, quoteKey: "0x" + "77".repeat(20), registry: "0x" + "88".repeat(20),
       cashier: "0x" + "99".repeat(20), locker, claimer, amount: "1000000000000000000",
       readyBy: now + 3600, t1: now + 7200, salt: "0x" + "aa".repeat(32),
+      commitHalfLocker: slot, edPointLocker: point, edViewPointLocker: point,
       commitHalfClaimer: slot, edPointClaimer: point, chainId: 1,
       feeBps: "0", fee: "0", feeRecipient: "0x" + "bb".repeat(20), validUntil: now + 600,
       nonce: "1", xmrAmount: "1000000000000", claimTip: "0", signature: "0x" + "00".repeat(65),
