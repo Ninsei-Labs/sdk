@@ -77,8 +77,10 @@ encryption envelope in the host, and do not pass a bid answer to `swaps.start` (
 
 `swaps.startSell` records the one-time address, the escrow, our half, the expectations and the relay origin that
 answered the quote. It sends no transaction. The same offer retried returns the same record with `resumed: true`; a
-changed commitment or relay origin is refused rather than silently resumed. A stored `claimSender` is a legacy
-single-sender fallback, not a pin: the ordered list passed to `claimViaRelay` is the authority.
+changed commitment or relay origin is refused rather than silently resumed. The old scalar `claimSender` is
+retired: `startSell` accepts `claimSenders` (or the relay-published `claimSender` as a one-element list), and
+`claimViaRelay` accepts a list or uses the stored list. The claim result names the sender that landed it as
+`provider`.
 
 There are two claim paths, and the host picks by what the seller holds:
 

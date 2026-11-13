@@ -225,12 +225,13 @@ if (claimed.state === "claimed") {
 ```
 
 `claimSenders` is the client's ordered list: the relay's own sender first, then other listed makers. `startSell`
-accepts the same list (or the relay answer's published `claimSender`) and stores it, so a later
-`claimViaRelay({ id })` can use the record without repeating the list. The SDK tries
-one sender at a time for a 15-30 s slot. A refusal moves on at once; a txid is not success - the SDK reads the
-escrow until it says `claimed` or the slot ends. The deal's maker and its quote-key owner are refused before the
-half leaves the client. When the list is exhausted the result is `state: "claim-yourself"` with `t1` and
-`secondsLeft`. The old scalar `claimSender` remains a one-element fallback for callers written before the list.
+stores a list only when the caller passes `claimSenders`; otherwise the offer's published `claimSender` becomes a
+one-element list. An explicit list replaces that published sender; it is never prepended. `claimViaRelay({ id })`
+uses the stored list, while a request `claimSenders` replaces it. The old scalar `claimSender` is retired and
+refused by name; the claim result names the sender that landed it as `provider`. The SDK tries one sender at a
+time for a 15-30 s slot. A refusal moves on at once; a txid is not success - the SDK reads the escrow until it
+says `claimed` or the slot ends. The deal's maker and its quote-key owner are refused before the half leaves the
+client. When the list is exhausted the result is `state: "claim-yourself"` with `t1` and `secondsLeft`.
 
 The claim window is the escrow's, not the relay's. Before every sender the SDK reads `ready`, `readyBy` and `t1`
 from the chain. Without the ready mark before `readyBy`, at or after `t1`, or inside the 120 s settlement margin
