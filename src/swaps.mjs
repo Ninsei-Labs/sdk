@@ -1520,8 +1520,8 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
     /**
      * START A SELL FROM A VERIFIED RELAY OFFER. The offer is the result of `quotes.firmRelay` for the bid side;
      * the record keeps the one-time address, the escrow, our half, the order expectations and the relay origin, so a
-     * reload can continue with `get` + `sellWatch` + `sellClaim`. The optional `claimSender` is a legacy
-     * single-sender fallback; `claimViaRelay` takes the client's ordered list at claim time. This method sends nothing.
+     * reload can continue with `get` + `sellWatch` + `sellClaim`. The ordered `claimSenders` list is the only
+     * sender source; it is stored for the later claim. This method sends nothing.
      */
     async startSell(request) {
       if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
@@ -1550,14 +1550,16 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         || !sameValue(quote.factory, order.factory) || Number(quote.chainId) !== Number(order.chainId)) {
         throw new SdkError("quote-refused", { step: "sell-record", why: "terms" });
       }
-      // THE SENDER IS CHOSEN BY THE CLIENT, NOT THE DEAL'S MAKER. The record keeps it so a reload claims through
-      // the same node; a sender naming the maker or the quote key owner would reveal the half to the party that
-      // must never receive it.
+      // THE SENDER IS CHOSEN BY THE CLIENT, NOT THE DEAL'S MAKER. The record keeps the list so a reload claims
+      // through the same node; a sender naming the maker or the quote key owner would reveal the half to the party
+      // that must never receive it. The old scalar is retired: it is not a second source and is refused by name.
       const dealMaker = addressTextOf(quote.provider, "provider");
       const quoteKeyOwner = quote.quoteKey === undefined || quote.quoteKey === null
         || String(quote.quoteKey).trim() === "" ? null : addressTextOf(quote.quoteKey, "quoteKey");
-      const requestedSender = request.claimSender === undefined || request.claimSender === null
-        || String(request.claimSender).trim() === "" ? null : addressTextOf(request.claimSender, "claimSender");
+      if (request.claimSender !== undefined && request.claimSender !== null
+        && String(request.claimSender).trim() !== "") {
+        throw new SdkError("bad-input", { field: "claimSender", why: "retired" });
+      }
       const requestedList = request.claimSenders === undefined || request.claimSenders === null
         ? null : request.claimSenders;
       if (requestedList !== null && !Array.isArray(requestedList)) {
@@ -1566,20 +1568,11 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       if (requestedList && requestedList.length === 0) {
         throw new SdkError("bad-input", { field: "claimSenders", why: "empty" });
       }
-      if (requestedList && requestedSender) {
-        throw new SdkError("bad-input", { field: "claimSenders", why: "with-claim-sender" });
-      }
-      if (requestedSender && requestedSender === dealMaker) {
-        throw new SdkError("bad-input", { field: "claimSender", why: "is-deal-maker" });
-      }
-      if (requestedSender && quoteKeyOwner && requestedSender === quoteKeyOwner) {
-        throw new SdkError("bad-input", { field: "claimSender", why: "is-quote-key" });
-      }
       const offerSender = offer.claimSender === undefined || offer.claimSender === null
         || String(offer.claimSender).trim() === "" ? null : addressTextOf(offer.claimSender, "offer.claimSender");
-      // THE STORED LIST IS BUILT HERE, ONCE. The relay's published claimSender is the default first sender; a caller
-      // that brings its own ordered list owns the order. The scalar remains a one-element fallback for older callers.
-      const explicitSenders = requestedList || (requestedSender ? [requestedSender] : null);
+      // THE STORED LIST IS BUILT HERE, ONCE. An explicit list wins; otherwise the relay's published claimSender is
+      // the only fallback, as a one-element list. There is no legacy request scalar.
+      const explicitSenders = requestedList;
       const rawSenders = explicitSenders || (offerSender ? [offerSender] : []);
       const claimSenders = [];
       for (const raw of rawSenders) {
@@ -1616,12 +1609,10 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         if (explicitSenders && claimSenders.length && (!storedList || storedList.length !== claimSenders.length
           || storedList.some((value, index) => String(value).toLowerCase() !== claimSenders[index]))) {
           existing.claimSenders = claimSenders;
-          existing.claimSender = claimSenders[0];
           try { engine.swap.saveSwap(existing, store); }
           catch { throw new SdkError("storage-unavailable", { step: "save-claim-senders" }); }
         } else if (!explicitSenders && !storedList && claimSenders.length) {
           existing.claimSenders = claimSenders;
-          existing.claimSender = claimSenders[0];
           try { engine.swap.saveSwap(existing, store); }
           catch { throw new SdkError("storage-unavailable", { step: "save-claim-senders" }); }
         }
@@ -1654,7 +1645,6 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
           address: (existing.escrow && existing.escrow.moneroAddress) || offer.jointAddress,
           xmrAmount: (existing.escrow && existing.escrow.xmrAmount) || quote.xmrAmount,
           claimTip: existing.claimTip || quote.claimTip, orderQuote: existing.orderQuote || offer.orderQuote,
-          claimSender: existing.claimSender || null,
           claimSenders: Array.isArray(existing.claimSenders) ? existing.claimSenders : [],
           readyWindow: existing.readyWindow || existing.sellWindow || null,
           resumed: true, next: "send-xmr" };
@@ -1727,10 +1717,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       swap.claimTip = quote.claimTip || null;
       // THE CLAIM SENDER IS PART OF THE OFFER, NOT A LATER CHOICE. Keeping the list means a reload cannot silently
       // send the half to a different node than the one the client selected.
-      if (claimSenders.length) {
-        swap.claimSenders = claimSenders;
-        swap.claimSender = claimSenders[0];
-      }
+      if (claimSenders.length) swap.claimSenders = claimSenders;
       swap.expect = {
         chainId, factory: order.factory, locker: order.locker, claimer: order.claimer, amount: String(order.amount),
         readyBy: order.readyBy, t1: order.t1, salt: order.salt,
@@ -1766,7 +1753,6 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       try { engine.swap.saveSwap(swap, store); } catch { throw new SdkError("storage-unavailable", { step: "save-swap" }); }
       return { id: swap.id, side: "sell", escrow: offer.escrow, address: offer.jointAddress,
         xmrAmount: quote.xmrAmount, claimTip: quote.claimTip || null, orderQuote: offer.orderQuote || null,
-        claimSender: swap.claimSender || null,
         claimSenders: Array.isArray(swap.claimSenders) ? swap.claimSenders : [],
         readyWindow: swap.readyWindow || null, resumed: false, next: "send-xmr" };
     },
@@ -1838,13 +1824,12 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       }
       const quoteKeyOwner = quote.quoteKey === undefined || quote.quoteKey === null
         || String(quote.quoteKey).trim() === "" ? null : addressTextOf(quote.quoteKey, "quoteKey");
-      const storedSenderRaw = swap.claimSender === undefined || swap.claimSender === null
-        || String(swap.claimSender).trim() === "" ? null : swap.claimSender;
-      const requestedSenderRaw = request.claimSender === undefined || request.claimSender === null
-        || String(request.claimSender).trim() === "" ? null : request.claimSender;
-      // THE ORDER IS THE CLIENT'S, NOT THE RECORD'S. A list passed now wins; the old scalar and the stored value are
-      // only one-element fallbacks for callers written before the list existed. Neither is a pin: the next sender is
-      // tried when this one refuses or its slot ends.
+      if (request.claimSender !== undefined && request.claimSender !== null
+        && String(request.claimSender).trim() !== "") {
+        throw new SdkError("bad-input", { field: "claimSender", why: "retired" });
+      }
+      // THE ORDER IS THE CLIENT'S, NOT THE RECORD'S. A list passed now wins; otherwise the stored list is the
+      // fallback for an id-only reload. There is no legacy scalar and no second source.
       if (request.claimSenders !== undefined && !Array.isArray(request.claimSenders)) {
         throw new SdkError("bad-input", { field: "claimSenders", why: "not-an-array" });
       }
@@ -1852,12 +1837,10 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       if (explicitList && explicitList.length === 0) {
         throw new SdkError("bad-input", { field: "claimSenders", why: "empty" });
       }
-      if (explicitList && requestedSenderRaw) {
-        throw new SdkError("bad-input", { field: "claimSenders", why: "with-claim-sender" });
-      }
-      const rawSenders = explicitList || (requestedSenderRaw ? [requestedSenderRaw] : null)
-        || (Array.isArray(swap.claimSenders) ? swap.claimSenders : null)
-        || (storedSenderRaw ? [storedSenderRaw] : []);
+      const legacyStored = swap.claimSender === undefined || swap.claimSender === null
+        || String(swap.claimSender).trim() === "" ? null : swap.claimSender;
+      const rawSenders = explicitList || (Array.isArray(swap.claimSenders) && swap.claimSenders.length
+        ? swap.claimSenders : (legacyStored ? [legacyStored] : []));
       if (!rawSenders.length) throw new SdkError("bad-input", { field: "claimSenders", why: "not-in-record" });
       const senders = [];
       for (const raw of rawSenders) {
@@ -1893,7 +1876,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       if (!Array.isArray(swap.claimSenders) || swap.claimSenders.length !== senders.length
         || swap.claimSenders.some((value, index) => String(value).toLowerCase() !== senders[index])) {
         swap.claimSenders = senders;
-        swap.claimSender = senders[0];
+        delete swap.claimSender;
         try { engine.swap.saveSwap(swap, store); }
         catch { throw new SdkError("storage-unavailable", { step: "save-claim-senders" }); }
       }
@@ -1961,7 +1944,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         return { ok: true, t1: t1Sec, readyBy: readyBySec, nowSec };
       };
       const windowResult = (reason, tried) => ({
-        id, state: "claim-window", reason, provider: null, claimSender: null, escrow, relayUrl,
+        id, state: "claim-window", reason, provider: null, escrow, relayUrl,
         txid: null, from: null, tipWei: tip.toString(), t1, secondsLeft: secondsLeft(), tried,
       });
       const STOP_ESCROW_CODES = new Set([
@@ -1969,7 +1952,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         "claim-not-funded", "claim-already-closed", "claim-half-invalid",
       ]);
       const claimedByEscrow = (sender = null, answer = null, tried = []) => ({
-        id, state: "claimed", provider: sender, claimSender: sender, escrow, relayUrl,
+        id, state: "claimed", provider: sender, escrow, relayUrl,
         txid: answer ? answer.txid : null, from: (answer && answer.from) || null,
         tipWei: (answer && answer.tipWei) || tip.toString(), tried,
       });
@@ -2067,7 +2050,6 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         for (;;) {
           const status = await readStatus();
           if (status && status.isClaimed) {
-            swap.claimSender = sender;
             finishAttempt(attempt, "claimed", { txid: answer ? answer.txid : null });
             try { engine.swap.saveSwap(swap, store); } catch { /* the chain already says claimed */ }
             return claimedByEscrow(sender, answer, tried);
@@ -2097,7 +2079,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       const finalGate = await windowOf();
       if (!finalGate.ok) return windowResult(finalGate.reason, tried);
       return { id, state: "claim-yourself", reason: "senders-exhausted",
-        provider: null, claimSender: null, escrow, relayUrl, txid: null, from: null, tipWei: tip.toString(),
+        provider: null, escrow, relayUrl, txid: null, from: null, tipWei: tip.toString(),
         t1, secondsLeft: secondsLeft(), tried };
     },
 
