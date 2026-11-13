@@ -995,12 +995,9 @@ export interface SellStartRequest {
   /** The verified `quotes.firmRelay` answer for the bid side. */
   readonly offer: FirmRelayAnswer;
   /**
-   * Optional legacy single sender stored for a no-ETH claim. The ordered list passed to `claimViaRelay` is the
-   * authority; this scalar is only a one-element fallback for callers written before the list existed. A sender
-   * naming the deal's maker or its quote-key owner is refused.
+   * Optional ordered senders stored for a no-ETH claim. An explicit list replaces the relay-published sender;
+   * the published sender is used only when no list is passed. The old scalar is retired.
    */
-  readonly claimSender?: string;
-  /** The ordered senders stored for a later `claimViaRelay`; the relay's published sender is prepended. */
   readonly claimSenders?: readonly string[];
   /** The twelve-word key; required only when no key is stored yet. */
   readonly recoveryKey?: string | { readonly mnemonic: string };
@@ -1024,8 +1021,6 @@ export interface SellStart {
   readonly xmrAmount: string;
   readonly claimTip: string | null;
   readonly orderQuote: Readonly<Record<string, unknown>> | null;
-  /** The legacy single sender stored by `startSell`, or null when the client supplies the list at claim time. */
-  readonly claimSender: string | null;
   /** The ordered senders stored by `startSell`; empty when the client supplies the list at claim time. */
   readonly claimSenders: readonly string[];
   readonly readyWindow: ReadyWindow | null;
@@ -1044,17 +1039,15 @@ export interface SellClaimRequest {
 /**
  * THE NO-WALLET CLAIM'S INPUTS. `id` names the sell record made by `startSell`; the escrow, half and signed tip
  * come from it. `claimSenders` is the client's ordered list: the relay's own sender first, then the listed makers.
- * Each entry is checked for the deal's maker and its quote-key owner. The old scalar `claimSender` is accepted as a
- * one-element fallback for callers written before the list. `relayUrl` is optional and may only repeat the origin
- * stored with the record - a foreign origin is refused. A second call is allowed after a refusal or an unknown
- * answer: the journal is diagnostic and the sender list is walked from the beginning once any previous slot ends.
+ * Each entry is checked for the deal's maker and its quote-key owner. The old scalar `claimSender` is retired and
+ * refused by name. `relayUrl` is optional and may only repeat the origin stored with the record - a foreign origin
+ * is refused. A second call is allowed after a refusal or an unknown answer: the journal is diagnostic and the
+ * sender list is walked from the beginning once any previous slot ends.
  */
 export interface RelayClaimRequest {
   readonly id: string;
   /** Ordered senders. Tried one at a time; the first that lands a claim on chain wins. */
   readonly claimSenders?: readonly string[];
-  /** One-element fallback for a caller written before `claimSenders`; may never name the deal's maker. */
-  readonly claimSender?: string;
   readonly relayUrl?: string;
   /** One sender's slot; clamped to 15-30 s. Default 20 s. */
   readonly slotMs?: number;
@@ -1080,7 +1073,6 @@ export interface RelayClaimed {
   readonly id: string;
   /** The sender whose slot found the claim; null when the escrow already read claimed before the first POST. */
   readonly provider: string | null;
-  readonly claimSender: string | null;
   readonly escrow: string;
   readonly relayUrl: string;
   /** The txid when an answer carried one; `null` when the claim was found on chain without it. */
@@ -1096,7 +1088,6 @@ export interface RelayClaimYourself {
   readonly reason: "senders-exhausted";
   readonly id: string;
   readonly provider: null;
-  readonly claimSender: null;
   readonly escrow: string;
   readonly relayUrl: string;
   readonly txid: null;
@@ -1117,7 +1108,6 @@ export interface RelayClaimWindow {
   readonly reason: "not-ready" | "window-closed" | "settlement-margin" | "unreadable" | "not-funded" | "escrow-refused" | "escrow-refunded";
   readonly id: string;
   readonly provider: null;
-  readonly claimSender: null;
   readonly escrow: string;
   readonly relayUrl: string;
   readonly txid: null;

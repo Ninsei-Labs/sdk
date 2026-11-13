@@ -117,10 +117,9 @@ const seed = async (overrides = {}) => {
   };
   if (overrides.withoutRelay) { delete made.withoutRelay; delete made.relayUrl; }
   if (overrides.offerClaimSender) made.claimSender = overrides.offerClaimSender;
-  const sender = Object.prototype.hasOwnProperty.call(overrides, "claimSender") ? overrides.claimSender : storedSender;
   const request = { offer: made, recoveryKey: mnemonic, onRecoveryKey: accept };
-  if (sender && !overrides.omitClaimSender) request.claimSender = sender;
   if (Array.isArray(overrides.claimSenders)) request.claimSenders = overrides.claimSenders;
+  else if (!overrides.omitClaimSender) request.claimSenders = [storedSender];
   return await swaps.startSell(request);
 };
 
@@ -144,15 +143,15 @@ export const relayClaimCheck = async () => {
   };
   const stored = engine.swap.getSwap(record.id, store);
   check(stored && stored.relayUrl === "https://relay.example", "startSell did not store the relay origin");
-  check(stored && stored.claimSender === storedSender, "startSell did not store the legacy sender");
+  check(stored && Array.isArray(stored.claimSenders) && stored.claimSenders[0] === lower(storedSender),
+    "startSell did not store the sender list");
   check(stored && stored.claimTip === claimTip && stored.escrow && stored.escrow.half,
     "the sale record does not carry the positive tip and the half");
 
   // (0b) THE LIST IS STORED AT START AND USED WITHOUT REPEATING IT AT CLAIM.
   {
     const listed = await seed({ claimSenders: [secondSender, relaySender], omitClaimSender: true });
-    check(listed && listed.claimSender === lower(secondSender)
-      && Array.isArray(listed.claimSenders) && listed.claimSenders[0] === lower(secondSender)
+    check(listed && Array.isArray(listed.claimSenders) && listed.claimSenders[0] === lower(secondSender)
       && listed.claimSenders[1] === lower(relaySender),
       "startSell did not store the ordered sender list: " + JSON.stringify({ listed }));
     const urls = [];
@@ -170,15 +169,14 @@ export const relayClaimCheck = async () => {
   {
     resetChain();
     const offered = await seed({ offerClaimSender: secondSender, omitClaimSender: true });
-    check(offered && offered.claimSender === lower(secondSender)
-      && Array.isArray(offered.claimSenders) && offered.claimSenders.length === 1
+    check(offered && Array.isArray(offered.claimSenders) && offered.claimSenders.length === 1
       && offered.claimSenders[0] === lower(secondSender),
       "an offer-only sender was not stored as the list: " + JSON.stringify({ offered }));
-    const again = await swaps.startSell({ offer: { ...offer, claimSender: relaySender,
+    const again = await swaps.startSell({ offer: { ...offer,
       escrow: offered.escrow, quote: { ...quote, id: "oq_offer_only_again" },
       orderQuote: { ...quote, id: "oq_offer_only_again", signature: "0x" + "55".repeat(65) },
       jointAddress: offered.address }, recoveryKey: mnemonic, onRecoveryKey: accept });
-    check(again && again.resumed === true && again.claimSender === lower(secondSender)
+    check(again && again.resumed === true
       && Array.isArray(again.claimSenders) && again.claimSenders[0] === lower(secondSender),
       "a resume replaced the client's stored sender list: " + JSON.stringify({ again }));
   }
@@ -236,15 +234,28 @@ export const relayClaimCheck = async () => {
     }
   }
 
-  // (0c) A RESUMED OFFER MAY NAME ANOTHER SENDER. THE RECORD'S OLD SCALAR IS NOT A PIN; THE CLIENT'S LIST AT CLAIM
-  // TIME IS THE AUTHORITY.
+  // (0c) A RESUMED OFFER MAY NAME ANOTHER SENDER. THE STORED LIST IS NOT A PIN; THE CLIENT'S LIST AT CLAIM TIME
+  // IS THE AUTHORITY.
   {
     const resumed = await swaps.startSell({ offer: { ...offer, escrow, jointAddress: stored.escrow.moneroAddress,
       quote: { ...stored.quote }, orderQuote: stored.orderQuote },
-      recoveryKey: mnemonic, onRecoveryKey: accept, claimSender: secondSender });
+      recoveryKey: mnemonic, onRecoveryKey: accept, claimSenders: [secondSender] });
     const after = engine.swap.getSwap(record.id, store);
-    check(resumed && resumed.resumed === true && after && after.claimSender === secondSender,
+    check(resumed && resumed.resumed === true && after && Array.isArray(after.claimSenders)
+      && after.claimSenders[0] === lower(secondSender),
       "a resumed sell still pinned the earlier sender");
+  }
+
+  // (0d) THE RETIRED SCALAR IS REFUSED BEFORE A RECORD IS MADE.
+  {
+    let retired = null;
+    try {
+      await swaps.startSell({ offer: { ...offer }, recoveryKey: mnemonic, onRecoveryKey: accept,
+        claimSender: storedSender });
+    } catch (error) { retired = error; }
+    check(retired && retired.code === "bad-input" && retired.params
+      && retired.params.field === "claimSender" && retired.params.why === "retired",
+      "startSell accepted the retired scalar sender: " + JSON.stringify(retired && retired.params));
   }
 
   // (1) THE FIRST SENDER IS THE RELAY'S OWN; THE ESCROW SAYS CLAIMED.
@@ -260,7 +271,7 @@ export const relayClaimCheck = async () => {
     const claimed = await swaps.claimViaRelay({ id: record.id,
       claimSenders: [relaySender, secondSender], fetchImpl: transport });
     check(claimed && claimed.state === "claimed" && claimed.provider === lower(relaySender)
-      && claimed.claimSender === lower(relaySender) && claimed.txid === "0x" + "ab".repeat(32),
+      && claimed.txid === "0x" + "ab".repeat(32),
       "the first sender did not claim: " + JSON.stringify(claimed));
     check(calls.length === 1 && calls[0].url === "https://relay.example/v1/claims/" + lower(relaySender) + "/" + escrow,
       "the first sender path is not the ordered first entry: " + JSON.stringify(calls.map((entry) => entry.url)));
@@ -439,13 +450,43 @@ export const relayClaimCheck = async () => {
     }
     check(called === 0, "a non-array sender list reached the relay");
     try {
-      await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender], claimSender: secondSender,
+      await swaps.claimViaRelay({ id: record.id, claimSender: storedSender,
         fetchImpl: async () => { called += 1; throw new Error("must not be called"); } });
-      check(false, "a list and a scalar sender were accepted together");
+      check(false, "a retired scalar sender was accepted");
     } catch (error) {
-      check(error && error.code === "bad-input" && error.params && error.params.why === "with-claim-sender",
-        "a list and a scalar sender were not refused");
+      check(error && error.code === "bad-input" && error.params && error.params.field === "claimSender"
+        && error.params.why === "retired", "a retired scalar sender was not refused by name");
     }
+    check(called === 0, "a retired scalar sender reached the relay");
+
+    // A RECORD WRITTEN BEFORE THE LIST EXISTED IS MIGRATED ON ITS FIRST CLAIM. The scalar is a stored fallback,
+    // never a request input; after the claim the record carries the list and the scalar is gone.
+    const legacy = await seed({ omitClaimSender: true });
+    const legacyRecord = engine.swap.getSwap(legacy.id, store);
+    legacyRecord.claimSender = lower(storedSender);
+    delete legacyRecord.claimSenders;
+    engine.swap.saveSwap(legacyRecord, store);
+    resetChain();
+    resetAttempts();
+    const legacyResult = await swaps.claimViaRelay({ id: legacy.id,
+      fetchImpl: async () => { chainStatus.claimed = true; return answer(storedSender, "0x" + "a4".repeat(32)); } });
+    const migrated = engine.swap.getSwap(legacy.id, store);
+    check(legacyResult && legacyResult.state === "claimed" && Array.isArray(migrated.claimSenders)
+      && migrated.claimSenders[0] === lower(storedSender) && migrated.claimSender === undefined,
+      "a pre-list record was not migrated on its first claim: " + JSON.stringify({ legacyResult, migrated }));
+
+    // A LIST THAT ALREADY MATCHES IS STILL A MIGRATION POINT: the stale scalar must not survive a no-op list save.
+    const sameList = engine.swap.getSwap(legacy.id, store);
+    sameList.claimSenders = [lower(storedSender)];
+    sameList.claimSender = lower(storedSender);
+    engine.swap.saveSwap(sameList, store);
+    resetChain();
+    resetAttempts();
+    const sameListResult = await swaps.claimViaRelay({ id: legacy.id,
+      fetchImpl: async () => { chainStatus.claimed = true; return answer(storedSender, "0x" + "a5".repeat(32)); } });
+    const cleaned = engine.swap.getSwap(legacy.id, store);
+    check(sameListResult && sameListResult.state === "claimed" && cleaned.claimSender === undefined,
+      "a matching list kept the retired scalar: " + JSON.stringify({ sameListResult, cleaned }));
 
     resetChain();
     resetAttempts();
@@ -454,19 +495,6 @@ export const relayClaimCheck = async () => {
     const result = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender, relaySender], fetchImpl: shared });
     check(result && result.state === "claimed" && deduped.length === 1,
       "a duplicated sender was tried twice");
-
-    resetChain();
-    resetAttempts();
-    const legacy = await seed({ omitClaimSender: true });
-    resetChain();
-    resetAttempts();
-    check(chainStatus.claimed === false, "fixture reset left claimed=true");
-    const legacyFetch = async () => { chainStatus.claimed = true; return answer(storedSender, "0x" + "a4".repeat(32), legacy.escrow); };
-    resetChain();
-    resetAttempts();
-    const legacyResult = await swaps.claimViaRelay({ id: legacy.id, claimSender: storedSender, fetchImpl: legacyFetch });
-    check(legacyResult && legacyResult.state === "claimed" && legacyResult.provider === lower(storedSender),
-      "the legacy scalar sender was not accepted as a fallback: " + JSON.stringify({ legacyResult, claimed: chainStatus.claimed }));
 
     resetChain();
     resetAttempts();
