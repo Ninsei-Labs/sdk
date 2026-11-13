@@ -255,7 +255,8 @@ export async function fundOrder({ factory, locker, claimer, commitHalfLocker, co
   // point can be funded beside a proof for another, and the claim reveals a half that does not open the address.
   const sameValue = (a, b) => String(a === undefined || a === null ? "" : a).replace(/^0x/i, "").toLowerCase()
     === String(b === undefined || b === null ? "" : b).replace(/^0x/i, "").toLowerCase();
-  for (const name of ["locker", "claimer", "amount", "readyBy", "t1", "salt", "commitHalfClaimer", "edPointClaimer"]) {
+  for (const name of ["locker", "claimer", "amount", "readyBy", "t1", "salt", "commitHalfClaimer", "edPointClaimer",
+    "commitHalfLocker", "edPointLocker", "edViewPointLocker"]) {
     if (!sameValue(quote[name], terms[name])) {
       throw new Error("the quote and the order terms diverge on field " + name);
     }
