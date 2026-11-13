@@ -1883,11 +1883,19 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         }
       }
       // A LIST IS NOT A PIN. It is saved only as the fallback for a reload whose caller no longer has the relay's
-      // answer; a later request that brings its own order ignores it.
+      // answer; a later request that brings its own order ignores it. The retired scalar is removed even when the
+      // list already matches, so a migrated record cannot keep two sources.
+      let sendersChanged = false;
       if (!Array.isArray(swap.claimSenders) || swap.claimSenders.length !== senders.length
         || swap.claimSenders.some((value, index) => String(value).toLowerCase() !== senders[index])) {
         swap.claimSenders = senders;
+        sendersChanged = true;
+      }
+      if (Object.prototype.hasOwnProperty.call(swap, "claimSender")) {
         delete swap.claimSender;
+        sendersChanged = true;
+      }
+      if (sendersChanged) {
         try { engine.swap.saveSwap(swap, store); }
         catch { throw new SdkError("storage-unavailable", { step: "save-claim-senders" }); }
       }

@@ -511,6 +511,19 @@ export const relayClaimCheck = async () => {
       && migrated.claimSenders[0] === lower(storedSender) && migrated.claimSender === undefined,
       "a pre-list record was not migrated on its first claim: " + JSON.stringify({ legacyResult, migrated }));
 
+    // A LIST THAT ALREADY MATCHES IS STILL A MIGRATION POINT: the stale scalar must not survive a no-op list save.
+    const sameList = engine.swap.getSwap(legacy.id, store);
+    sameList.claimSenders = [lower(storedSender)];
+    sameList.claimSender = lower(storedSender);
+    engine.swap.saveSwap(sameList, store);
+    resetChain();
+    resetAttempts();
+    const sameListResult = await swaps.claimViaRelay({ id: legacy.id,
+      fetchImpl: async () => { chainStatus.claimed = true; return answer(storedSender, "0x" + "a5".repeat(32)); } });
+    const cleaned = engine.swap.getSwap(legacy.id, store);
+    check(sameListResult && sameListResult.state === "claimed" && cleaned.claimSender === undefined,
+      "a matching list kept the retired scalar: " + JSON.stringify({ sameListResult, cleaned }));
+
     resetChain();
     resetAttempts();
     const deduped = [];
