@@ -633,6 +633,88 @@ export const relayClaimCheck = async () => {
     clockMs = 1_900_000_000_000;
   }
 
+  // (9f) A START AT t1 - 215 STILL HAS ONE POST'S WORTH OF ROOM. The per-sender gate must not stop this before the
+  // first POST, and it must stop the next sender if that slot crosses into the settlement margin.
+  {
+    resetChain();
+    resetAttempts();
+    readyMark = 1;
+    t1Sec = order.t1;
+    readyBySec = order.readyBy;
+    statusUnreadable = false;
+    clockMs = (order.t1 - 215) * 1000;
+    let calls = 0;
+    const result = await swaps.claimViaRelay({ id: record.id,
+      claimSenders: [relaySender],
+      fetchImpl: async () => { calls += 1; return refusal("claim-tip-too-small"); } });
+    check(result && result.state === "claim-yourself" && calls === 1,
+      "a window at t1 - 215 did not post exactly once: " + JSON.stringify({ result, calls }));
+    clockMs = 1_900_000_000_000;
+    readyMark = 1;
+  }
+
+  // (9f2) A SLOT THAT CROSSES INTO THE SETTLEMENT MARGIN STOPS THE NEXT SENDER. The gate is re-read for every
+  // sender, not once for the whole list.
+  {
+    resetChain();
+    resetAttempts();
+    readyMark = 1;
+    t1Sec = order.t1;
+    readyBySec = order.readyBy;
+    statusUnreadable = false;
+    clockMs = (order.t1 - 215) * 1000;
+    let calls = 0;
+    const result = await swaps.claimViaRelay({ id: record.id,
+      claimSenders: [relaySender, secondSender], slotMs: 20_000, pollMs: 2_000,
+      fetchImpl: async () => {
+        calls += 1;
+        if (calls === 1) throw Object.assign(new Error("lost answer"), { code: "claim-unknown" });
+        chainStatus.claimed = true;
+        return answer(secondSender, "0x" + "f8".repeat(32));
+      } });
+    check(result && result.state === "claim-window" && result.reason === "settlement-margin" && calls === 1,
+      "a slot crossing the margin did not stop the next sender: " + JSON.stringify({ result, calls }));
+    clockMs = 1_900_000_000_000;
+    readyMark = 1;
+  }
+
+  // (9g) A THROW INSIDE A SLOT LEAVES A DURABLE sending ENTRY, AND THE NEXT CALL CAN RECOVER.
+  {
+    resetChain();
+    resetAttempts();
+    readyMark = 1;
+    t1Sec = order.t1;
+    readyBySec = order.readyBy;
+    statusUnreadable = false;
+    clockMs = (order.readyBy + 10) * 1000;
+    let firstError = null;
+    let posts = 0;
+    try {
+      await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender], slotMs: 15_000, pollMs: 1_000,
+        fetchImpl: async () => {
+          posts += 1;
+          statusUnreadable = true;
+          return answer(relaySender, "0x" + "f8".repeat(32));
+        } });
+    } catch (error) { firstError = error; }
+    check(firstError && firstError.code === "claim-unknown" && posts === 1,
+      "a status read throw inside the slot was not claim-unknown: "
+        + JSON.stringify({ code: firstError && firstError.code, posts }));
+    const afterThrow = engine.swap.getSwap(record.id, store);
+    const lastAttempt = afterThrow && Array.isArray(afterThrow.claimAttempts)
+      ? afterThrow.claimAttempts[afterThrow.claimAttempts.length - 1] : null;
+    check(lastAttempt && lastAttempt.outcome === "sending",
+      "a thrown slot did not persist its sending entry: " + JSON.stringify(lastAttempt));
+    statusUnreadable = false;
+    let recovered = null;
+    try {
+      recovered = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender],
+        fetchImpl: async () => { chainStatus.claimed = true; return answer(relaySender, "0x" + "f9".repeat(32)); } });
+    } catch (error) { recovered = { error }; }
+    check(recovered && recovered.state === "claimed",
+      "the next call did not recover a durable sending entry: " + JSON.stringify(recovered));
+  }
+
   // (9a) THE CHAIN'S CLOCK, NOT THE DEVICE'S, DECIDES WHETHER THE HALF MAY BE POSTED. A device that is behind
   // must not hand the half to a relay after the contract's t1.
   {
@@ -669,6 +751,16 @@ export const relayClaimCheck = async () => {
       fetchImpl: async () => { calls += 1; chainStatus.claimed = true; return answer(relaySender, "0x" + "f4".repeat(32)); } });
     check(result && result.state === "claim-window" && result.reason === "unreadable" && calls === 0,
       "a missing chain clock fell back to the device clock: " + JSON.stringify({ result, calls }));
+
+    const broken = createSwaps({ config: {}, call: read, store, now: () => clockMs,
+      evmBlock: async () => ({ number: 1, timestamp: Number.NaN }) });
+    let brokenCalls = 0;
+    const brokenResult = await broken.claimViaRelay({ id: record.id, claimSenders: [relaySender],
+      fetchImpl: async () => { brokenCalls += 1; chainStatus.claimed = true; return answer(relaySender, "0x" + "f4".repeat(32)); } });
+    check(brokenResult && brokenResult.state === "claim-window" && brokenResult.reason === "unreadable"
+      && brokenCalls === 0,
+      "a configured but unreadable chain clock fell back to the device clock: "
+        + JSON.stringify({ brokenResult, brokenCalls }));
   }
 
   // (9c) THE SLOT IS CLAMPED TO 15-30 s; A SLOT VALUE IS NOT AN UNBOUNDED SLEEP.
@@ -713,6 +805,29 @@ export const relayClaimCheck = async () => {
       fetchImpl: async () => { calls += 1; chainStatus.claimed = true; return answer(relaySender, "0x" + "f6".repeat(32)); } });
     check(result && result.state === "claimed" && calls === 1,
       "a recorded in-flight sender was never retried: " + JSON.stringify({ result, calls }));
+  }
+
+  // (9e) A FUTURE-DATED `at` FROM AN OLD DEVICE CLOCK IS WAITED AT MOST ONE SLOT, NOT DAYS.
+  {
+    resetChain();
+    resetAttempts();
+    readyMark = 1;
+    t1Sec = order.t1;
+    readyBySec = order.readyBy;
+    statusUnreadable = false;
+    clockMs = (order.readyBy + 10) * 1000;
+    const current = engine.swap.getSwap(record.id, store);
+    current.claimAttempts = [{ sender: lower(relaySender),
+      at: Math.floor(clockMs / 1000) + 3_600, outcome: "sending" }];
+    engine.swap.saveSwap(current, store);
+    const started = clockMs;
+    let calls = 0;
+    const result = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender],
+      fetchImpl: async () => { calls += 1; chainStatus.claimed = true; return answer(relaySender, "0x" + "f7".repeat(32)); } });
+    check(result && result.state === "claimed" && calls === 1,
+      "a future-dated attempt was never retried: " + JSON.stringify({ result, calls }));
+    check(clockMs - started <= 20_000,
+      "a future-dated attempt stalled the resume path: " + JSON.stringify({ moved: clockMs - started }));
   }
 
   // (10) A SENDER IS WRITTEN BEFORE ITS SLOT, SO A RELOAD CAN SEE THE IN-FLIGHT ATTEMPT AND WAIT IT OUT.

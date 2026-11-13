@@ -105,9 +105,9 @@ does not take a relay from the caller after the quote: an optional `relayUrl` ma
 other origin is refused with `bad-input`. The half is never logged or written by this path.
 
 `claimAttempts` is a diagnostic journal, not a list of senders to skip. A later call starts with the first sender
-again; a previous `sending`, `unknown` or `unconfirmed` entry is waited out for its slot and then retried. A
-temporary refusal, a process restart or a closed tab therefore does not permanently remove the seller's only
-no-wallet path.
+again. A previous `sending` or `unknown` entry is waited out for its slot and then retried; a `refused` or
+`unconfirmed` entry is retried immediately. A temporary refusal, a process restart or a closed tab therefore does
+not permanently remove the seller's only no-wallet path.
 
 The sell record also keeps the node's signed `readyWindow`. `sellWatch`, the late-arrival boundary and
 `refundIfXmrMissing` use its `readyMinSeconds`/`readyMaxSeconds`; a record without the window is refused with

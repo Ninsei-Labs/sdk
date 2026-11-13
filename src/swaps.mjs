@@ -472,14 +472,17 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
   const sleepFor = typeof sleep === "function" ? sleep
     : (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   // THE CLAIM WINDOW USES THE CHAIN CLOCK, NOT THE DEVICE CLOCK. `evmBlock` is the same block-read seam the
-  // sell-side gate uses; an explicitly injected `now` remains a test seam. Without either, a half-revealing send
-  // must refuse rather than silently use Date.now().
+  // sell-side gate uses; an explicitly injected `now` remains a test seam only when no chain seam is configured.
+  // Without either, a half-revealing send must refuse rather than silently use Date.now().
   let observedNowSec = null;
   const chainNowSec = async () => {
     const snapshot = await chainSnapshot();
     if (snapshot && Number.isSafeInteger(Number(snapshot.timestamp)) && Number(snapshot.timestamp) > 0) {
       return Number(snapshot.timestamp);
     }
+    // A CONFIGURED CHAIN SEAM THAT IS UNREADABLE IS A REFUSAL, NOT A DEVICE CLOCK. The explicit `now` seam is only
+    // for hosts that did not configure `evmBlock` at all (simulation and tests).
+    if (typeof evmBlock === "function") return null;
     if (typeof now === "function") {
       const value = Math.floor(clockMs() / 1000);
       return Number.isSafeInteger(value) && value > 0 ? value : null;
@@ -1992,7 +1995,10 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         && Number.isFinite(Number(latest.at))) {
         const gate = await windowOf();
         if (!gate.ok) return windowResult(gate.reason, priorTried);
-        const slotEnd = Number(latest.at) + Math.ceil(slotMs / 1000);
+        // AN OLD RECORD MAY CARRY A DEVICE-CLOCK `at` AHEAD OF CHAIN TIME. A slot is 15-30 s by construction, so cap
+        // the wait at one slot from the chain clock instead of trusting a future timestamp indefinitely.
+        const slotEnd = Math.min(Number(latest.at) + Math.ceil(slotMs / 1000),
+          observedNowSec + Math.ceil(slotMs / 1000));
         while (observedNowSec !== null && observedNowSec < slotEnd) {
           const status = await readStatus();
           if (status && status.isClaimed) return claimedByEscrow(latest.sender, null, priorTried);

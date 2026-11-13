@@ -246,12 +246,12 @@ without a real transaction hash is `claim-unknown`: the claim may have been sent
 moves on only after the slot. Only an escrow that reads `claimed` is success.
 
 Each sender is written to the record before its POST. The log is diagnostic, not a skip list: a later call starts
-at the first sender again; a previous `sending`, `unknown` or `unconfirmed` entry is waited out for its slot and
-then retried. A refusal moves on at once. This is what makes a temporary relay failure, a restart or a closed tab
-recoverable. A sender's slot starts when it is entered, not when its POST returns; `pollMs` has a 250 ms floor and
-`timeoutMs` a 120 s ceiling. The relay gate also reserves the settlement margin, so `sellWatch` can still report
-its own-wallet `claim-open` while `claimViaRelay` has already stopped. A refunded escrow is `claim-window` with
-`reason: "escrow-refunded"`, not a request to claim; recovery is the next step.
+at the first sender again. A previous `sending` or `unknown` entry is waited out for its slot and then retried; a
+`refused` or `unconfirmed` entry is retried immediately. This is what makes a temporary relay failure, a restart or
+a closed tab recoverable. A sender's slot starts when it is entered, not when its POST returns; `pollMs` has a
+250 ms floor and `timeoutMs` a 120 s ceiling. The relay gate also reserves the settlement margin, so `sellWatch` can
+still report its own-wallet `claim-open` while `claimViaRelay` has already stopped. A refunded escrow is
+`claim-window` with `reason: "escrow-refunded"`, not a request to claim; recovery is the next step.
 
 The claim window uses the escrow's chain time, read with `evmBlock` (or the wallet's block provider), not the
 device clock. If neither clock is available, the client refuses with `claim-window` / `unreadable` before the half

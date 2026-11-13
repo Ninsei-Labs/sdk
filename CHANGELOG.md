@@ -1,6 +1,6 @@
 ## 0.60.1 — 2026-11-13
 
-- `claimViaRelay` treats `claimAttempts` as a diagnostic journal, not as a list of senders to skip. A repeated call starts from the first sender again; a previous `sending` or `unknown` entry is waited out for its slot and retried. A temporary relay refusal, a process restart or a closed tab no longer removes the seller's no-wallet path.
+- `claimViaRelay` treats `claimAttempts` as a diagnostic journal, not as a list of senders to skip. A repeated call starts from the first sender again; a previous `sending` or `unknown` entry is waited out for its slot and retried. A legacy future timestamp is capped at one slot, so an old device clock cannot stall recovery. A temporary relay refusal, a process restart or a closed tab no longer removes the seller's no-wallet path.
 - The claim window and `secondsLeft` use the escrow chain's block timestamp (`evmBlock` or the wallet's block provider). A device clock skew can no longer post the half after `t1`, and a missing chain clock returns `claim-window` / `unreadable` instead of falling back to `Date.now()`.
 - `sellWatch` does not report `ready` after `t1`; a ready mark that arrives too late is named as `claim-window-closed`.
 - The witness shadow walks every fixed slice to the common target even after finding a perfect candidate, and `witnessQuorum.ok` requires completed operators with no witness-to-witness disagreement.
