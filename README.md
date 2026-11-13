@@ -227,12 +227,11 @@ if (claimed.state === "claimed") {
 `claimSenders` is the client's ordered list: the relay's own sender first, then other listed makers. `startSell`
 stores a list only when the caller passes `claimSenders`; otherwise the offer's published `claimSender` becomes a
 one-element list. An explicit list replaces that published sender; it is never prepended. `claimViaRelay({ id })`
-uses the stored list, while a request `claimSenders` replaces it. The old scalar `claimSender` remains a
-one-element fallback for callers written before the list; it is not a pin and not the sender that necessarily
-lands the claim. The SDK tries one sender at a time for a 15-30 s slot. A refusal moves on at once; a txid is not
-success - the SDK reads the escrow until it says `claimed` or the slot ends. The deal's maker and its quote-key
-owner are refused before the half leaves the client. When the list is exhausted the result is
-`state: "claim-yourself"` with `t1` and `secondsLeft`.
+uses the stored list, while a request `claimSenders` replaces it. The old scalar `claimSender` is retired and
+refused by name; the claim result names the sender that landed it as `provider`. The SDK tries one sender at a
+time for a 15-30 s slot. A refusal moves on at once; a txid is not success - the SDK reads the escrow until it
+says `claimed` or the slot ends. The deal's maker and its quote-key owner are refused before the half leaves the
+client. When the list is exhausted the result is `state: "claim-yourself"` with `t1` and `secondsLeft`.
 
 The claim window is the escrow's, not the relay's. Before every sender the SDK reads `ready`, `readyBy` and `t1`
 from the chain. Without the ready mark before `readyBy`, at or after `t1`, or inside the 120 s settlement margin
@@ -256,11 +255,6 @@ a closed tab recoverable. A sender's slot starts when it is entered, not when it
 250 ms floor and `timeoutMs` a 120 s ceiling. The relay gate also reserves the settlement margin, so `sellWatch` can
 still report its own-wallet `claim-open` while `claimViaRelay` has already stopped. A refunded escrow is
 `claim-window` with `reason: "escrow-refunded"`, not a request to claim; recovery is the next step.
-
-`claimAttempts` is append-only and the SDK does not prune it: a long-lived record can grow with every retry. The
-journal is diagnostic, not a spendable state. A host may trim older entries, but it must keep the latest
-`sending` or `unknown` entry: that slot is waited out before the sender is tried again. Do not use the journal as
-proof that a sender is finished.
 
 The claim window uses the escrow's chain time, read with `evmBlock` (or the wallet's block provider), not the
 device clock. If neither clock is available, the client refuses with `claim-window` / `unreadable` before the half

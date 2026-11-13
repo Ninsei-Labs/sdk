@@ -77,9 +77,10 @@ encryption envelope in the host, and do not pass a bid answer to `swaps.start` (
 
 `swaps.startSell` records the one-time address, the escrow, our half, the expectations and the relay origin that
 answered the quote. It sends no transaction. The same offer retried returns the same record with `resumed: true`; a
-changed commitment or relay origin is refused rather than silently resumed. A stored `claimSender` is a legacy
-single-sender fallback, not a pin: an explicit `claimSenders` list replaces the relay-published sender and is never
-prepended to it. The ordered list passed to `claimViaRelay` is the authority.
+changed commitment or relay origin is refused rather than silently resumed. The old scalar `claimSender` is
+retired: `startSell` accepts `claimSenders` (or the relay-published `claimSender` as a one-element list), and
+`claimViaRelay` accepts a list or uses the stored list. The claim result names the sender that landed it as
+`provider`.
 
 There are two claim paths, and the host picks by what the seller holds:
 
@@ -98,10 +99,12 @@ its quote-key owner are refused before the half leaves the client. Before every 
 margin (plus a slot and time for the seller's own claim) it returns `state: "claim-window"` with a named reason and
 posts nothing. The window and `secondsLeft` use the chain's block timestamp, not the device clock; without a
 readable chain clock the result is `claim-window` / `unreadable` and no half leaves the client. An escrow read that
-fails before any send is also `claim-window` / `unreadable`; if an earlier attempt may already have sent the half,
-it is `claim-unknown` with `why: "escrow-unread"`, never `claim-yourself`. A relay answer such as `claim-not-ready`
-or `claim-window-closed` stops the list instead of passing the half to the next sender. When the list is exhausted
-the result is `state: "claim-yourself"` with `t1` and `secondsLeft`; `sellClaim` remains the fallback. A refunded escrow
+fails before any send is `claim-window` / `unreadable`; if an earlier attempt may already have sent the half, it is
+`claim-unknown` with `why: "escrow-unread"`, never `claim-yourself`. A relay answer such as `claim-not-ready` or
+`claim-window-closed` stops the list instead of passing the half to the next sender. Relay-level answers
+(`rate_limited`, `bad_request`, `unsupported_version`, `no_quote`) are `claim-unknown`, not a sender refusal. When
+the list is exhausted the result is `state: "claim-yourself"` with `t1` and `secondsLeft`; `sellClaim` remains the
+fallback. A refunded escrow
 is `state: "claim-window"` with `reason: "escrow-refunded"`, not a request to claim; recovery is the next step. It
 does not take a relay from the caller after the quote: an optional `relayUrl` may repeat the stored origin, and any
 other origin is refused with `bad-input`. The half is never logged or written by this path.
@@ -110,10 +113,6 @@ other origin is refused with `bad-input`. The half is never logged or written by
 again. A previous `sending` or `unknown` entry is waited out for its slot and then retried; a `refused` or
 `unconfirmed` entry is retried immediately. A temporary refusal, a process restart or a closed tab therefore does
 not permanently remove the seller's only no-wallet path.
-
-The journal is append-only and the SDK does not prune it; a record can grow with every retry. It is diagnostic,
-not a spendable state. A host may trim older entries, but it must keep the latest `sending` or `unknown` entry
-because that slot is waited out before the sender is tried again.
 
 The sell record also keeps the node's signed `readyWindow`. `sellWatch`, the late-arrival boundary and
 `refundIfXmrMissing` use its `readyMinSeconds`/`readyMaxSeconds`; a record without the window is refused with
