@@ -1976,7 +1976,19 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       // A CLAIM THAT ALREADY LANDED IS NOT A REASON TO SEND THE HALF AGAIN. The caller may have lost the answer on
       // the previous attempt; read the escrow before the first POST, and read it once more before returning
       // `claim-yourself`, so a late claim cannot be reported as "claim yourself".
-      const initial = await readStatus();
+      const priorAttempts = Array.isArray(swap.claimAttempts) ? swap.claimAttempts : [];
+      let initial;
+      try {
+        initial = await readStatus();
+      } catch (error) {
+        // NOTHING HAS BEEN SENT IN THIS CALL. Without an earlier attempt this is a pre-send refusal, not "the claim
+        // may already have been sent"; the window result says the clock/escrow could not be read.
+        if (!priorAttempts.length && error && error.code === "claim-unknown"
+          && error.params && error.params.why === "escrow-unread") {
+          return windowResult("unreadable", []);
+        }
+        throw error;
+      }
       if (initial.isClaimed) return claimedByEscrow();
       if (!initial.isFunded) return windowResult("not-funded", []);
       let refunded = Boolean(initial.isRefunded);
@@ -1985,7 +1997,6 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       // a crash or a lost answer leaves a durable trace; a later call reads the escrow and may try the same sender
       // again. Only a sender whose slot is still running is held back, and even then the slot is polled rather than
       // allowed to block the list forever.
-      const priorAttempts = Array.isArray(swap.claimAttempts) ? swap.claimAttempts : [];
       const priorTried = priorAttempts.map((entry) => ({
         sender: entry.sender, outcome: entry.outcome || "unknown", code: entry.code || null,
         params: entry.params || null, txid: entry.txid || null,

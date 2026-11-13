@@ -688,7 +688,8 @@ export interface SwapsApi {
    * result is `claim-yourself` with the time left before `t1`.
    *
    * The claim window is read with the escrow's chain clock (`evmBlock`), not the device clock. Without a readable
-   * clock the result is `claim-window` / `unreadable` and no half leaves the client. The deal's maker and its
+   * clock the result is `claim-window` / `unreadable` and no half leaves the client. The same applies to an escrow
+   * read that fails before any POST; after an earlier attempt it remains `claim-unknown`. The deal's maker and its
    * quote-key owner are refused before the half leaves the client. No wallet is created or used and no chain
    * transaction is signed. `relayUrl` may restate the stored origin; a different origin is refused.
    */

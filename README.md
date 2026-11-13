@@ -235,7 +235,8 @@ half leaves the client. When the list is exhausted the result is `state: "claim-
 The claim window is the escrow's, not the relay's. Before every sender the SDK reads `ready`, `readyBy` and `t1`
 from the chain. Without the ready mark before `readyBy`, at or after `t1`, or inside the 120 s settlement margin
 (plus the sender's slot and time for the seller's own claim), it returns `state: "claim-window"` with a named
-`reason` and posts nothing. An unread escrow is `claim-unknown` with `why: "escrow-unread"`; it is never reported as
+`reason` and posts nothing. An escrow read that fails before any send is `claim-window` / `unreadable`; if an earlier
+attempt may already have sent the half, it is `claim-unknown` with `why: "escrow-unread"`. It is never reported as
 `claim-yourself`. A relay answer such as `claim-not-ready` or `claim-window-closed` stops the list instead of
 passing the half to the next sender.
 

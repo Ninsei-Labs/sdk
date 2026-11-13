@@ -608,7 +608,7 @@ export const relayClaimCheck = async () => {
     check(selfSigned === true && calls > 0,
       "the relay posted where sellClaim would sign");
 
-    // A FAILED ESCROW READ IS UNKNOWN, NOT "CLAIM YOURSELF". The half may already have landed.
+    // A FAILED ESCROW READ BEFORE ANY SEND IS A PRE-SEND REFUSAL, NOT "THE CLAIM MAY HAVE LANDED".
     resetChain();
     resetAttempts();
     readyMark = 1;
@@ -617,15 +617,25 @@ export const relayClaimCheck = async () => {
     statusUnreadable = true;
     clockMs = 1_900_000_000_000;
     let unreadCalls = 0;
+    const unread = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender],
+      fetchImpl: async () => { unreadCalls += 1; chainStatus.claimed = true; return answer(relaySender, "0x" + "f2".repeat(32)); } });
+    check(unread && unread.state === "claim-window" && unread.reason === "unreadable",
+      "an unread escrow before any send did not return claim-window/unreadable: " + JSON.stringify(unread));
+    check(unreadCalls === 0, "an unread escrow still posted the half");
+    // WITH A PRIOR ATTEMPT THE HALF MAY ALREADY BE OUT; THAT REMAINS CLAIM-UNKNOWN.
+    const current = engine.swap.getSwap(record.id, store);
+    current.claimAttempts = [{ sender: lower(relaySender), at: Math.floor(clockMs / 1000), outcome: "sending" }];
+    engine.swap.saveSwap(current, store);
+    let priorUnreadCalls = 0;
     try {
       await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender],
-        fetchImpl: async () => { unreadCalls += 1; chainStatus.claimed = true; return answer(relaySender, "0x" + "f2".repeat(32)); } });
-      check(false, "an unread escrow was reported as a claim-yourself");
+        fetchImpl: async () => { priorUnreadCalls += 1; return answer(relaySender, "0x" + "f3".repeat(32)); } });
+      check(false, "a prior attempt with an unread escrow was not claim-unknown");
     } catch (error) {
       check(error && error.code === "claim-unknown" && error.params && error.params.why === "escrow-unread",
-        "an unread escrow did not refuse with claim-unknown/escrow-unread");
+        "a prior attempt with an unread escrow was not claim-unknown/escrow-unread");
     }
-    check(unreadCalls === 0, "an unread escrow still posted the half");
+    check(priorUnreadCalls === 0, "a prior attempt with an unread escrow still posted the half");
     statusUnreadable = false;
     resetChain();
     resetAttempts();
