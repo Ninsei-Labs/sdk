@@ -1376,7 +1376,14 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       // the result; `request.address` was never part of the public watch request.
       const record = (() => { try { return engine.swap.getSwap(id, store); } catch { return null; } })();
       const storedSwap = record;
-      const escrowAddress = request.escrow || (record && record.escrow && record.escrow.address) || null;
+      const sameAddress = (a, b) => String(a || "").replace(/^0x/, "").toLowerCase()
+        === String(b || "").replace(/^0x/, "").toLowerCase();
+      const recordEscrow = record && record.escrow && record.escrow.address;
+      if (request.escrow !== undefined && request.escrow !== null && String(request.escrow).trim()
+        && recordEscrow && !sameAddress(request.escrow, recordEscrow)) {
+        throw new SdkError("bad-input", { field: "escrow", why: "record-mismatch" });
+      }
+      const escrowAddress = request.escrow || recordEscrow || null;
       if (wantExpect && !escrowAddress) throw new SdkError("bad-input", { field: "escrow" });
       const readyWindowRaw = request.readyWindow || (storedSwap && (storedSwap.readyWindow || storedSwap.sellWindow)) || null;
       const pollMs = Number.isFinite(Number(request.pollMs)) && Number(request.pollMs) > 0 ? Number(request.pollMs) : limitOf("watchPollMs", 5000);
@@ -1415,6 +1422,10 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       const moneroAddress = typeof verifyRequest.address === "string" && verifyRequest.address
         ? verifyRequest.address
         : (record && record.escrow && record.escrow.moneroAddress) || null;
+      if (verifyRequest.address && record && record.escrow && record.escrow.moneroAddress
+        && String(verifyRequest.address) !== String(record.escrow.moneroAddress)) {
+        throw new SdkError("bad-input", { field: "verify.address", why: "record-mismatch" });
+      }
       if (!moneroAddress) throw new SdkError("bad-input", { field: "verify.address", why: "not-in-record" });
       const started = Date.now();
       // --- THE MAKER'S DECLINE: THE WAIT IS NOT STARTED AT ALL (issue #40). -------------------------------------

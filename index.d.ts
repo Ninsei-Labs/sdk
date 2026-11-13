@@ -1160,7 +1160,8 @@ export interface SellWatchResult {
 export interface SwapWatchRequest {
   /** The local swap record identifier. */
   readonly id: string;
-  /** The escrow address for the ready mark (mandatory when `expect` and `wallet` are passed and the record has none). */
+  /** The escrow address for the ready mark. If the record already names an escrow, a different value is refused as
+   * `bad-input` / `record-mismatch` rather than watched under the same id. */
   readonly escrow?: string;
   /** How often to ask the state. Default - `config.limits.watchPollMs`. */
   readonly pollMs?: number;
@@ -1175,7 +1176,8 @@ export interface SwapWatchRequest {
   /**
    * CLIENT-SIDE ARRIVAL CHECK (issue #85). With this the CLIENT decides: it reads the chain itself and `ready`
    * opens only when two operators agree. The backend's `seen` is then only a notification and does not open the
-   * button. `verify` is mandatory: without it the watch refuses with `bad-input`.
+   * button. `verify` is mandatory: without it the watch refuses with `bad-input`. `verify.address` must match the
+   * record's `moneroAddress` when the record has one; a different address is `bad-input` / `record-mismatch`.
    */
   readonly verify?: Omit<XmrArrivalRequest, "minConfirmations">;
   /** The confirmation target before `ready`. Default - `config.limits.xmrConfirmations` (10). */
