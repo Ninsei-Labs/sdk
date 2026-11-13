@@ -31,7 +31,7 @@ const quote = { ...order, provider: order.claimer,
   registry: addr("55"), cashier: addr("66"),
   commitHalfClaimer: halfCommitmentHex(3n, primitives.secp256k1, primitives.keccak256),
   edPointClaimer: maker.spendPoint, feeBps: 0, fee: "0", feeRecipient: addr("77"),
-  validUntil: now + 600, nonce: "1", xmrAmount: "1000000000000", claimTip: "0", commitHalfLocker: "0x" + "a1".repeat(32), edPointLocker: "0x" + "a2".repeat(32), edViewPointLocker: "0x" + "a3".repeat(32) };
+  validUntil: now + 600, nonce: "1", xmrAmount: "1000000000000", claimTip: "0", commitHalfLocker: derived.spendCommitment, edPointLocker: derived.spendPoint, edViewPointLocker: derived.viewPoint };
 quote.signature = signQuoteDigest({ crypto: primitives, digest: quoteDigest({ crypto: primitives, quote }), privateKey: makerKey });
 // A COPY OF THE SAME SIGNED QUOTE WITH ANOTHER LIFETIME. The lock check runs after the answer's preparation was paid;
 // the case below needs a quote that is already inside the answer's combined window but outside the next-block margin.
@@ -67,6 +67,19 @@ async function startWith(view, salt = order.salt, extra = {}, autoSalt = false, 
     call: async ({ data }) => (data.startsWith(FACTORY_METHODS.predict) ? "0x" + "0".repeat(24) + "88".repeat(20) : "0x"),
   }).start(request).catch((error) => error);
   return { result, sent, atSend };
+}
+
+console.log("=== 0) A NUMERIC SALT IS CANONICALISED, NOT A DIFFERENT SALT ===");
+{
+  const numeric = takerHalvesV2({ mnemonic: WORDS, chainId: 421614, factory: order.factory, salt: 123 });
+  const textual = takerHalvesV2({ mnemonic: WORDS, chainId: 421614, factory: order.factory,
+    salt: "0x" + BigInt(123).toString(16).padStart(64, "0") });
+  if (numeric.spendHalf === textual.spendHalf && numeric.viewHalf === textual.viewHalf
+    && numeric.makerViewHalf === textual.makerViewHalf && numeric.salt === textual.salt) {
+    ok("a number salt derives the same halves as its bytes32 form");
+  } else {
+    bad("numeric salt: " + JSON.stringify({ numeric, textual }));
+  }
 }
 
 console.log("=== 0) A SELL START IS REFUSED BEFORE ANY WALLET ===");
@@ -154,8 +167,8 @@ async function startPending({ fresh = true, receipt = { status: "0x1", logs: [],
 
 console.log("=== 1c3) A RELOADED PENDING RETRY FINDS THE SAME ESCROW ===");
 {
-  const first = await startPending();
-  const second = await startPending({ fresh: false });
+  const first = await startPending({ predictFromData: true });
+  const second = await startPending({ fresh: false, predictFromData: true });
   const records = Object.keys((loadState() || {}).swaps || {});
   if (first.result && first.result.step === "funding-pending" &&
       second.result && second.result.step === "funding-pending" &&
