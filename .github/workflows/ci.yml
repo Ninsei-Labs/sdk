@@ -111,6 +111,9 @@ jobs:
       - name: Break the action-window and sell guards (RED, then restored)
         run: pnpm run check:guard-teeth
 
+      - name: Break the 0.61.0 claim guards (RED, then restored)
+        run: pnpm run check:claim-teeth
+
       - name: Break the entry-types guard (RED, then restored)
         run: pnpm run check:types-teeth
 

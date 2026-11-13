@@ -361,6 +361,32 @@ export const relayClaimCheck = async () => {
       && result.tried[0] && result.tried[0].outcome === "unknown",
       code + " was treated as a sender refusal: " + JSON.stringify({ result, calls }));
   }
+
+  // A 200 ANSWER WITH A RELAY-LEVEL CODE IS THE SAME HOP-LEVEL ANSWER. The second interception must not fall
+  // through to the generic quote-refused branch.
+  {
+    resetChain();
+    resetAttempts();
+    readyMark = 1;
+    t1Sec = order.t1;
+    readyBySec = order.readyBy;
+    statusUnreadable = false;
+    clockMs = (order.readyBy + 10) * 1000;
+    let calls = 0;
+    const result = await swaps.claimViaRelay({ id: record.id,
+      claimSenders: [relaySender, secondSender], slotMs: 15_000, pollMs: 2_000,
+      fetchImpl: async (url) => {
+        calls += 1;
+        if (url.includes(lower(relaySender))) {
+          return { ok: true, status: 200, json: async () => ({ version: 1, code: "rate_limited" }) };
+        }
+        chainStatus.claimed = true;
+        return answer(secondSender, "0x" + "f1".repeat(32));
+      } });
+    check(result && result.state === "claimed" && calls === 2
+      && result.tried[0] && result.tried[0].outcome === "unknown",
+      "a 200 relay-level answer was treated as a sender refusal: " + JSON.stringify({ result, calls }));
+  }
   clockMs = 1_900_000_000_000;
   readyMark = 1;
   chainTimestamp = null;
