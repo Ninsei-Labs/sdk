@@ -21,6 +21,7 @@
     "check:pack": "node tools/check.mjs --only=pack",
     "check:pack-teeth": "node tools/run-teeth-isolated.mjs tools/check-pack-teeth.mjs",
     "check:guard-teeth": "node tools/run-teeth-isolated.mjs tools/check-guard-teeth.mjs",
+    "check:claim-teeth": "node tools/run-teeth-isolated.mjs tools/check-claim-teeth.mjs",
     "check:secrets": "node tools/check.mjs --only=secrets",
     "check:vendor-bundles": "node tools/check.mjs --only=vendor-bundles",
     "check:dleq-vectors": "node tools/check-dleq-vectors.mjs",
