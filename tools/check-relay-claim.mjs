@@ -77,10 +77,14 @@ let t1Sec = order.t1;
 let readyBySec = order.readyBy;
 let statusUnreadable = false;
 let statusReads = 0;
+let claimOnReady = false;
+let statusUnreadableOnReady = false;
 let chainStatus = { funded: true, claimed: false, refunded: false, balance: 1_000_000_000_000_000_000n };
 const resetChain = (overrides = {}) => {
   chainStatus = { funded: true, claimed: false, refunded: false, balance: 1_000_000_000_000_000_000n, ...overrides };
   chainTimestamp = null;
+  claimOnReady = false;
+  statusUnreadableOnReady = false;
 };
 const read = async ({ data }) => {
   if (data === encodeStatus()) {
@@ -89,7 +93,11 @@ const read = async ({ data }) => {
     return "0x" + word(chainStatus.funded ? 1 : 0) + word(chainStatus.claimed ? 1 : 0)
       + word(chainStatus.refunded ? 1 : 0) + word(chainStatus.balance);
   }
-  if (data === encodeRead("ready")) return "0x" + word(readyMark);
+  if (data === encodeRead("ready")) {
+    if (statusUnreadableOnReady) { statusUnreadable = true; statusUnreadableOnReady = false; }
+    if (claimOnReady) { chainStatus.claimed = true; claimOnReady = false; }
+    return "0x" + word(readyMark);
+  }
   if (data === encodeRead("t1")) return "0x" + word(t1Sec);
   if (data === encodeRead("readyBy")) return "0x" + word(readyBySec);
   const answer = slotReads[data];
@@ -317,6 +325,34 @@ export const relayClaimCheck = async () => {
     readyMark = 1;
     chainTimestamp = null;
   }
+
+  // (2b) RELAY-LEVEL ANSWERS ARE NOT A SENDER REFUSAL. A rate limit, malformed request, version problem or missing
+  // quote belongs to the hop; the half has not necessarily been forwarded, so the sender gets its slot and the list
+  // continues instead of recording a permanent refusal.
+  for (const code of ["rate_limited", "bad_request", "unsupported_version", "no_quote"]) {
+    resetChain();
+    resetAttempts();
+    readyMark = 1;
+    t1Sec = order.t1;
+    readyBySec = order.readyBy;
+    statusUnreadable = false;
+    clockMs = (order.readyBy + 10) * 1000;
+    let calls = 0;
+    const result = await swaps.claimViaRelay({ id: record.id,
+      claimSenders: [relaySender, secondSender], slotMs: 15_000, pollMs: 2_000,
+      fetchImpl: async (url) => {
+        calls += 1;
+        if (url.includes(lower(relaySender))) return refusal(code);
+        chainStatus.claimed = true;
+        return answer(secondSender, "0x" + "f0".repeat(32));
+      } });
+    check(result && result.state === "claimed" && calls === 2
+      && result.tried[0] && result.tried[0].outcome === "unknown",
+      code + " was treated as a sender refusal: " + JSON.stringify({ result, calls }));
+  }
+  clockMs = 1_900_000_000_000;
+  readyMark = 1;
+  chainTimestamp = null;
 
   // (3) A TXID IS NOT SUCCESS: THE ESCROW MUST READ CLAIMED.
   {
@@ -608,7 +644,7 @@ export const relayClaimCheck = async () => {
     check(selfSigned === true && calls > 0,
       "the relay posted where sellClaim would sign");
 
-    // A FAILED ESCROW READ IS UNKNOWN, NOT "CLAIM YOURSELF". The half may already have landed.
+    // A FAILED ESCROW READ BEFORE ANY SEND IS A PRE-SEND REFUSAL, NOT "THE CLAIM MAY HAVE LANDED".
     resetChain();
     resetAttempts();
     readyMark = 1;
@@ -617,15 +653,26 @@ export const relayClaimCheck = async () => {
     statusUnreadable = true;
     clockMs = 1_900_000_000_000;
     let unreadCalls = 0;
+    const unread = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender],
+      fetchImpl: async () => { unreadCalls += 1; chainStatus.claimed = true; return answer(relaySender, "0x" + "f2".repeat(32)); } })
+      .catch((error) => error);
+    check(unread && unread.state === "claim-window" && unread.reason === "unreadable",
+      "an unread escrow before any send did not return claim-window/unreadable: " + JSON.stringify(unread));
+    check(unreadCalls === 0, "an unread escrow still posted the half");
+    // WITH A PRIOR ATTEMPT THE HALF MAY ALREADY BE OUT; THAT REMAINS CLAIM-UNKNOWN.
+    const current = engine.swap.getSwap(record.id, store);
+    current.claimAttempts = [{ sender: lower(relaySender), at: Math.floor(clockMs / 1000), outcome: "sending" }];
+    engine.swap.saveSwap(current, store);
+    let priorUnreadCalls = 0;
     try {
       await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender],
-        fetchImpl: async () => { unreadCalls += 1; chainStatus.claimed = true; return answer(relaySender, "0x" + "f2".repeat(32)); } });
-      check(false, "an unread escrow was reported as a claim-yourself");
+        fetchImpl: async () => { priorUnreadCalls += 1; return answer(relaySender, "0x" + "f3".repeat(32)); } });
+      check(false, "a prior attempt with an unread escrow was not claim-unknown");
     } catch (error) {
       check(error && error.code === "claim-unknown" && error.params && error.params.why === "escrow-unread",
-        "an unread escrow did not refuse with claim-unknown/escrow-unread");
+        "a prior attempt with an unread escrow was not claim-unknown/escrow-unread");
     }
-    check(unreadCalls === 0, "an unread escrow still posted the half");
+    check(priorUnreadCalls === 0, "a prior attempt with an unread escrow still posted the half");
     statusUnreadable = false;
     resetChain();
     resetAttempts();
@@ -830,6 +877,87 @@ export const relayClaimCheck = async () => {
       "a future-dated attempt stalled the resume path: " + JSON.stringify({ moved: clockMs - started }));
   }
 
+  // (9h) A CLAIM LANDING AFTER THE LAST SLOT IS FOUND BEFORE A WINDOW STOP. The gate closes, but the escrow is
+  // read once more; a late claim must win over a closing-window report.
+  {
+    resetChain();
+    resetAttempts();
+    readyMark = 1;
+    t1Sec = order.t1;
+    readyBySec = order.readyBy;
+    statusUnreadable = false;
+    claimOnReady = false;
+    clockMs = (order.t1 - 215) * 1000;
+    let calls = 0;
+    const result = await swaps.claimViaRelay({ id: record.id,
+      claimSenders: [relaySender, secondSender], slotMs: 20_000, pollMs: 2_000,
+      fetchImpl: async () => {
+        calls += 1;
+        claimOnReady = true;
+        throw Object.assign(new Error("lost answer"), { code: "claim-unknown" });
+      } });
+    check(result && result.state === "claimed" && calls === 1,
+      "a late claim was reported as a closing window: " + JSON.stringify({ result, calls }));
+    clockMs = 1_900_000_000_000;
+    readyMark = 1;
+  }
+
+  // (9i) A FAILED FINAL STATUS READ DOES NOT TURN A WINDOW STOP INTO AN EXCEPTION. The window result keeps its
+  // named reason even when the extra escrow read is unreadable.
+  {
+    resetChain();
+    resetAttempts();
+    readyMark = 1;
+    t1Sec = order.t1;
+    readyBySec = order.readyBy;
+    statusUnreadable = false;
+    statusUnreadableOnReady = false;
+    clockMs = (order.t1 - 215) * 1000;
+    let calls = 0;
+    const result = await swaps.claimViaRelay({ id: record.id,
+      claimSenders: [relaySender, secondSender], slotMs: 20_000, pollMs: 2_000,
+      fetchImpl: async () => {
+        calls += 1;
+        if (calls === 1) {
+          statusUnreadableOnReady = true;
+          throw Object.assign(new Error("lost answer"), { code: "claim-unknown" });
+        }
+        chainStatus.claimed = true;
+        return answer(secondSender, "0x" + "fa".repeat(32));
+      } }).catch((error) => error);
+    check(result && result.state === "claim-window" && result.reason === "settlement-margin" && calls === 1,
+      "an unreadable final escrow replaced the window result with an exception: "
+        + JSON.stringify({ code: result && result.code, state: result && result.state, calls }));
+    statusUnreadable = false;
+    clockMs = 1_900_000_000_000;
+    readyMark = 1;
+  }
+
+  // (9j) THE RESUME GATE USES THE SAME LATE-READ RULE. A prior `sending` attempt whose slot has passed must not
+  // report a closing window without reading the escrow once more.
+  {
+    resetChain();
+    resetAttempts();
+    readyMark = 1;
+    t1Sec = order.t1;
+    readyBySec = order.readyBy;
+    clockMs = (order.t1 - 215) * 1000;
+    const resumed = engine.swap.getSwap(record.id, store);
+    resumed.claimAttempts = [{ sender: lower(relaySender), outcome: "sending", at: Math.floor(clockMs / 1000) }];
+    engine.swap.saveSwap(resumed, store);
+    claimOnReady = true;
+    let calls = 0;
+    const result = await swaps.claimViaRelay({ id: record.id,
+      claimSenders: [relaySender, secondSender], slotMs: 20_000, pollMs: 2_000,
+      fetchImpl: async () => { calls += 1; return answer(secondSender, "0x" + "fb".repeat(32)); } }).catch((error) => error);
+    check(result && result.state === "claimed" && calls === 0,
+      "a resumed late claim was reported as a closing window: "
+        + JSON.stringify({ code: result && result.code, state: result && result.state, calls }));
+    claimOnReady = false;
+    clockMs = 1_900_000_000_000;
+    readyMark = 1;
+  }
+
   // (10) A SENDER IS WRITTEN BEFORE ITS SLOT, SO A RELOAD CAN SEE THE IN-FLIGHT ATTEMPT AND WAIT IT OUT.
   {
     resetAttempts();
@@ -945,6 +1073,22 @@ export const relayClaimCheck = async () => {
     }
     check(delays.includes(120_000) && !delays.some((ms) => ms > 120_000),
       "the HTTP timeout was not capped at 120 s: " + JSON.stringify({ delays }));
+  }
+
+  // (14) A WATCH MAY NOT REDIRECT THE RECORD. A request escrow or verify address that disagrees with the stored
+  // record is refused before any chain read; otherwise a caller could watch another order under the same id.
+  {
+    const badEscrow = await swaps.watch({ id: record.id, escrow: "0x" + "ff".repeat(20),
+      verify: { address: record.escrow.moneroAddress, network: "stagenet" } }).catch((error) => error);
+    check(badEscrow && badEscrow.code === "bad-input" && badEscrow.params
+      && badEscrow.params.field === "escrow" && badEscrow.params.why === "record-mismatch",
+      "a watch accepted another escrow: " + JSON.stringify(badEscrow && (badEscrow.params || badEscrow.code)));
+    const badMonero = await swaps.watch({ id: record.id, escrow: record.escrow.address,
+      readyWindow: { side: "ask", readyMinSeconds: 2400, readyMaxSeconds: 3000 },
+      verify: { address: "59not-the-record", network: "stagenet" } }).catch((error) => error);
+    check(badMonero && badMonero.code === "bad-input" && badMonero.params
+      && badMonero.params.field === "verify.address" && badMonero.params.why === "record-mismatch",
+      "a watch accepted another Monero address: " + JSON.stringify(badMonero && (badMonero.params || badMonero.code)));
   }
 
   notes.push("the client list is tried in order; a refusal moves on, a txid waits for the escrow, and exhaustion asks for the seller's own claim");

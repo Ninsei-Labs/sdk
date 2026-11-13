@@ -235,9 +235,11 @@ half leaves the client. When the list is exhausted the result is `state: "claim-
 The claim window is the escrow's, not the relay's. Before every sender the SDK reads `ready`, `readyBy` and `t1`
 from the chain. Without the ready mark before `readyBy`, at or after `t1`, or inside the 120 s settlement margin
 (plus the sender's slot and time for the seller's own claim), it returns `state: "claim-window"` with a named
-`reason` and posts nothing. An unread escrow is `claim-unknown` with `why: "escrow-unread"`; it is never reported as
+`reason` and posts nothing. An escrow read that fails before any send is `claim-window` / `unreadable`; if an earlier
+attempt may already have sent the half, it is `claim-unknown` with `why: "escrow-unread"`. It is never reported as
 `claim-yourself`. A relay answer such as `claim-not-ready` or `claim-window-closed` stops the list instead of
-passing the half to the next sender.
+passing the half to the next sender. Relay-level answers (`rate_limited`, `bad_request`, `unsupported_version`,
+`no_quote`) are `claim-unknown`, not a sender refusal; the sender keeps its slot and the list continues.
 
 `claimViaRelay` reads the sell record made by `startSell` and requires a positive `claimTip`, the escrow and the
 half. It posts to the relay origin stored with the record; an optional `relayUrl` may repeat that origin but a
@@ -252,6 +254,11 @@ a closed tab recoverable. A sender's slot starts when it is entered, not when it
 250 ms floor and `timeoutMs` a 120 s ceiling. The relay gate also reserves the settlement margin, so `sellWatch` can
 still report its own-wallet `claim-open` while `claimViaRelay` has already stopped. A refunded escrow is
 `claim-window` with `reason: "escrow-refunded"`, not a request to claim; recovery is the next step.
+
+`claimAttempts` is append-only and the SDK does not prune it: a long-lived record can grow with every retry. The
+journal is diagnostic, not a spendable state. A host may trim older entries, but it must keep the latest
+`sending` or `unknown` entry: that slot is waited out before the sender is tried again. Do not use the journal as
+proof that a sender is finished.
 
 The claim window uses the escrow's chain time, read with `evmBlock` (or the wallet's block provider), not the
 device clock. If neither clock is available, the client refuses with `claim-window` / `unreadable` before the half
