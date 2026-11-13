@@ -237,7 +237,8 @@ from the chain. Without the ready mark before `readyBy`, at or after `t1`, or in
 (plus the sender's slot and time for the seller's own claim), it returns `state: "claim-window"` with a named
 `reason` and posts nothing. An unread escrow is `claim-unknown` with `why: "escrow-unread"`; it is never reported as
 `claim-yourself`. A relay answer such as `claim-not-ready` or `claim-window-closed` stops the list instead of
-passing the half to the next sender.
+passing the half to the next sender. Relay-level answers (`rate_limited`, `bad_request`, `unsupported_version`,
+`no_quote`) are `claim-unknown`, not a sender refusal; the sender keeps its slot and the list continues.
 
 `claimViaRelay` reads the sell record made by `startSell` and requires a positive `claimTip`, the escrow and the
 half. It posts to the relay origin stored with the record; an optional `relayUrl` may repeat that origin but a

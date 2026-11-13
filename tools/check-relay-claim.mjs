@@ -318,6 +318,34 @@ export const relayClaimCheck = async () => {
     chainTimestamp = null;
   }
 
+  // (2b) RELAY-LEVEL ANSWERS ARE NOT A SENDER REFUSAL. A rate limit, malformed request, version problem or missing
+  // quote belongs to the hop; the half has not necessarily been forwarded, so the sender gets its slot and the list
+  // continues instead of recording a permanent refusal.
+  for (const code of ["rate_limited", "bad_request", "unsupported_version", "no_quote"]) {
+    resetChain();
+    resetAttempts();
+    readyMark = 1;
+    t1Sec = order.t1;
+    readyBySec = order.readyBy;
+    statusUnreadable = false;
+    clockMs = (order.readyBy + 10) * 1000;
+    let calls = 0;
+    const result = await swaps.claimViaRelay({ id: record.id,
+      claimSenders: [relaySender, secondSender], slotMs: 15_000, pollMs: 2_000,
+      fetchImpl: async (url) => {
+        calls += 1;
+        if (url.includes(lower(relaySender))) return refusal(code);
+        chainStatus.claimed = true;
+        return answer(secondSender, "0x" + "f0".repeat(32));
+      } });
+    check(result && result.state === "claimed" && calls === 2
+      && result.tried[0] && result.tried[0].outcome === "unknown",
+      code + " was treated as a sender refusal: " + JSON.stringify({ result, calls }));
+  }
+  clockMs = 1_900_000_000_000;
+  readyMark = 1;
+  chainTimestamp = null;
+
   // (3) A TXID IS NOT SUCCESS: THE ESCROW MUST READ CLAIMED.
   {
     resetChain();
