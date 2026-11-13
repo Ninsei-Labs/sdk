@@ -1011,6 +1011,22 @@ export const relayClaimCheck = async () => {
       "the HTTP timeout was not capped at 120 s: " + JSON.stringify({ delays }));
   }
 
+  // (14) A WATCH MAY NOT REDIRECT THE RECORD. A request escrow or verify address that disagrees with the stored
+  // record is refused before any chain read; otherwise a caller could watch another order under the same id.
+  {
+    const badEscrow = await swaps.watch({ id: record.id, escrow: "0x" + "ff".repeat(20),
+      verify: { address: record.escrow.moneroAddress, network: "stagenet" } }).catch((error) => error);
+    check(badEscrow && badEscrow.code === "bad-input" && badEscrow.params
+      && badEscrow.params.field === "escrow" && badEscrow.params.why === "record-mismatch",
+      "a watch accepted another escrow: " + JSON.stringify(badEscrow && (badEscrow.params || badEscrow.code)));
+    const badMonero = await swaps.watch({ id: record.id, escrow: record.escrow.address,
+      readyWindow: { side: "ask", readyMinSeconds: 2400, readyMaxSeconds: 3000 },
+      verify: { address: "59not-the-record", network: "stagenet" } }).catch((error) => error);
+    check(badMonero && badMonero.code === "bad-input" && badMonero.params
+      && badMonero.params.field === "verify.address" && badMonero.params.why === "record-mismatch",
+      "a watch accepted another Monero address: " + JSON.stringify(badMonero && (badMonero.params || badMonero.code)));
+  }
+
   notes.push("the client list is tried in order; a refusal moves on, a txid waits for the escrow, and exhaustion asks for the seller's own claim");
   notes.push("the relay origin and the instance fetch rules are unchanged; sellClaim remains the own-wallet path");
   return { note: "the ordered relay claim reads the escrow and names the sender that landed it", problems, notes };
