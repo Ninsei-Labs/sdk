@@ -417,10 +417,12 @@ console.log("=== 16) A CONTRADICTING WITNESS IS NAMED, NOT HIDDEN BY THE FIRST C
     witnessOperators: ["W", "X"], witnessHashes: [BLOCK_HASH, "c".repeat(64)] });
   const named = (differentHash.witness.disagreements || []).some((entry) =>
     entry.field === "blockHash" && entry.operators.includes("W") && entry.operators.includes("X"));
-  if (differentHash.agrees === false && differentHash.problems.includes("blockHash") && named) {
-    ok("two witnesses on different blocks disagree and both operators are named");
+  if (differentHash.agrees === false && differentHash.problems.includes("blockHash") && named
+    && differentHash.witness.quorum && differentHash.witness.quorum.ok === false) {
+    ok("two witnesses on different blocks disagree, are named, and do not form a quorum");
   } else {
     bad("witness disagreement: " + JSON.stringify({ agrees: differentHash.agrees, problems: differentHash.problems,
+      quorum: differentHash.witness.quorum,
       disagreements: differentHash.witness.disagreements, observations: differentHash.witness.observations }));
   }
 
@@ -428,10 +430,12 @@ console.log("=== 16) A CONTRADICTING WITNESS IS NAMED, NOT HIDDEN BY THE FIRST C
     witnessOperators: ["W", "X"], witnessTxids: [TXID, null] });
   const emptyNamed = (empty.witness.disagreements || []).some((entry) =>
     entry.field === "seen" && entry.operators.join(",") === "W,X");
-  if (empty.agrees === false && empty.problems.includes("witness:disagreement") && emptyNamed) {
+  if (empty.agrees === false && empty.problems.includes("witness:disagreement") && emptyNamed
+    && empty.witness.quorum && empty.witness.quorum.ok === false) {
     ok("a witness that reports the payment and one that completes empty do not agree");
   } else {
     bad("witness empty disagreement: " + JSON.stringify({ agrees: empty.agrees, problems: empty.problems,
+      quorum: empty.witness.quorum,
       disagreements: empty.witness.disagreements, observations: empty.witness.observations }));
   }
 
@@ -441,6 +445,25 @@ console.log("=== 16) A CONTRADICTING WITNESS IS NAMED, NOT HIDDEN BY THE FIRST C
     ok("the disagreement is order-independent when the mismatching witness is first");
   } else {
     bad("reversed witness disagreement: " + JSON.stringify({ agrees: reversed.agrees, problems: reversed.problems }));
+  }
+}
+
+console.log("=== 17) A PERFECT CANDIDATE BELOW THE TIP DOES NOT END THE WALK ===");
+{
+  const result = await shadow({ fromHeight: 100, witnessTop: 139, exactInfoHeight: 140,
+    witnessOperators: ["W", "X"] });
+  if (result.witness.completed === true) {
+    ok("a witness that found the payment in the first slice still walks to the tip");
+  } else {
+    bad("early completion: " + JSON.stringify({ completed: result.witness.completed,
+      checked: result.witness.checked, quorum: result.witness.quorum }));
+  }
+  if (result.agrees === true && result.problems.length === 0 && result.witness.quorum
+    && result.witness.quorum.ok === true) {
+    ok("the deep payment agrees with the exact walk and forms a quorum");
+  } else {
+    bad("deep-payment agreement: " + JSON.stringify({ agrees: result.agrees, problems: result.problems,
+      quorum: result.witness.quorum, witness: result.witness }));
   }
 }
 

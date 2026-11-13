@@ -7,6 +7,7 @@
 // BREAKING RUNS: the window path is bypassed by a copy of the module in the same shape the other checks use.
 import { restoreWallet, windowTxHashes } from "../src/sweep-restore.mjs";
 import { createSweep } from "../src/sweep.mjs";
+import { createNinsei } from "../src/index.mjs";
 
 const fake = ({ balance = 0n, scanTxs = true, scanFails = false } = {}) => {
   const calls = [];
@@ -176,6 +177,32 @@ export const sweepWindowCheck = async () => {
     check(badFetch && badFetch.code === "bad-input" && badFetch.params && badFetch.params.field === "fetchImpl",
       "a non-function per-call fetch was silently replaced: " + JSON.stringify(badFetch && badFetch.code));
     notes.push("the facade's fetch is used by restore instead of the global fetch");
+  }
+
+  // THE SAME TRANSPORT RULE THROUGH THE PUBLIC FACADE, NOT ONLY THE SWEEP CONSTRUCTOR. `createNinsei({ fetch })`
+  // must carry its transport into `sweep.restore`, and a per-call `fetchImpl` must still win.
+  {
+    const facadeCalls = [];
+    const perCallCalls = [];
+    const client = createNinsei({ settlement: { chain: "arbitrum-sepolia" }, xmrNetwork: "stagenet",
+      fetch: async (url) => {
+        facadeCalls.push(String(url));
+        return { ok: true, status: 200, json: async () => ({ result: { tx_hashes: [] } }) };
+      } });
+    const facadeWallet = fake({ balance: 0n });
+    const facadeRestored = await client.sweep.restore({ wallet: facadeWallet.wallet, fromHeight: 100,
+      window: { nodeUrl: "http://127.0.0.1:9", toHeight: 110, tipHeight: 900 } });
+    check(facadeRestored && facadeRestored.total === "0", "the facade restore did not report its balance");
+    check(facadeCalls.length === 11, `the facade fetch did not read the window: ${facadeCalls.length} calls`);
+    const perCallRestored = await client.sweep.restore({ wallet: facadeWallet.wallet, fromHeight: 100,
+      window: { nodeUrl: "http://127.0.0.1:9", toHeight: 110, tipHeight: 900 },
+      fetchImpl: async (url) => {
+        perCallCalls.push(String(url));
+        return { ok: true, status: 200, json: async () => ({ result: { tx_hashes: [] } }) };
+      } });
+    check(perCallRestored && perCallRestored.total === "0" && perCallCalls.length === 11,
+      `a per-call fetch did not win through the facade: ${JSON.stringify({ perCallCalls: perCallCalls.length })}`);
+    notes.push("the facade's fetch reaches sweep.restore and a per-call fetch still wins");
   }
 
   return { note: "the withdrawal window scans only the lock and falls back on an empty or unreadable one", problems, notes };
