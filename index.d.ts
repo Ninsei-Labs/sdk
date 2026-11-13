@@ -170,7 +170,8 @@ export interface NinseiOptions {
 }
 
 /** One durable sender attempt on a sell record, written before the relay POST. This is a diagnostic journal,
- * not a set of senders that must be skipped on a later call. */
+ * not a set of senders that must be skipped on a later call. The journal is append-only and is not pruned by the
+ * SDK; a host may trim old entries, but must keep the latest `sending`/`unknown` one for its slot wait. */
 export interface StoredClaimAttempt {
   readonly sender: string;
   readonly at?: number;
@@ -688,7 +689,8 @@ export interface SwapsApi {
    * result is `claim-yourself` with the time left before `t1`.
    *
    * The claim window is read with the escrow's chain clock (`evmBlock`), not the device clock. Without a readable
-   * clock the result is `claim-window` / `unreadable` and no half leaves the client. The deal's maker and its
+   * clock the result is `claim-window` / `unreadable` and no half leaves the client. The same applies to an escrow
+   * read that fails before any POST; after an earlier attempt it remains `claim-unknown`. The deal's maker and its
    * quote-key owner are refused before the half leaves the client. No wallet is created or used and no chain
    * transaction is signed. `relayUrl` may restate the stored origin; a different origin is refused.
    */
@@ -1160,7 +1162,8 @@ export interface SellWatchResult {
 export interface SwapWatchRequest {
   /** The local swap record identifier. */
   readonly id: string;
-  /** The escrow address for the ready mark (mandatory when `expect` and `wallet` are passed and the record has none). */
+  /** The escrow address for the ready mark. If the record already names an escrow, a different value is refused as
+   * `bad-input` / `record-mismatch` rather than watched under the same id. */
   readonly escrow?: string;
   /** How often to ask the state. Default - `config.limits.watchPollMs`. */
   readonly pollMs?: number;
@@ -1175,7 +1178,8 @@ export interface SwapWatchRequest {
   /**
    * CLIENT-SIDE ARRIVAL CHECK (issue #85). With this the CLIENT decides: it reads the chain itself and `ready`
    * opens only when two operators agree. The backend's `seen` is then only a notification and does not open the
-   * button. `verify` is mandatory: without it the watch refuses with `bad-input`.
+   * button. `verify` is mandatory: without it the watch refuses with `bad-input`. `verify.address` must match the
+   * record's `moneroAddress` when the record has one; a different address is `bad-input` / `record-mismatch`.
    */
   readonly verify?: Omit<XmrArrivalRequest, "minConfirmations">;
   /** The confirmation target before `ready`. Default - `config.limits.xmrConfirmations` (10). */
