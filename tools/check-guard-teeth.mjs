@@ -118,8 +118,8 @@ const cases = [
   {
     check: "relay-claim", source: "src/swaps.mjs",
     name: "the relay claim window guard is removed",
-    from: "if (!gate.ok) return windowResult(gate.reason, tried);",
-    to: "if (false) return windowResult(gate.reason, tried);",
+    from: "return windowResult(gate.reason, tried);",
+    to: "return null;",
     wants: "did not stop before the relay",
   },
   {
