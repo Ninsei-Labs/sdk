@@ -401,6 +401,19 @@ console.log("=== 1g) CONFLICTING VIEW ALIASES ARE REFUSED ===");
   } else bad("conflicting halves: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
 }
 
+console.log("=== 1h) A QUOTE WITH ANOTHER LOCKER HALF IS REFUSED BEFORE THE SEND ===");
+{
+  const changed = { ...quote, commitHalfLocker: "0x" + "a1".repeat(32) };
+  changed.signature = signQuoteDigest({ crypto: primitives, digest: quoteDigest({ crypto: primitives, quote: changed }), privateKey: makerKey });
+  const { result, sent } = await startWith(derived.makerViewHalf, order.salt, {}, false, { quote: changed });
+  if (result && result.code === "bad-input" && result.params && result.params.step === "fund-order"
+    && String(result.params.why || "").includes("commitHalfLocker") && sent === 0) {
+    ok("a quote whose locker commitment differs from the built side is refused at the money boundary");
+  } else {
+    bad("locker-half mismatch: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
+  }
+}
+
 console.log("=== 2) ANOTHER VIEW HALF IS REFUSED BEFORE FUNDING ===");
 {
   const { result, sent } = await startWith("0x04");
