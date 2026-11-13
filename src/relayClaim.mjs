@@ -11,6 +11,10 @@ const ADDRESS = /^0x[0-9a-f]{40}$/;
 const HALF = /^[0-9a-f]{64}$/;
 const TXID = /^0x[0-9a-f]{64}$/;
 const DECIMAL = /^(0|[1-9][0-9]*)$/;
+// RELAY-LEVEL ANSWERS ARE NOT THE SENDER'S REFUSAL. A rate limit, a malformed request or a version/quote problem
+// describes the hop, not the sender; the half may not have been forwarded. They keep the conservative unknown
+// outcome so the sender's slot is still read, instead of marking that sender as refused for good.
+const RELAY_LEVEL_CODES = new Set(["rate_limited", "bad_request", "unsupported_version", "no_quote"]);
 
 /**
  * THE RELAY ORIGIN, NORMALISED ONCE. A claim is bound to the origin that answered the quote, so a trailing slash
@@ -42,9 +46,11 @@ export function halfTextOf(value) {
  * POST the half to the relay that answered the quote.
  *
  * A refusal from the relay is `quote-refused` with the provider's own code kept in `params.code`; the provider's
- * message is deliberately NOT copied, because it is not this package's user-facing text. A lost answer is
- * `claim-unknown`: the claim may have been sent, so a second call must begin by reading the escrow, never by
- * assuming that nothing happened. Only a validated transaction hash is a success.
+ * message is deliberately NOT copied, because it is not this package's user-facing text. A relay-level answer
+ * (`rate_limited`, `bad_request`, `unsupported_version`, `no_quote`) is `claim-unknown`: it names the hop, not the
+ * sender, and the half may not have been forwarded. A lost answer is `claim-unknown`: the claim may have been sent,
+ * so a second call must begin by reading the escrow, never by assuming that nothing happened. Only a validated
+ * transaction hash is a success.
  */
 export async function postRelayClaim({
   relayUrl,
@@ -88,12 +94,20 @@ export async function postRelayClaim({
     if (code === "claim-unknown" || code === "claim_unknown") {
       throw new SdkError("claim-unknown", { step: "relay-claim", why: "relay-timeout", code, status: response.status, outcome: "unknown" });
     }
+    if (code && RELAY_LEVEL_CODES.has(code)) {
+      throw new SdkError("claim-unknown", { step: "relay-claim", why: "relay-" + code,
+        code, status: response.status, outcome: "unknown" });
+    }
     if (code && version === 1) throw new SdkError("quote-refused", { step: "relay-claim", code, status: response.status });
     // AN UNVERSIONED NON-2XX IS NOT A REFUSAL WE CAN READ. The claim may still have been sent, so it is unknown.
     throw new SdkError("claim-unknown", { step: "relay-claim", why: "answer-status", status: response.status, outcome: "unknown" });
   }
   if (!answer || version !== 1) {
     throw new SdkError("claim-unknown", { step: "relay-claim", why: "answer", outcome: "unknown" });
+  }
+  if (code && RELAY_LEVEL_CODES.has(code)) {
+    throw new SdkError("claim-unknown", { step: "relay-claim", why: "relay-" + code,
+      code, status: response.status, outcome: "unknown" });
   }
   if (code) throw new SdkError("quote-refused", { step: "relay-claim", code, status: response.status });
 
