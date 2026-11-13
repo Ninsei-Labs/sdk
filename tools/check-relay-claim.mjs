@@ -626,7 +626,8 @@ export const relayClaimCheck = async () => {
     clockMs = 1_900_000_000_000;
     let unreadCalls = 0;
     const unread = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender],
-      fetchImpl: async () => { unreadCalls += 1; chainStatus.claimed = true; return answer(relaySender, "0x" + "f2".repeat(32)); } });
+      fetchImpl: async () => { unreadCalls += 1; chainStatus.claimed = true; return answer(relaySender, "0x" + "f2".repeat(32)); } })
+      .catch((error) => error);
     check(unread && unread.state === "claim-window" && unread.reason === "unreadable",
       "an unread escrow before any send did not return claim-window/unreadable: " + JSON.stringify(unread));
     check(unreadCalls === 0, "an unread escrow still posted the half");
