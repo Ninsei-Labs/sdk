@@ -1000,7 +1000,8 @@ export interface SellStartRequest {
    * naming the deal's maker or its quote-key owner is refused.
    */
   readonly claimSender?: string;
-  /** The ordered senders stored for a later `claimViaRelay`; the relay's published sender is prepended. */
+  /** The ordered senders stored for a later `claimViaRelay`. An explicit list replaces the relay-published
+   * `claimSender`; the published sender is used only when no list is passed, and is not prepended to a list. */
   readonly claimSenders?: readonly string[];
   /** The twelve-word key; required only when no key is stored yet. */
   readonly recoveryKey?: string | { readonly mnemonic: string };
@@ -1024,7 +1025,8 @@ export interface SellStart {
   readonly xmrAmount: string;
   readonly claimTip: string | null;
   readonly orderQuote: Readonly<Record<string, unknown>> | null;
-  /** The legacy single sender stored by `startSell`, or null when the client supplies the list at claim time. */
+  /** The first entry of the stored list, kept for legacy callers. It is not necessarily the sender that lands the
+   * claim; the claim result names that sender separately. */
   readonly claimSender: string | null;
   /** The ordered senders stored by `startSell`; empty when the client supplies the list at claim time. */
   readonly claimSenders: readonly string[];
