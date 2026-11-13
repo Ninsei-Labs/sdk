@@ -254,6 +254,11 @@ a closed tab recoverable. A sender's slot starts when it is entered, not when it
 still report its own-wallet `claim-open` while `claimViaRelay` has already stopped. A refunded escrow is
 `claim-window` with `reason: "escrow-refunded"`, not a request to claim; recovery is the next step.
 
+`claimAttempts` is append-only and the SDK does not prune it: a long-lived record can grow with every retry. The
+journal is diagnostic, not a spendable state. A host may trim older entries, but it must keep the latest
+`sending` or `unknown` entry: that slot is waited out before the sender is tried again. Do not use the journal as
+proof that a sender is finished.
+
 The claim window uses the escrow's chain time, read with `evmBlock` (or the wallet's block provider), not the
 device clock. If neither clock is available, the client refuses with `claim-window` / `unreadable` before the half
 leaves; it does not fall back to `Date.now()`. `secondsLeft` is derived from that same chain time.
