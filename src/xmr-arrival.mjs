@@ -530,14 +530,10 @@ async function locateInSlices(node, { expectedAtomic, address, viewSecret, spend
         if (!best || score > best.score || (score === best.score && amountAtomic > best.amountAtomic)) best = candidate;
       }
     }
-    // THE WHOLE SLICE WAS READ. A perfect candidate lets the walk stop after this slice, not after a block:
-    // the last witness request is still a fixed slice, never the payout height. Completion is judged by the
-    // LAST BLOCK the witness actually served, not by the slice index: a witness can stop inside the same
-    // 20-block window as the target and still be behind it.
-    if (best && best.score === 7) {
-      completed = slice.to >= target;
-      break;
-    }
+    // THE WHOLE SLICE WAS READ. A perfect candidate does not end the walk: a later slice can contain a newer tip,
+    // and the witness must still prove it reached the common target. Completion is judged by the LAST BLOCK the
+    // witness actually served, not by the slice index: a witness can stop inside the same 20-block window as the
+    // target and still be behind it.
     if (index === last) completed = slice.to >= target;
   }
   return { located: best, completed, servedTop, failure };
@@ -674,9 +670,6 @@ export async function verifyArrivalShadow(request) {
   if (!located) failed.push(...staleWitnesses);
   const completedOperators = [...completedWitnessOperators];
   const independentOperators = completedOperators.filter((operator) => String(operator).toLowerCase() !== "ninsei");
-  const required = 2;
-  const witnessQuorum = { required, completed: completedOperators, independent: independentOperators,
-    ok: (network === "mainnet" ? independentOperators.length : completedOperators.length) >= required };
 
   // ONE OPINION PER OPERATOR, THEN COMPARE THE OPINIONS. A second instance of the same operator may repeat the
   // first, but it may not silently contradict it; a different operator that reports another block, amount or
@@ -718,6 +711,12 @@ export async function verifyArrivalShadow(request) {
     const field = observationField(representatives[0], representatives[i]);
     if (field) witnessDisagreements.push({ operators: [representatives[0].operator, representatives[i].operator], field });
   }
+  // A QUORUM OF WALKERS IS NOT A QUORUM OF ANSWERS. Compute this after the witness-to-witness comparison: two
+  // completed operators that disagree have not agreed on anything, even though each reached the target.
+  const required = 2;
+  const witnessQuorum = { required, completed: completedOperators, independent: independentOperators,
+    ok: (network === "mainnet" ? independentOperators.length : completedOperators.length) >= required
+      && witnessDisagreements.length === 0 };
   const witnessEvidence = { observations: representatives, disagreements: witnessDisagreements };
 
   const witness = located

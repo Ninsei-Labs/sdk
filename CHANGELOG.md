@@ -1,3 +1,12 @@
+## 0.60.1 — 2026-11-13
+
+- `claimViaRelay` treats `claimAttempts` as a diagnostic journal, not as a list of senders to skip. A repeated call starts from the first sender again; a previous `sending` or `unknown` entry is waited out for its slot and retried. A legacy future timestamp is capped at one slot, so an old device clock cannot stall recovery. A temporary relay refusal, a process restart or a closed tab no longer removes the seller's no-wallet path.
+- The claim window and `secondsLeft` use the escrow chain's block timestamp (`evmBlock` or the wallet's block provider). A device clock skew can no longer post the half after `t1`, and a missing chain clock returns `claim-window` / `unreadable` instead of falling back to `Date.now()`.
+- `sellWatch` does not report `ready` after `t1`; a ready mark that arrives too late is named as `claim-window-closed`.
+- The witness shadow walks every fixed slice to the common target even after finding a perfect candidate, and `witnessQuorum.ok` requires completed operators with no witness-to-witness disagreement.
+- `sweep.restore` keeps the facade's fetch transport through `createNinsei({ fetch })`, while a per-call `fetchImpl` still wins.
+- The supported version line remains `0.60.x`; `package.json` and the baked-in `SDK_VERSION` move to `0.60.1`.
+
 ## 0.60.0 — 2026-11-13
 
 - `swaps.watch` keeps the joint Monero address apart from the EVM escrow: the result carries the address the client checked, and the automatic ready mark always signs against the escrow. A typed watch no longer returns the escrow as its `address`; the legacy untyped `request.address` is not read. `verify` remains mandatory, so a watch without the client's own check is refused by name instead of falling back to a retired service answer.

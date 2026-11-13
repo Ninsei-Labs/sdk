@@ -118,6 +118,25 @@ for (const [label, at] of [["at t1", 1_700_003_600], ["inside the last minute", 
   } catch (error) { check(false, label + " path failed: " + JSON.stringify(error && (error.code || error.message))); }
 }
 
+console.log("=== 4b) A READY MARK AFTER t1 IS NOT A USABLE SELL WINDOW ===");
+try {
+  const readyBy = 1_700_000_000;
+  const t1 = 1_700_003_600;
+  const reader = async ({ data }) => {
+    if (data === engine.evm.ESCROW_METHODS.status) return status(true, false, false, 5n);
+    if (data === engine.evm.ESCROW_METHODS.ready) return word(1n);
+    if (data === engine.evm.ESCROW_METHODS.readyBy) return word(BigInt(readyBy));
+    if (data === engine.evm.ESCROW_METHODS.t1) return word(BigInt(t1));
+    if (data === engine.evm.ESCROW_METHODS.termsHash) return "0x" + "00".repeat(32);
+    throw new Error("unexpected selector " + data);
+  };
+  const result = await swapsWith(reader, { now: () => (t1 + 1) * 1000 })
+    .sellWatch({ escrow, pollMs: 1, timeoutMs: 2_000 });
+  check(result.state === "claim-window-closed" && result.ready === true && result.claimOpen === false
+    && result.secondsLeft === 0,
+    "a ready mark after t1 is reported as a closed claim window: " + JSON.stringify(result));
+} catch (error) { check(false, "ready-after-t1 path failed: " + JSON.stringify(error && (error.code || error.message))); }
+
 console.log("=== 5) THE ADDRESS IS REQUIRED ===");
 try {
   await swapsWith(async () => word(0n)).sellWatch({ pollMs: 1, timeoutMs: 1 });

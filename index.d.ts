@@ -169,7 +169,8 @@ export interface NinseiOptions {
   createRecord?: (request: StartRequest) => Promise<SwapRecord> | SwapRecord;
 }
 
-/** One durable sender attempt on a sell record, written before the relay POST. */
+/** One durable sender attempt on a sell record, written before the relay POST. This is a diagnostic journal,
+ * not a set of senders that must be skipped on a later call. */
 export interface StoredClaimAttempt {
   readonly sender: string;
   readonly at?: number;
@@ -682,10 +683,14 @@ export interface SwapsApi {
    * sender. `claimSenders` is the client's ordered list - the relay's own sender first, then the listed makers -
    * sent one at a time through the relay (`POST /v1/claims/{sender}/{escrow}`). Each sender gets a 15-30 s slot; a
    * refusal moves on, a txid or unknown answer is followed by reading the escrow, and only `claimed` on chain is
-   * success. When the list is exhausted the result is `claim-yourself` with the time left before `t1`.
+   * success. A later call starts from the first sender again; a previous `sending`/`unknown` entry is waited out
+   * for its slot and retried, so a temporary refusal or a restart is recoverable. When the list is exhausted the
+   * result is `claim-yourself` with the time left before `t1`.
    *
-   * The deal's maker and its quote-key owner are refused before the half leaves the client. No wallet is created or
-   * used and no chain transaction is signed. `relayUrl` may restate the stored origin; a different origin is refused.
+   * The claim window is read with the escrow's chain clock (`evmBlock`), not the device clock. Without a readable
+   * clock the result is `claim-window` / `unreadable` and no half leaves the client. The deal's maker and its
+   * quote-key owner are refused before the half leaves the client. No wallet is created or used and no chain
+   * transaction is signed. `relayUrl` may restate the stored origin; a different origin is refused.
    */
   claimViaRelay(request: RelayClaimRequest): Promise<RelayClaimResult>;
   /**
@@ -1041,7 +1046,8 @@ export interface SellClaimRequest {
  * come from it. `claimSenders` is the client's ordered list: the relay's own sender first, then the listed makers.
  * Each entry is checked for the deal's maker and its quote-key owner. The old scalar `claimSender` is accepted as a
  * one-element fallback for callers written before the list. `relayUrl` is optional and may only repeat the origin
- * stored with the record - a foreign origin is refused.
+ * stored with the record - a foreign origin is refused. A second call is allowed after a refusal or an unknown
+ * answer: the journal is diagnostic and the sender list is walked from the beginning once any previous slot ends.
  */
 export interface RelayClaimRequest {
   readonly id: string;
@@ -1102,8 +1108,9 @@ export interface RelayClaimYourself {
 }
 
 /**
- * The half was not handed to any sender because the escrow's own claim window is not open. The caller must not
- * retry the relay list: the state, not the sender, is the answer.
+ * The half was not handed to any sender because the escrow's own claim window is not open. For a closed,
+ * not-ready, margin or unfunded state the state is the answer; `unreadable` can be retried once the chain clock
+ * and escrow state are readable again.
  */
 export interface RelayClaimWindow {
   readonly state: "claim-window";

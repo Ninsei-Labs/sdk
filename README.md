@@ -22,7 +22,7 @@ Report suspected vulnerabilities through GitHub's private **Report a vulnerabili
 The supported versions, scope, response targets, safe-harbor rules and disclosure process are in
 [`SECURITY.md`](SECURITY.md).
 
-## State (0.60.0)
+## State (0.60.1)
 
 | Surface | State |
 |---|---|
@@ -245,13 +245,17 @@ different one is refused. A node refusal keeps its code under `quote-refused.par
 without a real transaction hash is `claim-unknown`: the claim may have been sent, so the SDK reads the escrow and
 moves on only after the slot. Only an escrow that reads `claimed` is success.
 
-Each sender is written to the record before its POST. A reload skips senders that were already tried; a refused
-sender allows the next, while an attempt left `sending` or `unknown` stops with `claim-unknown` and
-`why: "previous-sender-unknown"` instead of resending the half. An `unconfirmed` sender is skipped as well. A
-sender's slot starts when it is entered, not when its POST returns; `pollMs` has a 250 ms floor and `timeoutMs` a
-120 s ceiling. The relay gate also reserves the settlement margin, so `sellWatch` can still report its own-wallet
-`claim-open` while `claimViaRelay` has already stopped. A refunded escrow is `claim-window` with
-`reason: "escrow-refunded"`, not a request to claim; recovery is the next step.
+Each sender is written to the record before its POST. The log is diagnostic, not a skip list: a later call starts
+at the first sender again. A previous `sending` or `unknown` entry is waited out for its slot and then retried; a
+`refused` or `unconfirmed` entry is retried immediately. This is what makes a temporary relay failure, a restart or
+a closed tab recoverable. A sender's slot starts when it is entered, not when its POST returns; `pollMs` has a
+250 ms floor and `timeoutMs` a 120 s ceiling. The relay gate also reserves the settlement margin, so `sellWatch` can
+still report its own-wallet `claim-open` while `claimViaRelay` has already stopped. A refunded escrow is
+`claim-window` with `reason: "escrow-refunded"`, not a request to claim; recovery is the next step.
+
+The claim window uses the escrow's chain time, read with `evmBlock` (or the wallet's block provider), not the
+device clock. If neither clock is available, the client refuses with `claim-window` / `unreadable` before the half
+leaves; it does not fall back to `Date.now()`. `secondsLeft` is derived from that same chain time.
 
 `actions.claim` is unchanged: it still sends only from the claimer's own wallet, because the half is revealed by
 whoever sends the claim.
