@@ -304,7 +304,7 @@ jobs:
           go-version: '1.27.3'
           cache-dependency-path: test/dleq-oracle/go/go.sum
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@1.99.1
+        uses: dtolnay/rust-toolchain@1.100.0
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Test the Go oracle reduction
