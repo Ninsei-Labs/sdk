@@ -5,7 +5,7 @@
     "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
-  "packageManager": "pnpm@12.11.2",
+  "packageManager": "pnpm@12.21.0",
   "description": "XMR <-> EVM swap engine: quotes, guards, order steps, recovery (no DOM, no user-facing strings)",
   "license": "(MIT AND LGPL-3.0-only)",
   "type": "module",
