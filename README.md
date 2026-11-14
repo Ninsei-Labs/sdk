@@ -22,7 +22,7 @@ Report suspected vulnerabilities through GitHub's private **Report a vulnerabili
 The supported versions, scope, response targets, safe-harbor rules and disclosure process are in
 [`SECURITY.md`](SECURITY.md).
 
-## State (0.60.1)
+## State (0.61.0)
 
 | Surface | State |
 |---|---|
