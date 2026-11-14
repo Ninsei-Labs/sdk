@@ -1,3 +1,16 @@
+## 0.61.0 — 2026-11-14
+
+- **BREAKING:** the scalar `claimSender` is retired from `SellStartRequest`, `RelayClaimRequest` and `RelayClaimed`. `claimSenders` is the only sender source; an explicit list replaces the relay-published sender and is never prepended. Pre-list records are migrated on their first claim.
+- A claim window is read from the escrow one last time before it is reported closed: a claim, refund or defund that landed after the last sender slot wins over the closing state. An unreadable final read still returns the named window state.
+- `swaps.watch` refuses `request.escrow` and `verify.address` that redirect the stored record (`bad-input` / `record-mismatch`) before any chain read.
+- A first unread escrow is `claim-window` / `unreadable` when nothing has been sent; after an earlier attempt it remains `claim-unknown` with `escrow-unread`.
+- Relay-level answers `rate_limited`, `bad_request`, `unsupported_version` and `no_quote` are `claim-unknown` (`relay-<code>`), not a sender refusal; the sender keeps its slot.
+- Funding compares `commitHalfLocker`, `edPointLocker` and `edViewPointLocker` with the signed quote before sending, so a locker-half mismatch is refused before the factory.
+- `engine/**` is now the SDK's own source; the generated-mirror headers and the `www/js` source-of-truth comments are gone.
+- The claim guards have a mutation suite in `tools/check-claim-teeth.mjs`, run in CI after `check:guard-teeth`.
+- CI uses Rust 1.100.0 and pnpm 12.21.0; Cargo resolves registry dependencies with a three-day cooldown.
+- The supported version line is `0.61.x`; `package.json` and the baked-in `SDK_VERSION` move to 0.61.0.
+
 ## 0.60.1 — 2026-11-13
 
 - `claimViaRelay` treats `claimAttempts` as a diagnostic journal, not as a list of senders to skip. A repeated call starts from the first sender again; a previous `sending` or `unknown` entry is waited out for its slot and retried. A legacy future timestamp is capped at one slot, so an old device clock cannot stall recovery. A temporary relay refusal, a process restart or a closed tab no longer removes the seller's no-wallet path.

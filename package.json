@@ -1,6 +1,6 @@
 {
   "name": "@ninsei-labs/sdk",
-  "version": "0.60.1",
+  "version": "0.61.0",
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
