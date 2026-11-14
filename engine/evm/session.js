@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/evm/session.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // The EVM wallet: state, balances, network switching and the injected connector.
 
 // A browser wallet (MetaMask, Rabby, Coinbase...) found by EIP-6963 connects directly over EIP-1193. The SDK

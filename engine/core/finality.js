@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/core/finality.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // STATE MATURITY PER NETWORK: at which level the chain treats a record as final.
 // One value for all networks is wrong: on base `safe` is ~25 s, on arbitrum ~13 min (measured on live nodes).
 // On bsc, monad and hyperevm the tags are FORMAL: they answer but lag 0-1 block, so reading by `finalized`

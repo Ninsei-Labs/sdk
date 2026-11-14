@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/atomic/orderContext.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // CANONICAL ORDER CONTEXT - what the DLEQ proof binds to.
 // It is built FROM THE ORDER FIELDS and identically everywhere (app, provider node, any verifier), so a
 // proof can be checked from the on-chain order alone (docs 27, section 11).

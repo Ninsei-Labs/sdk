@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/evm/escrow.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // Calls to the NinseiSwap escrow contract (one instance = one order).
 //
 // There is no EVM library here: the escrow has three state-moving functions (markReady, claim, refund) and a few

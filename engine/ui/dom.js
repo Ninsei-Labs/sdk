@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/ui/dom.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // Tiny DOM helpers. No frameworks: the demo must be readable by eye.
 
 export function h(tag, attrs = {}, children = []) {

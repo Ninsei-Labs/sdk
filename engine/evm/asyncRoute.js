@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/evm/asyncRoute.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // ASYNCHRONOUS ROUTE PROVIDERS BY NETWORK - "IS THERE A PATH FOR A PERSON WITH NO OWN NATIVE COIN".
 //
 // WHY THIS MODULE EXISTS. The declared routes in the registry (www/js/core/config.js: DEX_ROUTES) are ROUTER

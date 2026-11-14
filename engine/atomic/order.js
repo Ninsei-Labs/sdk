@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/atomic/order.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // ASSEMBLING ONE ORDER SIDE of an atomic swap: a key half, points, a proof, the encrypted envelope and the
 // contract commitment.
 //

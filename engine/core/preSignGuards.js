@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/core/preSignGuards.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // PRE-SIGNING GUARDS: AN INADMISSIBLE DEAL DOES NOT START.
 //
 // WHY A SEPARATE MODULE. The guards used to live apart: one in the route registry (the DEX leg's coverage and

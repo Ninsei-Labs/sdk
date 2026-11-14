@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/evm/permit.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // TOKEN ALLOWANCE FOR BUYING WITHOUT OWN ETH: what the token supports and what is missing.
 //
 // WHAT IS HERE AND WHAT IS NOT. Only selectors, calldata assembly and an HONEST verdict on whether a signature

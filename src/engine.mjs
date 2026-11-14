@@ -1,18 +1,11 @@
-// THE ENGINE SEAM, NOW SELF-CONTAINED.
+// THE ENGINE SEAM.
 //
-// The engine modules the core depends on are mirrored under sdk/engine/ - byte-for-byte copies kept in
-// sync by tools/build-sdk-engine.mjs and guarded by tools/check-sdk-engine.mjs. This file is the ONLY
-// place that knows where the engine lives; no other SDK module does.
+// The engine modules live under engine/. This file is the only place that knows where they live; no other SDK
+// module does. The SDK is the source of truth for these modules: do not regenerate them from another repository.
 //
-// WHY A VERIFIED MIRROR, NOT A MOVE. The very same modules are loaded by the demo page in the browser
-// (www/js), and the production web root is www/ alone - the sdk/ directory is not served there (see
-// tools/serve.mjs). Lifting the files out of www/js would 404 every engine import on the live site, and
-// dozens of repository checks read those sources by their www/js path. So the single source of truth
-// stays www/js and the SDK carries a copy: any drift reddens check-sdk-engine, so it cannot diverge
-// silently (the same rule build-sweep uses for the sweep/rfq copies).
-//
-// The mirror is generated - never edit sdk/engine/ by hand. Change www/js, then run:
-//   node tools/build-sdk-engine.mjs
+// The page reaches the same protocol rules through its own bridge, but the package does not depend on the page's
+// source tree. A rule that would be copied into both places must live here, in the package, and the bridge must
+// read it from the package.
 export * as config from "../engine/core/config.js";
 export * as guards from "../engine/core/preSignGuards.js";
 export * as restore from "../engine/recovery/restore.js";
@@ -32,27 +25,25 @@ export * as halfenc from "../engine/atomic/halfenc.js";
 // The engine's EVM layer: talking to the chain (order terms, sending, reading) - through this seam.
 export * as evm from "../engine/evm/index.js";
 // THE DEX LEG'S OWN GUARDS - THROUGH THE SAME SEAM. priceGateVerdict ("the price is not the market") and
-// dexLegVerdict (amount coverage + price) live in www/js/evm/dex.js and are re-exported here so a route provider
+// dexLegVerdict (amount coverage + price) live in engine/evm/dex.js and are re-exported here so a route provider
 // that is NOT the declared Uniswap path (CoWSwap, an aggregator) applies THE SAME guards rather than lookalikes.
 export * as dex from "../engine/evm/dex.js";
-// THE DEAL ENGINE NO LONGER LIVES IN www/js (#32, wave 3): the order flow moved into the package
-// (sdk/src/swap-flow.mjs) and is declared in sdk/index.d.ts. The page reaches it through the bridge, so the
-// mirror no longer carries core/swap-flow.js - what stays in the seam is the ORDER QUOTE source and the shared
-// CLAIM GAS LIMIT that the moved flow reads through this same seam. The order side is built by engine/atomic/order.js.
+// THE DEAL ENGINE LIVES IN THE PACKAGE: the order flow is sdk/src/swap-flow.mjs and is declared in sdk/index.d.ts.
+// The page reaches it through the bridge. What stays in the seam is the ORDER QUOTE source and the shared CLAIM
+// GAS LIMIT that the flow reads through this same seam. The order side is built by engine/atomic/order.js.
 
 export * as rfqSource from "../engine/core/rfqSource.js";
 export * as claimGas from "../engine/evm/claimGas.js";
 export * as escrow from "../engine/evm/escrow.js";
 export * as halvesSweep from "../engine/monero/halvesSweep.js";
-// MONERO ADDRESSES - THROUGH THE SAME MODULE THE DEMO USES. The format, the network prefixes and the address
-// check live in www/js/monero/address.js (checkAddress: base58 + keccak256 + network), and the page uses it
-// too. The wallet adapter needs exactly networkFromShape: its own address must belong to the network named by
-// the core, and that is checked by the same code, not by a private prefix table.
+// MONERO ADDRESSES. The format, the network prefixes and the address check live in engine/monero/address.js
+// (checkAddress: base58 + keccak256 + network); the page uses the same module through its bridge. The wallet
+// adapter needs exactly networkFromShape: its own address must belong to the network named by the core, and that
+// is checked by the same code, not by a private prefix table.
 export * as xmrAddress from "../engine/monero/address.js";
-// THE unlock_time RULE AND THE BLOCK READER - FROM THE SAME MIRROR, NOT A COPY. A second copy of "the output
-// is barred until a boundary" would be a second truth about money, so the rule lives under www/js
-// (monero/unlock.js) together with the Monero block parser (monero/scan.js), and the SDK reads them through
-// the engine mirror. check-sdk-engine reddens on any drift, so the two cannot diverge silently.
+// THE unlock_time RULE AND THE BLOCK READER. A second copy of "the output is barred until a boundary" would be a
+// second truth about money, so the rule lives in engine/monero/unlock.js together with the Monero block parser
+// (engine/monero/scan.js), and the SDK reads them through the engine seam. There is no external source to drift from.
 export * as xmrUnlock from "../engine/monero/unlock.js";
 export * as xmrScan from "../engine/monero/scan.js";
 // THE ADDRESS AND ITS PUBLIC KEYS, for the arrival check: the view secret and spend key are bound to the address,

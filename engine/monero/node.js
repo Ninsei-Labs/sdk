@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/monero/node.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // The live Monero node: the only real external dependency of the demo.
 //
 // The node address is the MONERO.node constant in www/js/core/config.js - the proxy

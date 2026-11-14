@@ -1,9 +1,5 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/evm/index.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // The wallet used by the demo interface.
-// One implementation: the injected EIP-1193 browser wallet (www/js/evm/session.js) - the user's real wallet,
+// One implementation: the injected EIP-1193 browser wallet (engine/evm/session.js) - the user's real wallet,
 // real balances. Mobile connectors are loaded by the host page and passed in as the same provider.
 // The built-in demo wallet and its mode switch were removed: we are heading to a real product, not a mockup.
 // Still NO transfers: there is no escrow contract yet and the address is mocked (mock/chain.js), so funding
@@ -37,10 +33,10 @@ export * from "./funding.js";
 // protocol code, not two lookalikes.
 export * from "./permit.js";
 // THE ASYNCHRONOUS ROUTE, EXECUTED - through the same engine seam as the decision that chooses it. The page reaches
-// it through the bridge; the SDK carries the same module in its engine mirror (tools/build-sdk-engine.mjs).
+// it through the bridge; the SDK owns this module.
 export * from "./asyncRoute.js";
-// THE EXECUTOR IS THE PACKAGE'S PROVIDER LAYER (src/legs/cow.mjs and its siblings). The generated mirror that
-// used to execute the route here carried a second submit/status path; it was removed with the order worker.
+// THE EXECUTOR IS THE PACKAGE'S PROVIDER LAYER (src/legs/cow.mjs and its siblings). The old copy that used to
+// execute the route here carried a second submit/status path; it was removed with the order worker.
 
 // currentProvider - the wallet provider goes OUT to the SDK core (evm-wallet.mjs) so signing uses the same
 // key as the page. Screens do not need it; they read status()/isConnected().
@@ -74,7 +70,7 @@ export async function simulateEscrowFunding(tx) {
 // Replaces simulateEscrowFunding. The difference is fundamental: the simulation invented a hash, here two
 // real transactions go out - createOrder to the factory and lock(sealedHalf) to the new escrow.
 //
-// Separation is deliberate: cryptography (halves, DLEQ, envelope) lives in www/js/atomic/ and does NOT reach
+// Separation is deliberate: cryptography (halves, DLEQ, envelope) lives in engine/atomic/ and does NOT reach
 // here. This function gets the ready sealedCommitment and sealedHalf - exactly what goes to the contract.
 // The caller sets the order of steps: verify the counterparty first, then lock.
 //

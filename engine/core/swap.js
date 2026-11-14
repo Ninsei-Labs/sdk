@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/core/swap.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // The demo core: the deal state over time.
 //
 // PRINCIPLE: the state is NOT kept as a "current step". Timestamps and events are kept, and the phase is derived

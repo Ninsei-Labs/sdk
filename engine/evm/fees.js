@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/evm/fees.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // The NinseiSwap fee: PART OF THE SIGNED QUOTE (OrderQuote v7), not a contract setting.
 //
 // WHERE THE RATE LIVES. Before, it and the recipient were set by the FACTORY (or router) in immutable fields, and

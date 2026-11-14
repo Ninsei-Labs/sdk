@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/atomic/halfenc.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // Transferring a key half: an encrypted half fit for publishing on chain.
 // WHAT THIS IS. A half x is sent so that: third parties cannot read it (the mask comes from an ECDH shared secret
 // with the recipient); THE RECIPIENT can check that the ciphertext holds the half matching the published point X by

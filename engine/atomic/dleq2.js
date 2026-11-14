@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/atomic/dleq2.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // DLEQ ACROSS CURVES: a proof that one scalar stands behind points on secp256k1 and ed25519.
 // Ported from go-dleq (prove.go, verify.go) to @noble/curves. The upstream project is
 // github.com/athanorlabs/go-dleq at d6fd7c03e213683cbb286d4d5bbba1c7e7e1cfe1 and is licensed LGPL-3.0-only; see

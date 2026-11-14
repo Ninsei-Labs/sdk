@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/atomic/halves.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // Half of a Monero key for the XMR <-> EVM atomic swap.
 // The Monero spend key is the sum of two halves: ks = ks_a + ks_b (mod l); spending needs both.
 // One half must work on edwards25519 (Monero) and secp256k1 (EVM), so the scalar stays below the smaller

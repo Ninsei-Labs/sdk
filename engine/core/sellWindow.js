@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/core/sellWindow.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // XMR SELL WINDOW: ONE RULE FOR TWO SIDES, NOT TWO NUMBERS.
 //
 // WHY A SEPARATE MODULE. The XMR sell window (a person gives XMR, receives the network native coin) has two

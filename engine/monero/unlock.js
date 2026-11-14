@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/monero/unlock.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // OUTPUT UNLOCK TIME (unlock_time). ONE RULE FOR EVERYONE WHO DECIDES "ARRIVAL IS THERE".
 //
 // A Monero transaction has an unlock_time field. Zero - "the output is open in the normal order". A non-zero
@@ -13,8 +9,8 @@
 // on the "done" mark, while the XMR stayed locked.
 //
 // WHY THE ONE SOURCE LIVES HERE. The rule is read by the backend indexer through the scan module and by the
-// SDK core through the engine mirror. A second copy would mean a second truth about money, so there is no copy:
-// the mirror must match this file to the byte, and a divergence between them is caught mechanically, not by a human.
+// SDK core through the engine seam. A second copy would mean a second truth about money, so there is no copy:
+// this module is the one implementation, and both readers use it.
 export const UNLOCK_TIME_BLOCK_MAX = 500_000_000;
 
 // Output state by its unlock_time. The return is a NAMED result, not a boolean: the interface must

@@ -27,7 +27,7 @@ if (!existsSync(target)) {
 }
 
 // The generated and VCS directories are not inputs to a teeth run. `assets` and `engine` are: the guards import
-// the browser bundle and the mirrored engine, and a missing asset makes the child fail for the wrong reason.
+// the browser bundle and the engine sources, and a missing asset makes the child fail for the wrong reason.
 const SKIP = new Set(["node_modules", ".git", "coverage", ".hermes", "out", "cache", "dist"]);
 const temp = mkdtempSync(join(tmpdir(), "sdk-teeth-isolated-"));
 try {

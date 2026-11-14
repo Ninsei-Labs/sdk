@@ -1,13 +1,9 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/evm/claimGas.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // CLAIM GAS FOR THE XMR SELL (claim): ONE SOURCE OF TRUTH FOR THE CLIENT AND THE NODE.
 // In a reverse swap the person gives XMR and claims ETH via `claim` on the settlement chain. They have no ETH,
 // so the node sends the claim gas. The gas rules used to live in TWO places and the numbers differed ~100x, so
 // a person with one gift could not send the claim. Now this module computes both numbers.
-// WHY ONE MODULE UNDER www/js: the formula must be ONE. The EVM engine lives under www/js, and the node imports
-// from www/js too; the reverse import is impossible (the browser is never served the node directory).
+// WHY ONE MODULE: the formula must be ONE. The SDK owns the EVM engine, and the node imports it from the package;
+// the browser and the node read the same implementation.
 // WHAT IS ONE HERE: the claim gas limit, the fee rule (2 x baseFee + tip) and the GIFT SIZE - the same claim
 // cost plus an EXPLICIT margin for base-fee growth between ticket and claim.
 

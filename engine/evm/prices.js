@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/evm/prices.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // LIVE MARKET NUMBERS FOR THE EVM LEG: the native price (Chainlink on-chain) and the gas cost (RPC).
 // WHY ON-CHAIN, NOT AN API: the price is a contract call over the same RPC already allowed by the CSP
 // (connect-src), so no new external domain appears, there are no keys or rate limits, and the feed address is

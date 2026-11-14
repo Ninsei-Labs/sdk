@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/recovery/recoveryFile.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // The deal recovery file: real cryptography in the browser (WebCrypto).
 //
 // Litepaper §5: without a saved recovery file a deal is not funded; if the tab is lost, this file is the only way

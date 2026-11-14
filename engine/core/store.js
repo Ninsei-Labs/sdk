@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/core/store.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // Demo state storage.
 //
 // Why it exists at all: litepaper §5.1.7 - "the tab can be closed, the browser will restore the state". The swap
