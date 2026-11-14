@@ -5,7 +5,7 @@
 //   syntax   - every module of the package parses;
 //   import   - the entry point loads in bare Node, and the check NAMES what a browser would be needed for;
 //   surface  - index.d.ts and the runtime agree in BOTH directions: interface members, named exports, code tables;
-//   mirror   - the engine mirror parses and none of its imports dangle inside the package;
+//   engine   - the engine modules parse and none of their imports dangle inside the package;
 //   pack     - what the tarball will carry matches the `files` field;
 //   secrets  - no keys, tokens or passwords in the tree.
 //   cow      - the CoWSwap order EIP-712 golden vector (real on-chain orders), the async seam, a breaking run;
@@ -304,7 +304,8 @@ export const mirrorCheck = () => {
   return {
     note: `${modules} modules parsed, no dangling relative imports`,
     problems,
-    notes: ["the engine mirror's source (www/js) is not in this repository: a byte-for-byte comparison is out of scope here"],
+    notes: ["the engine modules are the SDK source of truth; there is no external mirror to compare"],
+    // The check keeps its historical name in the registry, but it validates the SDK's own engine sources.
   };
 };
 

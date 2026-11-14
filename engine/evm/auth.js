@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/evm/auth.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // WALLET-SIGNATURE LOGIN AND THE SERVER-SIDE SWAP LIST.
 // Why: while swap records live only in localStorage, "my list" is tied to the browser. A server-side list
 // fixes that; binding it to the wallet address keeps other people's swaps hidden.

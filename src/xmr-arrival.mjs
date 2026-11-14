@@ -14,10 +14,9 @@
 // and the screen says the nodes do not agree. When only one operator has confirmed, the core names that state
 // (`one-node`) instead of waiting silently.
 //
-// WHERE THE RULE LIVES. "Locked by unlock_time is not an arrival" is ONE rule (issue #84). It is not copied here:
-// it lives under www/js/monero/unlock.js, is mirrored byte-for-byte into the engine (sdk/engine/monero/unlock.js,
-// guarded by tools/check-sdk-engine.mjs) and is read through the engine seam. The block parser is mirrored the
-// same way (www/js/monero/scan.js) - a second copy would be a second truth about money.
+// WHERE THE RULE LIVES. "Locked by unlock_time is not an arrival" is ONE rule (issue #84). It lives in the
+// SDK's engine (engine/monero/unlock.js) and is read through the engine seam. The block parser lives beside it
+// (engine/monero/scan.js) - a second copy would be a second truth about money.
 //
 // PRIVACY. Public nodes are asked for the WHOLE BLOCK (get_block plus /get_transactions over all of the block's
 // hashes), never for a single transaction: otherwise a node links the user's IP to the trade. Requests carry
@@ -402,7 +401,7 @@ export async function verifyArrival(request) {
   const amountAtomic = best.nodes[0].amountAtomic;
   const agreedBy = best.nodes.map((r) => ({ url: r.url, operator: r.operator, blockHash: r.blockHash, confirmations: r.confirmations }));
 
-  // LOCKED IS NOT AN ARRIVAL, and the rule for that is the shared one (issue #84), mirrored from www/js.
+  // LOCKED IS NOT AN ARRIVAL, and the rule for that is the shared one (issue #84), in the SDK engine.
   const locked = best.nodes.find((r) => r.unlock && r.unlock.locked);
   if (locked) {
     const until = locked.unlock;

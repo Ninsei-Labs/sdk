@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/evm/dex.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // THE DEX LEG: a Uniswap v3 quote read from the chain. READ ONLY: eth_call, not one transaction.
 //
 // WHAT IS REPLACED HERE. The price breakdown used to hold a mock: "Uniswap v3 USDC/WETH 0.05%" and the spread

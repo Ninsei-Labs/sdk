@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/ui/walletModal.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // A wallet-connect modal for the injected connector: browser-wallet choice only.
 // The browser-wallet list comes from outside (setChoices); detection is evm/injected.js by EIP-6963. Here is
 // only rendering: the CSP bans inline styles, so everything goes through dom.h(), and wallet icons are data: URLs.

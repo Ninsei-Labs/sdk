@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/evm/factory.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // Calls to the NinseiSwap escrow factory contract.
 //
 // There are no EVM libraries in the project and we are not adding any. BOTH FACTORY FUNCTIONS NOW TAKE THE

@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/core/chainSource.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // DATA SOURCE FOR THE MONERO LEG OF THE SWAP: the demo simulator or the real backend.
 // TWO LEGS, DIFFERENT READINESS. The EVM leg (escrow, claim, refund) is a SIMULATION (no contract yet): every
 // reply is marked mock: true and the UI must show it. The Monero leg (has XMR arrived, how many confirmations)

@@ -1,6 +1,3 @@
-// SDK ENGINE MODULE - the demo's sdk/ mirror copies this file byte for byte (tools/build-sdk-engine.mjs).
-// The page's own www/js module is a separate copy; edit this package source and regenerate the mirror.
-
 // The one-shot Monero wallet of a swap.
 //
 // Keys are derived by the package's own Monero module (engine/monero/keys.js) from @noble/curves; the 25-word

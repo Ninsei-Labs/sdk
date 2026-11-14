@@ -1,6 +1,3 @@
-// SDK ENGINE MODULE - the demo's sdk/ mirror copies this file byte for byte (tools/build-sdk-engine.mjs).
-// The page's own www/js module is a separate copy; edit this package source and regenerate the mirror.
-
 // Monero address checks and assembly: format + real checksum + network prefixes.
 // A detail easy to get wrong: Monero has its OWN base58 - block-based (8 bytes -> 11 chars, the remainder last).
 // It is NOT compatible with bitcoin-base58, where a leading '1' means a zero byte; here a block is a NUMBER and

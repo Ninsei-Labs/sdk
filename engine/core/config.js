@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/core/config.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // VM-neutral deployment pins generated from deployments/<vm>/<network>.json. No address table is copied below.
 import { DEPLOYMENTS, DEPLOYMENT_CHAINS, DEPLOYMENT_VMS, FACTORY_HISTORY, deploymentFor } from "./deployments.generated.js";
 

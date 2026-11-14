@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/recovery/restore.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // The reverse recovery-file path: file -> wallet that can claim the XMR.
 // The forward path (file generation) is in recoveryFile.js. Here is why the file exists: recovery when the tab is
 // lost. Two rules are pinned by CODE, not by a comment:

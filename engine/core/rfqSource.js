@@ -1,6 +1,3 @@
-// THE ORDER-QUOTE MIRROR OF www/js/core/rfqSource.js. The SDK copy drops the indicative quote book that the page
-// still uses: the bridge helpers it called are gone. Keep the order-quote path in sync with the source.
-
 // THE ORDER QUOTE FOR THE EXECUTOR FALLBACK. This module no longer carries the indicative quote book: the SDK has
 // no book path, and the bridge helpers it called (`sdkBook`, `sdkBookSnapshot`) are gone. What remains is the
 // order quote the executor asks for when it has to fall back to the provider, and its shape check.

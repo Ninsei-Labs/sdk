@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/monero/halvesSweep.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // KEYS FOR SWEEPING FROM A HALVES FILE. One logic for two consumers: the sweep page (sweep.js) and the
 // check, so the two cannot drift.
 // This is the main check of the whole sweep: the contract only verifies that the HASH of the revealed half

@@ -17,15 +17,12 @@
 //      no such function - the payable constructor moves the money - and there is no envelope in the order. Nor
 //      does the escrow have a separate funding function: an order is either born with money or not born at all.
 //
-// THE CRYPTOGRAPHY LIVES UNDER www/js/atomic/* (mirrored as ../engine/atomic/*) AND IS CALLED ONLY THROUGH
-// THE IN-PROCESS ORDER BUILDER. There is no crypto here - here is the order.
+// THE CRYPTOGRAPHY LIVES UNDER engine/atomic/* AND IS CALLED ONLY THROUGH THE IN-PROCESS ORDER BUILDER.
+// There is no crypto here - here is the order.
 //
-// WHY IT IS IN THE PACKAGE NOW. The page used to import this module straight from www/js/core/swap-flow.js; the
-// core (www/js, mirrored under ../engine/) was the second home of the deal flow. That is exactly the debt
-// issue #32 pays off: the deal engine is business logic, so it belongs to the package (@ninsei-labs/sdk), and
-// the page reaches it through ONE seam (www/js/sdk/bridge.js) by module name, not by pulling a file out of
-// www/js. The engine modules it needs are still read through the same verified mirror (./engine.mjs); what moved
-// is the RULES, not the crypto.
+// WHY IT IS IN THE PACKAGE. The deal engine is business logic, so it belongs to the package (@ninsei-labs/sdk).
+// The page reaches it through ONE seam (its bridge) by module name. The engine modules it needs are read through
+// ./engine.mjs; what lives here is the RULES, not the crypto.
 import { SdkError } from "./errors.mjs";
 import * as engine from "./engine.mjs";
 // THE HALF'S COMMITMENT, COMPUTED LOCALLY. The escrow checks the low 160 bits of `keccak256(x||y)` of `half*G`
@@ -52,8 +49,8 @@ const {
 } = engine.escrow;
 // THE COUNTERPARTY GUARDS: whether a stand-in may be signed on this chain.
 const { liveOrderSlotsVerdict, counterpartyVerdict } = engine.guards;
-// THE ORDER CONTEXT, THE ORDER QUOTE AND THE SHARED CLAIM GAS LIMIT - all through the mirror, so the page and
-// the package never keep a second copy of these rules.
+// THE ORDER CONTEXT, THE ORDER QUOTE AND THE SHARED CLAIM GAS LIMIT - all through the engine seam, so the page
+// and the package never keep a second copy of these rules.
 const { orderContextString } = engine.orderContext;
 const { requestOrderQuote, checkOrderQuoteShape } = engine.rfqSource;
 const { CLAIM_GAS_LIMIT } = engine.claimGas;

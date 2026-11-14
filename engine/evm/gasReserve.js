@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/evm/gasReserve.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // THE BUYER GAS RESERVE FOR ORDER ACTIONS: THE READINESS MARK AND A POSSIBLE REFUND.
 //
 // THE POINT. In a direct swap the person deposits into the escrow, and after the XMR arrives calls markReady itself

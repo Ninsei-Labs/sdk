@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/evm/injected.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // BROWSER WALLETS: detection by EIP-6963 and connection by EIP-1193.
 // WHY EIP-6963, NOT window.ethereum.isMetaMask. With two extensions installed, window.ethereum is "whoever was
 // last", and guessing by flags gives wrong names and icons. EIP-6963 solves this: a wallet announces itself with

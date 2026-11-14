@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/sdk/bridge.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // THE PAGE-TO-CORE SHIM: THE ONE PLACE WHERE SCREENS KNOW ABOUT THE SDK (sdk/).
 //
 // WHY IT EXISTS. The swap logic lives in the core (sdk/, the @ninsei-labs/sdk package) while the page should do
@@ -408,7 +404,7 @@ export async function sdkSetDestination(id, address) {
 }
 
 // THE MONERO ADDRESS NETWORK - A CORE SURFACE (it owns the address format): the shim only exposes it to the screen.
-// The fallback is the same module that mirrors the core (www/js/monero/address.js): there is no second prefix table.
+// The fallback is the same address module the SDK uses (engine/monero/address.js): there is no second prefix table.
 export async function sdkAddressNetwork(address) {
   const ctx = await instanceFor(undefined);
   if (ctx) return ctx.sdk.swaps.addressNetwork(address);
@@ -422,8 +418,8 @@ export async function sdkAddressNetwork(address) {
 //     the deal digest and the poll tick, reads and polling of the Monero node (the core has no node);
 //   * prices, fees, gas and the form's DEX leg - SHOWCASE: the numbers are read from the chain by engine
 //     modules, and the screen gets them through the seam, not by a second road into the engine;
-//   * networkFromShape/networkLabel - the Monero address shape and its name: the same format module the core
-//     mirrors (there is no second prefix table);
+//   * networkFromShape/networkLabel - the Monero address shape and its name: the same format module the SDK
+//     uses (there is no second prefix table);
 //   * createSwap/createReverseSwap/activeSwaps - the RECORD of the demo and reverse deal (the record is kept by
 //     the engine; the core exposes its STATE via swaps.list/swaps.progress).
 //   * createSwapWallet - THE FORM'S DEAL WALLET (state between screens, ui/formState.js): the page wallet with

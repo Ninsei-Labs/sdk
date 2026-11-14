@@ -1,7 +1,3 @@
-// GENERATED FILE - a byte-for-byte copy of the engine module www/js/atomic/orderHalfCommit.js for the SDK package.
-// Edit the source under www/js and regenerate the mirror; a drift guard reddens on any difference.
-// Everything below this header is identical to the source.
-
 // COMMITMENT TO A HALF - one formula for all sides.
 //
 // WHAT THE CHAIN COMPUTES. `keccak256(x || y)` of the secp256k1 POINT of the half `half*G` - that is, the ADDRESS of that point.
