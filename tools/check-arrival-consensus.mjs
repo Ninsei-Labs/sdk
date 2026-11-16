@@ -82,11 +82,11 @@ function fixture({ amount = AMOUNT, unlockTime = 0 } = {}) {
   };
 }
 
-function rpcFor(txByHost, { synchronized = true } = {}) {
+function rpcFor(txByHost, { synchronized = true, confirmations = {} } = {}) {
   return async (url, init) => {
     const body = JSON.parse(init.body);
     if (body.method === "get_info") {
-      return { ok: true, json: async () => ({ result: { height: 121, synchronized } }) };
+      return { ok: true, json: async () => ({ result: { height: 100 + (confirmations[new URL(url).hostname] ?? 21), synchronized } }) };
     }
     if (body.method === "get_block") {
       return { ok: true, json: async () => ({ result: { block_header: { hash: BLOCK_HASH }, tx_hashes: [TXID] } }) };
@@ -95,7 +95,7 @@ function rpcFor(txByHost, { synchronized = true } = {}) {
     return {
       ok: true,
       json: async () => ({
-        txs: [{ tx_hash: TXID, block_height: 100, confirmations: 21 }],
+        txs: [{ tx_hash: TXID, block_height: 100, confirmations: confirmations[new URL(url).hostname] ?? 21 }],
         txs_as_json: [JSON.stringify(tx)],
       }),
     };
@@ -106,7 +106,7 @@ const spendPub = G.multiply(SPEND).toHex();
 const viewPub = G.multiply(VIEW).toHex();
 const address = addressFromKeys({ network: "stagenet", kind: "primary", spendPub, viewPub }, { keccak256 });
 
-async function run({ nodes, txByHost, expectedAtomic = AMOUNT, minConfirmations = 10, txid = TXID }) {
+async function run({ nodes, txByHost, expectedAtomic = AMOUNT, minConfirmations = 10, txid = TXID, confirmations = {} }) {
   const verdict = await verifyArrival({
     nodes,
     address,
@@ -116,7 +116,7 @@ async function run({ nodes, txByHost, expectedAtomic = AMOUNT, minConfirmations 
     minConfirmations,
     fromHeight: 100,
     txid,
-    fetch: rpcFor(txByHost),
+    fetch: rpcFor(txByHost, { confirmations }),
   });
   return verdict;
 }
@@ -134,10 +134,19 @@ console.log("=== 1) TWO HONEST NODES AGREE ===");
   else bad("honest pair: " + JSON.stringify(verdict, (k,v)=>typeof v==="bigint"?v.toString():v));
   if (verdict.amountAtomic === AMOUNT.toString()) ok("the amount comes from the agreed observation");
   else bad("arrived amount: " + verdict.amountAtomic);
-  if (verdict.confirmations >= 10) ok("confirmations are reported");
+  if (verdict.confirmations === 21) ok("confirmations are reported");
   else bad("confirmations: " + verdict.confirmations);
   if (verdict.checked && verdict.checked.length === 2 && verdict.checked.every((r) => Number(r.height) > 0)) ok("an answered witness carries its height");
   else bad("checked heights: " + (verdict.checked || []).map((r) => r.height).join(","));
+}
+
+// Synthetic nodes agree on the transaction and differ only in their chain tips.
+for (const [a, b, expected, state] of [[9, 12, 9, "pending"], [12, 9, 9, "pending"], [10, 12, 10, "arrived"], [12, 10, 10, "arrived"], [11, 12, 11, "arrived"]]) {
+  const verdict = await run({ nodes: [{ url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" }],
+    txByHost: { default: fixture() }, confirmations: { "a.example": a, "b.example": b } });
+  if (verdict.confirmations === expected && verdict.state === state && verdict.amountAtomic === AMOUNT.toString()
+    && verdict.checked?.length === 2) ok(`confirmation boundary ${a}/${b} uses ${expected}`);
+  else bad(`confirmation boundary ${a}/${b}: ` + JSON.stringify(verdict, (_, value) => typeof value === "bigint" ? String(value) : value));
 }
 
 console.log("=== 1a0) A DUST TRANSFER BEFORE THE FULL PAYOUT IS NOT THE ARRIVAL ===");

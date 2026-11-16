@@ -122,8 +122,9 @@ if (BigInt("0x" + boundary.x) !== (1n << 252n)) problems.push("kat-05 does not c
 {
   const base = read("kat-01-pok");
   const torsion = clone(base.proof);
-  torsion.XB = "0100000000000000000000000000000000000000000000000000000000000000";
-  if (dleq.verify(torsion, base.context).ok) fail("torsion", "an order-2 XB was accepted");
+  torsion.XB = "ec" + "ff".repeat(30) + "7f"; // The order-2 point, not the identity.
+  const torsionVerdict = dleq.verify(torsion, base.context);
+  if (torsionVerdict.ok || !/prime-order subgroup/.test(torsionVerdict.reason)) fail("torsion", "an order-2 XB did not get its subgroup refusal: " + torsionVerdict.reason);
   // THE IDENTITY IS A FORBIDDEN SUBJECT, NOT A ZERO INTERMEDIATE. A manufactured proof of the identity would let a
   // side omit its half from the joint spend point.
   for (const [name, identity] of [

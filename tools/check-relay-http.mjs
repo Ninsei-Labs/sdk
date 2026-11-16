@@ -444,6 +444,33 @@ for (const [label, answer, why] of [
     else bad(label + " got " + JSON.stringify(error && (error.code || error.message)));
   }
 }
+// Each signed value is individually valid; both signatures cover the changed value.
+// The request stays fixed, so only its field binding may refuse the answer.
+for (const [field, value] of [
+  ["chainId", "421615"], ["factory", "0x" + "12".repeat(20)],
+  ["locker", "0x" + "23".repeat(20)], ["claimer", "0x" + "34".repeat(20)],
+  ["amount", "1001"], ["readyBy", String(order.readyBy + 1)], ["t1", String(order.t1 + 1)],
+  ["salt", "0x" + "45".repeat(32)], ["claimTip", "1"],
+  ["provider", "0x" + "a2".repeat(20)], ["registry", "0x" + "c4".repeat(20)],
+]) {
+  const answer = makeAnswer(built);
+  const payload = JSON.parse(answer.payload);
+  payload.quote[field] = value;
+  // Factory is bound by the envelope before quote normalization replaces its inner field.
+  if (field === "factory") payload.factory = value;
+  payload.quote.quoteSignature = signQuoteDigest({ crypto, digest: quoteDigest({ crypto, quote: payload.quote }), privateKey: hex(quotePrivate) });
+  payload.quoteSignature = payload.quote.quoteSignature;
+  answer.payload = JSON.stringify(payload);
+  answer.signature = signRelay(answer);
+  try {
+    await call({ fetchImpl: fakeFetch({ body: relayBody(answer) }).fetchImpl });
+    bad("signed field " + field + " passed");
+  } catch (error) {
+    if (error?.code === "quote-refused" && (field === "factory" ? error.params?.why === "factory" : error.params?.why === "field" && error.params.field === field)) ok("signed field " + field + " is bound to the request");
+    else bad("signed field " + field + " refused for the wrong reason: " + JSON.stringify({ code: error?.code, params: error?.params }));
+  }
+}
+
 const forwardedMismatch = relayBody(makeAnswer(built));
 forwardedMismatch.forwarded = { relayId: "other-relay" };
 const wrongForwarded = fakeFetch({ body: forwardedMismatch });

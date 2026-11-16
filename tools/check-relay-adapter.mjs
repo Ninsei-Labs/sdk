@@ -332,13 +332,17 @@ try {
   bad("a short sell quote was refused by the buy margin: " + JSON.stringify(error && (error.code || error.message)) + " " + JSON.stringify(error && error.params));
 }
 
-console.log("=== 2a) THE DENYLIST CHECKS THE CLIENT ON A BID ===");
-try {
-  await call(makeQuotes({ denylist: new Set([user]) }), { order: bidOrder, side: "bid", fetchImpl: relayFetch().fetchImpl });
-  bad("a denied bid claimer passed");
-} catch (error) {
-  if (error && error.code === "address-denied") ok("the client's own claimer is denied on a bid");
-  else bad("bid denylist returned " + JSON.stringify(error && (error.code || error.message)));
+console.log("=== 2a) THE DENYLIST CHECKS THE CLIENT ON BOTH SIDES ===");
+for (const [side, requestOrder] of [["ask", order], ["bid", bidOrder]]) {
+  let calls = 0;
+  try {
+    await call(makeQuotes({ denylist: new Set([user]) }), { order: requestOrder, side,
+      fetchImpl: async () => { calls++; throw new Error("screening must precede the relay"); } });
+    bad(`a denied ${side} client passed`);
+  } catch (error) {
+    if (error?.code === "address-denied" && calls === 0) ok(`the ${side} client is denied before any relay request`);
+    else bad(`${side} denylist returned ${error?.code} after ${calls} relay calls`);
+  }
 }
 
 console.log("=== 3) THE ROLE, THE KEY AND THE SALT ARE NOT GUESSED ===");

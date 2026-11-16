@@ -145,7 +145,7 @@ if (first) {
 if (first) {
   setStorage(originalStore);
   const changed = { ...offer, quote: { ...quote, commitHalfClaimer: "0x" + "00".repeat(32) } };
-  const got = await codeOf(() => firstSwaps.startSell({ offer: changed, recoveryKey: mnemonic, onRecoveryKey: accept }));
+  const got = await codeOf(() => createSwaps({ config: {}, call: read }).startSell({ offer: changed, recoveryKey: mnemonic, onRecoveryKey: accept }));
   ok(got && got.code === "quote-refused" && got.params && got.params.why === "offer-changed",
     "a changed offer is refused after a restart");
 }
