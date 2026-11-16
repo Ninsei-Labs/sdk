@@ -37,6 +37,7 @@ import { refundWindowCheck } from "./check-refund-window.mjs";
 import { refundIfMissingCheck } from "./check-refund-if-missing.mjs";
 import { sweepWindowCheck } from "./check-sweep-window.mjs";
 import { sweepFromOrderCheck } from "./check-sweep-order.mjs";
+import { feesCheck } from "./check-fees.mjs";
 import { sweepAdapterCheck } from "./check-sweep-adapter.mjs";
 import { claimTipCheck } from "./check-claim-tip.mjs";
 import { claimSenderCheck } from "./check-claim-sender.mjs";
@@ -2617,6 +2618,7 @@ const dleqChunksCheck = () => runScriptCheck("check-dleq-chunks.mjs", "dleq chun
 const securityInvariantsCheck = () => runScriptCheck("check-security-invariants.mjs", "security invariants");
 const lifecycleLocalCheck = () => runScriptCheck("check-lifecycle-local.mjs", "local lifecycle");
 const CHECKS = {
+  fees: feesCheck,
   syntax: syntaxCheck,
   import: importCheck,
   surface: surfaceCheck,
