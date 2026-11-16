@@ -57,7 +57,7 @@ export const sweepWindowCheck = async () => {
   withImages.wallet.driver().getKeyImages = async () => [{ getHex: () => "aa" }, { getHex: () => "bb" }];
   const spent = await restoreWallet({ wallet: withImages.wallet, fromHeight: 100,
     window: { txHashes: ["a"], toHeight: 110, tipHeight: 900, nodeUrl: "https://node.example", trustedNode: true },
-    fetchImpl: async (url, options) => { nodeCalls.push([url, JSON.parse(options.body)]); return { ok: true, json: async () => ({ spent_status: [false, true] }) }; },
+    fetchImpl: async (url, options) => { nodeCalls.push([url, JSON.parse(options.body)]); return { ok: true, json: async () => ({ spent_status: [0, 1] }) }; },
   });
   check(spent.window && spent.window.spent === 1 && spent.window.keyImages === 2,
     `the spent check reported ${JSON.stringify(spent.window)}`);
@@ -73,7 +73,7 @@ export const sweepWindowCheck = async () => {
   untrusted.wallet.driver().getKeyImages = async () => [{ getHex: () => "aa" }];
   const withheld = await restoreWallet({ wallet: untrusted.wallet, fromHeight: 100,
     window: { txHashes: ["a"], toHeight: 110, tipHeight: 900, nodeUrl: "https://node.example" },
-    fetchImpl: async () => { untrustedCalls += 1; return { ok: true, json: async () => ({ spent_status: [true] }) }; },
+    fetchImpl: async () => { untrustedCalls += 1; return { ok: true, json: async () => ({ spent_status: [1] }) }; },
   });
   check(untrustedCalls === 0, "key images were sent to a node that was not declared trusted");
   check(withheld.window && withheld.window.spent === null && withheld.window.spentWhy === "untrusted-node",
