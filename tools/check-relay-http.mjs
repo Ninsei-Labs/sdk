@@ -419,6 +419,25 @@ try {
     ok("a quote whose validUntil reaches readyBy is refused");
   } else bad("wrong validity code: " + JSON.stringify(error && (error.code || error.message)));
 }
+console.log("=== 3a) THE VERIFICATION CLOCK IS THE CALLER'S CLOCK ===");
+{
+  const later = fakeFetch({ body: relayBody(makeAnswer(built, { validUntil: nowSec + 30 })) });
+  try {
+    await call({ fetchImpl: later.fetchImpl, now: () => (nowSec + 120) * 1000 });
+    bad("an expired quote passed under the caller's later clock");
+  } catch (error) {
+    if (error && error.code === "quote-expired") ok("an expired quote is refused under the caller's later clock");
+    else bad("wrong later-clock code: " + JSON.stringify(error && (error.code || error.message)));
+  }
+  const earlier = fakeFetch({ body: relayBody(makeAnswer(built, { validUntil: nowSec + 30 })) });
+  try {
+    const result = await call({ fetchImpl: earlier.fetchImpl, now: () => (nowSec - 120) * 1000 });
+    if (result.quote.validUntil === String(nowSec + 30)) ok("a live quote is accepted under the caller's earlier clock");
+    else bad("earlier clock changed the quote: " + JSON.stringify(result.quote.validUntil));
+  } catch (error) {
+    bad("a live quote was refused under the caller's earlier clock: " + JSON.stringify(error && (error.code || error.message)));
+  }
+}
 {
   const poisoned = makeAnswer(built);
   poisoned.version = { toString: null };

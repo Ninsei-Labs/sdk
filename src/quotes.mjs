@@ -228,6 +228,7 @@ export function createQuotes({ config, now = () => Date.now(), evmCall = null, e
         partner: request.partner,
         fetchImpl: request.fetchImpl || fetchImpl,
         timeoutMs: request.timeoutMs,
+        now,
         features,
         terms: {
           market,
