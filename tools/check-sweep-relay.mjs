@@ -54,10 +54,6 @@ function wallet({ relay } = {}) {
   };
 }
 
-async function sign(adapter) {
-  return await createSweep({ http, config }).sign({ ...(await planRequest()), connectWallet: async () => adapter });
-}
-
 test("a relay answer is reported as sent and closes the session", async () => {
   const adapter = wallet();
   const sweep = createSweep({ http, config });
