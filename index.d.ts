@@ -1774,7 +1774,8 @@ export interface OrderApi {
    * The ONE native amount of a token-funded order: the quote's `payNative` in the network's native decimals.
    * The escrow holds native coin, so the token amount is never used as the escrow amount (a 6-decimal token
    * would be off by 10^12). A quote without a native figure answers `{ ok: false, code: "native-amount-unread" }`;
-   * it is never replaced by the payment amount.
+   * it is never replaced by the payment amount. A canonical decimal string is required: extra significant digits,
+   * exponent form and an unsafe `number` are refused rather than rounded.
    */
   escrowNativeWei(request?: { readonly quote?: Readonly<Record<string, unknown>> | null; readonly nativeDecimals?: number }): EscrowNativeAmount;
   /**

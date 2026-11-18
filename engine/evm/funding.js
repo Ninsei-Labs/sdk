@@ -88,11 +88,23 @@ export function testOrderTerms({ locker, claimer, commitHalfLocker, commitHalfCl
   };
 }
 
-// Amount in wei from a human value (string) and the token decimals.
+// Amount in wei from a human decimal value and the token decimals.
+//
+// The value must carry its exact digits. A significant digit beyond `decimals` is a refusal; it is never sliced
+// away, because that would fund a different amount from the signed one. Trailing zeroes beyond the decimals are
+// not significant and are accepted.
 export function toWei(human, decimals = 18) {
-  const [intPart, fracPart = ""] = String(human).split(".");
-  const frac = (fracPart + "0".repeat(decimals)).slice(0, decimals);
-  return BigInt(intPart || "0") * 10n ** BigInt(decimals) + BigInt(frac || "0");
+  const text = String(human);
+  const match = /^(?:0|[1-9]\d*)(?:\.(\d+))?$/.exec(text);
+  if (!match) throw new Error("the amount is not a decimal number");
+  const dec = Number(decimals);
+  if (!Number.isInteger(dec) || dec < 0) throw new Error("the decimals are not a whole number");
+  const fraction = match[1] || "";
+  if (fraction.length > dec && /[1-9]/.test(fraction.slice(dec))) {
+    throw new Error("the amount has more decimal digits than the token");
+  }
+  const kept = fraction.slice(0, dec).padEnd(dec, "0");
+  return BigInt(text.split(".")[0]) * 10n ** BigInt(dec) + BigInt(kept || "0");
 }
 
 // THE ONE NATIVE AMOUNT OF A TOKEN-FUNDED ORDER.
@@ -108,16 +120,16 @@ export function escrowNativeWei({ quote = null, nativeDecimals = 18 } = {}) {
     return { ok: false, code: "native-amount-unread", reason: "the quote carries no native amount" };
   }
   const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) {
+  // A number at or above the safe-integer range has already lost digits before this function sees it.
+  if (!Number.isFinite(n) || n <= 0 || (typeof raw === "number" && Math.abs(raw) > Number.MAX_SAFE_INTEGER)) {
     return { ok: false, code: "native-amount-unread", reason: "the quote's native amount is not a positive number" };
   }
   const dec = Number(nativeDecimals);
   if (!Number.isInteger(dec) || dec < 0) {
     return { ok: false, code: "native-amount-unread", reason: "the native decimals are not a whole number" };
   }
-  // THE QUOTE'S OWN DIGITS, NOT A RE-ROUNDED COPY. An exponent form falls back to toFixed(18), as the rest of the
-  // page does; everything else keeps exactly the digits it was typed with.
-  const text = /e/i.test(String(raw)) ? n.toFixed(18) : String(raw);
+  // THE QUOTE'S OWN DIGITS. A canonical decimal string keeps them; exponent form is not a canonical amount.
+  const text = String(raw);
   // DECIMAL DIGITS ONLY. BigInt accepts "0x10", and a native amount read as a hex literal would silently become
   // sixteen times the token amount; a quote carries decimal text.
   if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(text)) {

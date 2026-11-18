@@ -23,8 +23,24 @@ console.log("=== 1) THE NATIVE AMOUNT COMES FROM THE QUOTE ===");
   else bad("native scaling: " + JSON.stringify(native));
 
   const small = engine.evm.escrowNativeWei({ quote: { payNative: "1e-7" }, nativeDecimals: 18 });
-  if (small.ok && small.wei === "100000000000") ok("an exponent form is scaled, not rejected");
-  else bad("exponent form: " + JSON.stringify(small));
+  if (!small.ok && small.code === "native-amount-unread") ok("an exponent form is refused, not rounded");
+  else bad("exponent form accepted: " + JSON.stringify(small));
+
+  const boundary = engine.evm.escrowNativeWei({ quote: { payNative: "0.000000000000000001" }, nativeDecimals: 18 });
+  if (boundary.ok && boundary.wei === "1") ok("the smallest 18-decimal unit is one wei");
+  else bad("boundary: " + JSON.stringify(boundary));
+
+  const extra = engine.evm.escrowNativeWei({ quote: { payNative: "0.0004001" }, nativeDecimals: 6 });
+  if (!extra.ok && extra.code === "native-amount-unread") ok("a significant digit beyond the decimals is refused");
+  else bad("extra decimals accepted: " + JSON.stringify(extra));
+
+  const trailing = engine.evm.escrowNativeWei({ quote: { payNative: "0.0004000" }, nativeDecimals: 6 });
+  if (trailing.ok && trailing.wei === "400") ok("trailing zeroes beyond the decimals are not significant");
+  else bad("trailing zeroes: " + JSON.stringify(trailing));
+
+  const unsafe = engine.evm.escrowNativeWei({ quote: { payNative: Number.MAX_SAFE_INTEGER + 1 }, nativeDecimals: 0 });
+  if (!unsafe.ok && unsafe.code === "native-amount-unread") ok("an unsafe number is refused before conversion");
+  else bad("unsafe number accepted: " + JSON.stringify(unsafe));
 
   const six = engine.evm.escrowNativeWei({ quote: { payNative: "0.0004" }, nativeDecimals: 6 });
   if (six.ok && six.wei === "400") ok("the native decimals are respected");
