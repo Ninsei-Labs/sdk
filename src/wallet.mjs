@@ -1,4 +1,4 @@
-// THE WALLET OUTSIDE AND WITHOUT KNOWLEDGE OF THE CHAIN (issue #32, requirement 4; extensibility for Tron and Solana).
+// THE WALLET OUTSIDE AND WITHOUT KNOWLEDGE OF THE CHAIN.
 //
 // The SDK core knows neither EIP-1193, nor WalletConnect, nor the Solana wallet-standard. It knows the ADAPTER
 // INTERFACE: vm, connect, disconnect, address, chainId, subscribe, driver - and requires the adapter to be for

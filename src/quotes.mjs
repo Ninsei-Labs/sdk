@@ -23,7 +23,7 @@ const bytesToHexQ = (bytes) => { let out = "0x"; for (const b of bytes) out += b
 const providerOfSelector = () => bytesToHexQ(keccak256(utf8("providerOf(address)")).slice(0, 4));
 const providerOfData = (key) => providerOfSelector() + "0".repeat(24) + String(key).toLowerCase().replace(/^0x/, "");
 // THE FACTORY IS READ FROM THE RECORD, NOT FROM SETTINGS: `factoryOf(provider)` answers the factory the
-// provider named in its record (#103). Selected by a COMPUTED selector, like providerOf.
+// provider named in its record. Selected by a COMPUTED selector, like providerOf.
 const factoryOfSelector = () => bytesToHexQ(keccak256(utf8("factoryOf(address)")).slice(0, 4));
 const factoryOfData = (provider) => factoryOfSelector() + "0".repeat(24) + String(provider).toLowerCase().replace(/^0x/, "");
 const hexToBytesQ = (hex) => {
@@ -110,13 +110,13 @@ export function claimTipVerdict({ claimTipWei = 0, baseFeeWei = null, priorityFe
 
 export function createQuotes({ config, now = () => Date.now(), evmCall = null, evmCode = null, evmBlock = null,
   providerAllowed = null, knownFactoryCodes = null, knownImplementationCodes = null, denylist = null, fetchImpl = null }) {
-  // THE INTERFACE'S FACTORY POLICY (#103): the code hashes of factories it is willing to trade through
+  // THE INTERFACE'S FACTORY POLICY: the code hashes of factories it is willing to trade through
   // (extcodehash semantics = keccak256 of the runtime code). An EMPTY list is "no policy" (like
   // allowedProviders); a NON-EMPTY one refuses any factory whose code is not on it. Lower-cased once.
   const factoryPolicy = Array.isArray(knownFactoryCodes) && knownFactoryCodes.length
     ? knownFactoryCodes.map((h) => String(h).toLowerCase()).filter(Boolean)
     : null;
-  // THE INTERFACE'S ESCROW-IMPLEMENTATION POLICY (#114): the code hashes of the escrow IMPLEMENTATION the
+  // THE INTERFACE'S ESCROW-IMPLEMENTATION POLICY: the code hashes of the escrow IMPLEMENTATION the
   // factory must lead to - the code every order's clone delegatecalls. Same rule as the factory policy: an
   // EMPTY list is "no policy" (then the pair is still read and the implementation's code must be non-empty).
   const implementationPolicy = Array.isArray(knownImplementationCodes) && knownImplementationCodes.length

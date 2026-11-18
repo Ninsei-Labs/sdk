@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// A SUBADDRESS OUTPUT IN A MIXED TRANSACTION IS STILL OUR ARRIVAL (sdk#271.1).
+// A SUBADDRESS OUTPUT IN A MIXED TRANSACTION IS STILL OUR ARRIVAL.
 //
 // Monero puts a per-output additional transaction key in extra tag 0x04. The scanner used to read only tag 0x01,
 // so an output paid to a subaddress in a transaction that also paid someone else looked absent. This check builds

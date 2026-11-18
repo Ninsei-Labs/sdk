@@ -20,7 +20,7 @@
 // USAGE:
 //   node tools/npm-tag.mjs <version>                   print the derived tag; refuse (exit 1), naming the case
 //   node tools/npm-tag.mjs <version> --override <tag>  use <tag> instead - a human decision, named on stderr
-// The bare tag goes to STDOUT and everything explaining it to STDERR, so `tag=$(node tools/npm-tag.mjs ...)`
+// The bare tag goes to STDOUT and everything explaining it to STDERR, so `tag=$(node tools/npm-tag.mjs...)`
 // captures the tag alone while the run's log still shows what was decided and why.
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";

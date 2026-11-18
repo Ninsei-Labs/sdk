@@ -2,7 +2,7 @@
 // THE BREAKING RUN FOR THE `decline` CHECK: patch the files the guard reads, watch it come back RED with a NAMED
 // reason, put every file back byte for byte, and prove the bytes came back (sha256 compared before and after).
 //
-// ONE CASE PER PROMISE THE GUARD MAKES (issue #40):
+// ONE CASE PER PROMISE THE GUARD MAKES:
 //   a) THE ESCROW'S `Declined` EVENT IS THE DECLINE - cut the topic comparison and the chain source goes silent;
 //   b) THE EVENT'S IDENTITY IS PINNED - move the event's name and the topic stops being the contract's event;
 //   c) THE STATE IS WRITTEN DOWN - stop writing the settlement and nothing that reads the record reports it;

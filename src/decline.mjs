@@ -1,37 +1,17 @@
-// THE MAKER'S DECLINE: A STATE OF ITS OWN, TOLD APART FROM AN ORDINARY REFUND.
+// THE MAKER'S DECLINE.
 //
-// WHAT HAPPENS ON THE CHAIN. A maker who refuses a funded purchase - after screening the deposited ETH, say -
-// calls `decline()` on the escrow. The contract sets `refunded`, emits `Declined(claimer)` and sends the whole
-// balance, the fee included, back to the locker. NO half is revealed: there is nothing to recover, and nobody
-// assembles a Monero key from a declined order.
+// A decline is a maker closing a funded order. The escrow sets `refunded`, emits `Declined(claimer)` and returns the
+// balance to the locker. No half is revealed.
 //
-// WHY `status()` IS NOT ENOUGH TO SEE IT. `escrow.status()` answers four words - funded, claimed, refunded,
-// balance - and a decline reads exactly like an ordinary refund there: `refunded` is set and the money is back.
-// The two are not the same event, though. An ordinary refund is the depositor (or whoever holds their half)
-// taking the ETH back when the maker did not claim; it REVEALS THE DEPOSITOR'S HALF (`HalfRevealed(half, false)`)
-// so the maker can still take their XMR. A decline is the MAKER closing the order in the depositor's favour and
-// reveals nothing. On screen the two want different things said and different buttons hidden, so the SDK tells
-// them apart instead of reporting "refunded" for both.
+// `status()` shows the same `refunded` state as an ordinary refund. The SDK reads the `Declined` event or the node's
+// `declined` status with code `compliance` to tell them apart.
 //
-// THE TWO SOURCES, AND EITHER ONE IS ENOUGH:
-//   1) THE ESCROW'S `Declined` EVENT (the chain) - `declinedFromLogs`. The escrow has no getter for a decline
-//      (there is no `declined()` view), so the event is the on-chain fact that names it; it is read through the
-//      same read seam as every other chain read - an `eth_getLogs` over the escrow's address.
-//   2) THE NODE'S SWAP STATUS `declined` WITH THE CODE `compliance` (the wire) - `declinedFromStatus`. Those ARE
-//      the two fields the node returns and nothing else, so BOTH are required: the bare word without its code is
-//      not the state the node names, and guessing at it would put a category on a refusal that carries none.
-//
-// WHAT IS DELIBERATELY NOT CARRIED: a reason, a category, a provider. The node returns only `compliance` on
-// purpose - it does not name who declined or why - so the SDK reports the state, the node's own single token and
-// which reader saw it, AND NOTHING ELSE (see DECLINE_FIELDS below). The sentence a person reads is the
-// interface's: this package holds no user-facing string, and a decline is no exception.
+// The SDK reports the state, the node's token and the reader. It does not invent a reason, a category or a provider.
 import { SdkError } from "./errors.mjs";
 import { keccak256 } from "./primitives.mjs";
 import * as engine from "./engine.mjs";
 
-// THE EVENT, AND ONLY IT. The signature is assembled from its parts and hashed HERE, once, exactly as Solidity
-// does it: keccak256("Declined(address)"). The topic is exported so a caller filters logs with it rather than
-// deriving it a second time - a second copy of the same event would be a second truth about it.
+// The event signature is assembled once and hashed as Solidity does. Callers filter logs with the exported topic.
 export const DECLINE_EVENT_NAME = "Declined";
 export const DECLINE_EVENT_SIGNATURE = () => `${DECLINE_EVENT_NAME}(${["address"].join(",")})`;
 
@@ -42,33 +22,21 @@ const hexOf = (bytes) => {
 };
 
 /**
- * keccak256("Declined(address)") - topic0 of a decline's log. The escrow indexes `claimer`, so a log emitted by the
- * current contracts also carries it in topic1; the event signature (and therefore topic0) does not change. Logs from
- * escrows deployed before the indexing carry the claimer in data instead, which is why this module matches only
- * topic0 and does not assume a claimer position.
+ * The `Declined(address)` topic. The current escrow indexes `claimer` in topic1. Older escrows put the claimer in
+ * data, so this module matches topic0 only.
  */
 export const DECLINED_TOPIC0 = hexOf(keccak256(DECLINE_EVENT_SIGNATURE()));
 
-// THE NODE'S OWN TWO FIELDS for a declined swap: `{ status: "declined", code: "compliance" }`. The code is the
-// node's single token, deliberately opaque: it says "a screening decision was taken", not by whom or on what.
+// The node's two fields for a declined swap: `{ status: "declined", code: "compliance" }`. The code is opaque.
 export const DECLINED_STATUS = "declined";
 export const DECLINED_CODE = "compliance";
 
-// THE STATE'S OWN CODE - a `TerminalCode` (`index.d.ts`). The interface draws the decline screen from THIS, and
-// phrases the sentence itself; the package contributes the state and the code, not the words.
+// The terminal state the interface draws from. The package supplies the state and the code, not the words.
 export const DECLINED_TERMINAL = "declined";
 
 /**
- * THE WHOLE SET OF FIELDS A DECLINE IS REPORTED WITH - and the list is short ON PURPOSE. Everything else would be
- * a reason, a category or a provider, and the node names none of those:
- *   `declined`  - what happened (true/false);
- *   `terminal`  - the state the interface draws from (`declined`, or null);
- *   `code`      - the node's own token, UNCHANGED, or null;
- *   `source`    - which reader saw it: `event` (the escrow) or `status` (the node). PROVENANCE, NOT A REASON:
- *                 it says where the SDK learned it, not why the maker refused;
- *   `at`        - when it was seen (epoch ms), or null;
- *   `checked`   - whether the chain was read at all. `false` means "not measured", which is NOT "no decline" - a
- *                 caller that blurs the two would read a maker's refusal as an ordinary refund.
+ * The fields of a decline report. Keep this list short. `source` is provenance, not a reason. `checked: false` means
+ * the chain was not read, which is not the same as "no decline".
  */
 export const DECLINE_FIELDS = ["declined", "terminal", "code", "source", "at", "checked"];
 
@@ -92,13 +60,8 @@ export const declineNone = ({ source = null, at = null, checked = true } = {}) =
   verdictOf({ declined: false, terminal: null, code: null, source, at, checked });
 
 /**
- * SOURCE 1 - THE ESCROW'S `Declined` EVENT. `logs` is what the log read answered: an ARRAY of log objects.
- * Anything that is not an array is a refusal (`bad-input`), never "no decline": an unread chain must not be
- * reported as an escrow that declined nothing.
- *
- * Only the FIRST TOPIC is compared (the event's own signature). A log from another address is skipped when the
- * answer carries one and the caller named the escrow; a log without an address is still matched, because the
- * request that produced it was filtered by address and dropping it would hide a real decline.
+ * The escrow's `Declined` event. `logs` must be an array. A log from another address is skipped when the caller named
+ * the escrow. A log without an address still matches because the read was filtered by address.
  */
 export function declinedFromLogs(logs, { escrow = null, at = null } = {}) {
   if (!Array.isArray(logs)) throw new SdkError("bad-input", { field: "logs", why: "not-array" });
@@ -113,13 +76,8 @@ export function declinedFromLogs(logs, { escrow = null, at = null } = {}) {
 }
 
 /**
- * SOURCE 2 - THE NODE'S SWAP STATUS. `{ status: "declined", code: "compliance" }`, in either of the two shapes
- * the wire carries it in: at the top level of the answer (the swap state a backend relays) or NESTED UNDER
- * `userStatus` (the field the maker API names it by). BOTH fields must be there and must be exactly these tokens;
- * anything else is not the state the node names, and a partial match is NOT a decline.
- *
- * A body that is not an object at all answers `checked: false` - there was nothing to read, which is not the same
- * as having read it and found no decline.
+ * The node's status. It accepts `{ status: "declined", code: "compliance" }` at the top level or under `userStatus`.
+ * Both fields must match. A body that is not an object answers `checked: false`.
  */
 export function declinedFromStatus(body, { at = null } = {}) {
   if (!body || typeof body !== "object") return declineNone({ source: "status", at, checked: false });
@@ -133,10 +91,8 @@ export function declinedFromStatus(body, { at = null } = {}) {
 }
 
 /**
- * BOTH SOURCES AT ONCE, AND EITHER ONE IS ENOUGH - the form the flow uses. The chain is asked first (the escrow's
- * own event is the stronger fact) and the wire second; a source that was not read is named as such (its own
- * verdict stays, with `source: null` when neither was read), and a body without the node's two fields does not
- * cancel a chain answer.
+ * Both sources. Either one is enough. The chain is read first and the wire second. A body without the node's fields
+ * does not cancel a chain answer.
  */
 export function declineOf({ logs = undefined, status = undefined, escrow = null, at = null } = {}) {
   const fromChain = Array.isArray(logs) ? declinedFromLogs(logs, { escrow, at }) : null;
@@ -149,14 +105,8 @@ export function declineOf({ logs = undefined, status = undefined, escrow = null,
 }
 
 /**
- * THE DEFAULT CHAIN LOG READER: `eth_getLogs` THROUGH THE PAGE'S WALLET - the same provider the engine's
- * `readContract` uses, so the wallet that reads is the wallet that will sign (the rule the whole chain-read seam
- * follows). It is a READ, not a node substitution: the address is the caller's escrow and the filter is the
- * decline's own topic.
- *
- * `fromBlock` is the caller's: a watch that knows the escrow's birth height scans from there instead of walking
- * the chain's whole history. An answer that is not an array is a REFUSAL - a node that answered something else
- * did not answer "no decline", and a caller must not read it as one.
+ * The default log reader: `eth_getLogs` through the page wallet, so the reader and the signer use the same provider.
+ * `fromBlock` is the caller's. An answer that is not an array is a refusal, not "no decline".
  */
 export async function readDeclinedLogs({ address, topics = [DECLINED_TOPIC0], fromBlock = "earliest", toBlock = "latest" } = {}) {
   if (typeof address !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(address)) throw new SdkError("bad-input", { field: "logs.address" });
@@ -172,9 +122,8 @@ export async function readDeclinedLogs({ address, topics = [DECLINED_TOPIC0], fr
 export const logReaderOf = (logs) => (typeof logs === "function" ? logs : readDeclinedLogs);
 
 /**
- * A BLOCK BOUNDARY AS THE NODE WANTS IT (hex quantity), for a caller that knows where its escrow was born.
- * A value that is not a whole, non-negative number is the fallback - the safe end of the chain, not an invented
- * block: scanning too far is slow, scanning too little misses the event.
+ * A block boundary as the node wants it. A value that is not a whole, non-negative number falls back to the safe end
+ * of the chain. Scanning too far is slow. Scanning too little misses the event.
  */
 export const blockBoundaryOf = (height, fallback = "earliest") => {
   const value = Number(height);

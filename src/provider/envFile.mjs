@@ -9,14 +9,14 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 // WHERE TO LOOK WHEN THE FLAG IS NOT GIVEN: the current directory (the command is run from the node tree), then rfq/ under it (the layout of the tree this node was cut from)
-// (the same run from the repository root), then .env - that is also a frequent name for a settings file. What was found
+// (the same run from the repository root), then.env - that is also a frequent name for a settings file. What was found
 // is printed: a silent read of 'some' file is exactly the case where people later look for why the settings are wrong.
 //
 // ORDER: THE LOCAL FILE OUTRANKS THE PRODUCTION ONE. The local contour puts its settings BESIDE the production ones
-// (rfq.env.local), and while the search went from the plain name to .local, the developer tool picked up the production
+// (rfq.env.local), and while the search went from the plain name to.local, the developer tool picked up the production
 // file: the wallet path /opt/ninsei/..., the production price feed and its age - and refused with 'nothing to price the order with' where
 // the settings were in place (the quote checks fell exactly on this, and `npm run payout` with them).
-// The reverse order can err in one direction only: on the server there is no .local file at all, and the production
+// The reverse order can err in one direction only: on the server there is no.local file at all, and the production
 // one remains the only one. An explicit --env= still outranks everything.
 // THE `rfq/` PATH IS A SUPPORTED LAYOUT, NOT A COMMENT: the node tree keeps its settings in `rfq/`, while a
 // checkout run from the repository root has the same file one level down. The local file outranks the production

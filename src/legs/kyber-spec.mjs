@@ -51,7 +51,7 @@ export const KYBER_DOMAIN_NAME = ["Kyber", "DSLO", "Protocol"].join(" ");
 export const KYBER_DOMAIN_VERSION = "1";
 
 // The limit order contract that verifies the signature; identical on every network KyberSwap serves
-// (docs.kyberswap.com, "Contracts & Addresses": Ethereum, BSC, Arbitrum, Polygon, ... all DSLOProtocol 0xcab2...).
+// (docs.kyberswap.com, "Contracts & Addresses": Ethereum, BSC, Arbitrum, Polygon,... all DSLOProtocol 0xcab2...).
 export const KYBER_LIMIT_ORDER_CONTRACT = "0xcab2FA2eeab7065B45CBcF6E3936dDE2506b4f6C";
 
 // The type strings, assembled from their fields so the order is the single source of truth here (as in DSOrderMixin).
@@ -106,7 +106,7 @@ const concat = (...arrays) => {
   return out;
 };
 // BYTES ARE ACCEPTED IN EITHER FORM: the order book returns some hex fields WITHOUT a 0x prefix and others WITH one
-// (docs.kyberswap.com, Taker API: signature, getMakerAmount, ... are returned without a 0x prefix; an empty value
+// (docs.kyberswap.com, Taker API: signature, getMakerAmount,... are returned without a 0x prefix; an empty value
 // means empty bytes). Both are the same bytes, so both are accepted; an empty value is empty bytes.
 const hexToBytes = (hex) => {
   const h = String(hex === undefined || hex === null ? "" : hex).replace(/^0x/, "");

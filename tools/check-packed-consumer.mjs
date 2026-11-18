@@ -55,7 +55,7 @@ try {
 
     console.log("=== 2) EVERY PUBLIC SUBPATH IMPORTS FROM THE INSTALLED TREE ===");
     // THE LIST IS THE PACKAGE CONTRACT, NOT A SECOND HAND-WRITTEN COPY. Adding an export without adding it here
-    // used to leave the new subpath untested; ./adapters and ./relay were exactly that gap.
+    // used to leave the new subpath untested;./adapters and./relay were exactly that gap.
     let suffixes = [];
     try {
       const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));

@@ -11,7 +11,7 @@
 //      what makes (a) a comparison against the engine rather than against a list written by hand;
 //   f) A DECLARED TERMINAL WITH NO WRITER, IN THE ENGINE'S OWN TABLE - put `xmr_returned` back into the engine's
 //      `TERMINAL` and the guard must redden, naming the table it came from;
-//   g) ...AND IN THE PUBLIC TYPE - put `xmr_returned` back into the `TerminalCode` union and the guard must redden,
+//   g)...AND IN THE PUBLIC TYPE - put `xmr_returned` back into the `TerminalCode` union and the guard must redden,
 //      naming the union: the two declarations are read separately, so neither can hide the other;
 //   h) THE MAKER'S RECLAIM KEEPS ITS OWN PHASE - send it back to the shared `refund_available` and the guard must
 //      name the situation that lost its machine-readable identity, and the code two situations would then share.

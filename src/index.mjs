@@ -83,10 +83,10 @@ const normalizeOptions = (options) => {
   // substitution: the calls go to the network whose address the registry returned. The shape is the same as the
   // lock seam: ({to, data}) -> hex.
   if (o.evmCall !== undefined && typeof o.evmCall !== "function") fail("bad-input", { field: "evmCall" });
-  // THE CODE-READ SEAM (issue #103): ({address}) -> hex code, for the extcodehash check of the factory. Same
+  // THE CODE-READ SEAM: ({address}) -> hex code, for the extcodehash check of the factory. Same
   // rule as evmCall - a read brought from outside, not a substitution of the chain.
   if (o.evmCode !== undefined && typeof o.evmCode !== "function") fail("bad-input", { field: "evmCode" });
-  // THE LOG-READ SEAM (issue #40): ({ address, topics, fromBlock, toBlock }) -> logs. Needed for the maker's
+  // THE LOG-READ SEAM: ({ address, topics, fromBlock, toBlock }) -> logs. Needed for the maker's
   // decline, which is the escrow's `Declined` EVENT - the escrow has no getter that names it, and `status()` reads
   // a decline and an ordinary refund the same way. By default the logs are read through the page's wallet, the
   // same provider the chain read uses. Same rule as evmCall: a READ of the escrow's own event, not a node
@@ -102,12 +102,12 @@ const normalizeOptions = (options) => {
     const a = o.allowedProviders;
     if (!Array.isArray(a) && typeof a !== "function") fail("bad-input", { field: "allowedProviders" });
   }
-  // THE INTERFACE'S FACTORY POLICY (issue #103): an array of code hashes (extcodehash) the interface accepts.
+  // THE INTERFACE'S FACTORY POLICY: an array of code hashes (extcodehash) the interface accepts.
   // Like allowedProviders - a POLICY list, not proof; empty/absent means "no policy".
   if (o.knownFactoryCodes !== undefined && o.knownFactoryCodes !== null && !Array.isArray(o.knownFactoryCodes)) {
     fail("bad-input", { field: "knownFactoryCodes" });
   }
-  // THE INTERFACE'S ESCROW-IMPLEMENTATION POLICY (issue #114): an array of code hashes of known implementations
+  // THE INTERFACE'S ESCROW-IMPLEMENTATION POLICY: an array of code hashes of known implementations
   // of the escrow - the code every order's clone delegatecalls. The client checks the pair (implementation,
   // implementationCodeHash) the factory carries, exactly as the factory does at creation; this list pins WHICH
   // builds the interface accepts. Same rule as knownFactoryCodes: a POLICY list, empty/absent means "no policy"
@@ -115,7 +115,7 @@ const normalizeOptions = (options) => {
   if (o.knownImplementationCodes !== undefined && o.knownImplementationCodes !== null && !Array.isArray(o.knownImplementationCodes)) {
     fail("bad-input", { field: "knownImplementationCodes" });
   }
-  // THE INTERFACE'S ADDRESS DENYLIST (issue #16): policy, like allowedProviders - addresses the interface will not
+  // THE INTERFACE'S ADDRESS DENYLIST: policy, like allowedProviders - addresses the interface will not
   // trade to or from. An empty/absent list means "no check"; an entry that is not a string is a typo, not a silent
   // no-op. The SDK fetches nothing: the interface brings the list in.
   if (o.denylist !== undefined && o.denylist !== null) {
@@ -173,28 +173,16 @@ export function createNinsei(options) {
     nodes: o.nodes,
     addNodes: o.addNodes,
 });
-  // THE NETWORK'S PINS REACH THE CORE. The bridge passed them explicitly; a caller with default options did not,
-  // so the factory policy was null and the quote could name any factory. An explicit caller list still wins.
+  // The network pins reach the core. An explicit caller list wins.
   const knownFactoryCodes = factoryCodesForChain({ chain: config.settlement.chain, knownFactoryCodes: o.knownFactoryCodes });
   const knownImplementationCodes = implementationCodesForChain({ chain: config.settlement.chain, knownImplementationCodes: o.knownImplementationCodes });
   const leg = legFor(config.settlement.vm);
   const wallet = createWallet({ settlement: config.settlement.chain, leg });
-  // THE GUARDS READ THE NETWORK UNDER THE NAME evmNetwork, WHILE THE CONFIGURATION BUILDER RETURNS IT AS
-  // settlement.chain (preflight.mjs: both chain.nativeSymbol and config.evmNetwork.id). The names diverged, and
-  // ANY guard call failed with a TypeError - without a code, that is, not as a refusal but as a breakdown. A
-  // live swap start was therefore impossible in principle: preflight is called as the first step of start. We
-  // hand the guards a record of the same network under the name they expect; from outside it is the same config
-  // as before.
+  // The guards read the network as evmNetwork. Pass the same network under both names.
   const preflight = createPreflight({ config: { ...config, evmNetwork: config.settlement.chain }, wallet, limits: config.limits });
   const sim = o.mode === "sim" ? createSim() : null;
-  // THE STORAGE THE INTERFACE BROUGHT BECOMES THE CORE'S STORAGE: unfinished swaps and the agent session live
-  // where the interface decided (browser storage, memory, a server). Without the option the core takes its
-  // default: web storage if it is present in the environment, otherwise memory.
-  // ONE CLIENT, ONE STORE. A second client with another adapter used to replace the module-wide store, so the
-  // first client listed the second's swaps and could delete them. Even a client that brought no adapter binds the
-  // current one, so a later explicit store cannot take it over.
-  // ONE CLIENT, ONE STORE - WITHOUT A PROCESS-WIDE EXCLUSIVE BINDING. Each facade gets a store over its own
-  // adapter; two clients with different storages coexist and neither can take over the other's records.
+  // The storage option becomes the core's storage. Without it the core uses web storage or memory.
+  // One client, one store: each facade gets a store over its own adapter.
   const store = engine.store.createStore(o.storage || engine.store.storage());
   // THE CHAIN READ AND THE ALLOW-LIST GO INTO THE QUOTE CHECK: without the read the signature certifies itself,
   // so the same evmCall seam the lock and the actions use is handed to the quotes too.
@@ -251,7 +239,7 @@ export function createNinsei(options) {
       // THE ORDER DEADLINES (t1, readyBy, termsHash) from the chain: the screen needs them to say whether the
       // person is in the dead zone.
       deadlines: (escrow) => orderFlow.orderDeadlines(escrow, orderDeps),
-      // THE MAKER'S DECLINE, READ FROM THE ESCROW (issue #40): the `Declined` event, which is the on-chain fact
+      // THE MAKER'S DECLINE, READ FROM THE ESCROW: the `Declined` event, which is the on-chain fact
       // that tells a decline apart from an ordinary refund. The answer carries the state and the node's own token
       // and NOTHING ELSE - no reason, no category, no provider. `checked: false` means the chain was not read,
       // which is NOT the same as "the escrow did not decline".
@@ -267,10 +255,8 @@ export function createNinsei(options) {
     // THE MODE AND THE MONERO NETWORK GO INTO THE SWAP START: in the sandbox the counterparty's side is built by
     // a stand-in, on a live chain - only from the quote (a stand-in there would mean money against a
     // non-existent side), and the network is needed to build the shared Monero address.
-    // THE CHAIN READER GOES INTO THE SWAP START: it will check the escrow address, the order state and the fee
-    // before signing.
-    // THE CHAIN READER GOES INTO THE SWAP START: it will check the escrow address, the order state and the fee
-    // before signing. The Monero watch reads the chain through the same seam; there is no backend watcher.
+    // The chain reader goes into the swap start. It checks the escrow address, the order state and the fee before
+    // signing. The Monero watch uses the same seam; there is no backend watcher.
     swaps: createSwaps({ preflight, mode: o.mode, xmrNetwork: o.xmrNetwork, call: o.evmCall, fetchImpl: o.fetch || null, now: o.now || null, evmBlock: o.evmBlock || null, store,
       // THE LOG SEAM FOR THE DECLINE CHECK: the watch asks the escrow for its `Declined` event on every tick, so
       // a declined order stops the wait at once instead of running to `xmr-timeout`.

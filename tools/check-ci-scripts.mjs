@@ -10,7 +10,7 @@
 // script is named by a workflow, or is in the `CHECKS` registry and so runs under `pnpm run check` / `coverage`. The second rule closes the gap that let sale authentication, backup
 // confirmation, the one-key view half, arrival consensus, order proof and the recovery paths run only in the
 // release workflow: a guard that no PR runs is not a guard on a pull request. A workflow may also run `pnpm
-// install`, `pnpm exec ...` or a package binary; those are not scripts and are not checked.
+// install`, `pnpm exec...` or a package binary; those are not scripts and are not checked.
 //
 // BREAKING RUN (a COPY of package.json in a temp directory): drop a script the workflow names -> the case reddens.
 //

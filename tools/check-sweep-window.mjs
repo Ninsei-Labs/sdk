@@ -1,4 +1,4 @@
-// THE WITHDRAWAL WINDOW (sdk#76, item 4): scan the blocks around the lock, not all history.
+// THE WITHDRAWAL WINDOW: scan the blocks around the lock, not all history.
 //
 // The rule is only useful if the wallet is at the tip, `scanTxs` is the call that ran, and a rescan did NOT follow
 // it (the measured failure: rescanBlockchain wipes the output scanTxs found). The empty-window fallback is checked

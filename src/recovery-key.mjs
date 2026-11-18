@@ -766,7 +766,7 @@ export async function findSwaps({ mnemonic, chainId, factory = null, factories =
     else readersReason = probed.reason || "no-height-readers";
   }
   // THE ORDER IS NATIVE, AND THE PAYING TOKEN IS NOT ON THE CHAIN. The escrow receives the settlement network's
-  // native coin (`amount` is wei); which token the person swapped into it (USDC, USDT, ...) belongs to the DEX/quote
+  // native coin (`amount` is wei); which token the person swapped into it (USDC, USDT,...) belongs to the DEX/quote
   // record, not to OrderCreated or the clone. `payToken: null` plus a reason is the honest answer here; an invented
   // "USDC" would be a claim the chain does not support.
   for (const order of found) {

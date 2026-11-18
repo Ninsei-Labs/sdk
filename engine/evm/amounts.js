@@ -25,7 +25,7 @@ export function trimTrailingZeros(text) {
 // Amount for display and for the MAX button: truncation (not rounding) and at most 6 decimals.
 //
 // Why truncation: MAX must not insert an amount larger than the real balance - else the form
-// rightly answers "Not enough ..." and the MAX button leads into a dead end. Rounding up did
+// rightly answers "Not enough..." and the MAX button leads into a dead end. Rounding up did
 // exactly that: 0.0399187 -> 0.039919 > balance.
 // Why 6 decimals: human precision, and exactly what the balance hint shows.
 // Returns a NUMBER (for comparisons); the string for the input field is given by amountInputValue below.
@@ -46,7 +46,7 @@ export function floorAmount(value, decimals = 6) {
 // and a dot - "1e-7" would turn into "17" (caught by a check, not by a user).
 export function amountInputValue(value, decimals = 6) {
   // Truncate first, then format: toFixed ROUNDS itself, and without truncation you got
-  // 0.039919 - that is, more than the balance, and MAX hit "Not enough ...".
+  // 0.039919 - that is, more than the balance, and MAX hit "Not enough...".
   const cut = floorAmount(value, decimals);
   if (!Number.isFinite(cut) || cut <= 0) return "0";
   // For dust we print all digits: else toFixed would round to the first non-zero digit.

@@ -152,7 +152,7 @@ export function shortId() {
 // unnoticed. It used to be named isValidMoneroAddress - and that name was a trap: a function called
 // "address check" that lets a typo through ends up on the money path sooner or later.
 //
-// THE REAL CHECK IS checkAddress() from ../monero/address.js: format + base58 decode + keccak256 checksum
+// THE REAL CHECK IS checkAddress() from../monero/address.js: format + base58 decode + keccak256 checksum
 // + network match. The form calls that one. This one only screens out obvious garbage before the heavy decode.
 export function looksLikeMoneroAddress(addr) {
   const a = String(addr || "").trim();

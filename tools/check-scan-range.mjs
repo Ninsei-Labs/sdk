@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// A RANGE THAT COULD NOT BE READ IS NOT A COMPLETE ZERO (sdk#113, item 15).
+// A RANGE THAT COULD NOT BE READ IS NOT A COMPLETE ZERO.
 //
 // scanRange used to catch every block error, log it, and return a smaller sum with no marker. A BUSY transaction
 // answer was worse: it looked like an empty block. The answer now names the missing heights.

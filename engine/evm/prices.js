@@ -38,6 +38,7 @@ async function rpc(chain, method, params = []) {
   return j.result;
 }
 
+// ABI words are positional 32-byte values.
 const word = (data, i) => BigInt("0x" + String(data).slice(2).slice(i * 64, (i + 1) * 64));
 
 // ABI string decode: [offset][length][bytes]. Needed to tell the ETH/USD feed from another one. TextDecoder,
@@ -68,12 +69,14 @@ export async function nativeUsd(chain, { force = false } = {}) {
     ]);
     const desc = decodeString(descHex);
     const answer = word(roundHex, 1);
+    // Chainlink timestamps are seconds. Date.now() below is milliseconds.
     const updatedAt = Number(word(roundHex, 3)) * 1000;
     const decimals = Number(feed.decimals || 8);
     const value = Number(answer) / 10 ** decimals;
     const fresh = updatedAt > 0 && Date.now() - updatedAt < MAX_AGE_MS;
     const sane = value >= (feed.min || 0.01) && value <= (feed.max || 1e7);
     if (desc !== feed.pair || !fresh || !sane) {
+      // A failed or stale read is cached as null for CACHE_MS. That avoids a retry storm on a healthy feed.
       return put(key, null); // null, not "roughly this": silence is more honest than a guess
     }
     return put(key, { usd: value, updatedAt, source: "chainlink", pair: desc });

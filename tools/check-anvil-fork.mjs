@@ -6,7 +6,7 @@
 // The script then does what the SDK does on the money path: predict, createOrderAndFund, markReady, claim - and
 // verifies the event, the escrow address and the revealed half.
 //
-// It starts nothing itself: CI starts `anvil --fork-url ...` and waits for the port. Run locally with:
+// It starts nothing itself: CI starts `anvil --fork-url...` and waits for the port. Run locally with:
 //   anvil --fork-url https://sepolia-rollup.arbitrum.io/rpc
 //   ANVIL_RPC=http://127.0.0.1:8545 node tools/check-anvil-fork.mjs
 import { randomBytes } from "node:crypto";

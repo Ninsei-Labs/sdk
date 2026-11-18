@@ -417,7 +417,7 @@ try {
   } else bad("wrong missing-cashier code: " + JSON.stringify(error && (error.code || error.message)));
 }
 
-// sdk#291: THE PIN MUST COME FROM THE PROJECTION, NOT FROM A HAND-BUILT CONFIG. Cases 7 and 8 pass a config that
+//: THE PIN MUST COME FROM THE PROJECTION, NOT FROM A HAND-BUILT CONFIG. Cases 7 and 8 pass a config that
 // already names the vault; a client built from the NETWORK NAME is the shape a library caller uses, and it had no
 // vault at all, so every relay quote ended as `no-pinned-cashier`.
 console.log("=== 8b) A CLIENT BUILT FROM THE NETWORK NAME CARRIES THE NETWORK'S VAULT ===");

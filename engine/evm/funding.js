@@ -144,17 +144,12 @@ export function escrowNativeWei({ quote = null, nativeDecimals = 18 } = {}) {
 // its gas is part of what the wallet has to be able to afford. One constant, one source (the check ties the
 // reserve's copy to this declaration).
 export const GAS_CREATE_ORDER_AND_FUND = 700_000n;
-// THERE IS NO SEPARATE "CREATE WITHOUT A DEPOSIT" CONSTANT: no whole contract is created any more - each order's
-// escrow is an EIP-1167 clone of one shared implementation, the terms live in the clone's code, and the factory
-// only knows createOrderAndFund. The old lock(bytes) call and its gas constant are gone: the deposit rides in the
-// same transaction.
+// There is no separate "create without a deposit" constant. Each order escrow is an EIP-1167 clone, the terms live in
+// the clone code, and the factory only has createOrderAndFund. The deposit rides in the same transaction.
 
-// The OrderCreated event: topic0 is computed from the actual signature (also checked by the watchtower);
-// topics = [topic0, escrow, locker, claimer]; data carries both commitments, both points, the amount, readyBy, t1,
-// the salt. THE EVENT TOPIC COMES FROM ONE PLACE - the factory module, not a second copy here. It USED to be a
-// second copy here, which caused a real defect: after the OrderCreated field set changed, the stale copy failed to
-// find the event and the escrow address silently fell back to the prediction - so the "address from the receipt"
-// check stopped working without a word.
+// The OrderCreated event: topic0 comes from the actual signature. Topics are [topic0, escrow, locker, claimer].
+// Data carries both commitments, both points, the amount, readyBy, t1 and the salt.
+// The event topic comes from the factory module, not a second copy here.
 
 // The ACTUAL escrow address from the receipt. Returns null when the event is absent (the transaction is not in a
 // block, or the factory is another) - then the caller must say so aloud rather than substitute a guess.
@@ -216,39 +211,31 @@ export async function fundOrder({ factory, locker, claimer, commitHalfLocker, co
   if (locker.toLowerCase() === claimer.toLowerCase()) {
     throw new Error("locker and claimer must not coincide: the contract rejects such an order");
   }
-  // A SIGNED QUOTE IS MANDATORY: it carries the fee, the registry address and the provider, without which the
-  // order cannot be created. The fee used to be asked of the factory - now there is nothing to ask; a missing
-  // quote is a NAMED refusal, not a silent funding of the wrong amount.
+  // A signed quote is mandatory. It carries the fee, the registry address and the provider. Without it, the order
+  // cannot be created, and funding would use the wrong amount.
   if (!quote || typeof quote !== "object") throw new Error("a signed quote is required: the factory takes a quote, not bare order terms");
 
-  // COMMITMENTS AND POINTS ARE MANDATORY, and checked here and not deeper: without them the order is created but
-  // can neither be claimed nor have its half-to-Monero-address link proven. Let it fail loudly.
-  // The salt determines the escrow address and must exist BEFORE the terms are assembled: the terms also go to predict.
+  // Commitments and points are mandatory. Without them the order can be created but cannot be claimed, and its link
+  // to the Monero address cannot be proven.
+  // The salt determines the escrow address and must exist before the terms are assembled. The terms also go to predict.
   const salt = providedSalt || newSecret(); // CREATE2 salt: determines the escrow address
   const terms = testOrderTerms({
     locker, claimer, commitHalfLocker, commitHalfClaimer, edPointLocker, edPointClaimer, edViewPointLocker,
     amountWei, salt, claimWindowSeconds, readyWindowSeconds, readyBy, t1,
   });
-  // TAKE THE SALT FROM THE DEAL IF IT ALREADY HAS ONE. The salt determines the escrow address (CREATE2), so a
-  // re-run of funding with a new salt created a NEW escrow while the deal record kept the old address - the page,
-  // the explorer link and the progress screen showed an address not on chain. Re-using the salt also means a retry
-  // hits the SAME address and, if the order is already funded, simply fails instead of quietly creating a second
-  // escrow. The parameters are destructured, so there is no `order` variable here; the local is named `salt` and
-  // the input `providedSalt` to avoid a temporal-dead-zone self-reference.
-  // 1) the escrow address is visible BEFORE creation - that is the point of the factory
+  // Reuse the salt from the deal when it already has one. The salt determines the escrow address, so a new salt
+  // creates a new escrow while the record keeps the old address. Reuse also makes a retry hit the same address.
+  // The parameters are destructured, so the local is `salt` and the input is `providedSalt`.
+  // 1) the escrow address is visible before creation. That is the point of the factory.
   onStep?.("computing the escrow address");
-  // THE PREDICTION FIELDS MUST MATCH THE CREATION FIELDS BYTE FOR BYTE - the address is a hash of the creation
-  // code. Here that is guaranteed because both predict and createOrderAndFund are built from THE SAME terms: they
-  // can diverge only if one of the two places is edited alone. They already did once (the preimage was missing from
-  // the prediction); the cure is a shared source of fields, not care.
-  // THE DEPOSITOR'S FIELDS GO AS SEPARATE FACTORY ARGUMENTS, BUT THEY ARE IN THE SIGNED SET. Since quote protocol v10
-  // the factory signs them; the overwrite below must reproduce the signed values, or the digest check rejects the
-  // creation.
+  // The prediction fields must match the creation fields byte for byte. Both paths use the same terms, so they can
+  // diverge only when one place is edited alone. Keep one source of fields.
+  // The depositor's fields go as separate factory arguments, but they are in the signed set. The overwrite below must
+  // reproduce the signed values, or the digest check rejects the order.
   const quoteEnc = { ...quote, commitHalfLocker: terms.commitHalfLocker, edPointLocker: terms.edPointLocker, edViewPointLocker: terms.edViewPointLocker };
-  // QUOTE AND TERMS ARE ABOUT ONE THING: a divergence moves the escrow address and signs the wrong order.
-  // THE COUNTERPARTY'S SPEND HALF IS PART OF THAT ONE THING. The proof is checked against the counterparty side,
-  // while the factory encodes the signed quote; without comparing these two fields a quote that commits to one
-  // point can be funded beside a proof for another, and the claim reveals a half that does not open the address.
+  // Quote and terms must agree. A divergence moves the escrow address and signs the wrong order.
+  // The counterparty's spend half is part of that check. The proof is checked against the counterparty side, while
+  // the factory encodes the signed quote.
   const sameValue = (a, b) => String(a === undefined || a === null ? "" : a).replace(/^0x/i, "").toLowerCase()
     === String(b === undefined || b === null ? "" : b).replace(/^0x/i, "").toLowerCase();
   for (const name of ["locker", "claimer", "amount", "readyBy", "t1", "salt", "commitHalfClaimer", "edPointClaimer",
@@ -283,21 +270,14 @@ export async function fundOrder({ factory, locker, claimer, commitHalfLocker, co
   }
   const escrowState = escrowStateVerdict({ status: stateRead.status, error: stateRead.error, address: escrow });
   if (escrowState.blocks) throw new Error("signature not started: " + escrowState.reason);
-  // 2) ONE TRANSACTION: creating the order TOGETHER with the deposit.
+  // 2) One transaction creates the order and funds it.
   //
-  // It used to be two steps (createOrder, then lock) with two defects, both seen live: the wallet estimated the
-  // gas of the second transaction before code existed at the address (the limit came out as for a plain ETH
-  // transfer and it failed), and a funding failure left an empty contract on chain. Now a failure rolls back
-  // TOGETHER with creation, and only one signature is needed. Locker cannot be passed to this function - the sender
-  // becomes it, so the refund address always belongs to whoever paid.
-  // THE AMOUNT IS SHOWN IN ETH, NOT WEI, and taken as a ready string from the caller: amount formatting lives in
-  // one place in the project, and a second formatter here would diverge from it. The label is short on purpose: it
-  // is printed ON A BUTTON and must fit one line.
-  // THE FEE IS PART OF VALUE, AND THAT IS THE MAIN CONSEQUENCE OF ITS INTRODUCTION. The contract requires
-  // depositing EXACTLY `amount + fee`, so funding for the order amount alone is rejected - and rejected after
-  // signing, because the check lives in the contract. The order amount (`amount` in the terms) does NOT change: it
-  // is exactly what the claimer receives and what enters the terms hash. The fee is added on top, taken at claim,
-  // returned on refund.
+  // A failure rolls back creation, and one signature is enough. The sender becomes the locker, so the refund address
+  // always belongs to the payer.
+  // The amount is shown in ETH, not wei, and arrives as a ready string. Formatting lives in one place.
+  // The fee is part of the value. The contract requires exactly `amount + fee`, so funding the order amount alone is
+  // rejected after signing. The order amount is what the claimer receives and what enters the terms hash. The fee is
+  // added on top, taken at claim and returned on refund.
   onStep?.("reading the escrow fee from the signed quote");
   // THE FEE COMES FROM THE QUOTE AND IS MIRROR-CHECKED. Direction is already accounted for: a buy is amount + fee
   // (on top), a sell is amount (the fee is deducted from the claimer's payout).
@@ -322,14 +302,11 @@ export async function fundOrder({ factory, locker, claimer, commitHalfLocker, co
     gas: GAS_CREATE_ORDER_AND_FUND,
   });
 
-  // 2b) THE ESCROW ADDRESS COMES FROM THE RECEIPT, NOT THE PREDICTION. The prediction is right only while the salt
-  // and the factory code match: a re-run of funding creates an escrow at a new address while the deal record keeps
-  // the old one - and the deal looks broken (deadlines unreadable, no refund button). That is exactly what
-  // happened. A divergence from the prediction is named aloud: it is a sign of a real error.
+  // 2b) The escrow address comes from the receipt, not from the prediction. The prediction is right only when the
+  // salt and the factory code match. A divergence is a sign of a real error and must be named.
   let actualEscrow = null;
-  // THE ESCROW'S BIRTH BLOCK is the height from which the deal exists on chain, and the only source of that height
-  // independent of the Monero node. Declared outside the branch on purpose: a variable declared inside a block is
-  // not visible outside, and it must always be returned.
+  // The escrow birth block is the height where the deal exists on chain. It is the only source of that height
+  // independent of the Monero node. Declare it outside the branch so every path can return it.
   let birthBlock = null;
   let verdict = { status: "pending", reason: "no-receipt-reader" };
   if (typeof receipt === "function") {

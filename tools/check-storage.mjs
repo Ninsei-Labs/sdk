@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// STORAGE IS A REFUSAL, NOT A SILENT EMPTY STATE (sdk#113, item 10).
+// STORAGE IS A REFUSAL, NOT A SILENT EMPTY STATE.
 //
 // A failed write used to return the record and log a warning; a failed or corrupt read became an empty state,
 // which the next write saved over. The SDK facade now gives every client its own store, so two clients with

@@ -1,7 +1,7 @@
 // CODE TABLES. The single place where the codes are named: they are read by the SDK, by the check and by the README.
 //
 // Why codes and not texts: wording, translations and tone are the interface's business. The core must name a
-// state so that it can be translated and coloured without parsing a string (issue #32, requirement 2).
+// state so that it can be translated and coloured without parsing a string.
 
 export const STEP_CODES = [
   "awaiting_funding",
@@ -13,7 +13,7 @@ export const STEP_CODES = [
   "swept",
 ];
 
-// `declined` IS A TERMINAL STATE OF ITS OWN (issue #40): the maker refused a funded order, so the whole balance -
+// `declined` IS A TERMINAL STATE OF ITS OWN: the maker refused a funded order, so the whole balance -
 // the fee included - is already back in the depositor's wallet and NO half was revealed. It is told apart from
 // `refunded_eth`, which is the depositor taking the ETH back and DOES reveal a half (src/decline.mjs).
 // `xmr_returned` WAS DECLARED HERE AND IS GONE (it had no writer anywhere): the maker's reclaim of the XMR does
@@ -51,7 +51,7 @@ export const ERROR_CODES = [
   "wrong-account",
   "quote-unavailable",
   "quote-refused",
-  // A NODE'S ADDRESS DENYLIST REFUSAL (issue #16): the maker's node answers {ok:false, code:"denied-address", why}
+  // A NODE'S ADDRESS DENYLIST REFUSAL: the maker's node answers {ok:false, code:"denied-address", why}
   // before it prices the order, and that refusal reaches the app under THIS code - WITHOUT the node's `why` text
   // and WITHOUT the address, because the interface shows the person its own neutral message. It is its own code,
   // not "quote-refused": the advice to the interface differs ("this address is barred" vs "the quote was refused").
@@ -80,7 +80,7 @@ export const ERROR_CODES = [
   "quote-key-unknown",
   "quote-provider-mismatch",
   "quote-provider-not-allowed",
-  // THE FACTORY THAT WILL VERIFY THE QUOTE AND WHERE ITS FEE GOES (issue #103). The factory is taken from
+  // THE FACTORY THAT WILL VERIFY THE QUOTE AND WHERE ITS FEE GOES. The factory is taken from
   // the provider's REGISTRY RECORD and its CODE is checked against the interface's known builds (extcodehash):
   //   quote-factory-unchecked    - no way to read the factory / its code, so the claim stays unproven;
   //   quote-factory-unknown      - the record names no factory (zero);
@@ -103,7 +103,7 @@ export const ERROR_CODES = [
   // THE CLAIM WAS POSTED BUT NO REAL ANSWER CAME BACK. A timeout, a reset or a body without a usable transaction
   // hash leaves the outcome UNKNOWN: the relay may have sent the claim, and the half is already out of the client.
   // It is NOT `server-unavailable` (which would invite a blind retry) and NOT a success: the caller must read the
-  // escrow before doing anything else. `params.why` names the lost part (`answer-lost`, `answer-txid`, ...).
+  // escrow before doing anything else. `params.why` names the lost part (`answer-lost`, `answer-txid`,...).
   "claim-unknown",
   // THE TRANSACTION WAS SENT BUT THE RECEIPT DOES NOT PROVE AN ESCROW: no receipt yet, no expected OrderCreated,
   // or a receipt from another factory. The tx hash is the handle for a retry read; nothing was saved as funded.
@@ -112,12 +112,12 @@ export const ERROR_CODES = [
   // money, not a breakdown and not an empty response: mixing it with other refusals, the interface could not
   // tell "not arrived yet" from "broken".
   "xmr-timeout",
-  // XMR IS ON THE ADDRESS BUT BARRED BY THE TRANSACTION'S unlock_time (issue #84). Distinct from `xmr-timeout`:
+  // XMR IS ON THE ADDRESS BUT BARRED BY THE TRANSACTION'S unlock_time. Distinct from `xmr-timeout`:
   // that one means "nothing arrived within the wait", this one means "money is there and CANNOT be spent until a
   // height or a date". Marking ready under it would hand the escrow to the maker for funds he cannot be paid from -
   // so the core refuses with its own code, and the `until` boundary travels in params.
   "xmr-locked",
-  // THE XMR ARRIVAL CHECK ON TWO NODES (issue #85). The decision "the XMR arrived" is made by the client, and a
+  // THE XMR ARRIVAL CHECK ON TWO NODES. The decision "the XMR arrived" is made by the client, and a
   // single node is a single truth that can lie. Each code names a different reason the button must stay closed:
   //   xmr-nodes-disagree - a synced node has no such transaction in that block or a different block hash there;
   //   xmr-no-nodes       - every node in the list is unreachable, so nothing can be confirmed;
@@ -135,7 +135,7 @@ export const ERROR_CODES = [
   // normal transfer.
   "sweep-fee-too-high",
   "sweep-fee-unknown",
-  // CLAIM GAS FOR THE XMR SELLER (issue #78). The seller comes from Monero and has no coin on the EVM side to pay
+  // CLAIM GAS FOR THE XMR SELLER. The seller comes from Monero and has no coin on the EVM side to pay
   // for the claim, so the maker may send it - but only when asked for, and only after the core has CONFIRMED the
   // gas actually arrived. The three codes name the three states the interface must not blur together:
   //   gas-refused-by-maker - the maker declines to pay the claim gas, and the refusal is shown BEFORE the deal;
@@ -260,7 +260,7 @@ export const KIND_TO_CHECK = {
   "t1-not-after-ready-by": "deadline",
   "ready-window-too-short": "deadline",
   "claim-window-too-short": "deadline",
-  // A DEADLINE TOO FAR AHEAD (issue #88 - a concurrent edit in this tree): the order's t1 is a year away, and the
+  // A DEADLINE TOO FAR AHEAD: the order's t1 is a year away, and the
   // ETH cannot be returned until then. It shares the `deadline` code with the other two extremes.
   "deadline-too-far": "deadline",
   // escrow state

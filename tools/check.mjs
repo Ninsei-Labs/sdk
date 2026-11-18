@@ -24,11 +24,11 @@ import { tmpdir } from "node:os";
 import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { lineCoverage, mergeRanges } from "./coverage-merge.mjs";
-// AN INDEPENDENT KECCAK-256 FOR THE DECLINE CHECK (issue #40): the topic of the escrow's `Declined` event is
+// AN INDEPENDENT KECCAK-256 FOR THE DECLINE CHECK: the topic of the escrow's `Declined` event is
 // pinned as a literal AND recomputed with THIS implementation, while the module under test computes it with
 // @noble/hashes - two implementations agreeing is a cross-check, one agreeing with itself is not.
 import keccakPkg from "keccak256";
-// THE RECOVERY KEY CHECK (sdk#79): one key, its backup file and the salt-based on-chain search.
+// THE RECOVERY KEY CHECK: one key, its backup file and the salt-based on-chain search.
 import { recoveryKeyCheck } from "./check-recovery-key.mjs";
 import { moneroKeysCheck } from "./check-monero-keys.mjs";
 import { actionStateCheck } from "./check-action-state.mjs";
@@ -1869,7 +1869,7 @@ export const refusalsCheck = () => {
 };
 
 // ---------------------------------------------------------------------------------------------------
-// 15. DECLINE - THE MAKER'S REFUSAL IS A STATE OF ITS OWN (issue #40): it is told apart from an ordinary
+// 15. DECLINE - THE MAKER'S REFUSAL IS A STATE OF ITS OWN: it is told apart from an ordinary
 //     refund by the ESCROW'S `Declined` EVENT or by the NODE'S `declined` + `compliance` STATUS, either
 //     source stops the wait for XMR AT ONCE, no recovery file and no manual refund are offered for an order
 //     with nothing to recover, and NO reason, category or provider travels with it.
@@ -2144,7 +2144,7 @@ const settlementKindsWritten = (file) => {
 };
 
 /**
- * `const TERMINAL = { ... }` of a module as entries: the key (and whether it is written as a name), the value (and
+ * `const TERMINAL = {... }` of a module as entries: the key (and whether it is written as a name), the value (and
  * whether it is a literal). A key or a value written as a name is resolved by the caller - the map is the only
  * place that knows which constant it means.
  */
@@ -2162,7 +2162,7 @@ const terminalMapEntries = (file) => {
 };
 
 /**
- * THE CODES A `const TERMINAL = { ... }` TABLE DECLARES: its TOP-LEVEL keys - the entries whose VALUE is the
+ * THE CODES A `const TERMINAL = {... }` TABLE DECLARES: its TOP-LEVEL keys - the entries whose VALUE is the
  * `{ phase, label }` object. Pointed at the engine's table, `terminalMapEntries` above would return the INNER
  * phase/label pairs and miss the codes the table is actually keyed by, which is the whole point of reading it.
  */

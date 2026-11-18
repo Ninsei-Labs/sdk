@@ -1,76 +1,46 @@
-// THE PAGE-TO-CORE SHIM: THE ONE PLACE WHERE SCREENS KNOW ABOUT THE SDK (sdk/).
+// PAGE-TO-CORE SHIM.
 //
-// WHY IT EXISTS. The swap logic lives in the core (sdk/, the @ninsei-labs/sdk package) while the page should do
-// only markup, screen state and texts. Before this shim every screen called the engine itself and the logic
-// spread across two places. Now a screen calls the SHIM, and only it knows about the core.
+// Screens use the SDK through this file. The shim passes the page storage, the chain read and the wallet adapter.
+// It computes no thresholds, step order or escrow address.
 //
+// The SDK is served as a built bundle at assets/vendors/sdk/sdk-browser.js. The version query resets the cache
+// after a rebuild. The bundle exposes createNinsei and the browser adapters.
 //
-// WHAT THE SHIM PASSES TO THE CORE - exactly the seams the core asks for from outside and cannot get itself:
-//   storage    - the page's storage: deals and session are read from where the page puts them (core/store.js);
-//   evmCall    - chain reads WITH THE PAGE'S WALLET: the core has no provider of its own and must not;
-//   wallet     - the page wallet adapter (sdk/src/adapters/evm-wallet.mjs): signing happens only in it.
-//
-// WHAT THE SHIM DOES NOT DO. It computes neither thresholds nor step order nor the escrow address: method names
-// and paths are only those that EXIST in the core, and the decisions stay in the core.
-//
-// ABOUT THE CORE BEING AVAILABLE TO THE PAGE - IT IS NOW BUILT, NOT WAITING FOR A BUILD.
-//   * sdk/src/primitives.mjs imports @noble/curves and @noble/hashes by BARE package names, so the page is
-//     served not the sdk/ source but a BUILT BUNDLE (www/assets/vendors/sdk/sdk-browser.js, the same path as the
-//     atomic-swap crypto bundle). The bundle exposes the WHOLE FACADE:
-//     createNinsei (config/wallet/quotes/preflight/swaps/actions/order/sweep/recovery/sim) plus the browser
-//     adapters (evmWallet, localStorageAdapter/memoryAdapter). So starting a swap (swaps.start) and facade
-//     quotes ARE available to the page - a "facade not served to the page" refusal is no longer expected.
-//   * The bundle link carries ?v=<hash>, so the edge cache resets itself after a rebuild.
-//
-//
-// THE ORDER ACTIONS HAVE NO FALLBACK PATH ANY MORE, AND THAT IS A CONSEQUENCE OF THE MOVE. The deal engine used
-// to sit on the page and, with the bundle unavailable, the order actions ran on it - "the same functions", as it
-// was written here. Now the deal engine is a module OF THE PACKAGE (sdk/src/swap-flow.mjs): there is no second
-// copy on the page, so no fallback can exist. The bundle did not load (missing file, old cache, network) - that
-// is a NAMED refusal with the cause in the console (sdkBundle below), not silence and not a substitution.
-//
+// There is no page-side fallback. If the bundle does not load, sdkBundle returns null and the caller sees a named
+// refusal.
 
 import { chainById, DEFAULT_CHAIN, MONERO, allowedProvidersFor, knownFactoryCodesFor, knownImplementationCodesFor } from "../core/config.js";
 import { storage as pageStorage } from "../core/store.js";
 import * as evm from "../evm/index.js";
-// ORDER TERMS FOR THE CORE ARE ASSEMBLED FROM DATA, NOT FROM RULES: the windows come from the finality policy
-// (core/finality.js), the salt from the engine's generator (evm/funding.js). No deadlines or numbers of its own here.
+// Order terms come from data, not rules: the windows come from the finality policy and the salt from the engine's
+// generator. This file has no deadlines or numbers of its own.
 import { orderWindows } from "../core/finality.js";
 import { newSecret } from "../evm/funding.js";
-// THE ORDER CALLS - ACTION AND READ - COME FROM THE CORE. The deal engine moved into the package, and the shim
-// exposes EXACTLY the same names (markReadyOrder/claimOrder/refundOrder/orderStatus/orderDeadlines), so a screen
-// changes only the import source, not the call expression - and the guard that fixes the call site sees the old call.
+// Order actions and reads come from the core. The shim exposes the same names, so a screen changes only its import.
 //
-// THE DEAL LIST AND ITS UPKEEP (the #/swaps screen). States come from the CORE: swaps.list - display, swaps.forget -
-// dropping a record. The core needs only the page's storage, and the shim adds no rules of its own.
+// The deal list and its upkeep use core state. The core needs only the page storage.
 //
-// WATCHING IS A PAGE MECHANISM, NOT THE CORE'S: the poll tick lives in app.js, so the focus stays in
-// core/swap.js and the screen only declares it to the shim.
+// Watching is a page mechanism. The poll tick lives in app.js, and the screen declares it to the shim.
 import { setLiveFocus, dealSwapIds, serverRestoreHeightFor, STEP_LABELS,
   confirmReady as engineConfirmReady, refundEth as engineRefundEth, sweepNow as engineSweepNow,
   getSwap as engineGetSwap, saveSwap as engineSaveSwap } from "../core/swap.js";
-// THE FEE RATE AND THE ORDER STATE - CHAIN READS WITH THE PAGE'S WALLET: the reference panel ("how it works")
-// and recovery-file parsing take them. The page gets them FROM HERE, not directly from evm/*.
+// Fee rate and order state are chain reads with the page wallet. The page gets them here, not from evm/*.
 import { cachedFeeRate } from "../evm/fees.js";
-// MONERO ADDRESS AND HEIGHT - DELIBERATE PAGE READS (the progress screen): checking the recipient address
-// format and the node height for the scan height in the recovery file. The address logic lives in the core
-// (swaps.addressNetwork), here a fallback by the same module; the node height is the page node's read.
+// Monero address and height are deliberate page reads. The address logic lives in the core; the node height is the
+// page node's read.
 import { networkFromShape } from "../monero/address.js";
 import { height as nodeHeightValue } from "../monero/node.js";
 
-// THE CORE ADDRESS AS A STRING - THE BUILT BUNDLE SHIPPED WITH THE PACKAGE. A relative URL resolves both in the
-// published `engine/` tree and in the page that serves this shim from `www/js/sdk/`; ?v=<hash> keeps the cache fresh.
+// The built bundle shipped with the package. A relative URL resolves in the published engine tree and in the page.
+// The version query keeps the cache fresh.
 const SDK_BUNDLE = new URL("../../assets/vendors/sdk/sdk-browser.js?v=fa7dc71a", import.meta.url).href;
 
-// A NAMED SEAM FOR CHECKS. The asynchronous path is driven against a
-// stand-in order book (the demo network has no provider), and the ordinary escrow funding that follows a settled
-// swap can be replaced while that runs, because deploying an escrow factory on a throwaway chain is the stand's
-// job, not a check's. The replacement is named, set only by a check, and unset by the same function; production
-// never calls it, so the real funding path is what ships.
+// A named seam for checks. A check can replace the funding step while it drives a stand-in order book. Production
+// never calls it, so the real funding path ships.
 let startSwapOverride = null;
 export function useStartSwap(fn = null) { startSwapOverride = typeof fn === "function" ? fn : null; return Boolean(startSwapOverride); }
 
-// ONE LOAD PER PAGE. A refusal is a state, not a breakdown: it is named in the console and the caller decides.
+// One load per page. A refusal is a state: it is named in the console and the caller decides.
 let loading = null;
 export async function sdkBundle() {
   if (!loading) {
@@ -78,7 +48,7 @@ export async function sdkBundle() {
       try { return await import(SDK_BUNDLE); }
       catch (error) {
         console.warn("[bridge] the built SDK core was not served to the page (" + ((error && error.message) || error) +
-          "): actions go by the previous engine call; see www/js/sdk/bridge.js");
+          "): no page-side fallback; see www/js/sdk/bridge.js");
         return null;
       }
     })();

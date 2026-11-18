@@ -118,7 +118,7 @@ export const actionStateCheck = async () => {
     if (got !== expected || f.sent.length) problems.push(`${name} inside the margin answered ${JSON.stringify(got)} and sent ${f.sent.length}`);
   }
 
-  // A DRY RUN MUST NOT CARRY THE HALF (sdk#291). An `eth_call` of claim or refund goes to a public endpoint by
+  // A DRY RUN MUST NOT CARRY THE HALF. An `eth_call` of claim or refund goes to a public endpoint by
   // default, so the half would reach the RPC operator while the escrow is still open and the ETH has not moved.
   // The transaction itself still carries it: that is where the reveal happens.
   for (const [name, work, ready] of [

@@ -111,12 +111,12 @@ export function createHalfEnc({ secp256k1, ed25519, keccak256, randomBytes }) {
 // calldata at lock(). The format is fixed, because the commitment depends on it: any other layout changes the
 // hash and the lock is rejected.
 //
-//   0        : format version (1)
-//   1..33    : encryption recipient public key (33 bytes, compressed secp256k1)
-//   34..66   : sender ephemeral point (33 bytes, compressed)
-//   67..98   : masked scalar (32 bytes, big-endian)
-//   99       : context length in bytes (0..255)
-//   100..    : order context in UTF-8
+//   0: format version (1)
+//   1..33: encryption recipient public key (33 bytes, compressed secp256k1)
+//   34..66: sender ephemeral point (33 bytes, compressed)
+//   67..98: masked scalar (32 bytes, big-endian)
+//   99: context length in bytes (0..255)
+//   100..: order context in UTF-8
 //
 // Total 100 + context length bytes. JSON is deliberately not used: key order and number formatting would give
 // different bytes for the same content, and the commitment requires uniqueness.

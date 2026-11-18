@@ -610,7 +610,7 @@ export function dexLegVerdict(leg, requiredOutWei = null) {
 //
 // THERE ARE NO HUBS HERE ANY MORE: a detour via USDC/USDT is also a declared route, not a runtime search.
 //
-// Returns EITHER { ok: true, ... } with numbers from the chain, OR { ok: false, why } in words. Numbers and "why
+// Returns EITHER { ok: true,... } with numbers from the chain, OR { ok: false, why } in words. Numbers and "why
 // not" are not returned together: showing a person both means asking him to guess which of the two answers to
 // believe.
 // ---------------------------------------------------------------------------

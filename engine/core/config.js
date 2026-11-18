@@ -109,14 +109,11 @@ export const DEX_PRICE_GATE = {
 
 // PRE-SIGNING GUARD THRESHOLDS - ALSO NUMBERS IN DATA, NOT IN LOGIC (www/js/core/preSignGuards.js).
 // Only ORDER DEADLINES live here; the price and coverage thresholds are above, at the DEX leg.
-//   minReadyLeadSec   - how far the readiness-mark deadline must be ahead of "now" before signing. The threshold is
-//                       the SOFT sell window (600 s, www/js/core/sellWindow.js): how long the provider promises to
-//                       hold the on-screen price. It used to be 1200 - the WHOLE confirmation window - which blocked
-//                       the request ITSELF, because the node issues a reverse ticket with exactly the contract window
-//                       of 1200 s while the page checks deadlines a second or two later. The threshold must be
-//                       strictly below the contract window.
-//   minClaimWindowSec - how far the settlement deadline (t1) must stand from the readiness deadline: the window in
-//                       which the claimer claims the ETH cannot be "a few seconds". 10 minutes against the usual hour.
+//   minReadyLeadSec   - how far the readiness deadline must be ahead of "now" before signing. The threshold is the
+//                       soft sell window (600 s): how long the provider promises to hold the on-screen price. It
+//                       must stay below the contract window (1200 s).
+//   minClaimWindowSec - how far the settlement deadline (t1) must stand from the readiness deadline. 10 minutes
+//                       against the usual hour.
 export const SIGNING_GUARDS = {
   minReadyLeadSec: 600,
   minClaimWindowSec: 600,
@@ -379,16 +376,10 @@ export const CHAINS = [
     // (2026-09-23). IMPORTANT ABOUT THIS NETWORK: pools exist but liquidity is unusable. The 0.01% tier serves NO
     // size ("pool cannot serve this size"), 0.05% gives ZERO output at any size, and 0.3% answers at a price that
     // diverges from the Chainlink reference.
-    // ONE NUMBER, NOT THREE. It used to read "30x" and "18x" here while the report said 94.54%: measurements AT
-    // DIFFERENT SIZES ON DIFFERENT DAYS, each meaningless without a named size and method. Measurement 2026-09-24,
-    // block 312238363, head size 100 USDC: the quote gave 0.116508 WETH, i.e. an implied native price of $858.31
-    // against $2650.42 by the Chainlink feed - a 67.6% divergence against a 2% threshold, the pool 3.09x cheaper
-    // than the reference. The method is THE SAME CODE AS IN THE INTERFACE (www/js/evm/dex.js: priceGateVerdict,
-    // reference from www/js/evm/prices.js) and is rerunnable in one command.
-    //   (rerun the DEX quote check against arbitrum-sepolia)
-    // THE NUMBER DEPENDS ON SIZE (same block, same scale): 1 USDC = 77.5%, 10 USDC = 76.6%, 100 USDC = 67.6%,
-    // 1000 USDC = -16.0%. So ONE number stands here WITH A NAMED SIZE. The tool also prints a "how many times
-    // cheaper" observation (+208.6% for 100 USDC, i.e. the same 3.09x) - a RECOUNT of the same figure, not a second measurement.
+    // One measured number, with a named size and block. Measurement 2026-09-24, block 312238363, 100 USDC: the
+    // quote gave 0.116508 WETH, an implied native price of $858.31 against $2650.42 from Chainlink. That is a 67.6%
+    // divergence against a 2% threshold. The result depends on size: 1 USDC = 77.5%, 10 USDC = 76.6%, 100 USDC =
+    // 67.6%, 1000 USDC = -16.0%. Keep the size with the number.
     uniswap: {
       factory: "0x248ab79bbb9bc29bb72f7cd42f17e054fc40188e",
       quoter: "0x2779a0CC1c3e0E44D2542EC3e79e3864Ae93Ef0B",
@@ -450,26 +441,14 @@ export const CHAINS = [
     explorerName: "",
     gasUsd: 0.0001,
     routeType: "atomic",
-    // THE FACTORY DEPLOYED INTO THE LOCAL CHAIN. Its address is NOT CHOSEN BUT FOLLOWS FROM THE SENDER'S HISTORY:
-    // CREATE builds it from the account and its transaction number, so on a FRESH chain it is always the same while
-    // on a long-running one it differs - the account already has history. Here the address was MEASURED on chain
-    // (code read + keccak) after a redeploy for the quote format with xmrAmount: account 0 of anvil, nonce 60, block
-    // 74, 13188 bytes of code (keccak 0x9bffb62d50eef21bcfd4b59e1c3d6fb7cbb3e303257edb2f5ba9dc65b3e8719c -
-    // matched the tree build). The deploy command comes from mvp/contracts, the same form the stack tool uses.
-    // cashier is the second CREATE of the same pass (factory, then cashier, then registry): 573 bytes, keccak
-    // 0xcca1d8bc53d1d1c98901570800e093d0933f84637c6cdc727153b3ef8d8c3c36 - exactly the hash the escrow checks
-    // the cashier with. The registry is the third CREATE (DEPLOY_REGISTRY=true), 4557 bytes. PREVIOUS record:
-    // factory 0x5fbdb2315678afecb367f032d93f642f64180aa3 and cashier 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512,
-    // whose code did not match the canonical cashier - the escrow would have rejected such an order.
-    // THE ESCROW IMPLEMENTATION CODE HASH: what executes each order's clone, which the interface must check itself
-    // rather than trust the factory. The value is keccak256 of NinseiEscrow's runtime code from OUR OWN build (forge
-    // inspect NinseiEscrow deployedBytecode --root mvp/contracts and keccak - matched keccak256(type(NinseiEscrow)
-    // .runtimeCode) that the factory writes, and the out/ artifact). The implementation has NO immutables, so this is
-    // a PROTOCOL CONSTANT - the same hash on any network with that build. It sits per network, not as one global
-    // number, because the policy may be absent: a network with an OLD factory (no implementation()) must stay
-    // WITHOUT a policy, else reading the pair fails and live quotes there stall. That is the case on
-    // arbitrum-sepolia: its factory does not know the build (both getters revert), so it has NO field; it is enabled
-    // in the same pass as the new deploy.
+    // The factory deployed into the local chain. CREATE derives its address from the sender and its transaction
+    // number, so a fresh chain gives the same address while a long-running chain differs. These values were measured
+    // on chain after a redeploy for the quote format with xmrAmount: anvil account 0, nonce 60, block 74, 13188
+    // bytes of code (keccak 0x9bffb62d50eef21bcfd4b59e1c3d6fb7cbb3e303257edb2f5ba9dc65b3e8719c, matched to the
+    // tree build). The cashier is the second CREATE (573 bytes, keccak
+    // 0xcca1d8bc53d1d1c98901570800e093d0933f84637c6cdc727153b3ef8d8c3c36, the hash the escrow checks).
+    // The escrow implementation code hash is keccak256 of NinseiEscrow runtime code from this build. It is a
+    // protocol constant for this build, kept per network because a network with an old factory has no policy.
     escrow: { address: "0xcbEAF3BDe82155F56486Fb5a1072cb8baAf547cc", mode: "live", cashier: "0x1429859428C0aBc9C2C47C8Ee9FBaf82cFA0F20f", implementationCodeHash: "0xfd1ef12c1d96d3ee7060bd5901e06108723783403fad00c9630dcdeb6193674b" },
     // There are no tokens in the sandbox: payment is native. An empty list is a fact about the sandbox, not an oversight.
     tokens: [],
