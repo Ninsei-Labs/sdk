@@ -391,6 +391,7 @@ function swapByEscrow(store, escrow) {
 }
 
 export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork = null, call = null, fetchImpl = null, now = null, sleep = null, evmBlock = null, store = engine.store,
+  chunkOptions = null,
   // THE MONERO TIMINGS ARE BROUGHT BY THE CONFIGURATION: the watch's rate and timeout live in config.limits. There is
   // no server step and no route table to consult.
   config = null,
@@ -1112,6 +1113,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         const step = await orderStepChunked({
           order: request.order, side: made.side || null, counterparty: request.counterparty || null,
           standIn: mode !== "live", network: (record.swap.moneroNetwork || xmrNetwork || null),
+          options: chunkOptions || {},
         });
         // THE RECORD FIELDS ARE UNDER THE VERY NAMES THE ENGINE READS. So the record, after a page reload, again yields a
         // wallet from the halves (`halvesWalletOf`), rather than losing the address together with the tab.

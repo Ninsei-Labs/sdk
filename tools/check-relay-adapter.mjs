@@ -194,9 +194,10 @@ function relayFetch({ tamperProof = false, cashierAddress = cashier, validUntil 
   };
 }
 
-function makeQuotes({ providerWord = provider, factoryWord = factory, cashierPin = cashier, registryPin = null, denylist = null, now = null } = {}) {
+function makeQuotes({ providerWord = provider, factoryWord = factory, cashierPin = cashier, registryPin = null, denylist = null, now = null, chunkOptions = null } = {}) {
   return createQuotes({
     denylist,
+    chunkOptions,
     config: { settlement: { chain: { escrow: { ...(cashierPin ? { cashier: cashierPin } : {}), ...(registryPin ? { registry: registryPin } : {}) } } } },
     now: now || (() => nowSec * 1000),
     evmCall: chainReads({ providerWord, factoryWord }),
@@ -469,6 +470,39 @@ console.log("=== 8b) A CLIENT BUILT FROM THE NETWORK NAME CARRIES THE NETWORK'S 
   } catch (error) {
     if (error && error.code === "quote-cashier-mismatch") ok("a quote naming another vault is refused on a client built from the chain name");
     else bad("wrong foreign-vault code on a client built from the chain name: " + JSON.stringify(error && (error.code || error.message)));
+  }
+}
+
+console.log("=== 9) THE FIRM QUOTE USES THE CHUNKED PROOF AND VERIFIER ===");
+{
+  let yields = 0;
+  try {
+    const result = await call(makeQuotes({ chunkOptions: { yieldTo: async () => { yields += 1; } } }), {
+      fetchImpl: relayFetch().fetchImpl,
+    });
+    if (yields > 0 && result.quote) ok("quotes.firmRelay yields through the chunked proof and verifier");
+    else bad("quotes.firmRelay did not reach the chunked path: yields=" + yields);
+  } catch (error) {
+    bad("quotes.firmRelay failed on the chunked path: " + JSON.stringify(error && (error.code || error.message)) + " " + JSON.stringify(error && error.params));
+  }
+}
+
+console.log("=== 9b) A DEFAULT CLIENT APPLIES THE NETWORK FACTORY POLICY ===");
+{
+  const deployedRegistry = deploymentFor("arbitrum-sepolia").escrow.registry;
+  const facade = createNinsei({
+    settlement: { chain: "arbitrum-sepolia" },
+    xmrNetwork: "stagenet",
+    evmCall: chainReads(),
+    evmCode: async () => "0x6000",
+  });
+  try {
+    await facade.quotes.firmRelay({ ...baseRequest, features: nodeFeatures({ registry: deployedRegistry }), order,
+      fetchImpl: relayFetch().fetchImpl });
+    bad("a default client accepted a factory code outside the policy");
+  } catch (error) {
+    if (error && error.code === "quote-factory-code-unknown") ok("a default client applies the network factory policy");
+    else bad("a default client gave " + JSON.stringify(error && (error.code || error.message)) + " " + JSON.stringify(error && error.params));
   }
 }
 

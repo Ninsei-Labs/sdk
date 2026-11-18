@@ -14,9 +14,10 @@ instruments:
 ## Invariants
 
 The current map covers sender/chain binding (`SEND-01`), quote policy and TTL (`QUOTE-POLICY-01`,
-`QUOTE-TTL-01`), DLEQ knowledge proofs (`DLEQ-01`), recovery derivation (`RECOVERY-01`), storage failures and
-isolation (`STORE-01`), relay transcript/retry (`RELAY-01`), terminal state (`STATE-01`), XMR arrival
-(`ARRIVAL-01`) and the production adapter surface (`ADAPTER-01`).
+`QUOTE-TTL-01`), DLEQ knowledge proofs (`DLEQ-01`), recovery derivation and sweeps (`RECOVERY-01`), storage
+failures and isolation (`STORE-01`), relay transcript/retry (`RELAY-01`), terminal state (`STATE-01`), XMR arrival
+(`ARRIVAL-01`), DEX routes (`ROUTE-01`), amount exactness (`AMOUNT-01`) and the production adapter surface
+(`ADAPTER-01`).
 
 The map is deliberately small. A new security-critical file must be added to `SECURITY_CRITICAL_FILES` and to at
 least one invariant; a new invariant must point at a real check script.

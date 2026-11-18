@@ -7,8 +7,9 @@
 //
 // Run: node tools/check-key-view.mjs
 import { createHash } from "node:crypto";
-import { createSwaps } from "../src/swaps.mjs";
-import { buildOwnSideFromHalves } from "../src/order.mjs";
+import { createSwaps, recordInputOf } from "../src/swaps.mjs";
+import { buildOwnSideFromHalves, buildOwnSideFromHalvesKnown } from "../src/order.mjs";
+import { createRecord } from "../src/record.mjs";
 import { primitives } from "../src/primitives.mjs";
 import { quoteDigest, signQuoteDigest } from "../src/quoteEip712Spec.mjs";
 import { halfCommitmentHex } from "../engine/atomic/orderHalfCommit.js";
@@ -63,6 +64,8 @@ async function startWith(view, salt = order.salt, extra = {}, autoSalt = false, 
     counterparty, recoveryKey: WORDS, ...(autoSalt ? {} : { recoverySalt: salt }),
     receiveTo: "synthetic-xmr-destination", restoreHeight: 100, wallet, onRecoveryKey: async () => true };
   const result = await createSwaps({ mode: "live", xmrNetwork: "stagenet", logs: async () => [],
+    chunkOptions: options.chunkOptions || null,
+    createRecord: options.createRecord || undefined,
     now: options.nowMs === undefined ? null : () => options.nowMs,
     call: async ({ data }) => (data.startsWith(FACTORY_METHODS.predict) ? "0x" + "0".repeat(24) + "88".repeat(20) : "0x"),
   }).start(request).catch((error) => error);
@@ -104,6 +107,37 @@ console.log("=== 1) THE DERIVED VIEW HALF IS ACCEPTED ===");
   const { result, sent } = await startWith(derived.makerViewHalf);
   if (result && result.code === "wallet-rejected" && sent === 1) ok("the derived half reaches the wallet");
   else bad("derived half: " + JSON.stringify({ code: result && result.code, sent }));
+}
+
+console.log("=== 1b2) A START USES THE CHUNKED ORDER STEP ===");
+{
+  let yields = 0;
+  const { result, sent } = await startWith(derived.makerViewHalf, order.salt, {}, false,
+    { chunkOptions: { yieldTo: async () => { yields += 1; } } });
+  if (result && result.code === "wallet-rejected" && sent === 1 && yields > 0) {
+    ok("the key start yields through the chunked order step");
+  } else bad("key start did not reach the chunked path: " + JSON.stringify({ code: result && result.code, sent, yields }));
+}
+
+console.log("=== 1b3) A READY RECORD REUSES THE KNOWN HALVES WITHOUT A SECOND PROOF ===");
+{
+  let yields = 0;
+  const ready = buildOwnSideFromHalvesKnown(order, { spendHalf: derived.spendHalf, viewHalf: derived.viewHalf });
+  const readyOrder = { ...order, commitHalfLocker: ready.commitHalf, commitHalfClaimer: quote.commitHalfClaimer,
+    edPointLocker: ready.spendPoint, edPointClaimer: quote.edPointClaimer, edViewPointLocker: ready.viewPoint };
+  const readyRecord = async (req) => {
+    const made = createRecord(recordInputOf(req, "stagenet"), { order: req.order, side: ready.side });
+    made.swapWallet = { address: "synthetic-ready-wallet" };
+    return made;
+  };
+  const { result, sent } = await startWith(derived.makerViewHalf, order.salt, {}, false, {
+    order: readyOrder,
+    createRecord: readyRecord,
+    chunkOptions: { yieldTo: async () => { yields += 1; } },
+  });
+  if (result && result.code === "wallet-rejected" && sent === 1 && yields === 0) {
+    ok("a ready record reuses the known halves and starts no chunked proof");
+  } else bad("ready record path: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent, yields }));
 }
 
 console.log("=== 1b) THE SALT-BASED KEY USES THE SAME CHECK ===");
