@@ -73,6 +73,20 @@ For the bid side, the relay path returns the signed quote and the maker view hal
 `swaps.startSell`, which records the one-time address and the escrow. Do not build the order context or the
 encryption envelope in the host, and do not pass a bid answer to `swaps.start` (it refuses a sell).
 
+## 4a. DEX provider identity
+
+The asynchronous DEX providers bind their answers to the order that was signed.
+
+- **UniswapX** builds only the reactor pinned for the chain in `UNISWAPX_NETWORKS`. A caller-supplied `reactor`
+  that differs from that pin is refused with `uniswapx-bad-order` and `field: "reactor"`; there is no unsafe
+  override path. A new reactor needs a versioned network entry, not a per-call address.
+- **UniswapX status** accepts only the exact `orderHash` that was requested. A non-empty answer for another order
+  and an ambiguous list are `uniswapx-bad-response`, never a fallback to the first returned order.
+- **Uniswap Relay** accepts only the reactor's own `Relay` event: the log address must match the reactor and
+  `removed` must not be true. A foreign address, a removed log, or a log without an address is
+  `uniswap-relay-bad-response`, never `filled`.
+
+
 ## 5. Sell flow
 
 `swaps.startSell` records the one-time address, the escrow, our half, the expectations and the relay origin that
@@ -204,6 +218,11 @@ exception or a code as a user-facing sentence. Important groups include quote re
 
 See `src/codes.mjs` and `index.d.ts` for the current unions. Code values are part of the integration contract; a
 new code is a compatibility event and should be called out in the release notes.
+
+For `uniswap-relay-bad-response` with `where: "logs"`, `detail` is diagnostic and may name only one of several
+failed checks. In a batch that contains both a removed log and a foreign-address log, `detail` can be `removed`
+even though another log also failed the address check. Branch on `code` and `where`; do not use `detail` as the
+sole reason for a user-facing message or a retry decision.
 
 ## 11. Support matrix
 
