@@ -18,11 +18,9 @@ const bad = (m) => { fails.push(m); console.log("  FAIL  " + m); };
 
 console.log("=== 1) THE NATIVE AMOUNT COMES FROM THE QUOTE ===");
 {
-  const usdc = engine.evm.escrowNativeWei({ quote: { payNative: "0.0004" }, nativeDecimals: 18 });
-  const dai = engine.evm.escrowNativeWei({ quote: { payNative: "0.0004" }, nativeDecimals: 18 });
-  if (usdc.ok && usdc.wei === "400000000000000" && dai.ok && dai.wei === usdc.wei) {
-    ok("USDC and DAI quotes with the same native amount give the same wei");
-  } else bad("native equality: " + JSON.stringify({ usdc, dai }));
+  const native = engine.evm.escrowNativeWei({ quote: { payNative: "0.0004" }, nativeDecimals: 18 });
+  if (native.ok && native.wei === "400000000000000") ok("0.0004 native coins at 18 decimals is 400000000000000 wei");
+  else bad("native scaling: " + JSON.stringify(native));
 
   const small = engine.evm.escrowNativeWei({ quote: { payNative: "1e-7" }, nativeDecimals: 18 });
   if (small.ok && small.wei === "100000000000") ok("an exponent form is scaled, not rejected");

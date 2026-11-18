@@ -21,6 +21,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { signedFeeTotal } from "../src/sweep-fees.mjs";
 import { createSweep } from "../src/sweep.mjs";
 import * as engine from "../src/engine.mjs";
 
@@ -113,6 +114,23 @@ console.log("=== 2) A WALLET THAT CANNOT REPORT A FEE: sign refuses ===");
     if (o.error && o.error.code === "sweep-fee-unknown") ok(name + " -> sweep-fee-unknown");
     else bad(name + " -> " + JSON.stringify((o.error && o.error.code) || null));
   }
+}
+
+// A split signed set is all-or-unknown, whichever transaction cannot report its fee.
+for (const missingAt of [0, 1, 2]) {
+  const txs = [3n, 4n, 5n].map((fee, index) => ({ getFee: () => index === missingAt ? null : fee }));
+  const w = wallet();
+  let relayed = 0, signed = 0;
+  w.sweepUnlocked = async (request) => {
+    if (request.relay !== false || request.address !== ADDRESS) throw new Error("sweep must sign only for the requested address");
+    signed++;
+    return txs;
+  };
+  w.fee = async (set) => signedFeeTotal(set);
+  w.relay = async () => { relayed++; return ["unexpected"]; };
+  const o = await sign({ createSweep }, w);
+  if (o.kind === "error" && o.error?.code === "sweep-fee-unknown" && signed === 1 && relayed === 0) ok(`partial signed fee ${missingAt} refuses before relay`);
+  else bad(`partial signed fee ${missingAt}: ${o.kind}/${o.error?.code}, signed ${signed}, relayed ${relayed}`);
 }
 
 console.log("=== 3) A FEE LARGER THAN THE REMAINDER: no negative receive ===");

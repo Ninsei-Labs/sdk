@@ -9,5 +9,5 @@
     "types": [],
     "lib": ["ES2022", "DOM"]
   },
-  "include": ["consumer.ts"]
+  "include": ["consumer.ts", "adapter-fixtures.ts"]
 }

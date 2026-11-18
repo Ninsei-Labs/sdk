@@ -17,3 +17,10 @@ is kept by whoever writes and reviews a change.
 - No tool attribution lines (`Co-authored-by:`, "Generated with") in commits or pull requests.
 - No secrets and no real wallet or account addresses, keys or tokens. Tests use made-up values.
 - Code, commits and pull requests describe the change, not the conversation behind it.
+
+Tests follow docs/TESTING.md, the organisation's test standard, kept in sync from Ninsei-Labs/.github. Read
+it before writing or changing a test.
+
+@docs/TESTING.md
+
+The SDK's money-path checks also follow [docs/test-quality.md](docs/test-quality.md).

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// THE SIGNED ANSWER, CHECKED AGAINST THE RELAY'S OWN VECTOR.
+// THE SIGNED ANSWER, CHECKED AGAINST AN SDK-GENERATED REGRESSION PIN.
 //
 // The outer frame and the inner OrderQuote are signed by different keys. This check verifies both, the request
 // correlation, the fee arithmetic, the context and the view points, then breaks one field at a time.
@@ -58,7 +58,7 @@ if (buildRelayAnswerFixture() === committed) {
 }
 
 console.log("=== 1) THE OUTER FRAME MATCHES THE VECTOR ===");
-if (hex(relayQuoteDigest(answer)) === fixture.answerExpected.digest) ok("the outer digest matches the relay vector");
+if (hex(relayQuoteDigest(answer)) === fixture.answerExpected.digest) ok("the outer digest matches the SDK-generated regression pin");
 else bad("outer digest: " + hex(relayQuoteDigest(answer)));
 try {
   verifyRelayQuoteFrame(answer, quoteKey);
@@ -142,20 +142,29 @@ for (const [label, change] of [
   ["a changed payload", { payload: answer.payload + " " }],
 ]) {
   try { verifyRelayQuoteFrame({ ...answer, ...change }, quoteKey); bad(label + " passed the outer check"); }
-  catch { ok(label + " is refused by the outer signature"); }
+  catch (error) {
+    if (error?.code === "quote-refused" && error.params?.why === "signature") ok(label + " is refused by the outer signature");
+    else bad(label + " refused for the wrong reason: " + JSON.stringify(error?.params));
+  }
 }
 const changedQuote = JSON.parse(answer.payload);
 changedQuote.quote.amount = "1";
 try {
   verifyFirmAnswer({ answer: { ...answer, payload: JSON.stringify(changedQuote) }, features, request, now: fixture.now });
   bad("a changed inner amount passed");
-} catch { ok("a changed inner amount is refused"); }
+} catch (error) {
+  if (error?.code === "quote-refused" && error.params?.why === "signature") ok("a changed inner amount is refused by the outer signature");
+  else bad("changed inner amount refused for the wrong reason: " + JSON.stringify(error?.params));
+}
 const changedContext = JSON.parse(answer.payload);
 changedContext.context = "other";
 try {
   verifyFirmAnswer({ answer: { ...answer, payload: JSON.stringify(changedContext) }, features, request, now: fixture.now });
   bad("a changed context passed");
-} catch { ok("a changed context is refused"); }
+} catch (error) {
+  if (error?.code === "quote-refused" && error.params?.why === "signature") ok("a changed context is refused by the outer signature");
+  else bad("changed context refused for the wrong reason: " + JSON.stringify(error?.params));
+}
 
 console.log("");
 console.log(fails.length ? "FAILED: " + fails.length + " (passed " + pass + ")" : "relay answer: " + pass + " checks passed.");

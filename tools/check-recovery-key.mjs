@@ -1,7 +1,7 @@
 // THE RECOVERY KEY CHECK: fixed v2 vectors, the backup file, and the salt-based on-chain search.
 import * as recovery from "../src/public/recovery.mjs";
 import { buildOwnSideFromHalves } from "../src/order.mjs";
-import { ESCROW_EVENT_TOPICS, readEscrowEvents, readEscrowEventsByTopic } from "../src/recovery-key.mjs";
+import { RECOVERY_KEY_ITER, ESCROW_EVENT_TOPICS, readEscrowEvents, readEscrowEventsByTopic } from "../src/recovery-key.mjs";
 import { startHeightFromNodes } from "../src/swaps.mjs";
 
 const WORDS = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
@@ -61,6 +61,15 @@ export const recoveryKeyCheck = async () => {
   check(plainOpened.createdAt === "2026-10-21T00:00:00.000Z", "the plain backup lost its header date");
   const encrypted = await recovery.createRecoveryKeyFile({ mnemonic: WORDS, createdAt: "2026-10-21T09:30:00.000Z", passphrase: "correct horse battery" });
   check(JSON.parse(encrypted).kind === "ninsei-recovery-key", "the encrypted backup has no readable kind header");
+  check(RECOVERY_KEY_ITER === 600000 && JSON.parse(encrypted).iter === 600000, "recovery KDF work factor must be 600000");
+  for (const iter of [1000, 599999]) {
+    try {
+      await recovery.openRecoveryKeyFile(JSON.stringify({ ...JSON.parse(encrypted), iter }), "correct horse battery");
+      check(false, `weak recovery KDF ${iter} was accepted`);
+    } catch (error) {
+      check(error?.code === "recovery-failed" && error.params?.stage === "parse", `weak recovery KDF ${iter} was not refused before decrypt`);
+    }
+  }
   const encryptedOpened = await recovery.openRecoveryKeyFile(encrypted, "correct horse battery");
   check(encryptedOpened.mnemonic === WORDS, "the encrypted backup did not round-trip");
   check(encryptedOpened.createdAt === "2026-10-21T09:30:00.000Z", "the encrypted backup lost its sealed creation time");

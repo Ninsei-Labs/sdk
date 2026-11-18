@@ -23,18 +23,18 @@ jobs:
     name: SDK checks
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 60
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # pnpm comes from the `packageManager` field in package.json, not from a version pinned here: there is one
       # place that says which package manager this package uses.
       - name: Set up pnpm (from packageManager)
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
 
       - name: Set up Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: '24.22.1'
           cache: pnpm
@@ -272,7 +272,7 @@ jobs:
       # THE SAME INTEROP FROM THE SDK SIDE. witness-node#13 already drives this SDK from its workflow; this step
       # closes the reverse direction. The witness commit is pinned so a passing run names both sides exactly.
       - name: Check out the witness node at the pinned commit
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: Ninsei-Labs/witness-node
           ref: 2283aa4cc840c1c1baf52429acf1cc1274ed7d0c # v0.1.2; bump with the witness-node release
@@ -290,11 +290,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Set up pnpm (from packageManager)
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
       - name: Set up Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: '24.22.1'
           cache: pnpm
@@ -304,7 +304,7 @@ jobs:
           go-version: '1.27.3'
           cache-dependency-path: test/dleq-oracle/go/go.sum
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Test the Go oracle reduction

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// THE BREAKING RUNS FOR THE GUARDS THAT TOUCH MONEY. Each case removes one guard from a source copy, runs the
+// THE BREAKING RUNS FOR THE GUARDS THAT TOUCH MONEY. Each case changes one guard, boundary or constant in a source copy, runs the
 // named check, and requires it to redden with its own reason. Every source file is restored byte for byte.
 //
 // Run: node tools/check-guard-teeth.mjs
@@ -25,6 +25,56 @@ const guard = (check) => {
 };
 
 const cases = [
+  // Remove each request pair separately; a different refusal must not stand in for the named field.
+  ...[
+    ["chainId", "String(order.chainId)"], ["locker", "order.locker"], ["claimer", "order.claimer"],
+    ["amount", "String(order.amount)"], ["readyBy", "String(order.readyBy)"], ["t1", "String(order.t1)"],
+    ["salt", "order.salt"], ["claimTip", "String(terms.claimTip)"], ["provider", "terms.maker"], ["registry", "terms.registry"],
+  ].map(([field, expression]) => ({
+    check: "relay-http", source: "src/relayQuote.mjs", name: `the signed ${field} request binding is removed`,
+    from: `    ["${field}", ${expression}],`, to: "", wants: `signed field ${field}`,
+  })),
+  {
+    check: "relay-http", source: "src/relayQuote.mjs", name: "the envelope factory binding is removed",
+    from: "if (!same(payload.factory, request.terms.order.factory))", to: "if (false)", wants: "signed field factory",
+  },
+  {
+    check: "dleq-vectors", source: "engine/atomic/dleq2.js", name: "the subject subgroup check is removed",
+    from: 'if (!torsionFree(curves.B, XB)) return { ok: false, reason: "proof: XB is not in the prime-order subgroup" };',
+    to: "", wants: "order-2 XB did not get its subgroup refusal",
+  },
+  {
+    check: "fees", source: "engine/evm/fees.js", name: "the buy fee is omitted from funding",
+    from: "totalWei: feeOnTop ? amount + fee : amount", to: "totalWei: amount", wants: "fee roles and wei",
+  },
+  {
+    check: "fees", source: "engine/evm/fees.js", name: "the fee cap rejects its boundary",
+    from: "bps > MAX_FEE_BPS", to: "bps >= MAX_FEE_BPS", wants: "fee rate outside the ceiling",
+  },
+  {
+    check: "arrival-consensus", source: "src/xmr-arrival.mjs", name: "the fastest node supplies confirmations",
+    from: "Math.min(...best.nodes.map((r) => r.confirmations))", to: "Math.max(...best.nodes.map((r) => r.confirmations))", wants: "confirmation boundary",
+  },
+  {
+    check: "arrival-consensus", source: "src/xmr-arrival.mjs", name: "the confirmation threshold moves by one",
+    from: "confirmations < minConfirmations", to: "confirmations <= minConfirmations", wants: "confirmation boundary",
+  },
+  {
+    check: "recovery-key", source: "src/recovery-key.mjs", name: "the recovery KDF work factor is weakened",
+    from: "export const RECOVERY_KEY_ITER = 600000;\nconst ITER_MIN = 600000;", to: "export const RECOVERY_KEY_ITER = 1000;\nconst ITER_MIN = 1000;", wants: "recovery KDF work factor",
+  },
+  {
+    check: "recovery-key", source: "src/recovery-key.mjs", name: "the minimum recovery KDF work factor moves by one",
+    from: "const ITER_MIN = 600000;", to: "const ITER_MIN = 599999;", wants: "weak recovery KDF 599999",
+  },
+  {
+    check: "relay-adapter", source: "src/quotes.mjs", name: "screening always selects the claimer",
+    from: 'side === "bid" ? order.claimer : order.locker', to: 'order.claimer', wants: "ask denylist",
+  },
+  {
+    check: "sweep-adapter", source: "src/sweep-fees.mjs", name: "an unknown signed fee is omitted",
+    from: "if (value === null || value === undefined) return null;", to: "if (value === null || value === undefined) continue;", wants: "partial signed fee",
+  },
   {
     check: "action-state", source: "src/swap-flow.mjs",
     name: "the clock guard is removed",

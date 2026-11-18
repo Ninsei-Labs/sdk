@@ -38,6 +38,12 @@ export const sweepAdapterCheck = async () => {
   const signed = await adapter.sweepUnlocked({ address: ADDRESS, relay: false });
   check(calls.some((call) => call[0] === "sweep" && call[1].relay === false), "sweepUnlocked did not sign only");
   check((await adapter.fee(signed)) === "7", "the fee was not summed over every signed transaction");
+  for (const missingAt of [0, 1, 2]) {
+    for (const unavailable of [null, undefined]) {
+      const split = [3n, 4n, 5n].map((fee, index) => ({ getFee: () => index === missingAt ? unavailable : fee }));
+      check(await adapter.fee(split) === null, `partial signed fee ${missingAt} must be unknown`);
+    }
+  }
   check(JSON.stringify(await adapter.relay(signed)) === JSON.stringify(["tx-1"]), "relay did not send the signed transaction");
   notes.push("the wallet adapter carries the restore and the withdrawal surface");
 

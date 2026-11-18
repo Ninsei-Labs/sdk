@@ -37,6 +37,7 @@ import { refundWindowCheck } from "./check-refund-window.mjs";
 import { refundIfMissingCheck } from "./check-refund-if-missing.mjs";
 import { sweepWindowCheck } from "./check-sweep-window.mjs";
 import { sweepFromOrderCheck } from "./check-sweep-order.mjs";
+import { feesCheck } from "./check-fees.mjs";
 import { sweepAdapterCheck } from "./check-sweep-adapter.mjs";
 import { claimTipCheck } from "./check-claim-tip.mjs";
 import { claimSenderCheck } from "./check-claim-sender.mjs";
@@ -2616,7 +2617,27 @@ const quoteDefaultsCheck = () => runScriptCheck("check-quote-defaults.mjs", "quo
 const dleqChunksCheck = () => runScriptCheck("check-dleq-chunks.mjs", "dleq chunks");
 const securityInvariantsCheck = () => runScriptCheck("check-security-invariants.mjs", "security invariants");
 const lifecycleLocalCheck = () => runScriptCheck("check-lifecycle-local.mjs", "local lifecycle");
+// Node's test runner carries issue-named skips. Keep its counts visible and reject empty or missing cases.
+const nodeTestCheck = (tool, expected) => {
+  const problems = [];
+  let out;
+  try {
+    out = execFileSync(process.execPath, ["--test", "--test-concurrency=1", "--test-reporter=tap", p("tools", tool)],
+      { encoding: "utf8", timeout: 300_000, killSignal: "SIGKILL" });
+  } catch (error) {
+    return { note: tool + " failed", problems: [String(error.stdout || error.message)] };
+  }
+  for (const [name, count] of Object.entries(expected)) {
+    const actual = out.match(new RegExp("^# " + name + " (\\d+)$", "m"))?.[1];
+    if (Number(actual) !== count) problems.push(`${tool}: expected ${count} ${name}, got ${actual ?? "no count"}`);
+  }
+  const skips = out.split("\n").filter(line => line.includes("# SKIP"));
+  return { note: `${expected.pass} passed, ${expected.skipped} skipped`, problems, notes: skips };
+};
 const CHECKS = {
+  fees: feesCheck,
+  "adapter-contract": () => nodeTestCheck("check-adapter-contract.mjs", { tests: 2, pass: 0, fail: 0, skipped: 2 }),
+  "spent-status": () => nodeTestCheck("check-spent-status.mjs", { tests: 9, pass: 2, fail: 0, skipped: 7 }),
   syntax: syntaxCheck,
   import: importCheck,
   surface: surfaceCheck,
