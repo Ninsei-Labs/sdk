@@ -8,7 +8,7 @@
 // Each case removes one rule, runs `tools/check.mjs --only=native-amount`, requires a RED answer that names its
 // case, and restores the file byte for byte. The baseline and the final run must be green.
 //
-// Run: node tools/check-native-amount-teeth.mjs
+// Run: pnpm run check:native-amount-teeth (isolated copy; do not run this file directly)
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
