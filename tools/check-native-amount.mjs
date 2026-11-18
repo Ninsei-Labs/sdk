@@ -39,8 +39,9 @@ console.log("=== 1) THE NATIVE AMOUNT COMES FROM THE QUOTE ===");
   else bad("trailing zeroes: " + JSON.stringify(trailing));
 
   const unsafe = engine.evm.escrowNativeWei({ quote: { payNative: Number.MAX_SAFE_INTEGER + 1 }, nativeDecimals: 0 });
-  if (!unsafe.ok && unsafe.code === "native-amount-unread") ok("an unsafe number is refused before conversion");
-  else bad("unsafe number accepted: " + JSON.stringify(unsafe));
+  if (!unsafe.ok && unsafe.code === "native-amount-unread" && /safe/.test(unsafe.reason)) {
+    ok("an unsafe number is refused before conversion with a safe-number reason");
+  } else bad("unsafe number accepted: " + JSON.stringify(unsafe));
 
   const six = engine.evm.escrowNativeWei({ quote: { payNative: "0.0004" }, nativeDecimals: 6 });
   if (six.ok && six.wei === "400") ok("the native decimals are respected");

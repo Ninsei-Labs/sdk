@@ -120,9 +120,12 @@ export function escrowNativeWei({ quote = null, nativeDecimals = 18 } = {}) {
     return { ok: false, code: "native-amount-unread", reason: "the quote carries no native amount" };
   }
   const n = Number(raw);
-  // A number at or above the safe-integer range has already lost digits before this function sees it.
-  if (!Number.isFinite(n) || n <= 0 || (typeof raw === "number" && Math.abs(raw) > Number.MAX_SAFE_INTEGER)) {
+  if (!Number.isFinite(n) || n <= 0) {
     return { ok: false, code: "native-amount-unread", reason: "the quote's native amount is not a positive number" };
+  }
+  // A number at or above the safe-integer range has already lost digits before this function sees it.
+  if (typeof raw === "number" && Math.abs(raw) > Number.MAX_SAFE_INTEGER) {
+    return { ok: false, code: "native-amount-unread", reason: "the quote's native amount is not a safe number" };
   }
   const dec = Number(nativeDecimals);
   if (!Number.isInteger(dec) || dec < 0) {
