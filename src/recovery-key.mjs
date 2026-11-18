@@ -483,7 +483,8 @@ export async function readEscrowEvents({ escrows, evmLogs, fromBlock = "earliest
     fromBlock,
     toBlock,
   });
-  return decodeEscrowEvents(logs);
+  // The address filter is a request, not a guarantee. Keep only the escrows this call asked for.
+  return decodeEscrowEvents(logs, new Set(escrows.map((escrow) => escrow.toLowerCase())));
 }
 
 /**
@@ -502,16 +503,19 @@ export async function readEscrowEventsByTopic({ evmLogs, fromBlock = "earliest",
   return decodeEscrowEvents(logs);
 }
 
-function decodeEscrowEvents(logs) {
+function decodeEscrowEvents(logs, allowedEscrows = null) {
   const events = [];
   for (const log of logs) {
     if (!log || typeof log !== "object") continue;
+    // A removed log is not current state. It may describe an event that a reorg took back.
+    if (log.removed === true) continue;
     const topics = Array.isArray(log.topics) ? log.topics : [];
     const topic0 = String(topics[0] || "").toLowerCase();
     const name = ESCROW_EVENT_NAMES.get(topic0);
     if (!name) continue;
     const escrow = String(log.address || "").toLowerCase();
     if (!ADDRESS_RE.test(escrow)) continue;
+    if (allowedEscrows !== null && !allowedEscrows.has(escrow)) continue;
     const common = { escrow, event: name, blockNumber: log.blockNumber ?? null, transactionHash: log.transactionHash || null,
       logIndex: log.logIndex ?? null };
     if (name === "HalfRevealed") {

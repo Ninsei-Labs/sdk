@@ -38,6 +38,7 @@
     "check:terminal-teeth": "node tools/run-teeth-isolated.mjs tools/check-terminal-teeth.mjs",
     "check:sweep": "node tools/sweep-refusal.test.mjs",
     "check:sweep-half": "node tools/check-sweep-half.mjs",
+    "check:sweep-relay": "node tools/check-sweep-relay.mjs",
     "sync:version": "node tools/sync-version.mjs",
     "check:restore": "node tools/check-restore.mjs",
     "check:wallet-factory": "node tools/check-wallet-factory.mjs",

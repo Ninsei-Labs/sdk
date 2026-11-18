@@ -196,6 +196,7 @@ complete; a partial witness makes `agrees` false with `witness:not-completed`. T
 | `swaps.startSell` | The same offer resumes the same record; a changed commitment is `quote-refused`. |
 | `swaps.claimViaRelay` | A `claim-unknown` answer means the claim MAY have been sent. The SDK reads the escrow for the rest of that sender's slot and then moves to the next sender; do not resend the half on a guess. |
 | `actions.markReady` / `claim` / `refund` | Do not send a second transaction while the first outcome is unknown. Keep the transaction hash and re-read the receipt; a repeated call is not a substitute for an unknown receipt. |
+| `sweep.relay` | `sweep-relay-unknown` means the signed set MAY have left. The session token and signed set stay open; do not relay it again. Check the txids or the chain before signing a new withdrawal. |
 | `swaps.watch` | The wait may be repeated; it reads the same Monero address and does not create an order. |
 | `recovery.open` | Pure local parsing; safe to repeat. |
 

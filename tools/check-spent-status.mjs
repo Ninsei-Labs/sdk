@@ -7,11 +7,11 @@ import { restoreWallet } from "../src/sweep-restore.mjs";
 const images = ["aa".repeat(32), "bb".repeat(32), "cc".repeat(32)];
 const cases = [
   ["unspent", [0, 0, 0], 0], ["block spend", [0, 1, 0], 1],
-  ["pool spend", [0, 1, 2], 2, "sdk#364: pool status 2 is counted as unspent"],
+  ["pool spend", [0, 1, 2], 2],
   ...[[0, 1], [0, 1, 2, 0], [0, 1, 3], [0, 1, true], [0, 1, null], [0, 1, "1"]]
-    .map((values) => ["unknown " + JSON.stringify(values), values, null, "sdk#364: invalid or incomplete spent_status is treated as complete"]),
+    .map((values) => ["unknown " + JSON.stringify(values), values, null]),
 ];
-for (const [name, spent_status, expected, skip] of cases) test(name, { skip }, async () => {
+for (const [name, spent_status, expected] of cases) test(name, async () => {
   const requests = [];
   const driver = { async setRestoreHeight() {}, async getBalance() { return 5n; }, async getHeight() { return 1000; },
     async getDaemonHeight() { return 1000; }, async scanTxs() {}, async getKeyImages() { return images.map((key) => ({ getHex: () => key })); } };

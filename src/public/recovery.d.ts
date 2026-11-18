@@ -412,7 +412,8 @@ export declare const ESCROW_EVENT_TOPICS: {
   readonly declined: string;
 };
 
-/** Read HalfRevealed, Ready and Declined for a list of escrows in one log request. */
+/** Read HalfRevealed, Ready and Declined for a list of escrows in one log request. Only the requested escrows and
+ * current (non-removed) logs are returned. */
 export declare function readEscrowEvents(request: {
   escrows: readonly string[];
   evmLogs: (request: { address: readonly string[]; topics: (string | null)[][]; fromBlock: number | string; toBlock: number | string }) => Promise<unknown[]>;

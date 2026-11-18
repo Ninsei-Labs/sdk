@@ -135,6 +135,10 @@ export const ERROR_CODES = [
   // normal transfer.
   "sweep-fee-too-high",
   "sweep-fee-unknown",
+  // THE WITHDRAWAL WAS SENT BUT THE WALLET DID NOT CONFIRM THE RESULT. A throw or an answer without a transaction
+  // id leaves the signed set in the open session. The caller must check the chain before signing again; the same
+  // token must not relay that set twice.
+  "sweep-relay-unknown",
   // CLAIM GAS FOR THE XMR SELLER. The seller comes from Monero and has no coin on the EVM side to pay
   // for the claim, so the maker may send it - but only when asked for, and only after the core has CONFIRMED the
   // gas actually arrived. The three codes name the three states the interface must not blur together:
@@ -205,6 +209,7 @@ export const ERROR_META = Object.freeze({
   "insufficient-funds": { retryable: false, side: "wallet" },
   "sweep-fee-too-high": { retryable: false, side: "chain" },
   "sweep-fee-unknown": { retryable: true, side: "chain" },
+  "sweep-relay-unknown": { retryable: false, side: "chain" },
   "gas-refused-by-maker": { retryable: false, side: "provider" },
   "gas-not-arrived": { retryable: true, side: "chain" },
   "gas-too-little": { retryable: false, side: "provider" },

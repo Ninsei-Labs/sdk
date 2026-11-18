@@ -1442,7 +1442,8 @@ export interface SweepApi {
    * the person what will leave, BEFORE sending.
    */
   sign(request: SweepRunRequest): Promise<SweepSignResult>;
-  /** Send what `sign` signed, close the wallet and return the transaction hashes. */
+  /** Send what `sign` signed, close the wallet and return the transaction hashes. A lost answer throws
+   * `sweep-relay-unknown`; the session token stays valid, and the same signed set is never relayed twice. */
   relay(request: SweepRelayRequest): Promise<SweepRunResult>;
   /** Perform the withdrawal as a whole (`sign` + `relay`). */
   run(request: SweepRunRequest): Promise<SweepRunResult>;
@@ -1743,12 +1744,14 @@ export interface SweepSignResult {
   readonly swept: string;
 }
 
-/** Sending what was signed: the session token `sign` returned. */
+/** Sending what was signed: the session token `sign` returned. The token stays valid when the answer is unknown. */
 export interface SweepRelayRequest {
   readonly token: string;
 }
 
 export interface SweepRunResult {
+  /** Every signed transaction was relayed. A lost answer throws `sweep-relay-unknown` instead. */
+  readonly outcome: "sent";
   readonly txids: readonly string[];
   readonly swept: string;
 }
@@ -1991,6 +1994,7 @@ export type ErrorCode =
   /** A wallet/node reported a withdrawal fee above the SDK's ceiling; the transfer is refused. */
   | "sweep-fee-too-high"
   | "sweep-fee-unknown"
+  | "sweep-relay-unknown"
   /** The maker declines to pay the claim gas; the refusal is shown before the deal (issue #78). */
   | "gas-refused-by-maker"
   /** The claim gas was ordered but the recipient's balance did not grow. */

@@ -31,6 +31,22 @@ const xmrAmountOf = (value) => {
 const MIN_PASSPHRASE = 12;
 const STEPS = ["unlock", "sync", "sweep", "relay"];
 
+// The transaction ids the signed set can name before the wallet answers. They are a hint for the caller's chain
+// check, not proof that a relay happened.
+const txidsOf = (signed) => {
+  const list = Array.isArray(signed) ? signed : (signed === null || signed === undefined ? [] : [signed]);
+  const ids = [];
+  for (const tx of list) {
+    let id = null;
+    try {
+      id = tx && typeof tx.getHash === "function" ? tx.getHash()
+        : (tx && (typeof tx.hash === "string" ? tx.hash : (typeof tx.txid === "string" ? tx.txid : null)));
+    } catch { id = null; }
+    if (typeof id === "string" && id) ids.push(id);
+  }
+  return ids;
+};
+
 // A NODE MUST NOT BE ABLE TO SET THE WITHDRAWAL FEE. The node's estimate reaches the SDK through the wallet,
 // and an untrusted node can answer with most of the balance. The absolute ceiling is deliberately far above a
 // normal priority fee (0.01 XMR) while still rejecting a percentage-sized charge. A caller that needs another
@@ -403,7 +419,7 @@ export function createSweep({ call = null, fetchImpl = null } = {}) {
         });
         if (!feeVerdict.ok) throw new SdkError(feeVerdict.code, { fee: feeVerdict.fee, limit: feeVerdict.limit, amount: feeVerdict.amount, why: feeVerdict.why });
         const token = "sweep-" + (++sessionSeq);
-        sessions.set(token, { wallet, plan, signed });
+        sessions.set(token, { wallet, plan, signed, relayAttempted: false, txids: [] });
         return {
           token,
           amount: unlocked.toString(),
@@ -425,21 +441,41 @@ export function createSweep({ call = null, fetchImpl = null } = {}) {
 
     // SENDING THE SIGNED AND MARKING THE WITHDRAWAL. Sending is split from signing by the same seam as the session:
     // the person has time to see the transfer before it leaves.
+    //
+    // A LOST ANSWER IS NOT A LOST SIGNATURE. The session stays open when the wallet throws or answers without a
+    // transaction id: the signed set may already be on the Monero network, and deleting the handle would make it
+    // impossible to check. The same token never sends that set again; a later call reports the same unknown state.
     async relay(request) {
       if (!request || typeof request.token !== "string" || !request.token) throw new SdkError("bad-input", { field: "token" });
       const session = sessions.get(request.token);
       if (!session) throw new SdkError("bad-input", { field: "token", why: "no-open-session" });
-      sessions.delete(request.token);
-      const { wallet, plan, signed } = session;
-      try {
-        const txids = await wallet.relay(signed);
-        const list = Array.isArray(txids) ? txids : [];
-        // NO SERVICE REPORT. The transfer is on the Monero network; the SDK does not ask the page's own host to
-        // record it, so the host cannot link the visitor's IP to the escrow and the withdrawal.
-        return { txids: list, swept: plan.address };
-      } finally {
-        await wallet.close();
+      if (session.relayAttempted) {
+        throw new SdkError("sweep-relay-unknown", { token: request.token, why: "already-attempted",
+          outcome: "unknown", txids: session.txids, swept: session.plan.address });
       }
+      session.relayAttempted = true;
+      const { wallet, plan, signed } = session;
+      let txids;
+      try {
+        txids = await wallet.relay(signed);
+      } catch {
+        session.txids = txidsOf(signed);
+        throw new SdkError("sweep-relay-unknown", { token: request.token, why: "answer-lost",
+          outcome: "unknown", txids: session.txids, swept: plan.address });
+      } finally {
+        // Closing must not hide the relay outcome. The session still holds the signed set when the answer is unknown.
+        try { await wallet.close(); } catch { /* the close result is not the transfer result */ }
+      }
+      const list = Array.isArray(txids) ? txids.filter((txid) => typeof txid === "string" && txid) : [];
+      if (!list.length) {
+        session.txids = txidsOf(signed);
+        throw new SdkError("sweep-relay-unknown", { token: request.token, why: "answer-txid",
+          outcome: "unknown", txids: session.txids, swept: plan.address });
+      }
+      sessions.delete(request.token);
+      // NO SERVICE REPORT. The transfer is on the Monero network; the SDK does not ask the page's own host to
+      // record it, so the host cannot link the visitor's IP to the escrow and the withdrawal.
+      return { outcome: "sent", txids: list, swept: plan.address };
     },
 
     // THE WITHDRAWAL AS A WHOLE - THE SAME ORDER, ONE CALL. This is a WRAPPER over sign and relay, NOT a second
