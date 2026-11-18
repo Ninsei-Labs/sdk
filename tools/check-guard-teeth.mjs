@@ -54,6 +54,10 @@ const cases = [
     to: "&& log.removed !== true", wants: "a foreign reactor address",
   },
   {
+    check: "uniswap-relay-refusal", source: "src/legs/uniswaprelay.mjs", name: "a removed event is accepted",
+    from: "    && log.removed !== true", to: "", wants: "a removed event",
+  },
+  {
     check: "fees", source: "engine/evm/fees.js", name: "the buy fee is omitted from funding",
     from: "totalWei: feeOnTop ? amount + fee : amount", to: "totalWei: amount", wants: "fee roles and wei",
   },
