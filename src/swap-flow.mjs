@@ -156,6 +156,7 @@ export async function runAtomicOrder({
       onProgress: (step) => say("verify", step.phase === "sum"
         ? `summing commitments: ${step.done} of ${step.total}`
         : `verifying DLEQ proof: ${step.done} of ${step.total}`),
+      ...(typeof deps.yieldTo === "function" ? { yieldTo: deps.yieldTo } : {}),
     };
     const mine = await buildSide(order, chunkOptions);
     say("half", "side-ready");

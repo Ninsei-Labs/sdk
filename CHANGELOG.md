@@ -1,7 +1,7 @@
 ## Unreleased — 2026-11-18
 
 - The security inventory covers lock/funding, sweep/recovery, DEX legs and amount/fee modules; the map labels itself as inventory lint and no longer claims executable evidence.
-- `quotes.firmRelay` and `swaps.start` are driven with an injected chunk clock in the checks, so their chunked proof path is tested instead of grepped.
+- `quotes.firmRelay`, `swaps.start` and the atomic flow are driven with an injected chunk clock, and a ready record is proven to reuse the known halves without a second proof.
 - The deployment-pins check ignores CRLF-only differences, so a Windows checkout is current; a real content change still fails.
 - Relay quote verification uses the caller's clock seam instead of `Date.now()`, so an injected clock controls the expiry check.
 - `order.escrowNativeWei` accepts only a canonical decimal string, or a safe number. It refuses a significant digit beyond `nativeDecimals`, exponent form, and a number above `Number.MAX_SAFE_INTEGER`; it never truncates the signed amount. The guard is in the full battery and has a breaking-run suite.

@@ -100,6 +100,21 @@ console.log("=== 3) A MISSING CLAIMER IS NAMED BEFORE ANY WORK ===");
   else bad("missing claimer: " + JSON.stringify(result && (result.code || result)));
 }
 
+console.log("=== 4) THE DEFAULT FLOW USES THE CHUNKED BUILDERS ===");
+{
+  let yields = 0;
+  const result = await runAtomicOrder({
+    chainSlug: "arbitrum-sepolia", locker: LOCKER, claimer: CLAIMER, amountWei: 10n ** 18n, amountLabel: "1 ETH",
+    deps: {
+      yieldTo: async () => { yields += 1; },
+      fundOrderLive: async (request) => funding()(request),
+    },
+  }).catch((error) => error);
+  if (result && result.escrow === "0x" + "ee".repeat(20) && yields > 0) {
+    ok("the default flow yields through its chunked builders");
+  } else bad("the default flow did not reach the chunked builders: " + JSON.stringify({ escrow: result && result.escrow, yields, code: result && result.code }));
+}
+
 console.log("");
 console.log(fails.length ? "FAILED: " + fails.length + " (passed " + pass + ")" : "atomic flow: " + pass + " checks passed.");
 if (fails.length) process.exit(1);

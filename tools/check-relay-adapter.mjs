@@ -499,7 +499,7 @@ console.log("=== 9b) A DEFAULT CLIENT APPLIES THE NETWORK FACTORY POLICY ===");
   try {
     await facade.quotes.firmRelay({ ...baseRequest, features: nodeFeatures({ registry: deployedRegistry }), order,
       fetchImpl: relayFetch().fetchImpl });
-    bad("a default client accepted a factory whose code is not the pinned build");
+    bad("a default client accepted a factory code outside the policy");
   } catch (error) {
     if (error && error.code === "quote-factory-code-unknown") ok("a default client applies the network factory policy");
     else bad("a default client gave " + JSON.stringify(error && (error.code || error.message)) + " " + JSON.stringify(error && error.params));
