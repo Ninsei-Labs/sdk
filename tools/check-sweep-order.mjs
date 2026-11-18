@@ -1,4 +1,4 @@
-// A FOUND ORDER AND THE KEY (sdk#92, item 5): build the sweep payload without a recovery file.
+// A FOUND ORDER AND THE KEY: build the sweep payload without a recovery file.
 //
 // The page used to assemble the SDK's own payload from the order and the key. That rule is now here: the side,
 // the person's spend and view points, the other side's points, the joint address and the restore height.

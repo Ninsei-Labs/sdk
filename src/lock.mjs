@@ -1,35 +1,24 @@
 // LOCKING THE FUNDS: TERMS FIRST, THEN SENDING.
 //
-// The first half of the step is here - assembling and CHECKING the order terms BEFORE anything goes on-chain. The
-// rules are not ours: the contract sets them, and the engine already checks them (`www/js/evm/escrow.js`,
-// `orderTerms`). The core will not hold a copy of the rules: a copy would drift from the contract right where the
-// error shows up only as a rejected transaction.
+// This module assembles and checks the order terms before anything goes on-chain. The contract sets the rules.
+// The engine checks them; this module does not keep a second copy.
 //
-// WHAT IS HERE: both the assembly of the terms and the sending itself - it goes through the engine's EVM layer
-// (`fundOrder`), and the EVM wallet (the `send`/`receipt` role) comes from outside. What reads the chain is also a
-// seam: by default the engine's read, but the caller can substitute its own (as in actions.mjs).
+// The send goes through the engine's EVM layer and the external wallet adapter. The chain read is a seam: the engine
+// read by default, or a caller substitute.
 import { SdkError } from "./errors.mjs";
 import * as engine from "./engine.mjs";
-// THE DEAL FLOW IS A PACKAGE MODULE NOW (#32, wave 3): the registry address is read through it, exactly as
-// the actions read the order flow.
+// The deal flow is a package module. The registry address is read through it, as the actions read the order flow.
 import * as flow from "./swap-flow.mjs";
 import { assertWalletChain } from "./chainGuard.mjs";
 
-// THE ORDER'S WORD-ADDRESSES ARE BROUGHT TO 0x HERE, AT THE BOUNDARY, NOT AT EVERY CALLER.
-//
-// The engine returns the points and commitments WITHOUT the 0x prefix (that is how www/js/atomic/halves.js stores
-// them), while the calldata encoder (www/js/evm/factory.js, word) REQUIRES the prefix and refuses "not a number
-// and not hex" on 64 digits without one. The page normalises them on its side (sdk/src/swap-flow.mjs, with0x)
-// for exactly this reason. The core must do the same ITSELF: otherwise every caller would repeat the
-// normalisation, and one forgetful one would break the signature with the encoder's raw error. The list is
-// exactly the fields encoded as bytes32 that do NOT enter the order context string (otherwise the normalisation
-// would drift from the proof, which is bound to the context): two half commitments and three ed25519 points.
+// Bring these bytes32 fields to 0x form once, at the boundary. The encoder requires the prefix. These are the
+// fields encoded as bytes32 that do not enter the order context string.
 const HEX_POLICY_FIELDS = ["commitHalfLocker", "commitHalfClaimer", "edPointLocker", "edPointClaimer", "edViewPointLocker"];
 const with0x = (v) => (typeof v === "string" && v && !/^0x/i.test(v) ? "0x" + v : v);
 
 /**
- * The order terms in canonical form: points and commitments - with the 0x prefix. One form for the check and for
- * sending - otherwise one thing would be checked and another encoded.
+ * The order terms in canonical form: points and commitments with the 0x prefix. One form for the check and for
+ * sending.
  */
 export function canonicalTerms(request) {
   if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
@@ -109,27 +98,17 @@ export async function send(request, wallet, deps = {}) {
       receipt: (arg) => wallet.receipt(typeof arg === "string" ? arg : (arg && typeof arg.hash === "string" ? arg.hash : arg)),
     });
   } catch (error) {
-    // AN ALREADY-NAMED REASON PASSES AS IS: the adapter's and the reader's codes (wrong-chain, server-unavailable,
-    // contract-reverted, bad-input) ARE the answer, and it must not be overridden.
+    // A named reason passes as is. The adapter and reader codes are the answer and must not be overridden.
     if (error && typeof error.code === "string") throw error;
-    // THE REST USED TO HIDE BEHIND server-unavailable { step: "fund-order" }, and the real reason (the first live
-    // run: "locker and claimer cannot coincide") never reached the caller. Now the reason is NAMED as a string
-    // (briefly, without keys), and the code is chosen by it: transport - server-unavailable, order/data
-    // validation - bad-input.
+    // Name the reason and choose the code by it: transport is server-unavailable, order or data is bad-input.
     const why = sanitizeWhy((error && error.message) || error);
     throw new SdkError(transportish(why) ? "server-unavailable" : "bad-input", { step: "fund-order", why });
   }
 }
 
 /**
- * The escrow factory address for a network: FROM THE NETWORK REGISTRY, by the same path as the rest of the core.
- * The registry is read through the deal-flow module (sdk/src/swap-flow.mjs, escrowFactoryAddress) - the core
- * keeps no SECOND table of addresses.
- *
- * PREVIOUSLY THE FUNCTION LOOKED IN THE WRONG MODULE (www/js/evm/escrow.js, which has no such function) and
- * ALWAYS returned null - that is, the seam stayed silent about the factory's absence, and the caller took the
- * address elsewhere. Now the absence of a factory for a network is a REFUSAL WITH A CODE naming the network, not
- * null.
+ * The escrow factory address for a network, read from the network registry through the deal-flow module. An unknown
+ * network is a refusal with a code, not null.
  */
 export function factoryOf(chainSlug) {
   let address = null;

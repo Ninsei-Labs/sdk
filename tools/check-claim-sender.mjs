@@ -1,4 +1,4 @@
-// THE CLAIM SENDER POLICY (#18): the half is revealed by the sender, so the package sends a claim only from the
+// THE CLAIM SENDER POLICY: the half is revealed by the sender, so the package sends a claim only from the
 // claimer's own wallet. The rule is pure and is checked here without a chain.
 import { claimSenderVerdict } from "../src/actions.mjs";
 

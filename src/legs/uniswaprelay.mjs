@@ -340,7 +340,7 @@ export async function uniswapRelayStatus({ orderHash, chainId = null, reactor = 
  * hash exists or the order is finally dead, with a timeout. Returns:
  *   { ok: true, done: true, settled: true,  status: "filled" }   - the reactor relayed the order;
  *   { ok: true, done: true, settled: false, status: "expired" }  - the deadline passed with no event;
- *   { ok: false, code: "uniswap-relay-not-settled" | "uniswap-relay-unreachable" | ... } - a NAMED refusal.
+ *   { ok: false, code: "uniswap-relay-not-settled" | "uniswap-relay-unreachable" |... } - a NAMED refusal.
  * This observes the REAL on-chain effect (the event), never an answer from a service. The clock and the sleep are
  * injectable so the wait is testable without real time.
  */

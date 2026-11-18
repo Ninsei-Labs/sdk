@@ -121,7 +121,7 @@ export function createSwap(input, store = null) {
   return swap;
 }
 
-// REVERSE-FLOW DEAL RECORD . The sell screen used to stop at the request, and there was
+// REVERSE-FLOW DEAL RECORD. The sell screen used to stop at the request, and there was
 // nowhere to show a refund: a reverse deal had no record. It is created here - from exactly what the screen
 // already has (the node ticket plus the computed halves) - and lands in the same store as the buy flow, so the
 // deal card, the recovery file and the XMR sweep all work off it.
@@ -496,7 +496,7 @@ export function derive(swap, now = nowReal()) {
   if (swap.settlement) {
     phase = swap.settlement.phase;
     phaseLabel = Object.values(TERMINAL).find((x) => x.phase === swap.settlement.phase)?.label || "Settled";
-    // SWEEPING OUR OWN XMR AFTER A REFUND . On the reverse flow a refund leaves the
+    // SWEEPING OUR OWN XMR AFTER A REFUND. On the reverse flow a refund leaves the
     // user's coins on the swap's one-time address: the claimer's ETH came back, and nobody moved the XMR. They can
     // only be taken by assembling the spend key from OUR half and the OTHER half that the chain revealed on
     // settlement. While the revealed half is missing we do NOT grant the right - can.sweep stays false precisely
@@ -737,7 +737,7 @@ export function derive(swap, now = nowReal()) {
     },
     // What is real now and what is a simulation. The UI must show this, not guess.
     // The EVM leg is simulated if and only if the deal's network is not switched to live. It used to stand as a
-    // hard true, and on a LIVE deal with a real escrow the screen wrote "EVM leg ... is still simulated" - i.e.
+    // hard true, and on a LIVE deal with a real escrow the screen wrote "EVM leg... is still simulated" - i.e.
     // lied, although the order existed in the contract. The mark comes from the network settings, not from a
     // field in the deal: the field is set at creation, and deals created earlier still have "mock" there.
     simulated: { evm: !isLiveNetwork(swap), xmr: !xmr.live },

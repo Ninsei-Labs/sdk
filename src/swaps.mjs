@@ -29,15 +29,15 @@ import { probeMoneroNode } from "./probes.mjs";
 // the slots against the chain BEFORE signing (actions.markReady). The watch must call exactly it, otherwise "we saw
 // the XMR" and "we allowed the settlement to be taken" would diverge.
 import { createActions } from "./actions.mjs";
-// THE ONE RECOVERY KEY (sdk#76): the taker's halves come from it, not from a fresh random pair per swap.
+// THE ONE RECOVERY KEY: the taker's halves come from it, not from a fresh random pair per swap.
 import {
   createRecoveryKeyFile, importRecoveryKey, loadRecoveryKey,
   recoveryKeyFileName, recoverySaltOf, saveRecoveryKey,
   newRecoverySalt, takerHalvesV2,
 } from "./recovery-key.mjs";
-// THE XMR ARRIVAL CHECK ON TWO NODES (issue #85) - IN THE CORE, from the same mirrored rule and block parser.
+// THE XMR ARRIVAL CHECK ON TWO NODES - IN THE CORE, from the same mirrored rule and block parser.
 import * as xmrArrival from "./xmr-arrival.mjs";
-// THE MAKER'S DECLINE (issue #40): the escrow's `Declined` event is the decision. The node's `declined` +
+// THE MAKER'S DECLINE: the escrow's `Declined` event is the decision. The node's `declined` +
 // `compliance` status is an observation on the wire, not a second source this file trusts; the detectors and the
 // neutral vocabulary live in one module, so this file names the state instead of re-reading either.
 import { declineOf, logReaderOf, blockBoundaryOf, DECLINED_TOPIC0, DECLINED_TERMINAL, DECLINED_CODE } from "./decline.mjs";
@@ -46,34 +46,9 @@ import { readReadyWindow, readyLeadSec, readyLateSec, readyWindowMs } from "./re
 // signed tip. This module speaks that one wire; swaps.mjs decides which record may be claimed.
 import { relayOriginOf, addressTextOf, halfTextOf, postRelayClaim } from "./relayClaim.mjs";
 
-// THE ENGINE'S SETTLEMENT KINDS -> THE CONTRACT'S CODES: THE KEY IS THE KIND THE ENGINE REALLY WRITES.
-//
-// The map used to be keyed by names no code path writes - `refunded` for a refund (the engine writes
-// `kind: "refund_eth"`), and `xmr_returned` and `closed`, for which no settlement with that kind is written
-// anywhere in the engine or in this package. A REFUND therefore never met its key and fell into the fallback:
-// get/list/progress told the app `closed` about an order whose ETH was already back in the wallet - the very
-// distinction that became load-bearing once the maker's decline was made a state of its own (issue #40).
-//
-// WHAT CAN BE A KIND, EXHAUSTIVELY. The record's settlement belongs to the engine (engine/core/swap.js, the only
-// module that assigns swap.settlement), and `declined` is the one kind written by us (src/decline.mjs):
-//   `success`    - the swap completed and the XMR is on the depositor's address (sweepNow and the auto-sweep in the
-//                  ticker; the SDK does not take it from a backend session);
-//   `refund_eth` - the ETH went back to the depositor. TWO WRITERS, ONE KIND: the person's own refund (refundEth)
-//                  and the watchtower inside the ticker both write `kind: "refund_eth"` with the phase
-//                  `refunded_eth`, so there is exactly ONE refund-shaped kind here and nothing is collapsed;
-//   `declined`   - the maker refused a funded order. Not the engine's: the escrow reads `refunded` either way, so
-//                  the engine cannot tell a decline from a refund, and the SDK writes this kind itself when it SEES
-//                  the decline (src/decline.mjs). From then on every surface that reads the record reports it
-//                  without asking the chain again.
-//
-// AND WHAT IS NOT A KEY: an unknown kind is named, not invented - it comes out as "closed", the fallback in
-// toState below, which is why `closed` is a code here and not a key (no settlement carries that kind; the string
-// `closed` in the engine is the XMR SESSION's status vocabulary, not a settlement). The maker taking the XMR back
-// without a ready mark is NOT a kind either: it does not end a swap - the depositor's ETH is still in the escrow -
-// so it is a PHASE of a live swap (`xmr_reclaimed`, engine/core/swap.js, told apart by that code from the maker who
-// never locked), and the swap ends later as `refunded_eth`. `xmr_returned`, which stood in the engine's terminal
-// table and in the `TerminalCode` type as a state nothing could produce, is gone with it. Every one of these facts
-// is asserted by the `terminal` check rather than left to a reader.
+// The engine writes `success` and `refund_eth`. The SDK writes `declined` when it sees the maker's decline.
+// An unknown kind is not invented: it becomes `closed` in toState. `closed` is a code, not a settlement kind.
+// The `terminal` check asserts these facts.
 const TERMINAL = {
   success: "success",
   refund_eth: "refunded_eth",
@@ -81,8 +56,7 @@ const TERMINAL = {
 };
 
 const num = (v) => {
-  // NULL/UNDEFINED/EMPTY IS NOT ZERO. `Number(null)` is 0, which made every unknown amount look measured as empty;
-  // a missing number is a missing fact and the state/interface must see null.
+  // Null, undefined and empty are not zero. A missing number is a missing fact, and the state must see null.
   if (v === null || v === undefined || v === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
@@ -217,7 +191,7 @@ export function toState(swap) {
       status: d.phase || null,
       txs: (swap.escrow && (swap.escrow.txids || swap.escrow.txs)) || [],
     },
-    // A DECLINED ORDER OFFERS NOTHING, AND THAT IS THE POINT OF THE STATE (issue #40). The ETH - the fee
+    // A DECLINED ORDER OFFERS NOTHING, AND THAT IS THE POINT OF THE STATE. The ETH - the fee
     // included - is already back in the depositor's wallet and no half was revealed, so there is no ready mark to
     // place, no XMR to sweep and NO REFUND TO SIGN: the flags are OFF rather than left to whatever the engine's
     // `can` says about an order whose escrow merely reads `refunded`. The app needs no second source for "there
@@ -420,12 +394,12 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
   // THE MONERO TIMINGS ARE BROUGHT BY THE CONFIGURATION: the watch's rate and timeout live in config.limits. There is
   // no server step and no route table to consult.
   config = null,
-  // THE INTERFACE'S ADDRESS DENYLIST (issue #16), a Set of lower-cased addresses already assembled by the facade.
+  // THE INTERFACE'S ADDRESS DENYLIST, a Set of lower-cased addresses already assembled by the facade.
   // The check on the ACTUAL sender is done in start() below, ONE place, right before the send - the wallet adapter
   // only HANDS OUT the current account (`address()`), it does not carry the policy.
   denylist = null,
   watch: watchOptions = null,
-  // THE CHAIN LOG READER FOR THE DECLINE CHECK (issue #40). A seam, as the chain read is: by default the logs are
+  // THE CHAIN LOG READER FOR THE DECLINE CHECK. A seam, as the chain read is: by default the logs are
   // read through the page's wallet (`readDeclinedLogs`), and from outside a caller brings its own
   // ({ address, topics, fromBlock, toBlock }) -> logs. It is a READ of the escrow's own event, not a node
   // substitution - the address is the escrow of the swap being watched.
@@ -820,7 +794,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
     assertTimeForConfirmations: (request) => xmrArrival.assertTimeForConfirmations(request),
 
     /**
-     * THE CLIENT'S OWN EARLY REFUND WHEN THE XMR DID NOT ARRIVE (issue #88). After `readyBy` the maker may claim
+     * THE CLIENT'S OWN EARLY REFUND WHEN THE XMR DID NOT ARRIVE. After `readyBy` the maker may claim
      * even without the ready mark, and the early-refund window closes; so while the interface is open a depositor
      * who sees no XMR must take the ETH back BEFORE `readyBy`. The arrival is decided by THE SAME rule the watch
      * uses (xmr-arrival.verifyArrival): two nodes of different operators on one block, and money barred by
@@ -1196,7 +1170,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       if (!wallet || typeof wallet.send !== "function" || typeof wallet.receipt !== "function") {
         throw new SdkError("bad-input", { field: "wallet", missing: ["send", "receipt"], surface: "swaps.start", step: "lock" });
       }
-      // THE INTERFACE'S ADDRESS DENYLIST, ON THE ACTUAL SENDER (issue #16). The person may have switched accounts
+      // THE INTERFACE'S ADDRESS DENYLIST, ON THE ACTUAL SENDER. The person may have switched accounts
       // in the wallet, so what matters is the address the funding transaction will really be sent from AT THIS
       // MOMENT, not `order.locker` checked earlier. The wallet adapter hands out the current account (the adapter's
       // `address()` reads `eth_accounts[0]`); the comparison lives HERE, one place, right before the send - not
@@ -1227,7 +1201,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       } : {};
       const lockRequest = { ...request.order, ...derived, amountWei: request.order.amount };
       // THE SIGNED QUOTE: the fee, the registry address and the provider live in IT, not in the factory
-      // (decision #76). The caller brings it (the interface got it from the maker); without it the lock is not signed.
+      //. The caller brings it (the interface got it from the maker); without it the lock is not signed.
       // THE QUOTE MUST NAME THE SAME COUNTERPARTY HALF THAT WAS VERIFIED. `orderStep` verifies
       // `request.counterparty`, while funding encodes `request.orderQuote`; a caller that brings both can otherwise
       // prove one point and fund another. The same comparison is repeated in funding.js, at the money boundary.
@@ -1400,7 +1374,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
               : (config && typeof config.nodesFor === "function" ? config.nodesFor(request.verify.network || request.network || xmrNetwork) : []),
             minConfirmations }
         : null;
-      // LESS TIME LEFT THAN THE CONFIRMATIONS TAKE - NAMED AND NOT STARTED (issue #85, the owner's decision).
+      // LESS TIME LEFT THAN THE CONFIRMATIONS TAKE - NAMED AND NOT STARTED.
       if (verifyRequest) {
         if (!readyWindowRaw) throw new SdkError("bad-input", { field: "readyWindow", why: "not-in-record" });
         const readyWindow = readReadyWindow(readyWindowRaw, { side: "ask", field: "readyWindow" });
@@ -1428,7 +1402,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       }
       if (!moneroAddress) throw new SdkError("bad-input", { field: "verify.address", why: "not-in-record" });
       const started = Date.now();
-      // --- THE MAKER'S DECLINE: THE WAIT IS NOT STARTED AT ALL (issue #40). -------------------------------------
+      // --- THE MAKER'S DECLINE: THE WAIT IS NOT STARTED AT ALL. -------------------------------------
       // A decline leaves the escrow `refunded`, so nothing in the state says "do not wait any longer": without
       // this, the wait runs to its timeout and the app is told the generic `xmr-timeout` about an order that is
       // CLOSED and whose ETH is already back - or, worse, the app offers the recovery file and a manual refund

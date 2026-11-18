@@ -18,7 +18,7 @@ export const FACTORY_METHODS = {
 };
 
 // The OrderCreated event topic. It grew the registry address, the provider and the signing key, and now carries
-// `xmrAmount` in bulk (#32):
+// `xmrAmount` in bulk:
 //   cast keccak "OrderCreated(address,address,address,bytes32,bytes32,bytes32,bytes32,bytes32,uint256,uint256,uint64,uint64,bytes32,address,address,address)"
 // The topic lives in TWO places and both must match; a check pins them.
 export const ORDER_CREATED_TOPIC =

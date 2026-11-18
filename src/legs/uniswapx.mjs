@@ -259,7 +259,7 @@ export async function submitUniswapxOrder({ quote = null, signature = null, rout
 }
 
 /**
- * READ ONE ORDER by its hash. GET /orders?orderHash=<hash> -> { orders: [ ... ] }. The entry's `orderStatus` must be
+ * READ ONE ORDER by its hash. GET /orders?orderHash=<hash> -> { orders: [... ] }. The entry's `orderStatus` must be
  * a known status word (else "uniswapx-bad-response"); an empty list means the service does not know the order
  * ("uniswapx-order-unknown") - never silence, never null.
  */
@@ -299,8 +299,8 @@ export async function uniswapxOrderStatus({ orderHash, chainId = null, fetchImpl
  * WHAT ENDS AN ASYNCHRONOUS PROVIDER'S EXECUTION - poll the order service until the order is settled or finally
  * dead, with a timeout. Returns:
  *   { ok: true, done: true, settled: true,  status: "filled" }                                    - the swap settled;
- *   { ok: true, done: true, settled: false, status: "expired" | "error" | "cancelled" | ... }      - finally dead;
- *   { ok: false, code: "uniswapx-not-settled" | "uniswapx-unreachable" | ... }                     - a NAMED refusal.
+ *   { ok: true, done: true, settled: false, status: "expired" | "error" | "cancelled" |... }      - finally dead;
+ *   { ok: false, code: "uniswapx-not-settled" | "uniswapx-unreachable" |... }                     - a NAMED refusal.
  * "Not settled in time" is its OWN code: "we did not wait long enough" is a state of the order, not a breakdown.
  * The clock and the sleep are injectable so the wait is testable without real time.
  */

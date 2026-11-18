@@ -22,7 +22,7 @@
 //
 // WHY IT IS IN THE PACKAGE. The deal engine is business logic, so it belongs to the package (@ninsei-labs/sdk).
 // The page reaches it through ONE seam (its bridge) by module name. The engine modules it needs are read through
-// ./engine.mjs; what lives here is the RULES, not the crypto.
+//./engine.mjs; what lives here is the RULES, not the crypto.
 import { SdkError } from "./errors.mjs";
 import * as engine from "./engine.mjs";
 // THE HALF'S COMMITMENT, COMPUTED LOCALLY. The escrow checks the low 160 bits of `keccak256(x||y)` of `half*G`
@@ -30,7 +30,7 @@ import * as engine from "./engine.mjs";
 // the half ever leaving this process.
 import { halfCommitmentHex } from "../engine/atomic/orderHalfCommit.js";
 import { keccak256, secp256k1 } from "./primitives.mjs";
-// THE MAKER'S DECLINE (issue #40) - the escrow's `Declined` event and the neutral vocabulary the state is
+// THE MAKER'S DECLINE - the escrow's `Declined` event and the neutral vocabulary the state is
 // reported in. It is its own module because TWO surfaces ask the same question (this flow and the swaps watch)
 // and a second implementation of the same event would be a second truth about it.
 import { declinedFromLogs, logReaderOf, blockBoundaryOf, DECLINED_TOPIC0 } from "./decline.mjs";
@@ -63,7 +63,7 @@ export function escrowFactoryAddress(chainSlug) {
   return address;
 }
 
-// THE INTERFACE FEE CASHIER (#103): the address comes from the network registry, like the factory. The factory
+// THE INTERFACE FEE CASHIER: the address comes from the network registry, like the factory. The factory
 // no longer creates the cashier - it arrives in the ORDER TERMS, and without it no quote under the order can be
 // assembled.
 export function escrowCashierAddress(chainSlug) {
@@ -91,43 +91,32 @@ export async function runAtomicOrder({
   const cashier = escrowCashierAddress(chainSlug);
   const chain = chainById(chainSlug || DEFAULT_CHAIN);
 
-  // THE DEADLINES AND THE SALT ARE DECIDED HERE, BEFORE THE PROOF, AND NOWHERE ELSE.
+  // The deadlines and the salt are decided here, before the proof. The proof is bound to the order terms, which
+  // include both. Funding must not choose a different set later: the counterparty would reject the proof, while the
+  // local side would look healthy.
   //
-  // This is the very reason the context stopped being a string from the caller. The proof is bound to the order
-  // terms, and the terms include the deadlines and the salt. While the funding module decided them - that is,
-  // AFTER the computation - the proof was bound to one set of deadlines while a different set went into the
-  // contract: the check would fail at the counterparty, and on our own side everything would look healthy.
-  // The salt here is the same in meaning as before: it determines the escrow address, so repeating an order must
-  // come with the previous salt, otherwise a second escrow is created instead of the same one.
+  // The salt determines the escrow address. A repeated order must use the previous salt, or it creates a second
+  // escrow instead of the same one.
   const nowSec = Math.floor(Date.now() / 1000);
   const readyBy = nowSec + readyWindowSeconds;
-  // t1 IS THE WINDOW AFTER readyBy, NOT "from now" (issue #88): the owner's claim window equals an hour AFTER the
-  // readiness deadline. The flat formula "now + claimWindowSeconds" at a 4-hour readyBy gave t1 EARLIER than
-  // readyBy, that is, an order created already closed (this is what check-atomic-flow caught).
+  // t1 is the window after readyBy, not "from now". The claim window starts after the readiness deadline.
   const t1 = readyBy + claimWindowSeconds;
   const salt = providedSalt || newSecret();
 
-  // THE CONTEXT IS ASSEMBLED FROM THE ORDER FIELDS - by the same code as the provider node's and any verifier's.
-  // The provider's half is derived from THESE SAME terms, so its proof will agree only here.
-  // ONE ORDER OBJECT - ONE SOURCE OF FIELDS. Both the proof context and the quote request to the provider are
-  // assembled from it. A second copy of these fields would diverge exactly where it costs the most: the provider
-  // would derive its half from one set of terms while the proof was computed over another.
+  // The context is assembled from the order fields by the same rule a provider or verifier uses. The proof binds to
+  // these terms, so there is one order object for the proof and the quote request. A second copy would diverge where
+  // it costs the most.
   //
-  // THERE IS NO CLAIMER HERE, AND THAT IS FUNDAMENTAL. The contract pays whoever is recorded as claimer, and at
-  // claim time the half is revealed by whoever claims. So only the PROVIDER can name the claimer: it holds the
-  // half and its address must receive the money. While the application substituted its own value, the provider
-  // got an order with a foreign address and could not claim the ETH for it - the half stayed with it while the
-  // money went to someone else. That is why the claimer comes in the quote, and the context is assembled AFTER
-  // the quote.
+  // There is no claimer here. The contract pays the recorded claimer, and at claim time the half is revealed by
+  // whoever claims. Only the provider can name the claimer: it holds the half and must receive the money. The claimer
+  // therefore comes in the quote, and the context is assembled after the quote.
   const orderBase = {
     chainId: chain.chainId, factory, cashier, locker,
     amount: String(amountWei), readyBy: String(readyBy), t1: String(t1), salt,
     asset: "XMR",                  // what the user receives; not part of the context (it follows from the pair and network)
   };
-  // THERE IS NO HASHLOCK AND ENVELOPE HERE ANY MORE. Under the scheme of doc 27 the order carries BOTH half
-  // commitments and BOTH public ed25519 points, and the half is published by the settlement itself
-  // (claim/refund). The secret that used to be placed in the recovery file is now MY HALF: it is exactly what is
-  // needed to claim the XMR.
+  // The order carries both half commitments and both public ed25519 points. Settlement publishes the half. The secret
+  // in the recovery file is my half: exactly what is needed to claim the XMR.
   const say = (stage, detail) => onStage?.(stage, detail);
   {
     // THE QUOTE FIRST, THEN YOUR OWN SIDE. The order of steps is set by the fact that the claimer is named by the
@@ -366,7 +355,7 @@ export async function orderStatus(escrow, deps = {}) {
 }
 
 /**
- * THE ESCROW'S `Declined` EVENT - THE MAKER'S OWN CLOSING OF A FUNDED ORDER (issue #40).
+ * THE ESCROW'S `Declined` EVENT - THE MAKER'S OWN CLOSING OF A FUNDED ORDER.
  *
  * WHY THE EVENT AND NOT `status()`. Read on its own, `status()` cannot tell a decline from an ordinary refund:
  * both set `refunded` and send the whole balance back to the locker. The escrow keeps NO getter that names a
@@ -539,7 +528,7 @@ async function simulateAction(escrow, data, what, deps) {
 // A DRY RUN MUST NOT HAND THE HALF TO THE RPC. `eth_call` goes to a public endpoint by default, so simulating
 // `claim(half)` or `refund(half)` publishes the half to a third party while the escrow is still open and the ETH
 // has not moved. Whoever keeps that call holds both halves of the Monero key when the person declines the
-// transaction in the wallet or the send never lands (sdk#291).
+// transaction in the wallet or the send never lands.
 //
 // The simulation added exactly one check, and it is arithmetic: the half's point commitment must equal the
 // order's. The contract compares the LOW 160 BITS of `keccak256(x||y)` of `half*G`
@@ -573,7 +562,7 @@ async function assertHalfMatchesCommit(escrow, half, slot, what, deps) {
 // lied here: the current contract has NO hashlock field. Instead it has two half commitments -
 // commitHalfClaimer and commitHalfLocker (:74-75), and claim compares the half against the first (:217).
 // In production this is the second half of the Monero spend key, so claiming and revealing the half are one
-// action: the half is published by whoever claims, and it is also obtained by the other side (HalfRevealed, :222).
+// action: the half is published by whoever claims, and it is also obtained by the other side (HalfRevealed,:222).
 export async function claimOrder({ escrow, halfClaimer, expect, onStep, deps = {} }) {
   if (!escrow) throw new SdkError("bad-input", { field: "escrow" });
   if (!halfClaimer) throw new SdkError("bad-input", { field: "halfClaimer" });
@@ -588,7 +577,7 @@ export async function claimOrder({ escrow, halfClaimer, expect, onStep, deps = {
   // the order. No call carries the half until the send.
   await assertHalfMatchesCommit(escrow, halfClaimer, "commitHalfClaimer", "claim", deps);
   onStep?.("confirm-claim");
-  // THE CLAIM GAS LIMIT COMES FROM THE SHARED MODULE, NOT A LITERAL HERE (issue #127): the node lays exactly
+  // THE CLAIM GAS LIMIT COMES FROM THE SHARED MODULE, NOT A LITERAL HERE: the node lays exactly
   // this limit into the gas gift. It is set explicitly and with a margin: claim has the same trap as order
   // creation - the wallet estimates gas over a state that no longer exists on the chain (the same reason is
   // named in the contract, NinseiEscrow.sol:137-138), and the call costs tens of thousands of gas.

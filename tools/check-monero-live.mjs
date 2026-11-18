@@ -8,7 +8,7 @@
 // It mutates only a regtest chain. A node reporting another nettype is refused before mining.
 //
 // Run:
-//   monerod --regtest --offline --fixed-difficulty=1 --rpc-bind-port 38181 ...
+//   monerod --regtest --offline --fixed-difficulty=1 --rpc-bind-port 38181...
 //   MONERO_DAEMON_URL=http://127.0.0.1:38181 node tools/check-monero-live.mjs
 import { addressFromKeys } from "../engine/monero/address.js";
 import { createHalves } from "../engine/atomic/halves.js";

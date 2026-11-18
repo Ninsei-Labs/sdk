@@ -1,4 +1,4 @@
-// SANDBOX: failure scenarios and time. Added on requirement 8 of issue #32 - the interface lays out failure
+// SANDBOX: failure scenarios and time. Added on requirement 8 of - the interface lays out failure
 // screens without waiting for a live testnet.
 //
 // What is deliberately absent, and why: scenarios are applied by the ENGINE (`www/js/mock`, the scenario fields

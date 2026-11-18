@@ -101,25 +101,25 @@ const ROUTE_PROVIDERS = {
   },
   // COWSWAP - AN INTENT AUCTION: "async". The person signs an intent, and the settlement arrives LATER as a separate
   // transaction sent by someone else. Its record therefore carries `settled(...)` - what ends its execution (the
-  // order book reporting the order settled or finally dead). The provider itself lives in ./cow.mjs.
+  // order book reporting the order settled or finally dead). The provider itself lives in./cow.mjs.
   cowswap: cowProvider,
   // KYBERSWAP LIMIT ORDER - A SECOND INTENT AUCTION, ALSO "async". Same role as CoW (the person signs an
   // order, someone else settles it later), a different book and contract. It is the LIQUIDITY leg: its order
-  // trades ERC20 against ERC20 and settles WETH, not native coin (see the scope note in ./kyber.mjs). The
-  // provider itself lives in ./kyber.mjs.
+  // trades ERC20 against ERC20 and settles WETH, not native coin (see the scope note in./kyber.mjs). The
+  // provider itself lives in./kyber.mjs.
   kyberswap: kyberProvider,
   // UNISWAPX - A THIRD INTENT AUCTION, ALSO "async". Same role as CoW (the person signs an order, someone else
   // settles it later) and the same native capability (an output may be the NATIVE sentinel), so it is a SECOND
   // native leg as well as a single native route. Unlike CoW, publishing needs the Uniswap Trading API and an API
-  // key and the order is cosigned by Uniswap Labs (see the scope note in ./uniswapx.mjs). The provider itself
-  // lives in ./uniswapx.mjs.
+  // key and the order is cosigned by Uniswap Labs (see the scope note in./uniswapx.mjs). The provider itself
+  // lives in./uniswapx.mjs.
   uniswapx: uniswapxProvider,
   // THE RELAYED UNISWAP ROUTE - A FOURTH INTENT AUCTION, ALSO "async", AND THE KEY-FREE ONE. Same role as CoW (the
   // person signs an order, someone else settles it later) and the same native capability (the relayed swap unwraps
   // to native), so it is a THIRD native leg as well as a single native route. Its discovery path is the point:
   // Uniswap's own relayer repository documents NO submission endpoint and NO gossip service for a signed relay
   // order, so this provider refuses that step BY NAME ("uniswap-relay-no-discovery") instead of inventing one (see
-  // the scope note in ./uniswaprelay.mjs). The provider itself lives in ./uniswaprelay.mjs.
+  // the scope note in./uniswaprelay.mjs). The provider itself lives in./uniswaprelay.mjs.
   uniswaprelay: uniswapRelayProvider,
 };
 
@@ -134,7 +134,7 @@ export const routeProviderFor = (id) => ROUTE_PROVIDERS[id] || null;
  * synchronous would fund an escrow with nothing behind it - so it is refused BY NAME, with a `reason` token (the
  * same shape of refusal the level book uses), not assumed to be synchronous.
  *
- * Returns { ok: true, provider } or { ok: false, reason, ... } - a refusal as a VALUE, not an exception: the
+ * Returns { ok: true, provider } or { ok: false, reason,... } - a refusal as a VALUE, not an exception: the
  * caller keeps its own wording for the token.
  */
 export const requireSyncProvider = (id) => {
@@ -150,7 +150,7 @@ export const requireSyncProvider = (id) => {
  * THE GATE OF A PATH THAT ASSUMES AN ASYNCHRONOUS INTENT. The mirror of requireSyncProvider: it accepts a provider
  * whose swap settles in a LATER, separate action, and refuses by NAME - never silently - a provider that is
  * unknown, that is in fact synchronous, or that declares itself asynchronous without naming what ends execution
- * (`settled`). Refusals are VALUES: { ok: true, provider } or { ok: false, reason, ... }.
+ * (`settled`). Refusals are VALUES: { ok: true, provider } or { ok: false, reason,... }.
  */
 export const requireAsyncProvider = (id) => {
   const provider = routeProviderFor(id);
@@ -191,7 +191,7 @@ export const providerSettles = (provider) => (provider && provider.settles ? pro
  * CAN THIS PROVIDER CARRY A NATIVE NEED ALL THE WAY - a VALUE, by name.
  *   { ok: true,  settles: "native", provider }                     - it settles native: it can be the native leg;
  *   { ok: false, reason: "settles-wrapped", settles, provider }    - wrapped native only: a liquidity leg at most;
- *   { ok: false, reason: "settles-unstated", settles: null, ... }  - it does not say: refused, never assumed native.
+ *   { ok: false, reason: "settles-unstated", settles: null,... }  - it does not say: refused, never assumed native.
  */
 export const carriesNativeVerdict = (provider) => {
   const settles = providerSettles(provider);

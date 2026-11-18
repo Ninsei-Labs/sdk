@@ -1,4 +1,4 @@
-// ONE WALLET ADAPTER FOR RESTORE AND SIGN (sdk#92, item 8).
+// ONE WALLET ADAPTER FOR RESTORE AND SIGN.
 //
 // The same object the page opens and syncs is passed to `sweep.restore` and to `sweep.sign`. This guard checks
 // that it really carries both roles: the connected wallet, the no-op `open`, and the withdrawal calls.

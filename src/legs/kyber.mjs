@@ -366,7 +366,7 @@ export async function kyberOrderStatus({ id, chainId, maker, fetchImpl = null, t
  * with a timeout. Returns:
  *   { ok: true, done: true, settled: true,  status: "filled" }                      - the swap settled;
  *   { ok: true, done: true, settled: false, status: "cancelled" | "expired" }        - the order is finally dead;
- *   { ok: false, code: "kyber-not-settled" | "kyber-unreachable" | "kyber-bad-response" | ... } - a NAMED refusal.
+ *   { ok: false, code: "kyber-not-settled" | "kyber-unreachable" | "kyber-bad-response" |... } - a NAMED refusal.
  * "Not settled in time" is its OWN code: "we did not wait long enough" is a state of the order, not a breakdown. The
  * clock and the sleep are injectable so the wait is testable without real time.
  */

@@ -15,7 +15,7 @@
 // WHY A FUNCTION, NOT TWO NUMBERS IN TWO PLACES. This rule is decided by the NODE (rfq/reverseArrival.mjs -
 // the mark, the alarm, the early refund) and shown by the PAGE (www/js/core/swap.js - the on-screen countdown).
 // A second edition would diverge from the first silently: the person would see one window while the node lived by
-// another. The rfq -> www import direction is already accepted (precedent: rfq/reverseGas.mjs imports ../www/js/evm/claimGas.js).
+// another. The rfq -> www import direction is already accepted (precedent: rfq/reverseGas.mjs imports../www/js/evm/claimGas.js).
 export const SELL_WINDOW = {
   softSec: 600,     // "ten minutes": the provider's on-screen promise
   hardSec: 1200,    // contract window: 10 Monero confirmations, the maximum that goes into termsHash

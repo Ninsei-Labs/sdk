@@ -75,6 +75,7 @@ export async function getInfo({ force = false } = {}) {
 
 function normalize(info) {
   return {
+    // monerod get_info.height is the next block height (top + 1), not the latest mined block.
     height: info.height,
     nettype: info.nettype || (info.mainnet ? "mainnet" : info.stagenet ? "stagenet" : "testnet"),
     offline: !!info.offline,

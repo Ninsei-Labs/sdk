@@ -34,7 +34,7 @@ function wordsToChunk(one, two, three) {
   const b = WORD_INDEX.get(two);
   const c = WORD_INDEX.get(three);
   if (a === undefined || b === undefined || c === undefined) throw new Error("invalid mnemonic word");
-  // The word order encodes a value in a mixed radix; the inverse is in chunkToWords.
+  // Three words encode one little-endian uint32. Both directions use the same base-N offsets.
   return a + n * (((b - a) % n + n) % n) + n * n * (((c - b) % n + n) % n);
 }
 
@@ -46,6 +46,7 @@ function chunkToWords(value) {
   return [WORDLIST[one], WORDLIST[two], WORDLIST[three]];
 }
 
+// The checksum covers the three-letter prefixes of the 24 payload words. The checksum word is not included.
 function checksumWord(words) {
   const prefix = words.map((word) => word.slice(0, PREFIX)).join("");
   return words[crc32(new TextEncoder().encode(prefix)) % words.length];

@@ -21,7 +21,7 @@ export {
   validatePayload,
 } from "../../engine/recovery/recoveryFile.js";
 
-// ONE RECOVERY KEY FOR EVERY SWAP (sdk#79): the taker's key, its derivation, its file and the on-chain search.
+// ONE RECOVERY KEY FOR EVERY SWAP: the taker's key, its derivation, its file and the on-chain search.
 export {
   RECOVERY_KEY_ALG,
   RECOVERY_KEY_DOMAIN_V2,

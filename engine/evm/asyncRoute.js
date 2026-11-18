@@ -127,11 +127,11 @@ const knownChainsFor = (providerId) => asyncRouteChains(providerId || asyncRoute
 /**
  * WHICH WAY AN ASYNCHRONOUS NEED GOES FOR A NETWORK - as a VALUE, with a NAMED refusal.
  *
- *   { ok: true,  kind: "single",      ...route, need }                 - one provider carries the need all the way;
- *   { ok: true,  kind: "composition", legs: [liquidity, native], ... } - no single provider carries a NATIVE need,
+ *   { ok: true,  kind: "single",...route, need }                 - one provider carries the need all the way;
+ *   { ok: true,  kind: "composition", legs: [liquidity, native],... } - no single provider carries a NATIVE need,
  *                                                                        but a liquidity (wrapped) leg and a
  *                                                                        native-capable leg both serve the network;
- *   { ok: false, reason: "no-async-provider" | "no-native-async-provider", ... } - a named refusal.
+ *   { ok: false, reason: "no-async-provider" | "no-native-async-provider",... } - a named refusal.
  *
  * The rule that matters: a provider that does not settle what the person needs is NEVER chosen as the sole provider
  * for that need (a route that ends in WETH must not pass as native). It may only be a leg of a composition, and a

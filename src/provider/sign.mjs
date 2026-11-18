@@ -112,7 +112,7 @@ export function loadPrivateKey(keyFile) {
 
 // THE NODE'S PUBLIC KEY: THE ONE IT SIGNS WITH, AND NOT THE CONTENT OF THE FILE BESIDE IT (partner request to the node).
 //
-// WHY FROM THE LOADED KEY AND NOT FROM THE .pub FILE. The signature is made by the key the node read at start
+// WHY FROM THE LOADED KEY AND NOT FROM THE.pub FILE. The signature is made by the key the node read at start
 // (loadPrivateKey), so ITS public key must go out: the file beside it could be left from a former
 // key, come from a backup or be substituted. A reader who took the key from the file would check the signature
 // with the wrong key and would take a live node for a foreign one.
@@ -125,14 +125,14 @@ export function publicKeyBase64From(publicKeyPem) {
   return createPublicKey(publicKeyPem).export({ type: "spki", format: "der" }).toString("base64");
 }
 
-// The SIGNING public key from a private PEM - with the same SPKI DER export as in the .pub file.
+// The SIGNING public key from a private PEM - with the same SPKI DER export as in the.pub file.
 // createPublicKey accepts the PRIVATE PEM itself and derives the public key from it; a repeated call on a KeyObject
 // (createPublicKey(createPublicKey(pem))) refuses - "expected private", so there is NO nesting here.
 export function signingPublicKeyBase64(privateKeyPem) {
   return publicKeyBase64From(privateKeyPem);
 }
 
-// The content of the .pub file in the same form (base64 of SPKI DER), or the reason why it is absent.
+// The content of the.pub file in the same form (base64 of SPKI DER), or the reason why it is absent.
 export function publicKeyFileBase64(pubFile) {
   if (!pubFile) return { key: null, why: "the path of the public key file is not known" };
   if (!existsSync(pubFile)) return { key: null, why: "the public key file is missing: " + pubFile };

@@ -11,7 +11,7 @@
 //                          (the chain check itself is a later stage; here both values are only bound).
 //   registry             - the maker registry named by the order. Bound now so a quote cannot be replayed
 //                          from one registry into another even before anyone reads `providerOf`.
-//   cashier              - the fee vault of the order (issue #103): the fee destination is part of the SIGNED
+//   cashier              - the fee vault of the order: the fee destination is part of the SIGNED
 //                          terms, so the factory no longer mints one vault per maker and the fee is not
 //                          scattered across them. Bound so a relayer cannot retarget where the fee accrues.
 //   locker, claimer,     - the order conditions: the same terms the DLEQ context binds and the escrow's
@@ -28,12 +28,12 @@
 //   chainId              - bound in the domain AND in the message. A quote signed for one network does not
 //                          verify on another.
 //   feeBps, fee,         - the provider's commission: the rate, the amount in wei and the recipient. Shown to
-//   feeRecipient           the customer before signing (#76) and frozen by the signature afterwards.
+//   feeRecipient           the customer before signing and frozen by the signature afterwards.
 //   validUntil           - the quote's own expiry, IN SECONDS (the order's readyBy/t1 and block.timestamp
 //                          scale): a quote past it is refused regardless of the price.
 //   nonce                - replay protection: the very same signed quote cannot be presented twice.
 //   claimTip             - the tip the escrow pays to whoever sends `claim`, out of the payout, in the same
-//                          transaction (#18). It is inside the signed set so a provider cannot raise it after the
+//                          transaction. It is inside the signed set so a provider cannot raise it after the
 //                          taker has seen the quote. Zero means no tip and is the only value a buy uses.
 //   commitHalfLocker,    - the depositor's half commitment and two Monero points. They used to travel beside the
 //   edPointLocker,         quote, outside the signature: a taker could show one set and fund another escrow with
@@ -46,7 +46,7 @@ export const ORDER_QUOTE_DOMAIN_NAME = "NinseiEscrowFactory";
 export const ORDER_QUOTE_DOMAIN_VERSION = "1";
 // 10: the signed EIP-712 field set grew the depositor's half commitment and two Monero points. They used to be
 // factory arguments outside the signature, which let one quote fund an escrow with decoy locker fields.
-// 9: the signed EIP-712 field set grew `claimTip` (#18) - the tip a third-party sender of `claim` takes from the
+// 9: the signed EIP-712 field set grew `claimTip` - the tip a third-party sender of `claim` takes from the
 // payout, covered by the provider's signature like every other condition.
 // 8: the field set grew `xmrAmount` (#110 step 3). This is the request-shape generation label, and it moves WITH the
 // field set (see the note above). The DOMAIN name and the domain version string are UNCHANGED by it: they name the

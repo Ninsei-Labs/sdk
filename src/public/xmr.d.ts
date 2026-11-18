@@ -475,7 +475,7 @@ export interface NodeProbeRefusal {
 
 /**
  * ASK A NODE FOR `get_info`: the height, the network it names, whether it is synchronized. Never throws - the
- * answer names the problem (`unreachable`, `timeout`, `nettype`, ...). `fetchImpl` is injected so a Node consumer
+ * answer names the problem (`unreachable`, `timeout`, `nettype`,...). `fetchImpl` is injected so a Node consumer
  * or a test can pass its own; `timeoutMs` abandons the request (8 seconds by default).
  */
 export declare function probeMoneroNode(options: {

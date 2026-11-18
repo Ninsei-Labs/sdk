@@ -23,7 +23,7 @@ import {
   restoreInjected,
 } from "./session.js";
 import { discoverWallets } from "./injected.js";
-// fundOrder needs a LOCAL name: `export * from ./funding.js` only re-exports and does not create a local
+// fundOrder needs a LOCAL name: `export * from./funding.js` only re-exports and does not create a local
 // variable, so fundOrderLive called a missing name and crashed.
 import { fundOrder } from "./funding.js";
 export * from "./factory.js";
@@ -42,7 +42,7 @@ export * from "./asyncRoute.js";
 // key as the page. Screens do not need it; they read status()/isConnected().
 export { address, balanceOf, chainIdOf, connect, disconnect, isConnected, refreshBalances, restore, status, subscribe, switchChain, currentProvider };
 export { connectInjected, restoreInjected };
-// IMPORTANT: this is an import, not a re-export. `export { X } from ...` only re-exports and does NOT create
+// IMPORTANT: this is an import, not a re-export. `export { X } from...` only re-exports and does NOT create
 // a local name, while fundOrderLive uses sendTransaction/readContract directly - this already broke twice.
 import { sendTransaction, readContract, readReceipt, readCode } from "./session.js";
 export { sendTransaction, readContract, readReceipt, readCode };

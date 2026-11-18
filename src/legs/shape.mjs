@@ -16,7 +16,7 @@ export const SHAPES = [SYNC, ASYNC];
 
 /**
  * IS A PROVIDER COMPLETE - may a path trust it. An answer as a VALUE, not an exception: { ok: true, shape } or
- * { ok: false, reason, ... }.
+ * { ok: false, reason,... }.
  *
  * The rule that matters: an ASYNCHRONOUS provider MUST declare what ends its execution - `settled(...)`, a check
  * that reads the outcome and answers whether the swap has ended and with what. A provider that cannot say this is

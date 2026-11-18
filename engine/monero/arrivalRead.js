@@ -71,6 +71,6 @@ export function viewKeyMatchesAddress(viewScalar, expectedViewPubHex, halves) {
   return got === want;
 }
 
-// THE UNLOCK RULE HAS ONE HOME: ./unlock.js. This module re-exports it for the public xmr entry instead of keeping
+// THE UNLOCK RULE HAS ONE HOME:./unlock.js. This module re-exports it for the public xmr entry instead of keeping
 // a second copy; a second copy is a second truth about whether money can be spent.
 export { UNLOCK_TIME_BLOCK_MAX, unlockStateOf } from "./unlock.js";

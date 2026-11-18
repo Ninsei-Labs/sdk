@@ -262,7 +262,7 @@ export declare function recoveryFileName(swapId?: string | null): string;
 
 
 // ---------------------------------------------------------------------------------------------------
-// ONE RECOVERY KEY PER BROWSER (sdk#79)
+// ONE RECOVERY KEY PER BROWSER
 // ---------------------------------------------------------------------------------------------------
 
 /** The version of the stored/backup key record. */

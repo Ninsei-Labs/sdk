@@ -1,66 +1,31 @@
-// The deal recovery file: real cryptography in the browser (WebCrypto).
+// The deal recovery file: WebCrypto AES-GCM, not a stub.
 //
-// Litepaper §5: without a saved recovery file a deal is not funded; if the tab is lost, this file is the only way
-// to claim the XMR or refund the ETH (including through a standalone client without the site). So it is real
-// AES-GCM, not a stub: the file can be decrypted only with the password the user knows.
+// The file is the only way to claim the XMR or refund the ETH after the tab is lost. It decrypts only with the
+// password the user knows.
 //
 // File format (Ninsei-swap-<id>.json.enc):
 //   { v:2, alg:"AES-GCM-256/PBKDF2-SHA256", iter, salt, iv, ciphertext, meta:{id,side,createdAt} }
-// Inside ciphertext is the payload (see buildPayload), versioned separately: the envelope version (v) and the
-// payload version (version) change independently - encryption and deal content are different things.
+// The envelope version (v) and the payload version (version) change independently.
 //
-// WHAT IS IN THE PAYLOAD, AND WHY EXACTLY THIS
-// v3: MY HALF of the spend key and MY HALF of the view key (spendHalf, viewHalf) plus the counterparty's PUBLIC
-//   points (otherSpendPoint, otherViewPoint). No full spend key exists for ANYONE: the address is a sum of halves,
-//   and only the holder of both can spend. The second half is given by the chain - hence the escrow address is in
-//   the file too: the sweep reads the revealed half from it. The counterparty's points are public (they are in the
-//   address and the order anyway), but without them the address cannot be assembled from the halves.
-// v2: the mnemonic is the single source of keys: both the spend key and the view key derive from it. Keys are NOT
-//   duplicated in the payload: a copy of the secret in the file is one more way to lose it and one more reason for
-//   the fields to drift (the file used to carry both seedHex and the two private keys).
-//   publicSpendKey /
-//   publicViewKey /
-//   address - for checking: if the mnemonic derives another address, the file is corrupt or substituted, and a
-//     wallet must not be restored from it.
-//   restoreHeight - the height to start the scan from. Without it the wallet scans Monero history from zero,
-//     which is tens of hours (measured ~35 blocks/s). The deal's creation height is a correct floor: the XMR lock
-//     cannot happen earlier.
+// Payload:
+// v3: my spend half and my view half, plus the counterparty's public points. The escrow address is here too, because
+//   the sweep reads the revealed half from it.
+// v2: the mnemonic is the single source of keys. The payload also carries the public spend key, the public view key,
+//   the address for checking and the scan start height. Without the height the wallet scans from zero.
 //
-// WHAT IS NOT IN THE FILE: the spend key in the clear (only inside the ciphertext), a card number, a withdrawal
-// address, and anything not needed to complete or roll back the deal.
-//
-// THERE IS NO QUOTE KIND IN THE PAYLOAD, and the payload key set is not checked: a file issued earlier with an
-// extra kind key is still read (the extra key just goes unread) and new files are issued without it. The format
-// does not change: PAYLOAD_VERSION stays 3 - the quote kind never had to do with the file version.
+// The file does not carry the spend key in clear, a card number or a withdrawal address.
+// A file with an extra kind key is still read. New files do not carry that key.
 
-// THE ENCRYPTION PARAMETERS ARE NAMED EXPLICITLY AND ARE NOT TAKEN FROM WEB-CRYPTO DEFAULTS.
-// The tag length and the key length are part of the FORMAT, not an implementation detail: a file issued today must
-// be readable years later, so both numbers stand in every call (encrypt/decrypt/deriveKey), live in frozen objects
-// and were confirmed by MEASUREMENT: the tag length (ciphertext minus plaintext = 16 bytes) and the derived key
-// length (256 bits - proven by decrypting with a key derived separately as 256 bits). The PBKDF2 iteration count
-// is also part of the format, but it is DELIBERATELY changeable: it grows with time, and old files are then read
-// by their own count (see ITER_MIN below).
+// The encryption parameters are explicit, not WebCrypto defaults. The tag length, key length and iteration count are
+// part of the format. The iteration count can grow, and old files are read with their own count (see ITER_MIN).
 //
-//
-// THE ITERATION COUNT: 600,000 - OWASP's recommendation for PBKDF2-HMAC-SHA256, i.e. when FIPS-140 requires
-// a "work factor of 600,000 or more" with an internal HMAC-SHA-256 (the numbers come from GPU measurements on an
-// RTX 4000, as of December 2022).
-// WHY PBKDF2 AND NOT Argon2id/scrypt, WHICH OWASP RANKS HIGHER: a browser offers only what WebCrypto gives, and
-// among password-hashing it has ONE - PBKDF2; Argon2id and scrypt are not in the standard. There is nothing to
-// choose from, so at least the number correct for PBKDF2 matters.
-// WHY 210,000 WAS WRONG: that number is in the OWASP table for PBKDF2-HMAC-SHA512 (220,000), while we use
-// HMAC-SHA256 - the count was three times below the recommendation for our own algorithm.
-// WHAT THIS DOES NOT GIVE, SO AS NOT TO BE MISLED: iterations raise the price of ONE guess (measured on the
-// development machine: 210k - 109 ms, 600k - 283 ms; noticeably more on a weak device in a browser) but do not
-// save a weak password: an offline brute force is bounded by the password ENTROPY, not by the count. The 12-char
-// minimum remains the weak spot.
+// PBKDF2 is the only password KDF in WebCrypto. Argon2id and scrypt are not available. The count is 600,000 for
+// PBKDF2-HMAC-SHA256. A weak password remains the weak point; iterations raise the cost of one guess.
 const ITER = 600_000;
-// A FLOOR FOR FOREIGN FILES. The iteration count comes FROM THE FILE (otherwise it could not be raised without
-// losing old files), so a weak value must meet a refusal: a file below the floor is not decrypted.
+// The iteration count comes from the file, so a weak value must be refused.
 const ITER_MIN = 100_000;
 const ITER_MAX = 10_000_000;
-// The algorithm identifier is ONE string for the whole module: it used to be written twice (write and read), and a
-// divergence between the copies would surface only on a live file.
+// One algorithm identifier for writes and reads.
 const ALG_ID = "AES-GCM-256/PBKDF2-SHA256";
 const AES = Object.freeze({ name: "AES-GCM", tagLength: 128, keyBits: 256 });
 const KDF = Object.freeze({ name: "PBKDF2", hash: "SHA-256" });
@@ -98,20 +63,12 @@ function unb64(str) {
   return Uint8Array.from(atob(str), (c) => c.charCodeAt(0));
 }
 
-// THE ITERATION COUNT IS A PARAMETER, NOT A CALL CONSTANT. On encryption it is ITER, on reading it is the number
-// FROM THE FILE: the format stores it precisely so the count can be raised without losing already issued files.
-// Reading used to take the constant and ignore the iter field entirely - so raising the count would have silently
-// broken all old files, and the field in the file would have been decoration.
-// AAD: THE HEADER IS UNDER AUTHENTICATION, NOT ONLY THE CIPHERTEXT. AES-GCM checks the integrity of what is passed
-// to it as additionalData. Without AAD (as in version 1) only the ciphertext was covered, while `meta` - the deal
-// id, side, time, terms hash - sits beside it and could be edited without a trace, and the reader would take the
-// substituted value. The string is built by both writer and reader FROM THE SAME FIELDS IN THE SAME ORDER: any
-// field edit changes the string and decryption is rejected.
-// WHY AN ARRAY, NOT AN OBJECT: key order in an object is a JSON implementation detail and an "identical" object
-// can yield different text. And why ?? null: a missing field in the array would give undefined, which is another
-// value.
-// EXPORTED ON PURPOSE: the string is part of the FORMAT, and checks must build it with the same code, not their
-// own copy (a copy would diverge from the format exactly where it costs most).
+// The iteration count is a parameter, not a call constant. Encryption uses ITER; reading uses the count from the
+// file. The format stores it so the count can grow without losing old files.
+// AAD: the header is authenticated, not only the ciphertext. Version 1 has no AAD, so a version-1 file must decrypt
+// without it. The string is built by both writer and reader from the same fields in the same order.
+// An array, not an object: object key order is a JSON implementation detail. Missing fields become null.
+// Exported so checks build the same string, not a copy.
 export function envelopeAad(envelope) {
   const m = envelope.meta || {};
   return JSON.stringify([
@@ -131,21 +88,13 @@ async function deriveKey(passphrase, salt, iterations) {
   );
 }
 
-// THE HEIGHT TO START THE RECOVERY SCAN FROM. A pure function: it goes nowhere, so it is checked without a node -
-// and that matters, because this is exactly where the height used to get lost.
+// The recovery scan start height. This is a pure function, so a test can run it without a node.
 //
-// WHY TWO SOURCES. The height was taken ONLY from the Monero node, and when the node did not answer, null was
-// honestly written into the file. Recovery then scanned history from zero (tens of hours), although the exact deal
-// height was at hand: the escrow is created by a transaction and its block is in the receipt. The node is someone
-// else's service that may be down (a live proxy returned 502), while the deal is our own and already exists.
+// The height has three sources: the escrow birth height from the receipt, the application's stored height and the
+// Monero node height. The node is an external service and can be down. The deal height is ours and already exists.
 //
-// TAKE THE SMALLER AND STEP BACK A BLOCK. The XMR arrival may land a block earlier than the recorded height, and a
-// scan that starts below the money finds it; one that starts above never does. Hence Math.min and minus one, but
-// never below one.
-// THE THIRD SOURCE - THE APPLICATION. Old deal records have no birthHeight field (it appeared later), but the app
-// resolved and stored the height when it registered the watch; the page gets it from its server. This is OUR
-// source, so it does not depend on whether the Monero node answers now, and it is what saves already issued
-// files: their record has no height at all.
+// Use the smallest source and subtract one block. The XMR arrival can land one block before the recorded height. A
+// scan that starts too high never finds the money.
 export function scanStartHeight({ escrowBirthHeight = null, serverRestoreHeight = null, nodeHeight = null } = {}) {
   const known = [escrowBirthHeight, serverRestoreHeight, nodeHeight]
     .map((v) => Number(v))
@@ -154,15 +103,12 @@ export function scanStartHeight({ escrowBirthHeight = null, serverRestoreHeight 
   return Math.max(1, Math.min(...known) - 1);
 }
 
-// The payload: everything needed to complete or roll back the deal without the site. restoreHeight is passed by
-// the caller - scanStartHeight puts it here, and the module does not go to the network itself so it can be tested
-// without a node.
+// The payload. `restoreHeight` is passed by the caller; scanStartHeight computes it. This module never reads the
+// network.
 export function buildPayload({ swap, swapWallet, escrow, receiveAddress, restoreHeight = null }) {
   return {
     magic: FILE_MAGIC,
-    // THE VERSION REFLECTS THE CONTENT, NOT THE MODULE VERSION. It used to hold PAYLOAD_VERSION, so after halves
-    // appeared a file built from a mnemonic got number 3 - claiming content it did not have, and the check rightly
-    // rejected it. The number must tell the truth about the content: a halves file is three, a mnemonic file is two.
+    // The version reflects the content, not the module version. A halves file is 3. A mnemonic file is 2.
     version: swapWallet && swapWallet.spendHalf ? 3 : 2,
     swapId: swap.id,
     // The order terms hash FROM THE CONTRACT. It is the file's tie to the chain: knowing the terms, one can check

@@ -313,7 +313,7 @@ export async function signMessage(message) {
   }
   // THE MESSAGE IS PASSED IN HEX, NOT AS TEXT. EIP-191 requires it: the first personal_sign argument is the
   // message bytes in hex. MetaMask accepts text too (which is why this never surfaced on a live wallet for
-  // years), while a node refuses: "invalid value: string ..., expected a valid hex string". Verified by a call:
+  // years), while a node refuses: "invalid value: string..., expected a valid hex string". Verified by a call:
   // text - refusal -32602, hex - a signature. The argument order [data, address] is as in MetaMask and WalletConnect.
   // If the wallet answers with an error, we show it AS IS: the cause is visible from the text.
   const hex = "0x" + Array.from(new TextEncoder().encode(String(message)), (b) => b.toString(16).padStart(2, "0")).join("");

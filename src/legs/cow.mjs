@@ -137,7 +137,7 @@ export function cowOrderSubmission({ order, signature, owner, signingScheme = "e
 
 /**
  * THE PROVIDER'S PLAN. For an async provider the plan is the INTENT: the signed order that will be submitted, with
- * the typed data, the digest and the UID, plus what ends execution. Returns { ok, ... } - a value.
+ * the typed data, the digest and the UID, plus what ends execution. Returns { ok,... } - a value.
  */
 export function cowPlan(request = {}) {
   const intent = buildCowIntent(request);
@@ -234,7 +234,7 @@ export async function cowOrderStatus({ uid, chainId, fetchImpl = null, timeoutMs
  * with a timeout. Returns:
  *   { ok: true, done: true, settled: true,  status: "fulfilled" }             - the swap settled;
  *   { ok: true, done: true, settled: false, status: "cancelled" | "expired" } - the order is finally dead;
- *   { ok: false, code: "cow-not-settled" | "cow-unreachable" | "cow-bad-response" | ... } - a NAMED refusal.
+ *   { ok: false, code: "cow-not-settled" | "cow-unreachable" | "cow-bad-response" |... } - a NAMED refusal.
  * "Not settled in time" is its OWN code: "we did not wait long enough" is a state of the order, not a breakdown.
  * The clock and the sleep are injectable so the wait is testable without real time.
  */

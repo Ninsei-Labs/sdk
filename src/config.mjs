@@ -61,7 +61,7 @@ const chainConfig = (chain) => ({
   // refuses an answer whose `cashier` is not this network's vault, and the funding path fills the order terms
   // from the same projection. A projection that drops the field leaves a client built from a network NAME with
   // no vault at all, so every relay quote ends as `no-pinned-cashier` - a defect in the profile, not in the
-  // answer (sdk#291). Nothing else fills these fields: the projection is the one place both facades read.
+  // answer. Nothing else fills these fields: the projection is the one place both facades read.
   escrow: chain.escrow ? {
     address: chain.escrow.address || null,
     mode: chain.escrow.mode || null,
@@ -88,7 +88,7 @@ const chainConfig = (chain) => ({
 // carry a client for the old node's HTTP surface: those routes were retired, and a client that still names them
 // would silently make every request against a service that no longer exists.
 
-// THE MONERO NODES THE ARRIVAL IS CHECKED AGAINST. Defaults are the list verified on 2026-10-02 (issue #85):
+// THE MONERO NODES THE ARRIVAL IS CHECKED AGAINST. Defaults are the list verified on 2026-10-02:
 // mainnet - four public nodes of different operators; stagenet - our node and the one independent public node.
 // `ready` opens only when two nodes of DIFFERENT operators agree on the block (see sdk/src/xmr-arrival.mjs), so
 // the list is a list of WITNESSES, not of equal endpoints.

@@ -1,6 +1,6 @@
 // THE PROVIDER SIDE, NODE ONLY: identity, signing and env files for the machine that runs the node.
 //
-// Separate entry, like ./adapters, because these helpers reach the filesystem and node:crypto. A browser
+// Separate entry, like./adapters, because these helpers reach the filesystem and node:crypto. A browser
 // consumer must never pull them in, and a Node consumer gets them with one import.
 //
 // WHY THEY LIVE HERE. The demo's backend verifies a maker's quote and builds an allow list from the provider's

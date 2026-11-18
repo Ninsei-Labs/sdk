@@ -32,6 +32,7 @@ function toBytesLE(value, width = SCALAR_BYTES) {
 
 function reduce(bytes) {
   if (bytes.length > 64) throw new Error("scalar is longer than 64 bytes");
+  // sc_reduce32 reads the zero-padded input as little-endian before reducing modulo l.
   const padded = new Uint8Array(64);
   padded.set(bytes);
   return toBytesLE(toBigIntLE(padded) % ORDER);

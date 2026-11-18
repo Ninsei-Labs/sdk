@@ -220,6 +220,7 @@ function checkOrderQuote(quote, terms, nowSec) {
   }
   if (fee !== (amount * BigInt(bps)) / 10000n) throw new SdkError("quote-refused", { step: "answer", why: "fee" });
   const validUntil = wireNumber(quote.validUntil, "quote.validUntil");
+  // A quote must expire before readyBy. After readyBy, its signed price must not authorize a new deposit.
   if (!Number.isSafeInteger(validUntil) || validUntil <= nowSec) {
     throw new SdkError("quote-expired", { step: "answer", validUntil: quote.validUntil });
   }

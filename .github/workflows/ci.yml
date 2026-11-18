@@ -142,8 +142,7 @@ jobs:
       - name: Check the withdrawal refusal (empty remainder -> insufficient-funds)
         run: pnpm run check:sweep
 
-      # A REVEALED HALF IS ONE 32-BYTE WORD. The escrow's `revealedHalf()` used to be read as an address, keeping 20
-      # bytes, so `(s_a + s_b)·G` never matched and every real withdrawal was refused.
+      # A revealed half is one 32-byte word. Read the full word, never an address tail.
       - name: Check the revealed half (32 bytes, never an address tail)
         run: pnpm run check:sweep-half
 
@@ -174,10 +173,8 @@ jobs:
         run: pnpm run check:deadline-scale
 
 
-      # THE RESTORE PASS IS A PACKAGE RULE NOW. It used to live on the sweep page: a scan ten blocks below the
-      # named height, a rescan, and ONE second pass when coins exist but none is spendable. A wrong height or a
-      # missing pass looks like an empty wallet, not like an error - so the rule is exercised with a stand-in
-      # driver, and each of its three load-bearing lines is cut in a copy to prove it reddens.
+      # The restore pass is a package rule. It scans ten blocks below the named height, rescans, and runs one second
+      # pass when coins exist but none is spendable. A wrong height or a missing pass looks like an empty wallet.
       - name: Check the restore pass (height, rescan, the one locked second pass)
         run: pnpm run check:restore
 
@@ -226,9 +223,8 @@ jobs:
           ANVIL_RPC: http://127.0.0.1:8546
         run: pnpm run check:anvil-uniswap
 
-      # THE WALLET IS BUILT WITHOUT KNOWING THE LIBRARY. The page used to pass a `createWallet` callback that
-      # translated "stagenet" into monero-ts's enum, and it owned the only `networkFromNode`. Both are the
-      # package's: a caller passes the namespace, and an unknown nettype is null rather than a guess.
+      # The wallet is built without knowing the library. The caller passes the namespace, and an unknown nettype is
+      # null rather than a guess.
       - name: Check the wallet factory (the network word becomes the library's enum)
         run: pnpm run check:wallet-factory
 
@@ -259,13 +255,8 @@ jobs:
       - name: Check the node preflight (height, network, every failure named)
         run: pnpm run check:node-probe
 
-      # THE REGISTRY IS THE LIST. The named steps above keep failures readable, and they are the checks that are
-      # not registered: teeth runs, live/anvil readings and package checks with external inputs. A check that was
-      # added to `CHECKS` and not to this workflow used to run only in the release workflow: storage, scan-range,
-      # funding-receipt, sweep-window, sweep-order, sweep-adapter, claim-sender, provider, compose, entries,
-      # version, settlement-profiles, the DEX intents and the deployment pins were in that position. This step
-      # runs every registered check under NODE_V8_COVERAGE, so the battery and the coverage floor are one pass.
-      # Do not add a named step that invokes a registered check: it would run the same check twice.
+      # The registry is the list. This step runs every registered check under NODE_V8_COVERAGE, so the battery and
+      # the coverage floor are one pass. Do not add a named step that invokes a registered check: it would run twice.
       - name: Run every registered SDK check and enforce coverage
         run: pnpm run coverage
 

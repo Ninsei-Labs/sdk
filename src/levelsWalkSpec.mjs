@@ -1,4 +1,4 @@
-// THE MAKER'S LEVEL SET: THE REFERENCE WALK OVER IT (issue #110, part B).
+// THE MAKER'S LEVEL SET: THE REFERENCE WALK OVER IT.
 //
 // WHY. The maker sends the node a LEVEL SET - chunks of volume with their own prices - and the node computes a
 // firm price by WALKING it. The client (SDK) needs the same walk to show the same price before signing. This file

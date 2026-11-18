@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// A SENT TRANSACTION IS NOT A FUNDED ESCROW (sdk#113, item 7).
+// A SENT TRANSACTION IS NOT A FUNDED ESCROW.
 //
 // The receipt is the only evidence that the factory created the order: status 1, an OrderCreated from the factory
 // that was called, for the predicted escrow. A missing receipt or a different event is pending, not funded.
