@@ -1750,8 +1750,8 @@ export interface SweepRelayRequest {
 }
 
 export interface SweepRunResult {
-  /** Whether every signed transaction was relayed, or the outcome is unknown. */
-  readonly outcome: "sent" | "unknown";
+  /** Every signed transaction was relayed. A lost answer throws `sweep-relay-unknown` instead. */
+  readonly outcome: "sent";
   readonly txids: readonly string[];
   readonly swept: string;
 }
