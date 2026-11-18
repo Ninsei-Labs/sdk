@@ -120,11 +120,10 @@ jobs:
       - name: Break the refusals guard (RED, then restored)
         run: pnpm run check:refusals-teeth
 
-      # THE AMOUNTS OF A TOKEN-FUNDED BUY. The escrow holds native coin, while the quote's token amount is a
-      # different number; a quote without a native figure is a named refusal, never a rescale. The signed XMR
-      # integer, not the rounded display number, is what the arrival check and the recovery file compare.
-      - name: Check the native amount and the signed XMR atomic
-        run: pnpm run check:native-amount
+      # THE NATIVE AMOUNT AND THE SIGNED XMR ATOMIC. The native check runs in the coverage battery; this step
+      # proves its rounding guards are load-bearing.
+      - name: Break the native amount guard (RED, then restored)
+        run: pnpm run check:native-amount-teeth
 
       - name: Break the decline guard (RED, then restored)
         run: pnpm run check:decline-teeth
