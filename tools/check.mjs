@@ -2629,6 +2629,7 @@ const typesConsumerCheck = () => {
 };
 const quoteBindingCheck = () => runScriptCheck("check-quote-binding.mjs", "quote binding");
 const quoteDefaultsCheck = () => runScriptCheck("check-quote-defaults.mjs", "quote defaults");
+const nativeAmountCheck = () => runScriptCheck("check-native-amount.mjs", "native amount");
 const dleqChunksCheck = () => runScriptCheck("check-dleq-chunks.mjs", "dleq chunks");
 const securityInvariantsCheck = () => runScriptCheck("check-security-invariants.mjs", "security invariants");
 const lifecycleLocalCheck = () => runScriptCheck("check-lifecycle-local.mjs", "local lifecycle");
@@ -2651,6 +2652,7 @@ const nodeTestCheck = (tool, expected) => {
 };
 const CHECKS = {
   fees: feesCheck,
+  "native-amount": nativeAmountCheck,
   "adapter-contract": () => nodeTestCheck("check-adapter-contract.mjs", { tests: 2, pass: 0, fail: 0, skipped: 2 }),
   "spent-status": () => nodeTestCheck("check-spent-status.mjs", { tests: 9, pass: 9, fail: 0, skipped: 0 }),
   "sweep-relay": () => nodeTestCheck("check-sweep-relay.mjs", { tests: 3, pass: 3, fail: 0, skipped: 0 }),

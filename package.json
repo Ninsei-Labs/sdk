@@ -86,6 +86,7 @@
     "check:types-consumer": "node node_modules/typescript/bin/tsc -p tools/ts-consumer/tsconfig.json",
     "check:monero-live": "node tools/check-monero-live.mjs",
     "check:native-amount": "node tools/check-native-amount.mjs",
+    "check:native-amount-teeth": "node tools/run-teeth-isolated.mjs tools/check-native-amount-teeth.mjs",
     "check:ci-boundary": "node tools/check-ci-boundary.mjs",
     "coverage": "node tools/coverage.mjs"
   },
