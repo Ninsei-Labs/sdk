@@ -44,6 +44,16 @@ const cases = [
     to: "", wants: "order-2 XB did not get its subgroup refusal",
   },
   {
+    check: "uniswapx-refusal", source: "src/legs/uniswapx.mjs", name: "the status read accepts the first returned order",
+    from: "const matches = orders.filter((o) => o && String(o.orderHash || \"\").toLowerCase() === String(orderHash).toLowerCase());",
+    to: "const matches = orders;", wants: "another order hash",
+  },
+  {
+    check: "uniswap-relay-refusal", source: "src/legs/uniswaprelay.mjs", name: "the reactor address is ignored",
+    from: '&& String(log.address || "").toLowerCase() === expectedAddress\n    && log.removed !== true',
+    to: "&& log.removed !== true", wants: "a foreign reactor address",
+  },
+  {
     check: "fees", source: "engine/evm/fees.js", name: "the buy fee is omitted from funding",
     from: "totalWei: feeOnTop ? amount + fee : amount", to: "totalWei: amount", wants: "fee roles and wei",
   },

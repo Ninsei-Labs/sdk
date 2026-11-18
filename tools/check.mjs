@@ -1176,6 +1176,11 @@ export const uniswapxRefusalCheck = async () => {
   // submit answer with no orderId).
   named("status: orders not an array", await ux.uniswapxOrderStatus({ orderHash: HASH, chainId: 1, fetchImpl: async () => response(200, { orders: "nope" }) }), "uniswapx-bad-response");
   named("status: unknown status word", await ux.uniswapxOrderStatus({ orderHash: HASH, chainId: 1, fetchImpl: async () => response(200, ordersBody({ orderStatus: "teleported" })) }), "uniswapx-bad-response");
+  // A NON-EMPTY ANSWER FOR ANOTHER ORDER MUST NOT BECOME OURS. The status belongs to HASH; the service returning one
+  // different order is malformed, even when that order says filled.
+  const OTHER = "0x" + "cd".repeat(32);
+  named("status: another order hash", await ux.uniswapxOrderStatus({ orderHash: HASH, chainId: 1, fetchImpl: async () => response(200, { orders: [{ orderHash: OTHER, orderStatus: "filled" }] }) }), "uniswapx-bad-response");
+  named("status: ambiguous order hashes", await ux.uniswapxOrderStatus({ orderHash: HASH, chainId: 1, fetchImpl: async () => response(200, { orders: [{ orderHash: HASH, orderStatus: "open" }, { orderHash: HASH, orderStatus: "filled" }] }) }), "uniswapx-bad-response");
   named("submit: no orderId", await ux.submitUniswapxOrder({ quote: {}, signature: sig, submitter: "http://stand-in.test/order", fetchImpl: async () => response(201, { requestId: "r", orderStatus: "open" }) }), "uniswapx-bad-response");
   named("settled: unknown status word", await ux.uniswapxSettled({ orderHash: HASH, chainId: 1 }, { fetchImpl: async () => response(200, ordersBody({ orderStatus: "wat" })), now: () => 0, sleep: async () => {} }), "uniswapx-bad-response");
 
@@ -1189,14 +1194,19 @@ export const uniswapxRefusalCheck = async () => {
   // package. So a caller either names a submitter (and no key is needed in the package) or gets a named refusal.
   named("plan: unknown network", ux.uniswapxPlan({ ...planRequest, chainId: 5 }), "uniswapx-unknown-network");
   named("plan: incomplete order", ux.uniswapxPlan({ chainId: 1 }), "uniswapx-bad-order");
+  named("plan: foreign reactor", ux.uniswapxPlan({ ...planRequest, reactor: "0x" + "44".repeat(20) }), "uniswapx-bad-order");
+  const defaultPlan = ux.uniswapxPlan(planRequest);
+  if (defaultPlan.ok !== true || defaultPlan.reactor !== ux.uniswapxReactorFor(1)) problems.push(`plan: the default reactor is not the network pin (${JSON.stringify(defaultPlan.reactor)})`);
+  else notes.push("plan: the reactor is the network pin");
   named("status: unknown network", await ux.uniswapxOrderStatus({ orderHash: HASH, chainId: 5, fetchImpl: open }), "uniswapx-unknown-network");
   named("submit: no submitter", await ux.submitUniswapxOrder({ quote: {}, signature: sig, fetchImpl: open }), "uniswapx-no-submitter");
   named("submit: bad signature", await ux.submitUniswapxOrder({ quote: {}, signature: "0x00", submitter: "http://stand-in.test/order", fetchImpl: open }), "uniswapx-bad-order");
   // A CONFIGURED SUBMITTER PUBLISHES WITH NO KEY: this is the whole point of the step - our proxy holds the key.
   const submitsOk = async () => response(200, { orderId: HASH, orderStatus: "open" });
-  const published = await ux.submitUniswapxOrder({ quote: {}, signature: sig, submitter: "http://stand-in.test/order", fetchImpl: submitsOk });
+  const published = await ux.submitUniswapxOrder({ orderHash: HASH, quote: {}, signature: sig, submitter: "http://stand-in.test/order", fetchImpl: submitsOk });
   if (!(published.ok === true && published.orderId === HASH && published.orderStatus === "open")) problems.push(`submit: a configured submitter did not publish without a key (${JSON.stringify(published)})`);
   else notes.push("submit: a configured submitter publishes WITHOUT any key (our proxy holds it, the package does not)");
+  named("submit: another order id", await ux.submitUniswapxOrder({ orderHash: HASH, quote: {}, signature: sig, submitter: "http://stand-in.test/order", fetchImpl: async () => response(200, { orderId: OTHER, orderStatus: "open" }) }), "uniswapx-bad-response");
   // THE PACKAGE CARRIES NO HARDCODED HOST: the submitter is the caller's, never a constant in the module.
   if (typeof ux.UNISWAPX_TRADING_API !== "undefined") problems.push("the provider still exports a hardcoded Uniswap Trading API host (UNISWAPX_TRADING_API)");
   else notes.push("the provider carries NO hardcoded Uniswap Trading API host: the submitter comes from the caller");
@@ -1405,6 +1415,8 @@ export const uniswapRelayRefusalCheck = async () => {
   const now = () => 1_000_000;
   const noSleep = async () => {};
   const sig = "0x" + "ab".repeat(65);
+  const eventLog = (over = {}) => ({ address: relay.UNISWAPRELAY_REACTOR, removed: false,
+    topics: [relay.UNISWAPRELAY_EVENT_TOPIC0, HASH, "0x" + "11".repeat(32), "0x" + "22".repeat(32)], ...over });
   const orderReq = () => ({
     chainId: 1, swapper: SWAPPER, sellToken: TOKEN, wrappedToken: WETH, fee: 3000,
     sellAmountWei: "1000000", buyAmountWei: "500000", feeToken: TOKEN, feeEndAmountWei: "1000",
@@ -1437,7 +1449,10 @@ export const uniswapRelayRefusalCheck = async () => {
   named("status: no driver", await relay.uniswapRelayStatus({ orderHash: HASH, chainId: 1 }), "uniswap-relay-unreachable");
   named("status: logs not an array", await relay.uniswapRelayStatus({ orderHash: HASH, chainId: 1, getLogs: async () => "nope" }), "uniswap-relay-bad-response");
   named("status: a log that is not ours", await relay.uniswapRelayStatus({ orderHash: HASH, chainId: 1, getLogs: async () => ([{ topics: ["0x" + "00".repeat(32), HASH] }]) }), "uniswap-relay-bad-response");
-  const filled = await relay.uniswapRelayStatus({ orderHash: HASH, chainId: 1, getLogs: async () => ([{ topics: [relay.UNISWAPRELAY_EVENT_TOPIC0, HASH, "0x" + "11".repeat(32), "0x" + "22".repeat(32)] }]) });
+  named("status: a foreign reactor address", await relay.uniswapRelayStatus({ orderHash: HASH, chainId: 1, getLogs: async () => ([eventLog({ address: "0x" + "55".repeat(20) })]) }), "uniswap-relay-bad-response");
+  named("status: a removed event", await relay.uniswapRelayStatus({ orderHash: HASH, chainId: 1, getLogs: async () => ([eventLog({ removed: true })]) }), "uniswap-relay-bad-response");
+  named("status: a log without an address", await relay.uniswapRelayStatus({ orderHash: HASH, chainId: 1, getLogs: async () => ([eventLog({ address: undefined })]) }), "uniswap-relay-bad-response");
+  const filled = await relay.uniswapRelayStatus({ orderHash: HASH, chainId: 1, getLogs: async () => ([eventLog()]) });
   if (!(filled.ok === true && filled.status === "filled")) problems.push(`status: a matching Relay event did not read as filled (${JSON.stringify(filled)})`);
   else notes.push("status: a matching Relay event reads as filled (the real on-chain effect)");
   const open = await relay.uniswapRelayStatus({ orderHash: HASH, chainId: 1, getLogs: async () => ([]), deadline: 2_000_000, nowSec: 1_000_000 });
@@ -1452,7 +1467,7 @@ export const uniswapRelayRefusalCheck = async () => {
   named("settled: unreachable", await relay.uniswapRelaySettled({ orderHash: HASH, chainId: 1 }, { getLogs: throwing, now, sleep: noSleep }), "uniswap-relay-unreachable");
   const t = { v: 0 };
   named("settled: timeout (stays open)", await relay.uniswapRelaySettled({ orderHash: HASH, chainId: 1, deadline: 2_000_000 }, { getLogs: async () => ([]), now: () => (t.v += 1000), sleep: noSleep, pollMs: 1000, timeoutMs: 3000, nowSec: 1_000_000 }), "uniswap-relay-not-settled");
-  const done = await relay.uniswapRelaySettled({ orderHash: HASH, chainId: 1 }, { getLogs: async () => ([{ topics: [relay.UNISWAPRELAY_EVENT_TOPIC0, HASH] }]), now, sleep: noSleep });
+  const done = await relay.uniswapRelaySettled({ orderHash: HASH, chainId: 1 }, { getLogs: async () => ([eventLog()]), now, sleep: noSleep });
   if (!(done.ok === true && done.done === true && done.settled === true && done.status === "filled")) problems.push(`settled: a filled order did not end as settled (${JSON.stringify(done)})`);
   else notes.push("settled: a filled order ends as done + settled with status filled");
   const dead = await relay.uniswapRelaySettled({ orderHash: HASH, chainId: 1, deadline: 900_000 }, { getLogs: async () => ([]), now, sleep: noSleep, nowSec: 1_000_000 });
