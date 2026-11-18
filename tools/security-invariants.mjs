@@ -1,15 +1,18 @@
 // SECURITY INVARIANTS -> THE CHECKS THAT EXERCISE THEM.
 //
 // A percentage of lines is not a security argument. This map is the reviewable half: every invariant names the
-// files it constrains and the scripts that exercise it. tools/check-security-invariants.mjs refuses an invariant
-// with no check, a dangling script path or a critical file that no invariant names.
+// files it constrains and the scripts that exercise it. tools/check-security-invariants.mjs is an inventory lint;
+// it refuses an invariant with no check, a dangling script path or a critical file that no invariant names, but it
+// does not execute the mapped scripts.
 
 export const SECURITY_INVARIANTS = [
   {
     id: "SEND-01",
     statement: "A signing action re-reads the account and chain at the send boundary and refuses a mismatch before eth_sendTransaction.",
-    files: ["src/actions.mjs", "src/chainGuard.mjs", "src/adapters/evm-wallet.mjs"],
-    checks: ["tools/check-chain-guard.mjs", "tools/check-claim-sender.mjs"],
+    files: ["src/actions.mjs", "src/chainGuard.mjs", "src/adapters/evm-wallet.mjs", "src/lock.mjs",
+      "engine/evm/funding.js"],
+    checks: ["tools/check-chain-guard.mjs", "tools/check-claim-sender.mjs", "tools/check-fees.mjs",
+      "tools/check-funding-receipt.mjs"],
   },
   {
     id: "QUOTE-POLICY-01",
@@ -38,8 +41,10 @@ export const SECURITY_INVARIANTS = [
   {
     id: "RECOVERY-01",
     statement: "Recovery halves are bound to chain, factory, role and public salt; the mnemonic never leaves the client.",
-    files: ["src/recovery-key.mjs", "src/recovery.mjs", "src/public/recovery.mjs"],
-    checks: ["tools/check-recovery-key.mjs", "tools/check-recovery-open.mjs"],
+    files: ["src/recovery-key.mjs", "src/recovery.mjs", "src/public/recovery.mjs", "src/sweep.mjs",
+      "src/sweep-restore.mjs"],
+    checks: ["tools/check-recovery-key.mjs", "tools/check-recovery-open.mjs", "tools/check-sweep-relay.mjs",
+      "tools/check-spent-status.mjs", "tools/check-sweep-adapter.mjs"],
   },
   {
     id: "STORE-01",
@@ -66,6 +71,20 @@ export const SECURITY_INVARIANTS = [
     checks: ["tools/check-arrival-consensus.mjs", "tools/check-arrival-real.mjs", "tools/check-arrival-extra-keys.mjs"],
   },
   {
+    id: "ROUTE-01",
+    statement: "Every DEX leg rejects foreign status, a foreign settlement event and a removed event; a route refusal is named, not accepted as a quote.",
+    files: ["src/legs/cow.mjs", "src/legs/kyber.mjs", "src/legs/uniswapx.mjs", "src/legs/uniswaprelay.mjs",
+      "src/legs/index.mjs", "src/legs/profiles.mjs", "src/legs/shape.mjs"],
+    checks: ["tools/check-refusals-teeth.mjs", "tools/check-guard-teeth.mjs", "tools/check-settlement-profiles.mjs"],
+  },
+  {
+    id: "AMOUNT-01",
+    statement: "A native, fee or XMR amount is exact: no silent rounding, truncation or Number precision loss reaches funding.",
+    files: ["engine/evm/fees.js", "engine/evm/funding.js", "engine/core/xmrAmount.js"],
+    checks: ["tools/check-fees.mjs", "tools/check-native-amount.mjs", "tools/check-xmr-amount.mjs",
+      "tools/check-native-amount-teeth.mjs"],
+  },
+  {
     id: "ADAPTER-01",
     statement: "The production adapter barrel exposes only the documented adapters, and its public subpath carries declarations.",
     files: ["src/adapters/index.mjs", "src/adapters/evm-wallet.mjs"],
@@ -90,4 +109,17 @@ export const SECURITY_CRITICAL_FILES = [
   "src/adapters/index.mjs",
   "src/adapters/evm-wallet.mjs",
   "src/index.mjs",
+  "src/lock.mjs",
+  "src/sweep.mjs",
+  "src/sweep-restore.mjs",
+  "engine/evm/funding.js",
+  "engine/evm/fees.js",
+  "engine/core/xmrAmount.js",
+  "src/legs/cow.mjs",
+  "src/legs/kyber.mjs",
+  "src/legs/uniswapx.mjs",
+  "src/legs/uniswaprelay.mjs",
+  "src/legs/index.mjs",
+  "src/legs/profiles.mjs",
+  "src/legs/shape.mjs",
 ];

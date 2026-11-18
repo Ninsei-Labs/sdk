@@ -109,7 +109,8 @@ export function claimTipVerdict({ claimTipWei = 0, baseFeeWei = null, priorityFe
 }
 
 export function createQuotes({ config, now = () => Date.now(), evmCall = null, evmCode = null, evmBlock = null,
-  providerAllowed = null, knownFactoryCodes = null, knownImplementationCodes = null, denylist = null, fetchImpl = null }) {
+  providerAllowed = null, knownFactoryCodes = null, knownImplementationCodes = null, denylist = null, fetchImpl = null,
+  chunkOptions = null }) {
   // THE INTERFACE'S FACTORY POLICY: the code hashes of factories it is willing to trade through
   // (extcodehash semantics = keccak256 of the runtime code). An EMPTY list is "no policy" (like
   // allowedProviders); a NON-EMPTY one refuses any factory whose code is not on it. Lower-cased once.
@@ -216,7 +217,8 @@ export function createQuotes({ config, now = () => Date.now(), evmCall = null, e
       }
       const derived = takerHalvesV2({ mnemonic, chainId, factory: order.factory, salt });
       const derivation = { kind: "salt-v2", salt };
-      const own = await buildOwnSideFromHalvesChunked(order, { spendHalf: derived.spendHalf, viewHalf: derived.viewHalf });
+      const own = await buildOwnSideFromHalvesChunked(order, { spendHalf: derived.spendHalf, viewHalf: derived.viewHalf },
+        chunkOptions || {});
       const xa = secp256k1.Point.fromHex(own.side.proof.XA);
       const clientHalf = {
         commitHalf: bytesToHexQ(keccak256(xa.toBytes(false).slice(1))),
@@ -271,6 +273,7 @@ export function createQuotes({ config, now = () => Date.now(), evmCall = null, e
               viewPoint: result.edViewPointLocker,
               viewHalf: derived.makerViewHalf,
             },
+        options: chunkOptions || {},
       });
       // THE ONE-TIME XMR ADDRESS IS DERIVED, NOT TAKEN FROM THE RELAY. Both sides must assemble it from the same
       // points: our spend/view halves from the recovery key, the node's spend point and view point from the answer.

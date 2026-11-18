@@ -63,6 +63,7 @@ async function startWith(view, salt = order.salt, extra = {}, autoSalt = false, 
     counterparty, recoveryKey: WORDS, ...(autoSalt ? {} : { recoverySalt: salt }),
     receiveTo: "synthetic-xmr-destination", restoreHeight: 100, wallet, onRecoveryKey: async () => true };
   const result = await createSwaps({ mode: "live", xmrNetwork: "stagenet", logs: async () => [],
+    chunkOptions: options.chunkOptions || null,
     now: options.nowMs === undefined ? null : () => options.nowMs,
     call: async ({ data }) => (data.startsWith(FACTORY_METHODS.predict) ? "0x" + "0".repeat(24) + "88".repeat(20) : "0x"),
   }).start(request).catch((error) => error);
@@ -104,6 +105,16 @@ console.log("=== 1) THE DERIVED VIEW HALF IS ACCEPTED ===");
   const { result, sent } = await startWith(derived.makerViewHalf);
   if (result && result.code === "wallet-rejected" && sent === 1) ok("the derived half reaches the wallet");
   else bad("derived half: " + JSON.stringify({ code: result && result.code, sent }));
+}
+
+console.log("=== 1b2) A START USES THE CHUNKED ORDER STEP ===");
+{
+  let yields = 0;
+  const { result, sent } = await startWith(derived.makerViewHalf, order.salt, {}, false,
+    { chunkOptions: { yieldTo: async () => { yields += 1; } } });
+  if (result && result.code === "wallet-rejected" && sent === 1 && yields > 0) {
+    ok("the key start yields through the chunked order step");
+  } else bad("key start did not reach the chunked path: " + JSON.stringify({ code: result && result.code, sent, yields }));
 }
 
 console.log("=== 1b) THE SALT-BASED KEY USES THE SAME CHECK ===");

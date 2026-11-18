@@ -1,6 +1,9 @@
 #!/usr/bin/env node
-// THE MAP MUST STAY HONEST: every invariant names existing files and existing check scripts, every critical file
-// is named by at least one invariant, and no invariant is a sentence with no executable evidence.
+// INVENTORY LINT, NOT EXECUTABLE EVIDENCE.
+//
+// This script checks that the map is complete: every invariant names existing files and existing check scripts,
+// every critical file is named by an invariant, and no invariant is a placeholder. It does NOT execute those
+// checks. Their own runs, breaking runs and review carry the proof; a filename mention here is only inventory.
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";

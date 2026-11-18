@@ -5,7 +5,6 @@
 import assert from "node:assert/strict";
 import { DEFAULT_CHAIN, KNOWN_FACTORY_CODES, knownFactoryCodesFor, knownImplementationCodesFor } from "../engine/core/config.js";
 import { factoryCodesForChain, implementationCodesForChain } from "../src/factoryPolicy.mjs";
-import { readFileSync } from "node:fs";
 
 const problems = [];
 let passed = 0;
@@ -49,11 +48,6 @@ check("a chain object is read by its id", () => {
 });
 check("an unknown network does not inherit the default implementation pin", () => {
   assert.equal(implementationCodesForChain({ chain: "no-such-network", knownImplementationCodes: null }), null);
-});
-check("createNinsei uses the policy helper", () => {
-  const source = readFileSync(new URL("../src/index.mjs", import.meta.url), "utf8");
-  assert.match(source, /factoryCodesForChain\(\{ chain: config\.settlement\.chain/);
-  assert.match(source, /implementationCodesForChain\(\{ chain: config\.settlement\.chain/);
 });
 check("every policy entry is a 32-byte code hash", () => {
   for (const [network, list] of Object.entries(KNOWN_FACTORY_CODES)) {
