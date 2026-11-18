@@ -279,6 +279,14 @@ read once, and an unreadable log request is a refusal, not a partial answer.
 `readEscrowEventsByTopic` reads the same three settlement events (`HalfRevealed`, `Ready` and `Declined`) without
 an address filter: the caller receives every event in the block range and filters by `escrow`. This is the
 privacy-preserving path for a recovery page, because the RPC does not learn which escrows belong to the visitor.
+`readEscrowEvents` keeps only the escrows named in its request, and both readers drop logs marked `removed`.
+
+`sweep.relay` returns `outcome: "sent"` with the transaction ids. If the wallet throws or returns no transaction id,
+the answer is `sweep-relay-unknown`: the session token, the signed set and any known txids stay in the open session.
+The same token never relays that set again. Check the chain before signing a new withdrawal.
+
+A window spent check counts status `2` as spent in the pool. A short, long or non-integer `spent_status` list is not a
+spent count: `spent` is null and `scanComplete` is false with `scanIncompleteReason: "spent-status-unavailable"`.
 
 - `amount` — the escrow's **native** amount in wei;
 - `settlementToken: "native"` — what the escrow receives;

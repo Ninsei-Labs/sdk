@@ -270,9 +270,22 @@ export async function restoreWallet(request = {}) {
             });
             const body = response && response.ok === true ? await response.json() : null;
             if (body && Array.isArray(body.spent_status)) {
-              windowReport.spent = body.spent_status.filter((value) => value === true || value === 1).length;
               windowReport.keyImages = hexes.length;
-            } else windowReport.spent = null;
+              // The node must answer for every key image, and only 0, 1 or 2 are known. A short, long or
+              // non-integer list is not a spent count.
+              const statuses = body.spent_status;
+              const valid = statuses.length === hexes.length
+                && statuses.every((value) => Number.isInteger(value) && value >= 0 && value <= 2);
+              if (valid) {
+                windowReport.spent = statuses.filter((value) => value === 1 || value === 2).length;
+              } else {
+                windowReport.spent = null;
+                windowReport.spentWhy = "spent-status-invalid";
+              }
+            } else {
+              windowReport.spent = null;
+              windowReport.spentWhy = "spent-status-unreadable";
+            }
           } else { windowReport.spent = null; windowReport.spentWhy = "no-key-images"; }
         } catch { windowReport.spent = null; windowReport.spentWhy = "check-failed"; }
       } else if (windowReport.used && requestWindow.nodeUrl) {

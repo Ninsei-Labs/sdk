@@ -1,3 +1,9 @@
+## Unreleased — 2026-11-18
+
+- `sweep.relay` keeps the signed set and session token when the wallet throws or returns no transaction id. The answer is `sweep-relay-unknown`; the same token never relays that set twice.
+- `readEscrowEvents` keeps only the requested escrows, and both recovery event readers drop `removed` logs.
+- A window spent check counts pool status `2` as spent. A short, long or non-integer `spent_status` list is unknown: `spent` is null and the scan is incomplete.
+
 ## 0.61.0 — 2026-11-14
 
 - **BREAKING:** the scalar `claimSender` is retired from `SellStartRequest`, `RelayClaimRequest` and `RelayClaimed`. `claimSenders` is the only sender source; an explicit list replaces the relay-published sender and is never prepended. Pre-list records are migrated on their first claim.

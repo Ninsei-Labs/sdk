@@ -252,16 +252,21 @@ export const recoveryKeyCheck = async () => {
   // without asking the RPC about each escrow separately.
   {
     const escrow = "0x" + "ab".repeat(20);
+    const foreign = "0x" + "ee".repeat(20);
     const half = "0x" + "cd".repeat(32);
     const words = (values) => "0x" + values.map((value) => BigInt(value).toString(16).padStart(64, "0")).join("");
     const logs = [
       { address: escrow, topics: [ESCROW_EVENT_TOPICS.halfRevealed], data: words([BigInt(half), 1]), blockNumber: 5, transactionHash: "0x" + "01".repeat(32), logIndex: 0 },
       { address: escrow, topics: [ESCROW_EVENT_TOPICS.ready, "0x" + "0".repeat(24) + "11".repeat(20)], data: "0x", blockNumber: 6, transactionHash: "0x" + "02".repeat(32), logIndex: 0 },
       { address: escrow, topics: [ESCROW_EVENT_TOPICS.declined, "0x" + "0".repeat(24) + "22".repeat(20)], data: "0x", blockNumber: 7, transactionHash: "0x" + "03".repeat(32), logIndex: 0 },
+      { address: foreign, topics: [ESCROW_EVENT_TOPICS.ready, "0x" + "0".repeat(24) + "44".repeat(20)], data: "0x", blockNumber: 8, transactionHash: "0x" + "06".repeat(32), logIndex: 0 },
+      { address: escrow, topics: [ESCROW_EVENT_TOPICS.ready, "0x" + "0".repeat(24) + "55".repeat(20)], data: "0x", blockNumber: 9, transactionHash: "0x" + "07".repeat(32), logIndex: 0, removed: true },
     ];
     let request = null;
     const events = await readEscrowEvents({ escrows: [escrow], evmLogs: async (value) => { request = value; return logs; } });
-    check(events.length === 3 && events[0].event === "HalfRevealed" && events[0].half === half && events[0].byClaimer === true,
+    check(events.length === 3 && events.every((event) => event.escrow === escrow),
+      "bulk events kept a foreign escrow or a removed event");
+    check(events[0].event === "HalfRevealed" && events[0].half === half && events[0].byClaimer === true,
       "bulk events did not decode the revealed half");
     check(events[1].event === "Ready" && events[2].event === "Declined", "bulk events lost the ready or declined event");
     check(request && Array.isArray(request.address) && request.address[0] === escrow, "bulk events did not send the escrow list");
@@ -276,6 +281,7 @@ export const recoveryKeyCheck = async () => {
     const logs = [
       { address: first, topics: [ESCROW_EVENT_TOPICS.halfRevealed], data: words([BigInt(half), 1]), blockNumber: 2, transactionHash: "0x" + "04".repeat(32), logIndex: 0 },
       { address: second, topics: [ESCROW_EVENT_TOPICS.ready, "0x" + "0".repeat(24) + "33".repeat(20)], data: "0x", blockNumber: 1, transactionHash: "0x" + "05".repeat(32), logIndex: 0 },
+      { address: first, topics: [ESCROW_EVENT_TOPICS.ready, "0x" + "0".repeat(24) + "66".repeat(20)], data: "0x", blockNumber: 3, transactionHash: "0x" + "08".repeat(32), logIndex: 0, removed: true },
     ];
     let request = null;
     const events = await readEscrowEventsByTopic({ evmLogs: async (value) => { request = value; return logs; } });
