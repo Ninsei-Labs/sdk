@@ -128,8 +128,14 @@ export function buildUniswapxIntent(request = {}) {
   if (!net) return { ...refusal("uniswapx-unknown-network", { chainId: Number.isFinite(chainId) ? chainId : null }), known: Object.keys(UNISWAPX_NETWORKS).map(Number) };
   const swapper = request.swapper;
   const recipient = request.recipient === undefined || request.recipient === null ? swapper : request.recipient;
+  const reactor = request.reactor === undefined || request.reactor === null ? net.reactor : request.reactor;
+  // THE REACTOR IS NOT A CALLER CHOICE ON THIS PATH. A different address would sign an order another reactor may
+  // accept, and the status read below is bound to the network's reactor. Refuse it by name rather than override.
+  if (!isAddress(reactor) || String(reactor).toLowerCase() !== String(net.reactor).toLowerCase()) {
+    return refusal("uniswapx-bad-order", { field: "reactor", expected: net.reactor });
+  }
   const order = {
-    reactor: request.reactor === undefined || request.reactor === null ? net.reactor : request.reactor,
+    reactor,
     swapper,
     nonce: request.nonce,
     deadline: request.deadline,
@@ -222,9 +228,10 @@ export async function uniswapxSignOrder({ typedData, wallet, address = null } = 
  * quote call - this provider does not fabricate it, and the cosigner is Uniswap Labs' (see the header). With no
  * submitter URL it refuses by name ("uniswapx-no-submitter"). The endpoint is NEVER guessed.
  */
-export async function submitUniswapxOrder({ quote = null, signature = null, routing = "DUTCH_V2", submitter = null, fetchImpl = null, timeoutMs = 20_000 } = {}) {
+export async function submitUniswapxOrder({ quote = null, signature = null, routing = "DUTCH_V2", submitter = null, fetchImpl = null, timeoutMs = 20_000, orderHash = null } = {}) {
   if (typeof signature !== "string" || !/^0x[0-9a-fA-F]{130}$/.test(signature)) return refusal("uniswapx-bad-order", { field: "signature" });
   if (!quote || typeof quote !== "object") return refusal("uniswapx-bad-order", { field: "quote" });
+  if (orderHash !== null && orderHash !== undefined && !isHash(orderHash)) return refusal("uniswapx-bad-order", { field: "orderHash" });
   const target = submitter === undefined || submitter === null || submitter === "" ? null : String(submitter);
   if (!target) return refusal("uniswapx-no-submitter", { field: "submitter" });
   const http = createHttp({ apiBase: target, fetchImpl, timeoutMs });
@@ -240,6 +247,12 @@ export async function submitUniswapxOrder({ quote = null, signature = null, rout
   if (!res.ok) return refusal("uniswapx-refused", { status: res.status, stage: "submit" });
   const data = res.body && typeof res.body === "object" ? res.body : null;
   if (!data || typeof data.orderId !== "string" || data.orderId === "") return refusal("uniswapx-bad-response", { where: "submit", field: "orderId" });
+  // A SUBMITTER THAT RETURNS ANOTHER ORDER ID DID NOT PUBLISH OUR ORDER. The caller may pass the hash it signed;
+  // when it does, the service answer must name that exact order.
+  if (orderHash !== null && orderHash !== undefined
+    && String(data.orderId).toLowerCase() !== String(orderHash).toLowerCase()) {
+    return refusal("uniswapx-bad-response", { where: "submit", field: "orderId", expected: orderHash });
+  }
   const status = data.orderStatus;
   if (typeof status !== "string" || !UNISWAPX_STATUSES.includes(status)) return refusal("uniswapx-bad-response", { where: "submit", field: "orderStatus" });
   return { ok: true, orderId: data.orderId, orderStatus: status, requestId: typeof data.requestId === "string" ? data.requestId : null };
@@ -266,8 +279,17 @@ export async function uniswapxOrderStatus({ orderHash, chainId = null, fetchImpl
   if (!res.ok) return refusal("uniswapx-refused", { status: res.status, stage: "orders" });
   const orders = res.body && res.body.orders;
   if (!Array.isArray(orders)) return refusal("uniswapx-bad-response", { where: "orders" });
-  const found = orders.find((o) => o && String(o.orderHash || "").toLowerCase() === String(orderHash).toLowerCase()) || orders[0] || null;
-  if (!found) return refusal("uniswapx-order-unknown", { orderHash });
+  const matches = orders.filter((o) => o && String(o.orderHash || "").toLowerCase() === String(orderHash).toLowerCase());
+  // AN ANSWER WITH ANOTHER ORDER IS NOT OUR ORDER. The service can return a non-empty list with a different hash;
+  // falling back to orders[0] would turn that order's final status into ours. An empty list stays "unknown", but a
+  // non-empty list whose hashes do not match is a malformed answer.
+  if (matches.length === 0) {
+    return orders.length === 0
+      ? refusal("uniswapx-order-unknown", { orderHash })
+      : refusal("uniswapx-bad-response", { where: "orders", detail: "order-hash-mismatch" });
+  }
+  if (matches.length > 1) return refusal("uniswapx-bad-response", { where: "orders", detail: "ambiguous-order-hash" });
+  const found = matches[0];
   const status = found.orderStatus;
   if (typeof status !== "string" || !UNISWAPX_STATUSES.includes(status)) return refusal("uniswapx-bad-response", { where: "orderStatus", got: typeof status === "string" ? status : null });
   return { ok: true, status, order: found };

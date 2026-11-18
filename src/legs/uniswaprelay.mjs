@@ -307,13 +307,25 @@ export async function uniswapRelayStatus({ orderHash, chainId = null, reactor = 
   if (!read.ok) return read;
   const logs = read.logs;
   if (!Array.isArray(logs)) return refusal("uniswap-relay-bad-response", { where: "logs", got: typeof logs });
-  const ours = logs.filter((log) => {
+  const expectedAddress = String(target).toLowerCase();
+  const topicMatches = (log) => {
     if (!log || !Array.isArray(log.topics)) return false;
     const t0 = String(log.topics[0] || "").toLowerCase();
     const t1 = String(log.topics[1] || "").toLowerCase();
     return t0 === UNISWAPRELAY_EVENT_TOPIC0.toLowerCase() && t1 === String(orderHash).toLowerCase();
-  });
-  if (logs.length > 0 && ours.length === 0) return refusal("uniswap-relay-bad-response", { where: "logs", detail: "topics-mismatch" });
+  };
+  // THE REACTOR'S OWN EVENT, NOT JUST THE RIGHT TOPICS. A log from another contract, a removed log, or a log without
+  // an address is not this order's settlement; the read must not turn a foreign answer into `filled`.
+  const ours = logs.filter((log) => topicMatches(log)
+    && String(log.address || "").toLowerCase() === expectedAddress
+    && log.removed !== true);
+  if (logs.length > 0 && ours.length === 0) {
+    const relevant = logs.filter(topicMatches);
+    const detail = relevant.length === 0
+      ? "topics-mismatch"
+      : (relevant.some((log) => log.removed === true) ? "removed" : "foreign-address");
+    return refusal("uniswap-relay-bad-response", { where: "logs", detail });
+  }
   if (ours.length > 0) return { ok: true, status: UNISWAPRELAY_SETTLED_STATUS, log: ours[0] };
   // No event: still open, unless the deadline (unix seconds) has already passed.
   if (deadline !== null && deadline !== undefined) {
