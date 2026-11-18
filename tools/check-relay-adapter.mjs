@@ -292,6 +292,23 @@ for (const [left, expected] of [[30, "quote-too-short"], [31, "quote-too-short"]
   }
 }
 
+console.log("=== 1b2) THE ADAPTER PASSES ITS CLOCK TO THE QUOTE VERIFIER ===");
+{
+  // The answer is valid 60 s after a clock five minutes in the past. A verifier using Date.now() would call it
+  // expired; the adapter must use the same injected clock it already uses for the quote's reported life.
+  const shiftedNowMs = (Math.floor(Date.now() / 1000) - 300) * 1000;
+  const until = Math.floor(shiftedNowMs / 1000) + 60;
+  try {
+    const result = await call(makeQuotes({ now: () => shiftedNowMs }), {
+      fetchImpl: relayFetch({ validUntil: until }).fetchImpl,
+    });
+    if (result.quote.validUntil === String(until)) ok("the adapter verified the quote under its injected clock");
+    else bad("the adapter changed the quote under its injected clock: " + JSON.stringify(result.quote.validUntil));
+  } catch (error) {
+    bad("the adapter ignored its injected clock: " + JSON.stringify(error && (error.code || error.message)) + " " + JSON.stringify(error && error.params));
+  }
+}
+
 console.log("=== 1a) THE REGISTRY IS PINNED TO THE NETWORK ===");
 {
   const foreign = makeQuotes({ registryPin: "0x" + "aa".repeat(20) });

@@ -1,5 +1,7 @@
 ## Unreleased — 2026-11-18
 
+- The deployment-pins check ignores CRLF-only differences, so a Windows checkout is current; a real content change still fails.
+- Relay quote verification uses the caller's clock seam instead of `Date.now()`, so an injected clock controls the expiry check.
 - `order.escrowNativeWei` accepts only a canonical decimal string, or a safe number. It refuses a significant digit beyond `nativeDecimals`, exponent form, and a number above `Number.MAX_SAFE_INTEGER`; it never truncates the signed amount. The guard is in the full battery and has a breaking-run suite.
 - `sweep.relay` keeps the signed set and session token when the wallet throws or returns no transaction id. The answer is `sweep-relay-unknown`; the same token never relays that set twice.
 - `readEscrowEvents` keeps only the requested escrows, and both recovery event readers drop `removed` logs.

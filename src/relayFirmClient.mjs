@@ -40,6 +40,7 @@ export async function requestFirmQuote({
   fetchImpl = null,
   timeoutMs = 20_000,
   retryTimeouts = 1,
+  now = () => Date.now(),
   ...request
 } = {}) {
   const base = String(relayUrl === undefined || relayUrl === null ? "" : relayUrl).trim().replace(/\/+$/, "");
@@ -123,6 +124,9 @@ export async function requestFirmQuote({
     answer,
     features: request.features,
     request: built,
+    // THE VERIFICATION USES THE CALLER'S CLOCK. A real Date.now here turns a slow run into `quote-expired`
+    // even when the caller injected a fixed clock for the rest of the quote path.
+    now: typeof now === "function" ? now() : now,
   });
   const publishedRecipient = wireText(published.feeRecipient === undefined || published.feeRecipient === null ? "" : published.feeRecipient, "relay.feeRecipient").toLowerCase();
   const quoteRecipient = wireText(verified.quote.feeRecipient === undefined || verified.quote.feeRecipient === null ? "" : verified.quote.feeRecipient, "quote.feeRecipient").toLowerCase();
