@@ -60,7 +60,7 @@ const actionFailure = (error, step) => {
   // wrapping them a second time would erase `why` and turn a named refusal into a generic one.
   if (error instanceof SdkError) throw error;
   if (typeof (error && error.code) === "string" && ERROR_CODES.includes(error.code)) {
-    throw new SdkError(error.code, { step, ...(error.params || {}) });
+    throw new SdkError(error.code, { ...(error.params || {}), step });
   }
   const code = codeOfError(error);
   const message = messageOfError(error);
@@ -102,6 +102,14 @@ const actionFailure = (error, step) => {
   // AN UNCLASSIFIED FAILURE IS NOT A REVERT. The old fallback claimed the escrow refused; that is a statement
   // about the chain we cannot make from an error we did not classify.
   throw new SdkError("unknown", { step, why: "unclassified" });
+};
+
+// THE SAME CLASSIFIER FOR THE FUNDING PATH. `actionFailure` throws because the actions wrapper wants that shape;
+// funding needs the named error as a value so it can rethrow it after its own pending-record cleanup.
+export const walletError = (error, step) => {
+  try { actionFailure(error, step); }
+  catch (named) { return named; }
+  return new SdkError("unknown", { step, why: "unclassified" });
 };
 
 const withCodes = async (step, work) => {

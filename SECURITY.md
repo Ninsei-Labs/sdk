@@ -12,7 +12,7 @@ paths as security reports even when the immediate impact is not yet clear.
 | `< 0.61` | No |
 
 Before 1.0, security fixes are made on the current line and published in the latest release. We do not backport to
-older lines unless a supported integrator cannot move to the current release. The package requires Node.js 24.22.1
+older lines unless a supported integrator cannot move to the current release. The package requires Node.js 24.22.3
 or newer.
 
 ## Report a vulnerability

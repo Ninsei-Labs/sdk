@@ -237,6 +237,41 @@ async function locate(node, { expectedAtomic, address, viewSecret, spendPub, fro
 }
 
 /**
+ * A MATCHING TRANSFER CAN BE IN THE POOL BEFORE IT IS IN A BLOCK. The exact walk cannot see it, so the site would
+ * say "waiting for the maker's XMR" with no txid for a whole block interval. The pool is read as a WHOLE (all
+ * hashes, then the existing batched `/get_transactions`), never by the caller's txid: a node must not learn which
+ * transfer is being watched.
+ *
+ * A pool match is INFORMATION ONLY. It never counts as seen or arrived, and it does not change the two-operator or
+ * confirmation rules; one synced node's pool is enough to show the txid while the block arrives.
+ */
+async function findPoolTransfer(node, { expectedAtomic, watched, tip, nowSec, fetchImpl, timeoutMs }) {
+  const body = await call(node, "/get_transaction_pool_hashes", {}, fetchImpl, timeoutMs);
+  const hashes = Array.isArray(body.tx_hashes)
+    ? body.tx_hashes.map((hash) => String(hash).replace(/^0x/, "").toLowerCase()).filter((hash) => /^[0-9a-f]{64}$/.test(hash))
+    : [];
+  if (!hashes.length) return null;
+  const txs = await getBlockTxs(node, hashes, fetchImpl, timeoutMs);
+  let best = null;
+  for (const tx of txs) {
+    // `height: null` is right here: the transaction has no block yet. The tip still decides whether its unlock
+    // time has matured, exactly as the block walk does.
+    const hit = engine.xmrScan.matchTransaction(tx, [watched], { height: null, tipHeight: Math.max(0, tip), nowSec });
+    if (!hit.length) continue;
+    // AN UNVERIFIED AMOUNT IS NOT SHOWN AS A POOL PAYMENT. The same Pedersen check that guards `locate` must pass
+    // before the report names an amount; otherwise a node could invent one without a key.
+    if (!hit[0].outputs.every((o) => o.amountVerified === true)) continue;
+    const amountAtomic = sumOutputs(hit[0]);
+    const locked = hit[0].unlock && hit[0].unlock.locked === true;
+    const score = (amountAtomic >= expectedAtomic ? 4 : 0) + 2 + (locked ? 0 : 1);
+    // A POOL HAS NO HEIGHT. The deterministic tie-break still uses the lower txid, so two answers name one transfer.
+    const candidate = { txid: tx.tx_hash, height: 0, score, amountAtomic, locked };
+    if (betterCandidate(candidate, best)) best = { ...candidate, node, unlock: hit[0].unlock || null };
+  }
+  return best;
+}
+
+/**
  * VERIFY THE ARRIVAL. Returns a verdict, and refuses WITH A CODE where the money cannot be declared an arrival:
  *   xmr-locked          - the outputs are barred by the transaction's unlock_time (until a height or a date);
  *   xmr-underpaid       - the amount is less than expected;
@@ -312,9 +347,44 @@ export async function verifyArrival(request) {
     if (located) break;
   }
   if (!located) {
+    // A POOL TRANSFER IS NOT AN ARRIVAL, BUT ITS TXID IS REAL INFORMATION. Read the whole pool on every synced
+    // node and return the match before the absence path: one node's pool is enough to show the id, while `seen`
+    // stays false and the confirmation rule stays untouched.
+    let poolHit = null;
+    const poolFailed = [];
+    const poolChecked = new Set();
+    for (const { node, info } of live) {
+      if (!info.synced) { continue; }
+      try {
+        const hit = await findPoolTransfer(node, {
+          expectedAtomic, watched, tip: top, nowSec, fetchImpl, timeoutMs,
+        });
+        poolChecked.add(node.operator);
+        if (hit) { poolHit = hit; break; }
+      } catch (error) {
+        poolFailed.push({ ...failureOf(error, node), why: "pool-read" });
+      }
+    }
+    if (poolHit) {
+      return {
+        seen: false, state: "pool", absent: false, txid: poolHit.txid, height: null,
+        amountAtomic: poolHit.amountAtomic.toString(), amountVerified: true,
+        confirmations: 0, locked: poolHit.locked, unlock: poolHit.unlock,
+        tip, operators: [poolHit.node.operator], poolFrom: { url: poolHit.node.url, operator: poolHit.node.operator },
+        checked: live.map((l) => ({
+          url: l.node.url, operator: l.node.operator, height: l.info.height, synchronized: l.info.synced,
+          state: l.node === poolHit.node ? "pool" : "pool-no-match",
+        })),
+        failed: [...failed, ...poolFailed],
+      };
+    }
+    failed.push(...poolFailed);
     failed.push(...staleWitnesses);
     // ABSENCE IS A CLAIM ABOUT MONEY, SO IT NEEDS TWO OPERATORS. One node can withhold a transaction and make
     // this walk look empty; a refund signed on that answer would take the depositor's ETH from a maker who paid.
+    // ONLY A NODE WHOSE POOL WAS ALSO READ COUNTS. A completed block walk with a failed pool read is unknown
+    // about the mempool, and a transfer relayed only there must not become `absent: true`.
+    const absenceOperators = [...completedOperators].filter((operator) => poolChecked.has(operator));
     // Only when no node finished the walk is every node unreachable.
     if (!completedOperators.size) {
       // A LIVE BUT UNSYNCHRONIZED NODE IS UNKNOWN, NOT ABSENT. Returning pending keeps the refund closed while
@@ -325,7 +395,7 @@ export async function verifyArrival(request) {
       }
       throw new SdkError("xmr-no-nodes", { tried: nodes.map((n) => n.url), nodes: failed });
     }
-    return { seen: false, state: "pending", absent: completedOperators.size >= 2, txid: txidHint, tip, completedOperators: [...completedOperators], checked: live.map((l) => ({ url: l.node.url, operator: l.node.operator, height: l.info.height, synchronized: l.info.synced })), failed };
+    return { seen: false, state: "pending", absent: absenceOperators.length >= 2, txid: txidHint, tip, completedOperators: absenceOperators, checked: live.map((l) => ({ url: l.node.url, operator: l.node.operator, height: l.info.height, synchronized: l.info.synced })), failed };
   }
 
   // 3. VERIFY ON EVERY NODE: the SAME block hash, the SAME transaction inside it, the confirmations and the money.

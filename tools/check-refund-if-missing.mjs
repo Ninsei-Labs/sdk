@@ -136,6 +136,9 @@ export const refundIfMissingCheck = async () => {
       const hashes = partial ? ["aa", "bb"] : (mismatch || badJson ? ["aa"] : []);
       return { ok: true, json: async () => ({ result: { block_header: { hash: "ab".repeat(32) }, tx_hashes: hashes } }) };
     }
+    if (String(url).endsWith("/get_transaction_pool_hashes")) {
+      return { ok: true, json: async () => ({ tx_hashes: [] }) };
+    }
     if (String(url).endsWith("/get_transactions") && (partial || mismatch || badJson)) {
       if (badJson) return { ok: true, json: async () => ({ txs: [{ tx_hash: "aa" }], txs_as_json: ["{"] }) };
       return { ok: true, json: async () => ({ txs: [{ tx_hash: mismatch ? "cc" : "aa" }], txs_as_json: ["{}"] }) };

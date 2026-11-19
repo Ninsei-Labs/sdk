@@ -36,7 +36,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: '24.22.1'
+          node-version: '24.22.3'
           cache: pnpm
 
       # ANVIL AND CAST COME FROM THE SAME PINNED FOUNDRY THE CONTRACT REPOSITORY USES. The fork check below needs
@@ -265,7 +265,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: Ninsei-Labs/witness-node
-          ref: 2283aa4cc840c1c1baf52429acf1cc1274ed7d0c # v0.1.2; bump with the witness-node release
+          ref: 83feb7b20c75dd96f02c6950ab3fc6e862fef813 # witness-node#28: fake daemon answers the pool route
           path: witness-node
 
       - name: Run the SDK/witness interop check
@@ -292,7 +292,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: '24.22.1'
+          node-version: '24.22.3'
           cache: pnpm
 
       - name: Install the pinned Foundry release
@@ -357,7 +357,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: '24.22.1'
+          node-version: '24.22.3'
           cache: pnpm
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7

@@ -1,3 +1,9 @@
+## Unreleased — 2026-11-19
+
+- `verifyArrival` reports `state: "pool"` with the matching txid while the transfer is still in a node's mempool; it never counts as seen or arrived.
+- The funding send uses the same wallet-error classifier as `markReady`, `claim` and `refund`, so a numeric provider refusal is no longer reported as `server-unavailable`.
+- The Node.js floor is `24.22.3` across `engines`, CI, the Docker build and the support docs.
+
 ## Unreleased — 2026-11-18
 
 - The security inventory covers lock/funding, sweep/recovery, DEX legs and amount/fee modules; the map labels itself as inventory lint and no longer claims executable evidence.

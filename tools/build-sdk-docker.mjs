@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const result = spawnSync("docker", [
-  "run", "--rm", "-v", ROOT + ":/src", "-w", "/src", "node:24.22.1",
+  "run", "--rm", "-v", ROOT + ":/src", "-w", "/src", "node:24.22.3",
   "sh", "-lc", "corepack enable >/dev/null 2>&1; pnpm install --frozen-lockfile && pnpm run build:sdk",
 ], { stdio: "inherit" });
 if (result.error) {

@@ -37,6 +37,9 @@ const fetchFor = ({ synchronized, tx = false, empty = false } = {}) => async (ur
   if (body.method === "get_block") return { ok: true, json: async () => ({
     result: { block_header: { hash: "a".repeat(64) }, tx_hashes: tx ? ["b".repeat(64)] : [] },
   }) };
+  if (String(url).endsWith("/get_transaction_pool_hashes")) {
+    return { ok: true, json: async () => ({ tx_hashes: [] }) };
+  }
   if (body.method === "get_transactions") return { ok: true, json: async () => ({ txs: [], txs_as_json: [] }) };
   if (empty) throw new Error("unexpected call");
   return { ok: true, json: async () => ({ txs: [], txs_as_json: [] }) };
@@ -74,12 +77,18 @@ const shadowTopFetch = async (url, init) => {
   return { ok: true, status: 200, json: async () => ({ txs: [], txs_as_json: [] }) };
 };
 
-async function mutatedLadder(from, to, name) {
+async function mutatedLadder(from, to, name, all = false) {
   const source = readFileSync(join(ROOT, "src", "xmr-arrival.mjs"), "utf8").replace(/\r\n/g, "\n");
-  const at = source.indexOf(from);
-  if (at < 0) throw new Error("the mutation did not apply: " + from.slice(0, 70));
-  const changed = source.slice(0, at) + to + source.slice(at + from.length);
-  if (changed === source) throw new Error("the mutation changed nothing: " + from.slice(0, 70));
+  const needles = Array.isArray(from) ? from : [from];
+  let changed = source;
+  if (all) {
+    for (const needle of needles) changed = changed.split(needle).join(to);
+  } else {
+    const at = source.indexOf(needles[0]);
+    if (at < 0) throw new Error("the mutation did not apply: " + needles[0].slice(0, 70));
+    changed = source.slice(0, at) + to + source.slice(at + needles[0].length);
+  }
+  if (changed === source) throw new Error("the mutation changed nothing: " + needles[0].slice(0, 70));
   const rewritten = changed.replace(/from\s+"(\.\/[^"]+)"/g,
     (whole, rel) => `from "${pathToFileURL(join(ROOT, "src", rel)).href}"`);
   const file = join(dir, name + ".mjs");
@@ -93,10 +102,21 @@ try {
   if (pending && pending.state === "pending" && pending.absent === false) ok("the shipped module does not call two stale witnesses absent");
   else bad("shipped unsynchronized verdict", JSON.stringify(pending));
 
-  const noSyncCheck = await mutatedLadder("if (!info.synced) {", "if (false) {", "no-sync-check");
+  const noSyncCheck = await mutatedLadder("if (!info.synced) {", "if (false) {", "no-sync-check", true);
   const staleMutant = await noSyncCheck.verifyArrival(request());
-  if (staleMutant && staleMutant.absent === true) ok("removing the sync check makes the stale pair absent (the guard is load-bearing)");
+  if (staleMutant && staleMutant.absent === true) ok("removing both sync checks makes the stale pair absent (the guard is load-bearing)");
   else bad("sync-check mutation", JSON.stringify(staleMutant));
+
+  // EACH CHECK ALONE. Removing only the block-walk guard leaves the pool guard refusing the stale pair; removing
+  // only the pool guard leaves the block walk refusing it. The combined mutation above is the positive control.
+  const noBlockSync = await mutatedLadder("if (!info.synced) {\n      staleWitnesses", "if (false) {\n      staleWitnesses", "no-block-sync");
+  const blockStale = await noBlockSync.verifyArrival(request());
+  if (blockStale && blockStale.absent === false) ok("the pool guard still refuses a stale block witness");
+  else bad("block sync mutation", JSON.stringify(blockStale));
+  const noPoolSync = await mutatedLadder("if (!info.synced) { continue; }", "if (false) { continue; }", "no-pool-sync");
+  const poolStale = await noPoolSync.verifyArrival(request());
+  if (poolStale && poolStale.absent === false) ok("the block walk still refuses a stale pool witness");
+  else bad("pool sync mutation", JSON.stringify(poolStale));
 
   let originalMismatch = null;
   try { await real.verifyArrival(request({ spendPub: wrongSpend, fetch: fetchFor({ synchronized: true }) })); }
