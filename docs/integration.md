@@ -122,8 +122,8 @@ does not take a relay from the caller after the quote: an optional `relayUrl` ma
 other origin is refused with `bad-input`. The half is never logged or written by this path.
 
 `claimAttempts` is a diagnostic journal, not a list of senders to skip. A later call starts with the first sender
-again. A previous `sending` or `unknown` entry is waited out for its slot and then retried; a `refused` or
-`unconfirmed` entry is retried immediately. A temporary refusal, a process restart or a closed tab therefore does
+again. The latest attempt is waited out for its slot and then retried, whatever its outcome; a `refused` or
+`unconfirmed` entry is retried after that slot, not before it. A temporary refusal, a process restart or a closed tab therefore does
 not permanently remove the seller's only no-wallet path.
 
 The journal is append-only and the SDK does not prune it; a record can grow with every retry. It is diagnostic,

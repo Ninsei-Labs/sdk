@@ -62,6 +62,8 @@ const offer = {
 const word = (value) => BigInt(value).toString(16).padStart(64, "0");
 const bytes = (value) => String(value).replace(/^0x/, "").padStart(64, "0");
 const lower = (value) => String(value || "").toLowerCase();
+const TEST_SLOT_MS = 20_000;
+const TEST_SLOT_SEC = TEST_SLOT_MS / 1000;
 const slotReads = {
   [encodeRead("termsHash")]: "00".repeat(32),
   [encodeRead("edPointLocker")]: bytes(offer.nodeHalf.edPoint),
@@ -1018,7 +1020,7 @@ export const relayClaimCheck = async () => {
     resetChain();
     clockMs = 1_900_000_000_000;
     let firstCalls = 0;
-    const first = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender],
+    const first = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender], slotMs: TEST_SLOT_MS,
       fetchImpl: async () => { firstCalls += 1; return refusal("claim-tip-too-small"); } });
     check(first && first.state === "claim-yourself" && firstCalls === 1,
       "a refused sender did not end the first list: " + JSON.stringify({ first, firstCalls }));
@@ -1029,7 +1031,8 @@ export const relayClaimCheck = async () => {
       "the refused sender was not written before the next call");
 
     const urls = [];
-    const second = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender, secondSender],
+    const secondStarted = clockMs;
+    const second = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender, secondSender], slotMs: TEST_SLOT_MS,
       fetchImpl: async (url) => {
         urls.push(url);
         if (url.includes(lower(relaySender))) return refusal("claim-tip-too-small");
@@ -1039,6 +1042,8 @@ export const relayClaimCheck = async () => {
     check(second && second.state === "claimed" && second.provider === lower(secondSender)
       && urls.length === 2 && urls[0].includes(lower(relaySender)) && urls[1].includes(lower(secondSender)),
       "a reload did not retry the refused sender before the next one: " + JSON.stringify({ second, urls }));
+    check(clockMs - secondStarted >= TEST_SLOT_MS,
+      "a refused sender was retried inside its slot: " + JSON.stringify({ moved: clockMs - secondStarted }));
 
     resetAttempts();
     resetChain();
@@ -1093,6 +1098,135 @@ export const relayClaimCheck = async () => {
       } });
     check(posts === 1 && statusReads <= 3,
       "a slow POST stretched the sender slot: " + JSON.stringify({ posts, statusReads }));
+  }
+
+  // (10a) EACH NAMED REFUSAL IS RETRIED ON THE NEXT CALL, NOT TREATED AS A PERMANENT SKIP.
+  for (const code of ["rate_limited", "bad_request", "unsupported_version", "no_quote", "claim-tip-too-small"]) {
+    resetAttempts();
+    resetChain();
+    clockMs = 1_900_000_000_000;
+    const first = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender], slotMs: TEST_SLOT_MS,
+      fetchImpl: async () => refusal(code) });
+    check(first && first.state === "claim-yourself",
+      "the " + code + " fixture did not refuse: " + JSON.stringify(first));
+    const started = clockMs;
+    const dbg = engine.swap.getSwap(record.id, store);
+    const priorAt = dbg && dbg.claimAttempts && dbg.claimAttempts[dbg.claimAttempts.length - 1]
+      && Number(dbg.claimAttempts[dbg.claimAttempts.length - 1].at);
+    let calls = 0;
+    const second = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender], slotMs: TEST_SLOT_MS,
+      fetchImpl: async () => {
+        calls += 1;
+        chainStatus.claimed = true;
+        return answer(relaySender, "0x" + "ab".repeat(32));
+      } });
+    check(second && second.state === "claimed" && calls === 1,
+      "a " + code + " refusal was not retried: " + JSON.stringify({ second, calls }));
+    check(Number.isFinite(priorAt) && clockMs >= (priorAt + TEST_SLOT_SEC) * 1000,
+      "a " + code + " refusal was retried inside its slot: " + JSON.stringify({ moved: clockMs - started, priorAt }));
+  }
+
+  // (10b) AN UNKNOWN SENDER IS RETRIED AFTER ITS SLOT, NOT LEFT AS A PERMANENT SKIP.
+  {
+    resetAttempts();
+    resetChain();
+    clockMs = 1_900_000_000_000;
+    let firstCalls = 0;
+    const first = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender], slotMs: TEST_SLOT_MS,
+      fetchImpl: async () => { firstCalls += 1; throw Object.assign(new Error("lost"), { code: "claim-unknown" }); } });
+    check(first && first.state === "claim-yourself" && firstCalls === 1,
+      "the unknown fixture did not finish its first slot: " + JSON.stringify({ first, firstCalls }));
+    const started = clockMs;
+    const resumed = engine.swap.getSwap(record.id, store);
+    const priorAt = resumed && resumed.claimAttempts && resumed.claimAttempts[resumed.claimAttempts.length - 1]
+      && Number(resumed.claimAttempts[resumed.claimAttempts.length - 1].at);
+    let secondCalls = 0;
+    const second = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender], slotMs: TEST_SLOT_MS,
+      fetchImpl: async () => {
+        secondCalls += 1;
+        chainStatus.claimed = true;
+        return answer(relaySender, "0x" + "ac".repeat(32));
+      } });
+    check(second && second.state === "claimed" && secondCalls === 1,
+      "an unknown sender was not retried: " + JSON.stringify({ second, secondCalls }));
+    check(Number.isFinite(priorAt) && clockMs >= (priorAt + TEST_SLOT_SEC) * 1000,
+      "an unknown sender was retried inside its slot: " + JSON.stringify({ moved: clockMs - started, priorAt }));
+  }
+
+  // (10c) A FAILED FIRST READ IS NOT A DEAD END.
+  {
+    resetAttempts();
+    resetChain();
+    clockMs = 1_900_000_000_000;
+    statusUnreadable = true;
+    const first = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender], slotMs: TEST_SLOT_MS,
+      fetchImpl: async () => answer(relaySender, "0x" + "ad".repeat(32)) }).catch((error) => error);
+    check(first && first.state === "claim-window" && first.reason === "unreadable",
+      "a failed first escrow read was not named: " + JSON.stringify(first));
+    statusUnreadable = false;
+    let calls = 0;
+    const second = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender], slotMs: TEST_SLOT_MS,
+      fetchImpl: async () => {
+        calls += 1;
+        chainStatus.claimed = true;
+        return answer(relaySender, "0x" + "ae".repeat(32));
+      } });
+    check(second && second.state === "claimed" && calls === 1,
+      "a failed first read blocked the next claim: " + JSON.stringify({ second, calls }));
+  }
+
+  // (10d) A THROW DURING THE SLOT LEAVES THE SENDER RECORDED AND RETRIES IT.
+  {
+    resetAttempts();
+    resetChain();
+    clockMs = 1_900_000_000_000;
+    let firstCalls = 0;
+    const first = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender], slotMs: TEST_SLOT_MS,
+      fetchImpl: async () => {
+        firstCalls += 1;
+        statusUnreadable = true;
+        return answer(relaySender, "0x" + "af".repeat(32));
+      } }).catch((error) => error);
+    check(first && first.code === "claim-unknown" && first.params && first.params.why === "escrow-unread",
+      "a failed slot read was not claim-unknown: " + JSON.stringify(first));
+    check(firstCalls === 1, "the failed slot did not post once");
+    statusUnreadable = false;
+    const resumed = engine.swap.getSwap(record.id, store);
+    const priorAt = resumed && resumed.claimAttempts && resumed.claimAttempts[resumed.claimAttempts.length - 1]
+      && Number(resumed.claimAttempts[resumed.claimAttempts.length - 1].at);
+    let secondCalls = 0;
+    const second = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender], slotMs: TEST_SLOT_MS,
+      fetchImpl: async () => {
+        secondCalls += 1;
+        chainStatus.claimed = true;
+        return answer(relaySender, "0x" + "b0".repeat(32));
+      } });
+    check(second && second.state === "claimed" && secondCalls === 1,
+      "a failed slot blocked the next claim: " + JSON.stringify({ second, secondCalls }));
+    check(Number.isFinite(priorAt) && clockMs >= (priorAt + TEST_SLOT_SEC) * 1000,
+      "a failed slot was retried inside its slot: " + JSON.stringify({ priorAt }));
+  }
+
+  // (10e) AN UNCONFIRMED ATTEMPT ALSO OWNS ITS SLOT.
+  {
+    resetAttempts();
+    resetChain();
+    clockMs = 1_900_000_000_000;
+    const current = engine.swap.getSwap(record.id, store);
+    current.claimAttempts = [{ sender: lower(relaySender), at: Math.floor(clockMs / 1000), outcome: "unconfirmed" }];
+    engine.swap.saveSwap(current, store);
+    const priorAt = Math.floor(clockMs / 1000);
+    let calls = 0;
+    const result = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender], slotMs: TEST_SLOT_MS,
+      fetchImpl: async () => {
+        calls += 1;
+        chainStatus.claimed = true;
+        return answer(relaySender, "0x" + "b1".repeat(32));
+      } });
+    check(result && result.state === "claimed" && calls === 1,
+      "an unconfirmed sender was not retried: " + JSON.stringify({ result, calls }));
+    check(clockMs >= (priorAt + TEST_SLOT_SEC) * 1000,
+      "an unconfirmed sender was retried inside its slot: " + JSON.stringify({ priorAt }));
   }
 
   // (12) A TINY POLL IS FLOORED, SO ONE SLOT CANNOT BURN THE CHAIN.
