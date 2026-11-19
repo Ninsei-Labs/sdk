@@ -273,6 +273,77 @@ jobs:
           SDK_DIR: ${{ github.workspace }}
         run: node witness-node/tools/check-sdk-interop.mjs
 
+  # THE NON-ZERO FEE AGAINST THE DEPLOYED CONTRACTS IS AN EXTERNAL-RPC CHECK. It is deliberately separate and
+  # non-blocking: an archive endpoint can be down, rate-limited or pruned, and that must be visible in this job's
+  # log without turning the rest of CI red. The core checks do not depend on it.
+  anvil-fee:
+    name: Nonzero-fee fork (external RPC, non-blocking)
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up pnpm (from packageManager)
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24.22.1'
+          cache: pnpm
+
+      - name: Install the pinned Foundry release
+        env:
+          FOUNDRY_VERSION: v1.9.0
+          FOUNDRY_ASSET_ID: 703110190
+          FOUNDRY_SHA256: 8d17599b42e3139f1a9c171be3798c4ed8e743ae17b84cc3435e57bf2a51ae99
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          archive="foundry_${FOUNDRY_VERSION}_linux_amd64.tar.gz"
+          asset="https://api.github.com/repos/foundry-rs/foundry/releases/assets/${FOUNDRY_ASSET_ID}"
+          release="https://github.com/foundry-rs/foundry/releases/download/${FOUNDRY_VERSION}/${archive}"
+          mkdir -p "$RUNNER_TEMP/foundry"
+          common=(
+            --fail --location --retry 5 --retry-all-errors --retry-delay 5
+            --connect-timeout 20 --max-time 300
+            --output "$RUNNER_TEMP/$archive"
+          )
+          if ! curl "${common[@]}" \
+            --header "Authorization: Bearer ***" \
+            --header "Accept: application/octet-stream" \
+            "$asset"; then
+            echo "The API asset endpoint failed; trying the release download URL." >&2
+            curl "${common[@]}" "$release"
+          fi
+          printf '%s  %s\n' "$FOUNDRY_SHA256" "$RUNNER_TEMP/$archive" | sha256sum --check
+          tar --extract --gzip --file "$RUNNER_TEMP/$archive" --directory "$RUNNER_TEMP/foundry"
+          echo "$RUNNER_TEMP/foundry" >> "$GITHUB_PATH"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Start the pinned archive fork (Alchemy, Tenderly fallback)
+        env:
+          ALCHEMY_RPC: ${{ secrets.ALCHEMY_API_KEY != '' && format('https://arb-sepolia.g.alchemy.com/v2/{0}', secrets.ALCHEMY_API_KEY) || '' }}
+          FALLBACK_RPC: https://arbitrum-sepolia.gateway.tenderly.co
+        run: |
+          set -eu
+          args=(--network arbitrum-sepolia --port 8547 --block-number 329841886)
+          if [ -n "${ALCHEMY_RPC:-}" ]; then
+            args+=(--rpc "$ALCHEMY_RPC")
+          fi
+          args+=(--rpc "$FALLBACK_RPC")
+          tools/start-anvil-fork.sh "${args[@]}"
+
+      - name: Check the non-zero fee on the fork
+        env:
+          ANVIL_RPC: http://127.0.0.1:8547
+        run: pnpm run check:anvil-fee
+
   dleq-oracle:
     name: Go/Rust DLEQ oracle
     needs: checks

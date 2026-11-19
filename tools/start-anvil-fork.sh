@@ -14,6 +14,7 @@ Options:
   --network NAME       arbitrum-sepolia or ethereum-mainnet
   --port PORT          anvil port (default: 8545)
   --rpc URL            use this RPC; repeatable. Defaults are selected per network.
+  --block-number N     pin the fork at this block (an archive RPC is required)
   --block-offset N     pin head - N on ethereum-mainnet (default: 5)
   -h, --help           show this help
 EOF
@@ -22,12 +23,14 @@ EOF
 NETWORK=""
 PORT="8545"
 BLOCK_OFFSET=""
+BLOCK_NUMBER=""
 RPC_URLS=()
 while (($# > 0)); do
   case "$1" in
     --network) NETWORK="${2:-}"; shift 2 ;;
     --port) PORT="${2:-}"; shift 2 ;;
     --rpc) RPC_URLS+=("${2:-}"); shift 2 ;;
+    --block-number) BLOCK_NUMBER="${2:-}"; shift 2 ;;
     --block-offset) BLOCK_OFFSET="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; usage >&2; exit 2 ;;
@@ -66,13 +69,26 @@ if [ -n "$BLOCK_OFFSET" ] && ! [[ "$BLOCK_OFFSET" =~ ^[0-9]+$ ]]; then
   echo "--block-offset must be numeric" >&2
   exit 2
 fi
+if [ -n "$BLOCK_NUMBER" ] && ! [[ "$BLOCK_NUMBER" =~ ^[0-9]+$ ]]; then
+  echo "--block-number must be numeric" >&2
+  exit 2
+fi
 
 LOG="${TMPDIR:-/tmp}/anvil-$PORT.log"
 PID_FILE="${TMPDIR:-/tmp}/anvil-$PORT.pid"
 rm -f "$LOG" "$PID_FILE"
 
+# AN RPC URL CAN CARRY AN API KEY. Logs are read by CI users, so the key (Alchemy's `/v2/<key>`, or an apikey query)
+# is removed before a URL or an anvil error line is printed. The key still reaches anvil in argv, never in the log.
+redact_url() {
+  sed -E 's#(/v2/)[^/[:space:]]+#\1<redacted>#g; s#([?&]apikey=)[^&[:space:]]+#\1<redacted>#Ig'
+}
+
 FORK_BLOCK=""
-if ((PIN_BLOCK == 1)); then
+if [ -n "$BLOCK_NUMBER" ]; then
+  FORK_BLOCK="$BLOCK_NUMBER"
+  echo "forking $NETWORK at pinned block $FORK_BLOCK"
+elif ((PIN_BLOCK == 1)); then
   HEAD=""
   for url in "${RPC_URLS[@]}"; do
     [ -n "$url" ] || continue
@@ -98,7 +114,7 @@ fi
 
 for url in "${RPC_URLS[@]}"; do
   [ -n "$url" ] || continue
-  echo "trying fork via $url"
+  echo "trying fork via $(printf '%s' "$url" | redact_url)"
   args=(
     --fork-url "$url"
     --fork-state-by-number
@@ -121,8 +137,8 @@ for url in "${RPC_URLS[@]}"; do
   done
   kill "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
-  echo "fork via $url did not start:" >&2
-  cat "$LOG" >&2
+  echo "fork via $(printf '%s' "$url" | redact_url) did not start:" >&2
+  redact_url < "$LOG" >&2
 done
 
 echo "could not start a $NETWORK fork from any endpoint" >&2

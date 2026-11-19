@@ -1,18 +1,24 @@
-// Executable examples of adapters accepted by index.d.ts. Known defects stay skipped until their issue is fixed.
+// Executable examples of adapters accepted by index.d.ts. The synchronous store is the declared contract; a
+// promise-returning store is a named refusal.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createNinsei } from "../src/index.mjs";
 import { createSwaps } from "../src/swaps.mjs";
 import { createStore, memoryStorage } from "../engine/core/store.js";
 import { encodeStatus, encodeRead } from "../engine/evm/escrow.js";
-import { asyncStorage, feeOnlyBlock } from "./ts-consumer/adapter-fixtures.ts";
+import { asyncStorage, declaredBlock, syncStorage } from "./ts-consumer/adapter-fixtures.ts";
 
-test("a Promise-returning declared store can list an empty account", { skip: "sdk#356: runtime parses the storage Promise instead of awaiting it" }, async () => {
-  const sdk = createNinsei({ settlement: { chain: "arbitrum-sepolia" }, xmrNetwork: "stagenet", storage: asyncStorage() });
+test("a declared synchronous store can list an empty account", async () => {
+  const sdk = createNinsei({ settlement: { chain: "arbitrum-sepolia" }, xmrNetwork: "stagenet", storage: syncStorage() });
   assert.deepEqual(await sdk.swaps.list(), []);
 });
 
-test("a declared block adapter supports a ready relay claim", { skip: "sdk#356: evmBlock declaration omits the number and timestamp required by claims" }, async () => {
+test("a Promise-returning store is refused, not parsed", async () => {
+  const sdk = createNinsei({ settlement: { chain: "arbitrum-sepolia" }, xmrNetwork: "stagenet", storage: asyncStorage() });
+  await assert.rejects(() => sdk.swaps.list(), (error) => error && error.code === "storage-unavailable");
+});
+
+test("a declared block adapter supports a ready relay claim", async () => {
   const address = (byte) => "0x" + byte.repeat(20);
   const record = { id: "declared-block", side: "sell", claimTip: "1", claimSenders: [address("33")],
     relayUrl: "https://relay.example", quote: { provider: address("11") },
@@ -23,7 +29,7 @@ test("a declared block adapter supports a ready relay claim", { skip: "sdk#356: 
   store.saveState(state);
   let posted = false;
   const word = (n) => BigInt(n).toString(16).padStart(64, "0");
-  const swaps = createSwaps({ config: {}, store, now: () => 1900000000000, evmBlock: feeOnlyBlock,
+  const swaps = createSwaps({ config: {}, store, now: () => 1900000000000, evmBlock: declaredBlock,
     call: async ({ data }) => {
       if (data === encodeStatus()) return "0x" + word(1) + word(posted ? 1 : 0) + word(0) + word(1000);
       if (data === encodeRead("termsHash")) return "0x" + word(0);

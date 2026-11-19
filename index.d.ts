@@ -108,7 +108,9 @@ export interface NinseiOptions {
    * base and priority fees. A missing seam is `quote-tip-unchecked` when a quote carries a non-zero tip; zero tips
    * (the buy side) never call it.
    */
-  evmBlock?: (tag?: string) => Promise<{ readonly baseFeePerGas?: string | number | bigint | null;
+  evmBlock?: (tag?: string) => Promise<{ readonly number?: string | number | bigint | null;
+    readonly timestamp?: string | number | bigint | null;
+    readonly baseFeePerGas?: string | number | bigint | null;
     readonly baseFeeWei?: string | number | bigint | null;
     readonly priorityFeePerGas?: string | number | bigint | null;
     readonly maxPriorityFeePerGas?: string | number | bigint | null;
@@ -196,9 +198,9 @@ export interface SwapRecord {
 }
 
 export interface StorageAdapter {
-  get(key: string): string | null | Promise<string | null>;
-  set(key: string, value: string): void | Promise<void>;
-  remove(key: string): void | Promise<void>;
+  get(key: string): string | null;
+  set(key: string, value: string): void;
+  remove(key: string): void;
 }
 
 export interface HttpResponse {

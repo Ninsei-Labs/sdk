@@ -214,7 +214,7 @@ console.log("=== BREAKING RUN: a Foundry installer or an unpinned release redden
   const brokenInstaller = { ...files, ".github/workflows/ci.yml": (files[".github/workflows/ci.yml"] || "") + "\n      - uses: foundry-rs/foundry-toolchain@v1\n" };
   if (foundryInstallerMisses(brokenInstaller).length) ok("breaking run REDDENS: a foundryup installer is caught");
   else bad("breaking run does not catch a Foundry installer");
-  const brokenPin = { ...files, ".github/workflows/ci.yml": (files[".github/workflows/ci.yml"] || "").replace(/FOUNDRY_SHA256:.*\r?\n/, "") };
+  const brokenPin = { ...files, ".github/workflows/ci.yml": (files[".github/workflows/ci.yml"] || "").replace(/FOUNDRY_SHA256:.*\r?\n/g, "") };
   if (foundryPinMisses(brokenPin).includes("sha256")) ok("breaking run REDDENS: a missing Foundry SHA-256 is caught");
   else bad("breaking run does not catch a missing Foundry SHA-256");
 }
