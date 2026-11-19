@@ -38,6 +38,21 @@ function rpc({ failAt = null, busy = false, partial = false, undecodedBlock = fa
 const run = (options) => scanRange({
   daemonUrl: "https://node.example", fromHeight: 99, toHeight: 101, watched: [], fetchImpl: rpc(options),
 });
+const runWatched = (watched) => scanRange({
+  daemonUrl: "https://node.example", fromHeight: 99, toHeight: 101, watched, fetchImpl: rpc({}),
+});
+
+console.log("=== 0) AN INVALID WATCHED IDENTITY IS REFUSED, NOT A COMPLETE ZERO ===");
+{
+  let error = null;
+  try {
+    await runWatched([{ address: "not-a-monero-address", viewSecret: "00", spendPub: "00" }]);
+  } catch (e) { error = e; }
+  if (error && (error.code === "bad-input" || error.code === "xmr-address-mismatch")
+    && !error.message.includes("complete")) {
+    ok("an invalid watched identity is a named refusal");
+  } else bad("invalid watched identity -> " + JSON.stringify({ code: error && error.code, message: error && error.message }));
+}
 
 console.log("=== 1) A FULLY READ RANGE IS COMPLETE ===");
 {

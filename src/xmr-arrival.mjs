@@ -170,6 +170,17 @@ async function getBlockTxs(node, hashes, fetchImpl, timeoutMs) {
 // amount did not match its Pedersen commitment is NOT money: it contributes zero, and the caller names it.
 const sumOutputs = (hit) => hit.outputs.reduce((n, o) => n + (o.amountVerified ? (o.amountAtomic || 0n) : 0n), 0n);
 
+// THE SAME TIE-BREAK IN THE EXACT AND THE SHADOW WALK. Score and amount decide first; two candidates that are
+// equal on both are not interchangeable, because the report names one txid. The earlier block wins, and inside one
+// block the lower txid wins - both walks see the same chain order.
+const betterCandidate = (candidate, best) => {
+  if (!best) return true;
+  if (candidate.score !== best.score) return candidate.score > best.score;
+  if (candidate.amountAtomic !== best.amountAtomic) return candidate.amountAtomic > best.amountAtomic;
+  if (candidate.height !== best.height) return candidate.height < best.height;
+  return String(candidate.txid).toLowerCase() < String(best.txid).toLowerCase();
+};
+
 /**
  * FIND THE BEST MATCHING TRANSFER. Blocks are walked from the swap's birth height upwards and the whole block is
  * asked for each height, so a public node never learns which transaction is ours. Every matching transfer is
@@ -200,11 +211,10 @@ async function locate(node, { expectedAtomic, address, viewSecret, spendPub, fro
       // one; a full unlocked payout wins over a full locked one. The verification step still compares the chosen
       // transaction across operators.
       const score = (amountAtomic >= expectedAtomic ? 4 : 0) + (amountVerified ? 2 : 0) + (locked ? 0 : 1);
-      const candidate = { txid: tx.tx_hash, height: h };
-      if (score === 7) return candidate;
-      if (!best || score > best.score || (score === best.score && amountAtomic > best.amountAtomic)) {
-        best = { ...candidate, score, amountAtomic };
-      }
+      const candidate = { txid: tx.tx_hash, height: h, score, amountAtomic };
+      // A perfect score does not end the walk: another perfect candidate can tie on score and amount, and the
+      // deterministic tie-break must decide which txid the caller is told about.
+      if (betterCandidate(candidate, best)) best = candidate;
     }
   }
   return best;
@@ -526,7 +536,7 @@ async function locateInSlices(node, { expectedAtomic, address, viewSecret, spend
         const locked = hit[0].unlock && hit[0].unlock.locked === true;
         const score = (amountAtomic >= expectedAtomic ? 4 : 0) + (amountVerified ? 2 : 0) + (locked ? 0 : 1);
         const candidate = { txid, height: block.height, blockHash: block.hash, amountAtomic, locked, score };
-        if (!best || score > best.score || (score === best.score && amountAtomic > best.amountAtomic)) best = candidate;
+        if (betterCandidate(candidate, best)) best = candidate;
       }
     }
     // THE WHOLE SLICE WAS READ. A perfect candidate does not end the walk: a later slice can contain a newer tip,

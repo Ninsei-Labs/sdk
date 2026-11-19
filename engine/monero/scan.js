@@ -483,7 +483,15 @@ function bindWatched(watched) {
   const bound = [];
   for (const entry of watched) {
     const verdict = watchedAddressVerdict(entry);
-    if (verdict.ok) bound.push({ entry, bound: verdict });
+    // AN INVALID IDENTITY IS NOT AN EMPTY WATCH. Skipping it made scanRange return a complete zero row for an
+    // address whose key did not belong to it; the caller could not tell that from "no money".
+    if (!verdict.ok) {
+      const error = new Error("watched identity is invalid");
+      error.code = verdict.code || "bad-input";
+      error.params = verdict;
+      throw error;
+    }
+    bound.push({ entry, bound: verdict });
   }
   return bound;
 }

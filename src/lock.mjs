@@ -31,7 +31,7 @@ export function canonicalTerms(request) {
  * The order terms for the contract. They are assembled by the engine, and its refusal (the deadlines the wrong
  * way, readyBy in the past) is turned into a CODE: texts are the interface's business, the core speaks in codes.
  */
-export function terms(request) {
+export function terms(request, nowSec = null) {
   if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
   const need = ["locker", "claimer", "commitHalfLocker", "commitHalfClaimer", "edPointLocker", "edPointClaimer", "amount", "readyBy", "t1"];
   const missing = need.filter((k) => request[k] === undefined || request[k] === null || request[k] === "");
@@ -41,7 +41,8 @@ export function terms(request) {
   } catch (error) {
     // We will not parse ANOTHER's text: we name what the contract's rules check, and only if the deadlines are
     // actually violated. Otherwise - a general refusal on the terms.
-    const seconds = Math.floor(Date.now() / 1000);
+    const seconds = Number.isSafeInteger(Number(nowSec)) && Number(nowSec) > 0
+      ? Number(nowSec) : Math.floor(Date.now() / 1000);
     if (Number(request.readyBy) <= seconds) throw new SdkError("bad-input", { field: "readyBy", why: "not-in-future" });
     if (Number(request.t1) <= Number(request.readyBy)) throw new SdkError("bad-input", { field: "t1", why: "not-after-readyBy" });
     throw new SdkError("bad-input", { field: "terms" });
@@ -76,7 +77,7 @@ export async function send(request, wallet, deps = {}) {
   // THE DEADLINES - HERE, BEFORE ANY SENDING, and on the form funding expects (`amountWei`, not `amount`: the
   // order terms and the sending have different names for the same field, and they must not be confused).
   const canonical = canonicalTerms(request);
-  terms({ ...canonical, amount: canonical.amountWei });
+  terms({ ...canonical, amount: canonical.amountWei }, deps.nowSec);
   const evm = engine.evm;
   await assertWalletChain(wallet, canonical.chainId, "fund-order");
   // WHAT READS THE CHAIN IS ALSO A SEAM (as in actions.mjs): by default it is the engine's read, but the caller
@@ -87,6 +88,7 @@ export async function send(request, wallet, deps = {}) {
     return await evm.fundOrder({
       ...canonical,
       call: reader,
+      nowSec: Number.isSafeInteger(Number(deps.nowSec)) && Number(deps.nowSec) > 0 ? Number(deps.nowSec) : null,
       onPredicted: deps.onPredicted,
       send: (tx) => wallet.send({ ...tx, chainId: canonical.chainId, from: canonical.locker }),
       // NORMALISING THE RECEIPT ARGUMENT'S SHAPE - HERE, AT THE CORE'S BOUNDARY, NOT AT EVERY CALLER.
