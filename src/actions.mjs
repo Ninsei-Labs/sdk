@@ -9,6 +9,7 @@
 // claiming it is revealing your own half (irreversible), for refunding the same reveal. The transaction still
 // looks successful.
 import { SdkError } from "./errors.mjs";
+import { ERROR_CODES } from "./codes.mjs";
 // THE DEAL FLOW IS NOW A PACKAGE MODULE, NOT AN ENGINE FILE (#32, wave 3): www/js/core/swap-flow.js moved to
 // sdk/src/swap-flow.mjs. The actions therefore call the module directly instead of reaching it through the
 // mirror - there is exactly one implementation, and it lives here.
@@ -44,13 +45,68 @@ const requestOrFail = (request, extra) => {
   return request;
 };
 
-// The engine's refusal arrives as text; a CODE goes out. Texts are the interface's business, the core speaks in codes.
+// A WALLET ERROR IS NOT A CONTRACT REVERT. EIP-1193 providers report a refusal, a missing permission, another
+// chain or a busy request with numeric codes; the old wrapper turned all of them into `contract-reverted`. The
+// interface then told the person the escrow had refused a transaction it never saw. A real revert is recognised
+// by the receipt, a revert-shaped error, or the message - and only then leaves as `contract-reverted`.
+const codeOfError = (error) => error && (error.code || (error.data && error.data.originalError && error.data.originalError.code));
+const messageOfError = (error) => String((error && error.message) || error || "");
+const isProviderError = (error) => {
+  const code = codeOfError(error);
+  return typeof code === "number" || (typeof code === "string" && !ERROR_CODES.includes(code));
+};
+const actionFailure = (error, step) => {
+  // ERRORS ALREADY NAMED BY THE SDK KEEP THEIR CODE. The flow and the chain guards speak the same vocabulary;
+  // wrapping them a second time would erase `why` and turn a named refusal into a generic one.
+  if (error instanceof SdkError) throw error;
+  if (typeof (error && error.code) === "string" && ERROR_CODES.includes(error.code)) {
+    throw new SdkError(error.code, { step, ...(error.params || {}) });
+  }
+  const code = codeOfError(error);
+  const message = messageOfError(error);
+  const receiptStatus = error && error.receipt && error.receipt.status;
+  const explicitReject = code === 4001 || code === "ACTION_REJECTED"
+    || /user rejected|user denied|rejected by user|denied by user|action_rejected/i.test(message);
+  // A NAMED REVERT WINS OVER A MESSAGE THAT MENTIONS "revert"; a wallet's own 4001 wins over generic
+  // revert-shaped text, so a localized "cannot be reverted" refusal is not blamed on the escrow.
+  const namedRevert = code === "contract-reverted" || code === 3
+    || receiptStatus === 0 || receiptStatus === "0x0" || receiptStatus === "0";
+  if (namedRevert) throw new SdkError("contract-reverted", { step, why: "revert" });
+  // 4001 IS THE PERSON'S DECISION, not a chain answer. A textual rejection is accepted as the same event
+  // because some injected providers send no numeric code.
+  if (explicitReject) throw new SdkError("wallet-rejected", { step });
+  // REVERT DATA ONLY COUNTS AFTER A REFUSAL. A 4001/ACTION_REJECTED error may carry arbitrary provider data;
+  // it is still the person's decision, not an escrow answer.
+  if ((error && typeof error.data === "string" && error.data.startsWith("0x")) || /execution reverted|revert/i.test(message)) {
+    throw new SdkError("contract-reverted", { step, why: "revert" });
+  }
+  // A DETERMINISTIC WALLET REFUSAL HAS ITS OWN CODE. No gas is a wallet-side state, not a transport failure:
+  // retrying the same transaction will fail the same way until the account is funded.
+  if (code === "INSUFFICIENT_FUNDS" || /insufficient funds/i.test(message)) {
+    throw new SdkError("insufficient-funds", { step });
+  }
+  // 4902 IS A WALLET THAT DOES NOT KNOW THE CHAIN. It is a wallet-side refusal with its own existing code, not
+  // a wrong contract answer.
+  if (code === 4902 || /unrecognized chain|not added|unknown chain/i.test(message)) {
+    throw new SdkError("wrong-chain", { vm: "evm", step, why: "unknown-chain" });
+  }
+  // THE WALLET IS NOT USABLE FOR THIS REQUEST. 4100 has no permission for the account, -32002 already has a
+  // request open, and a transport failure never reached a node. Keep one wallet-side code and name the reason.
+  if (code === 4100) throw new SdkError("wallet-not-connected", { step, why: "unauthorized" });
+  if (code === -32002 || /already pending|already processing/i.test(message)) {
+    throw new SdkError("wallet-not-connected", { step, why: "request-pending" });
+  }
+  if (isProviderError(error)) {
+    throw new SdkError("wallet-not-connected", { step, why: "transport", providerCode: code ?? null });
+  }
+  // AN UNCLASSIFIED FAILURE IS NOT A REVERT. The old fallback claimed the escrow refused; that is a statement
+  // about the chain we cannot make from an error we did not classify.
+  throw new SdkError("unknown", { step, why: "unclassified" });
+};
+
 const withCodes = async (step, work) => {
   try { return await work(); }
-  catch (error) {
-    if (error && typeof error.code === "string") throw error;
-    throw new SdkError("contract-reverted", { step });
-  }
+  catch (error) { actionFailure(error, step); }
 };
 
 export function createActions({ call = null, blockTime = null } = {}) {
@@ -74,7 +130,9 @@ export function createActions({ call = null, blockTime = null } = {}) {
       const tx = from ? { to, data, from } : { to, data };
       const result = await provider.request({ method: "eth_call", params: [tx, "latest"] });
       if (typeof result !== "string" || !result.startsWith("0x")) {
-        throw new SdkError("contract-reverted", { surface: "actions.read" });
+        // A MALFORMED `eth_call` ANSWER IS A NODE FAILURE, NOT A WALLET STATE. `unknown` keeps it out of both
+        // `contract-reverted` and the wallet-side codes; the reason names what was wrong.
+        throw new SdkError("unknown", { surface: "actions.read", why: "bad-answer" });
       }
       return result;
     };
