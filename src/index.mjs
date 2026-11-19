@@ -1,5 +1,5 @@
 // THE SDK ENTRY POINT. Assembles the facades and holds rules common to all: no DOM, no texts, no windows.
-import { buildConfig } from "./config.mjs";
+import { buildConfig, escrowOverrideOf } from "./config.mjs";
 import { factoryCodesForChain, implementationCodesForChain } from "./factoryPolicy.mjs";
 import { createQuotes } from "./quotes.mjs";
 import { createPreflight } from "./preflight.mjs";
@@ -44,6 +44,7 @@ const normalizeOptions = (options) => {
   if (settlement.vm !== undefined && (typeof settlement.vm !== "string" || !settlement.vm)) {
     fail("bad-input", { field: "settlement.vm" });
   }
+  const escrowOverride = escrowOverrideOf(settlement);
   if (typeof o.xmrNetwork !== "string" || !o.xmrNetwork) fail("bad-input", { field: "xmrNetwork" });
   const mode = o.mode === undefined ? "live" : o.mode;
   if (mode !== "live" && mode !== "sim") fail("bad-input", { field: "mode", known: ["live", "sim"] });
@@ -136,7 +137,7 @@ const normalizeOptions = (options) => {
     }
   }
   return {
-    settlement: { chain: settlement.chain, vm: settlement.vm },
+    settlement: { chain: settlement.chain, vm: settlement.vm, escrow: escrowOverride },
     xmrNetwork: o.xmrNetwork,
     assetsBase: typeof o.assetsBase === "string" && o.assetsBase ? o.assetsBase : "/",
     mode,

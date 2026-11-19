@@ -28,6 +28,10 @@ const sdk = createNinsei({
 One client owns one storage adapter and one wallet session. Two clients with different storage adapters are
 isolated; do not reuse a storage adapter between tenants.
 
+A local anvil deployment is passed by the caller: `settlement: { chain: "local-anvil", escrow: { address, cashier,
+implementationCodeHash } }`. It is refused for a public network. The `testnet` and `fakechain` node maps are empty
+until the caller names nodes through `nodes` or `addNodes`.
+
 ## 3. Required seams
 
 | Seam | Required for | Contract |

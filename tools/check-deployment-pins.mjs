@@ -18,6 +18,7 @@ import {
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUTPUT = join(ROOT, "engine", "core", "deployments.generated.js");
+const MAINNET_CHAIN_REF = "42161";
 const problems = [];
 
 function check(condition, message) {
@@ -35,8 +36,8 @@ const historyFixture = (chainRef, network) => ({
   factories: [{ address: "0x" + "11".repeat(20), deploymentBlock: 123, release: { tag: "old-release" } }],
 });
 {
-  const mainnet = normalizeHistory(historyFixture("42161", "arbitrum-one"), "test:mainnet-history.json");
-  check(mainnet.chainRef === "42161", "mainnet history lost its chainRef during normalization");
+  const mainnet = normalizeHistory(historyFixture(MAINNET_CHAIN_REF, "arbitrum-one"), "test:mainnet-history.json");
+  check(mainnet.chainRef === MAINNET_CHAIN_REF, "mainnet history lost its chainRef during normalization");
   const accepted = historyVerdict(mainnet, { "arbitrum-one": {} });
   check(accepted.ok === true, "a valid mainnet history was refused: " + accepted.why);
 
@@ -143,8 +144,8 @@ for (const [network, pin] of Object.entries(DEPLOYMENTS)) {
   // HISTORY IS MAINNET ONLY. While a network is in development every factory switch replaces the old one; keeping
   // retired factories there would make recovery search old testnet addresses that no user should depend on.
   const retired = history.filter((entry) => entry.status === "retired");
-  if (String(pin.chainRef) !== "42161") {
-    check(retired.length === 0, `${network}: retired factory history is mainnet-only (chain 42161)`);
+  if (String(pin.chainRef) !== MAINNET_CHAIN_REF) {
+    check(retired.length === 0, `${network}: retired factory history is mainnet-only (chain ${MAINNET_CHAIN_REF})`);
   }
 }
 for (const network of Object.keys(FACTORY_HISTORY)) {

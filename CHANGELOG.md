@@ -1,5 +1,6 @@
 ## Unreleased — 2026-11-19
 
+- `createNinsei` accepts the deployment a local anvil just created (`settlement.escrow`), and the `testnet` and `fakechain` node maps are present but empty until the caller names nodes.
 - `swaps.verifyRecovery` reads every transfer to the order address without a quoted amount, including short, overpaid, split and still-pool payments. `verifyArrival` keeps its amount rule.
 - A previous claim attempt owns its sender slot even after a refusal: a later call waits out the remaining slot and starts the sender list from the beginning, so a temporary refusal or restart never removes the seller's no-wallet path.
 - `verifyArrival` reports `state: "pool"` with the matching txid while the transfer is still in a node's mempool; it never counts as seen or arrived.
