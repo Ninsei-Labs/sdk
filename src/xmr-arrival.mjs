@@ -354,7 +354,7 @@ export async function verifyArrival(request) {
     const poolFailed = [];
     const poolChecked = new Set();
     for (const { node, info } of live) {
-      if (!info.synced) continue;
+      if (!info.synced) { continue; }
       try {
         const hit = await findPoolTransfer(node, {
           expectedAtomic, watched, tip: top, nowSec, fetchImpl, timeoutMs,

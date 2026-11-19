@@ -133,6 +133,9 @@ function fetchBoth({ tie = false, witnessHash = BLOCK_HASH, witnessHashes = null
     if (body.method === "get_block") {
       return { ok: true, json: async () => ({ result: blockFor(Number(body.params.height), tie) }) };
     }
+    if (String(url).endsWith("/get_transaction_pool_hashes")) {
+      return { ok: true, json: async () => ({ tx_hashes: [] }) };
+    }
     if (typeof body.method === "string") {
       const ids = tie ? [TXID, TXID_TIE] : [TXID];
       return { ok: true, json: async () => ({ txs: ids.map((txid) => ({ tx_hash: txid, block_height: 105, confirmations: 16 })),
@@ -154,6 +157,9 @@ function fetchEmpty() {
     if (body.method === "get_info") return { ok: true, json: async () => ({ result: { height: 121, synchronized: true } }) };
     if (body.method === "get_block") {
       return { ok: true, json: async () => ({ result: { block_header: { hash: String(body.params.height).padStart(64, "0") }, tx_hashes: [] } }) };
+    }
+    if (String(url).endsWith("/get_transaction_pool_hashes")) {
+      return { ok: true, json: async () => ({ tx_hashes: [] }) };
     }
     if (Array.isArray(body.txs_hashes)) return { ok: true, json: async () => ({ txs: [], txs_as_json: [] }) };
     return { ok: false, status: 404, json: async () => ({}) };
