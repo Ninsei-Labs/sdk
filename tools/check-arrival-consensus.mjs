@@ -195,6 +195,45 @@ console.log("=== 1b) A RESTRICTED NODE ACCEPTS THE WALK IN BATCHES OF AT MOST 10
   }
 }
 
+console.log("=== 1c) A POOL TRANSFER IS REPORTED WITH A TXID, BUT IS NOT AN ARRIVAL ===");
+{
+  const tx = fixture();
+  const other = "c".repeat(64);
+  let poolHashesSeen = null;
+  const poolFetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (body.method === "get_info") return { ok: true, json: async () => ({ result: { height: 121, synchronized: true } }) };
+    if (body.method === "get_block") return { ok: true, json: async () => ({ result: { block_header: { hash: BLOCK_HASH }, tx_hashes: [] } }) };
+    if (url.endsWith("/get_transaction_pool_hashes")) {
+      poolHashesSeen = ["not-a-txid", TXID, other];
+      return { ok: true, json: async () => ({ tx_hashes: poolHashesSeen }) };
+    }
+    const hashes = (body.txs_hashes || []).map((hash) => String(hash).toLowerCase());
+    return { ok: true, json: async () => ({
+      txs: hashes.map((hash) => ({ tx_hash: hash, block_height: null, confirmations: 0 })),
+      txs_as_json: hashes.map((hash) => JSON.stringify(hash === TXID ? tx : { extra: [], vout: [] })),
+    }) };
+  };
+  let verdict = null;
+  let error = null;
+  try {
+    verdict = await verifyArrival({
+      nodes: [{ url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" }],
+      address, viewSecret: VIEW, spendPub, expectedAtomic: AMOUNT, minConfirmations: 10,
+      fromHeight: 100, txid: TXID, fetch: poolFetch,
+    });
+  } catch (e) { error = e; }
+  if (!error && verdict && verdict.state === "pool" && verdict.txid === TXID && verdict.seen === false
+    && verdict.confirmations === 0 && verdict.height === null && verdict.amountAtomic === AMOUNT.toString()) {
+    ok("a pool match is reported as pool with its txid and zero confirmations");
+  } else {
+    bad("pool verdict: " + JSON.stringify({ error: error && (error.code || error.message), verdict }));
+  }
+  if (Array.isArray(poolHashesSeen) && poolHashesSeen.includes(TXID) && poolHashesSeen.includes(other)) {
+    ok("the whole pool is requested, not the watched txid");
+  } else bad("pool request: " + JSON.stringify(poolHashesSeen));
+}
+
 console.log("=== 1) TWO HONEST NODES AGREE ===");
 {
   const tx = fixture();
