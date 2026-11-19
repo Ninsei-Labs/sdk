@@ -6,6 +6,7 @@
 import { recordInputOf } from "../src/swaps.mjs";
 import { createRecord } from "../src/record.mjs";
 import { createNinsei } from "../src/index.mjs";
+import { buildConfig } from "../src/config.mjs";
 
 export const swapNetworkCheck = () => {
   const problems = [];
@@ -59,6 +60,13 @@ export const swapNetworkCheck = () => {
   if (!foreign || foreign.code !== "bad-input" || !foreign.params || foreign.params.field !== "settlement.escrow"
     || foreign.params.why !== "only-local-anvil") {
     problems.push("a public deployment override was accepted: " + JSON.stringify(foreign && foreign.params));
+  }
+  let direct = null;
+  try {
+    buildConfig({ settlement: { chain: "arbitrum-sepolia", escrow }, xmrNetwork: "stagenet" });
+  } catch (error) { direct = error; }
+  if (!direct || direct.code !== "bad-input" || !direct.params || direct.params.why !== "only-local-anvil") {
+    problems.push("a direct buildConfig call accepted a public deployment override: " + JSON.stringify(direct && direct.params));
   }
 
   return {

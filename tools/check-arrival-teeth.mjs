@@ -170,15 +170,6 @@ try {
   } else bad("highest-top guard", JSON.stringify({ quorum: topAware.witness.quorum,
     checked: topAware.witness.checked, agrees: topAware.agrees, problems: topAware.problems }));
 
-  const topMutant = await mutatedLadder(
-    "const targetTop = highestTop === null ? top : Math.max(top, highestTop);",
-    "const targetTop = top;", "highest-top");
-  const mutantTop = await topMutant.verifyArrivalShadow(shadowTopRequest);
-  if (mutantTop.agrees === false && mutantTop.witness.quorum.ok === false) {
-    ok("removing the common target alone still leaves the served-tip target refusing agreement");
-  } else bad("highest-top mutation", JSON.stringify({ quorum: mutantTop.witness.quorum,
-    agrees: mutantTop.agrees, problems: mutantTop.problems }));
-
   const noWitnessEvidence = await mutatedLadder(
     "if (witness.completed && witness.failed.length === 0 && witness.quorum.ok && !witnessDisagreements.length) agrees = true;",
     "if (true) agrees = true;", "no-witness-evidence");

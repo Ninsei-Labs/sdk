@@ -188,6 +188,42 @@ const endpointsOf = (raw, options) => {
   };
 };
 
+export function escrowOverrideOf(settlement) {
+  const raw = settlement && settlement.escrow;
+  if (raw === undefined || raw === null) return null;
+  if (!settlement || settlement.chain !== "local-anvil") {
+    fail("bad-input", { field: "settlement.escrow", why: "only-local-anvil" });
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) fail("bad-input", { field: "settlement.escrow" });
+  const address = String(raw.address || "");
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
+    fail("bad-input", { field: "settlement.escrow.address" });
+  }
+  const text = (field) => {
+    if (raw[field] === undefined || raw[field] === null) return null;
+    if (typeof raw[field] !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(raw[field])) {
+      fail("bad-input", { field: "settlement.escrow." + field });
+    }
+    return raw[field];
+  };
+  if (raw.implementationCodeHash !== undefined && raw.implementationCodeHash !== null) {
+    if (typeof raw.implementationCodeHash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(raw.implementationCodeHash)) {
+      fail("bad-input", { field: "settlement.escrow.implementationCodeHash" });
+    }
+  }
+  if (raw.deploymentBlock !== undefined && raw.deploymentBlock !== null
+    && (typeof raw.deploymentBlock !== "number" || !Number.isSafeInteger(raw.deploymentBlock) || raw.deploymentBlock < 0)) {
+    fail("bad-input", { field: "settlement.escrow.deploymentBlock" });
+  }
+  return {
+    address,
+    cashier: text("cashier"),
+    registry: text("registry"),
+    implementationCodeHash: raw.implementationCodeHash === undefined ? null : raw.implementationCodeHash,
+    deploymentBlock: raw.deploymentBlock === undefined || raw.deploymentBlock === null ? null : raw.deploymentBlock,
+  };
+}
+
 export function buildConfig(options) {
   const chains = engine.config.CHAINS.map(chainConfig);
   const chosen = chains.find((c) => c.id === options.settlement.chain) || null;
@@ -195,8 +231,9 @@ export function buildConfig(options) {
   // A LOCAL CHAIN'S ADDRESSES ARE CREATED, NOT CONSTANT. The caller may hand the deployment that its own anvil
   // just produced; the address, cashier and implementation pin then travel with the network into quotes, funding and
   // the arrival read. The override is deliberately local-anvil only: a public network's pins stay reviewed data.
-  if (options.settlement.escrow) {
-    chosen.escrow = { ...(chosen.escrow || {}), ...options.settlement.escrow };
+  const override = escrowOverrideOf(options.settlement);
+  if (override) {
+    chosen.escrow = { ...(chosen.escrow || {}), ...override };
   }
   const rawChain = engine.config.CHAINS.find((c) => c.id === options.settlement.chain) || {};
   const watch = watchOf(options);
