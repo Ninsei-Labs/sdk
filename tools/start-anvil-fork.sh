@@ -78,6 +78,12 @@ LOG="${TMPDIR:-/tmp}/anvil-$PORT.log"
 PID_FILE="${TMPDIR:-/tmp}/anvil-$PORT.pid"
 rm -f "$LOG" "$PID_FILE"
 
+# AN RPC URL CAN CARRY AN API KEY. Logs are read by CI users, so the key (Alchemy's `/v2/<key>`, or an apikey query)
+# is removed before a URL or an anvil error line is printed. The key still reaches anvil in argv, never in the log.
+redact_url() {
+  sed -E 's#(/v2/)[^/[:space:]]+#\1<redacted>#g; s#([?&]apikey=)[^&[:space:]]+#\1<redacted>#Ig'
+}
+
 FORK_BLOCK=""
 if [ -n "$BLOCK_NUMBER" ]; then
   FORK_BLOCK="$BLOCK_NUMBER"
@@ -108,7 +114,7 @@ fi
 
 for url in "${RPC_URLS[@]}"; do
   [ -n "$url" ] || continue
-  echo "trying fork via $url"
+  echo "trying fork via $(printf '%s' "$url" | redact_url)"
   args=(
     --fork-url "$url"
     --fork-state-by-number
@@ -131,8 +137,8 @@ for url in "${RPC_URLS[@]}"; do
   done
   kill "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
-  echo "fork via $url did not start:" >&2
-  cat "$LOG" >&2
+  echo "fork via $(printf '%s' "$url" | redact_url) did not start:" >&2
+  redact_url < "$LOG" >&2
 done
 
 echo "could not start a $NETWORK fork from any endpoint" >&2
