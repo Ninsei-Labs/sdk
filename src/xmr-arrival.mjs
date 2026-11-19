@@ -53,6 +53,11 @@ const failureOf = (error, node) => {
   const out = { url: node.url, operator: node.operator, code };
   if (params.status !== undefined && params.status !== null) out.status = params.status;
   if (why) out.why = why;
+  // A PARTIAL BATCH NAMES WHICH REQUEST FAILED. The outer failure list is what a caller sees; dropping the offset
+  // here would make a multi-batch block look like one anonymous partial answer.
+  for (const key of ["batchStart", "batchEnd", "total"]) {
+    if (params[key] !== undefined && params[key] !== null) out[key] = params[key];
+  }
   return out;
 };
 
@@ -139,29 +144,40 @@ async function getBlock(node, height, fetchImpl, timeoutMs) {
   return { hash, txHashes };
 }
 
-// ALL THE BLOCK'S TRANSACTIONS in one request (never a single-hash request to a public node).
+// ALL THE BLOCK'S TRANSACTIONS in bounded requests. Public monerod runs restricted and refuses more than 100
+// hashes per `/get_transactions`; batching keeps the request shape legal without changing which txids are named.
+const RESTRICTED_TRANSACTIONS_COUNT = 100;
+
 async function getBlockTxs(node, hashes, fetchImpl, timeoutMs) {
   if (!hashes.length) return [];
-  const j = await call(node, "/get_transactions", { txs_hashes: hashes, decode_as_json: true }, fetchImpl, timeoutMs);
-  const wrappers = Array.isArray(j.txs) ? j.txs : [];
-  const bodies = Array.isArray(j.txs_as_json) ? j.txs_as_json : [];
-  // A PARTIAL ANSWER IS NOT AN EMPTY BLOCK. If the node returns fewer transactions than the block named, the walk
-  // cannot conclude "no payment": that answer is unknown and must stop the refund path.
-  if (bodies.length !== hashes.length || (wrappers.length && wrappers.length !== hashes.length)) {
-    throw new SdkError("xmr-no-nodes", { node: node.url, why: "partial-transactions", want: hashes.length, got: bodies.length });
-  }
-  const out = bodies.map((s, i) => {
-    let body;
-    try { body = typeof s === "string" ? JSON.parse(s) : s; }
-    catch { throw new SdkError("xmr-no-nodes", { node: node.url, why: "bad-json" }); }
-    const w = wrappers[i] || {};
-    body.tx_hash = String(w.tx_hash || body.tx_hash || "").replace(/^0x/, "").toLowerCase();
-    body.block_height = w.block_height ?? null;
-    body.confirmations = w.confirmations ?? null;
-    return body;
-  }).filter((body) => hashes.includes(String(body.tx_hash || "").toLowerCase()));
-  if (out.length !== hashes.length) {
-    throw new SdkError("xmr-no-nodes", { node: node.url, why: "partial-transactions", want: hashes.length, got: out.length });
+  const out = [];
+  for (let start = 0; start < hashes.length; start += RESTRICTED_TRANSACTIONS_COUNT) {
+    const batch = hashes.slice(start, start + RESTRICTED_TRANSACTIONS_COUNT);
+    const batchOffset = { batchStart: start, batchEnd: start + batch.length, total: hashes.length };
+    const j = await call(node, "/get_transactions", { txs_hashes: batch, decode_as_json: true }, fetchImpl, timeoutMs);
+    const wrappers = Array.isArray(j.txs) ? j.txs : [];
+    const bodies = Array.isArray(j.txs_as_json) ? j.txs_as_json : [];
+    // A PARTIAL ANSWER IS NOT AN EMPTY BLOCK. If the node returns fewer transactions than the batch named, the walk
+    // cannot conclude "no payment": that answer is unknown and must stop the refund path. The batch offset names the
+    // exact request, not only the tail's size.
+    if (bodies.length !== batch.length || (wrappers.length && wrappers.length !== batch.length)) {
+      throw new SdkError("xmr-no-nodes", { node: node.url, why: "partial-transactions", want: batch.length, got: bodies.length, ...batchOffset });
+    }
+    const wanted = new Set(batch.map((hash) => String(hash).toLowerCase()));
+    const parsed = bodies.map((s, i) => {
+      let body;
+      try { body = typeof s === "string" ? JSON.parse(s) : s; }
+      catch { throw new SdkError("xmr-no-nodes", { node: node.url, why: "bad-json" }); }
+      const w = wrappers[i] || {};
+      body.tx_hash = String(w.tx_hash || body.tx_hash || "").replace(/^0x/, "").toLowerCase();
+      body.block_height = w.block_height ?? null;
+      body.confirmations = w.confirmations ?? null;
+      return body;
+    }).filter((body) => wanted.has(String(body.tx_hash || "").toLowerCase()));
+    if (parsed.length !== batch.length) {
+      throw new SdkError("xmr-no-nodes", { node: node.url, why: "partial-transactions", want: batch.length, got: parsed.length, ...batchOffset });
+    }
+    out.push(...parsed);
   }
   return out;
 }
