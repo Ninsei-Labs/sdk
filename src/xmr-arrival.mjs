@@ -53,6 +53,11 @@ const failureOf = (error, node) => {
   const out = { url: node.url, operator: node.operator, code };
   if (params.status !== undefined && params.status !== null) out.status = params.status;
   if (why) out.why = why;
+  // A PARTIAL BATCH NAMES WHICH REQUEST FAILED. The outer failure list is what a caller sees; dropping the offset
+  // here would make a multi-batch block look like one anonymous partial answer.
+  for (const key of ["batchStart", "batchEnd", "total"]) {
+    if (params[key] !== undefined && params[key] !== null) out[key] = params[key];
+  }
   return out;
 };
 
@@ -148,13 +153,15 @@ async function getBlockTxs(node, hashes, fetchImpl, timeoutMs) {
   const out = [];
   for (let start = 0; start < hashes.length; start += RESTRICTED_TRANSACTIONS_COUNT) {
     const batch = hashes.slice(start, start + RESTRICTED_TRANSACTIONS_COUNT);
+    const batchOffset = { batchStart: start, batchEnd: start + batch.length, total: hashes.length };
     const j = await call(node, "/get_transactions", { txs_hashes: batch, decode_as_json: true }, fetchImpl, timeoutMs);
     const wrappers = Array.isArray(j.txs) ? j.txs : [];
     const bodies = Array.isArray(j.txs_as_json) ? j.txs_as_json : [];
     // A PARTIAL ANSWER IS NOT AN EMPTY BLOCK. If the node returns fewer transactions than the batch named, the walk
-    // cannot conclude "no payment": that answer is unknown and must stop the refund path.
+    // cannot conclude "no payment": that answer is unknown and must stop the refund path. The batch offset names the
+    // exact request, not only the tail's size.
     if (bodies.length !== batch.length || (wrappers.length && wrappers.length !== batch.length)) {
-      throw new SdkError("xmr-no-nodes", { node: node.url, why: "partial-transactions", want: batch.length, got: bodies.length });
+      throw new SdkError("xmr-no-nodes", { node: node.url, why: "partial-transactions", want: batch.length, got: bodies.length, ...batchOffset });
     }
     const wanted = new Set(batch.map((hash) => String(hash).toLowerCase()));
     const parsed = bodies.map((s, i) => {
@@ -168,7 +175,7 @@ async function getBlockTxs(node, hashes, fetchImpl, timeoutMs) {
       return body;
     }).filter((body) => wanted.has(String(body.tx_hash || "").toLowerCase()));
     if (parsed.length !== batch.length) {
-      throw new SdkError("xmr-no-nodes", { node: node.url, why: "partial-transactions", want: batch.length, got: parsed.length });
+      throw new SdkError("xmr-no-nodes", { node: node.url, why: "partial-transactions", want: batch.length, got: parsed.length, ...batchOffset });
     }
     out.push(...parsed);
   }

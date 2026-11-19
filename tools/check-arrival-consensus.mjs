@@ -162,6 +162,37 @@ console.log("=== 1b) A RESTRICTED NODE ACCEPTS THE WALK IN BATCHES OF AT MOST 10
   if (requests.length > 0 && requests.every((count) => count <= 100)) {
     ok("every /get_transactions request names at most 100 hashes");
   } else bad("request sizes: " + JSON.stringify(requests));
+
+  // THE FAILURE NAMES THE BATCH, NOT JUST ITS SIZE. The second request is the two-hash tail; if it comes back
+  // partial, the caller must see batchStart 100 / batchEnd 102 / total 102 in the recorded failure.
+  const partialFetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (body.method === "get_info") return { ok: true, json: async () => ({ result: { height: 121, synchronized: true } }) };
+    if (body.method === "get_block") return { ok: true, json: async () => ({ result: { block_header: { hash: BLOCK_HASH }, tx_hashes: many } }) };
+    const hashes = (body.txs_hashes || []).map((hash) => String(hash).toLowerCase());
+    if (hashes.length > 100) return { ok: true, json: async () => ({ status: "Too many transactions requested in restricted mode" }) };
+    const kept = hashes.length === 2 ? hashes.slice(0, 1) : hashes;
+    return { ok: true, json: async () => ({
+      txs: kept.map((hash) => ({ tx_hash: hash, block_height: 100, confirmations: 21 })),
+      txs_as_json: kept.map((hash) => JSON.stringify(hash === TXID ? tx : { extra: [], vout: [] })),
+    }) };
+  };
+  let partialError = null;
+  try {
+    await verifyArrival({
+      nodes: [{ url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" }],
+      address, viewSecret: VIEW, spendPub, expectedAtomic: AMOUNT, minConfirmations: 10,
+      fromHeight: 100, txid: TXID, fetch: partialFetch,
+    });
+  } catch (e) { partialError = e; }
+  const partialFailure = partialError && partialError.params && Array.isArray(partialError.params.nodes)
+    ? partialError.params.nodes.find((node) => node.why === "partial-transactions") : null;
+  if (partialFailure && partialFailure.batchStart === 100 && partialFailure.batchEnd === 102 && partialFailure.total === 102) {
+    ok("a partial tail batch reports its exact offset");
+  } else {
+    bad("partial batch offset: " + JSON.stringify({ code: partialError && partialError.code, failure: partialFailure,
+      nodes: partialError && partialError.params && partialError.params.nodes }));
+  }
 }
 
 console.log("=== 1) TWO HONEST NODES AGREE ===");
