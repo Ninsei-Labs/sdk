@@ -524,6 +524,196 @@ export async function verifyArrival(request) {
     operators: [...best.operators], agreedBy, checked: seen, failed };
 }
 
+/**
+ * RECOVERY READ CANNOT USE THE QUOTE'S AMOUNT. A seller may send less than the quote (an exchange fee), more, or
+ * several transfers. The recovery path therefore walks the same whole blocks and returns EVERY matching transfer
+ * with its verified outputs, instead of choosing one candidate shaped by `expectedAtomic`.
+ */
+function recoveryObservation(tx, hit, node, { height, blockHash, confirmations, pool = false }) {
+  const outputs = hit[0].outputs.map((o) => ({
+    index: o.index,
+    key: String(o.key || "").replace(/^0x/, "").toLowerCase(),
+    amountAtomic: o.amountVerified ? String(o.amountAtomic ?? null) : null,
+    amountVerified: o.amountVerified === true,
+  }));
+  const amountAtomic = sumOutputs(hit[0]);
+  return {
+    txid: String(tx.tx_hash || "").replace(/^0x/, "").toLowerCase(),
+    height, blockHash, confirmations, pool,
+    outputs,
+    amountAtomic: amountAtomic.toString(),
+    amountVerified: hit[0].outputs.every((o) => o.amountVerified === true),
+    locked: !!(hit[0].unlock && hit[0].unlock.locked),
+    unlock: hit[0].unlock || null,
+    url: node.url, operator: node.operator,
+  };
+}
+
+async function scanRecoveryBlocks(node, { watched, fromHeight, toHeight, nowSec, fetchImpl, timeoutMs }) {
+  const transfers = [];
+  const failures = [];
+  let complete = true;
+  for (let height = fromHeight; height <= toHeight; height++) {
+    let block;
+    try { block = await getBlock(node, height, fetchImpl, timeoutMs); }
+    catch (error) { failures.push({ ...failureOf(error, node), height }); complete = false; break; }
+    if (!block.txHashes.length) continue;
+    let txs;
+    try { txs = await getBlockTxs(node, block.txHashes, fetchImpl, timeoutMs); }
+    catch (error) { failures.push({ ...failureOf(error, node), height }); complete = false; break; }
+    for (const tx of txs) {
+      const hit = engine.xmrScan.matchTransaction(tx, [watched], {
+        height, tipHeight: Math.max(0, toHeight), nowSec,
+      });
+      if (!hit.length) continue;
+      const confirmations = Number.isFinite(Number(tx.confirmations)) ? Number(tx.confirmations) : (toHeight - height + 1);
+      transfers.push(recoveryObservation(tx, hit, node, { height, blockHash: block.hash, confirmations }));
+    }
+  }
+  return { transfers, failures, complete };
+}
+
+async function scanRecoveryPool(node, { watched, tip, nowSec, fetchImpl, timeoutMs }) {
+  const body = await call(node, "/get_transaction_pool_hashes", {}, fetchImpl, timeoutMs);
+  const hashes = Array.isArray(body.tx_hashes)
+    ? body.tx_hashes.map((hash) => String(hash).replace(/^0x/, "").toLowerCase()).filter((hash) => /^[0-9a-f]{64}$/.test(hash))
+    : [];
+  if (!hashes.length) return [];
+  const txs = await getBlockTxs(node, hashes, fetchImpl, timeoutMs);
+  const transfers = [];
+  for (const tx of txs) {
+    const hit = engine.xmrScan.matchTransaction(tx, [watched], { height: null, tipHeight: Math.max(0, tip), nowSec });
+    if (!hit.length) continue;
+    transfers.push(recoveryObservation(tx, hit, node, { height: null, blockHash: null, confirmations: 0, pool: true }));
+  }
+  return transfers;
+}
+
+/**
+ * THE RECOVERY READ. Unlike `verifyArrival`, it has no expected amount and never calls a short transfer a refusal:
+ * it returns every matching transfer from the order's start height, including a transfer still in the pool. Each
+ * transfer carries its verified outputs and the operators that agreed on the same observation. A transfer seen by
+ * one operator is returned with `agreed: false`; a recovery UI must decide whether to wait for the second operator.
+ */
+export async function verifyRecovery(request) {
+  if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
+  const nodes = normalizeNodes(request.nodes);
+  if (!isStr(request.address)) throw new SdkError("bad-input", { field: "address" });
+  if (request.viewSecret === undefined || request.viewSecret === null) throw new SdkError("bad-input", { field: "viewSecret" });
+  if (!isStr(request.spendPub)) throw new SdkError("bad-input", { field: "spendPub" });
+  const fromHeight = intOf(request.fromHeight);
+  if (fromHeight === null || fromHeight < 0) throw new SdkError("bad-input", { field: "fromHeight" });
+  const minConfirmations = Math.max(1, intOf(request.minConfirmations) ?? 1);
+  const fetchImpl = typeof request.fetch === "function" ? request.fetch : globalThis.fetch;
+  if (typeof fetchImpl !== "function") throw new SdkError("bad-input", { field: "fetch" });
+  const nowSec = Number.isFinite(Number(request.nowSec)) ? Number(request.nowSec) : Math.floor(Date.now() / 1000);
+  const timeoutMs = Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0 ? Number(request.timeoutMs) : 20000;
+  const bound = engine.xmrScan.watchedAddressVerdict({
+    address: request.address, viewSecret: request.viewSecret, spendPub: request.spendPub,
+  });
+  if (!bound.ok) {
+    if (bound.code === "bad-input") throw new SdkError("bad-input", { field: bound.field || "address", why: bound.why });
+    throw new SdkError(bound.code, { field: bound.field || "address", address: request.address });
+  }
+  const watched = { address: request.address, viewSecret: bound.viewSecret, spendPub: bound.spendPub };
+
+  const live = [];
+  const failed = [];
+  for (const node of nodes) {
+    try { live.push({ node, info: await getInfo(node, fetchImpl, timeoutMs) }); }
+    catch (error) { failed.push(failureOf(error, node)); }
+  }
+  if (!live.length) throw new SdkError("xmr-no-nodes", { tried: nodes.map((n) => n.url), nodes: failed });
+  const tip = Math.max(...live.map((l) => l.info.height));
+  const top = Math.max(0, tip - 1);
+  const observations = new Map();
+  const checked = [];
+  let complete = true;
+
+  for (const { node, info } of live) {
+    checked.push({ url: node.url, operator: node.operator, height: info.height, synchronized: info.synced });
+    if (!info.synced) {
+      failed.push({ url: node.url, operator: node.operator, code: "stale", why: "not-synchronized" });
+      complete = false;
+      continue;
+    }
+    const nodeTop = Math.max(0, Math.min(top, info.height - 1));
+    const blocks = await scanRecoveryBlocks(node, { watched, fromHeight, toHeight: nodeTop, nowSec, fetchImpl, timeoutMs });
+    for (const transfer of blocks.transfers) {
+      if (!observations.has(transfer.txid)) observations.set(transfer.txid, []);
+      observations.get(transfer.txid).push(transfer);
+    }
+    failed.push(...blocks.failures);
+    if (!blocks.complete) complete = false;
+    try {
+      const pool = await scanRecoveryPool(node, { watched, tip: nodeTop, nowSec, fetchImpl, timeoutMs });
+      for (const transfer of pool) {
+        if (!observations.has(transfer.txid)) observations.set(transfer.txid, []);
+        observations.get(transfer.txid).push(transfer);
+      }
+    } catch (error) {
+      failed.push({ ...failureOf(error, node), why: "pool-read" });
+      complete = false;
+    }
+  }
+
+  const transfers = [];
+  for (const [txid, list] of observations) {
+    // A TRANSFER IS AGREED ONLY ON THE SAME OBSERVATION. Different blocks, outputs, amounts or unlock states are
+    // separate observations, not a majority vote that hides a lie.
+    const groups = new Map();
+    for (const observation of list) {
+      const key = JSON.stringify({
+        height: observation.height, blockHash: observation.blockHash, outputs: observation.outputs,
+        amountAtomic: observation.amountAtomic, amountVerified: observation.amountVerified,
+        locked: observation.locked, pool: observation.pool,
+        unlock: observation.unlock ? { locked: observation.unlock.locked, untilHeight: observation.unlock.untilHeight ?? null, untilTime: observation.unlock.untilTime ?? null } : null,
+      });
+      if (!groups.has(key)) groups.set(key, { observation, nodes: [] });
+      groups.get(key).nodes.push(observation);
+    }
+    const ranked = [...groups.values()].sort((a, b) => b.nodes.length - a.nodes.length
+      || String(a.observation.operator).localeCompare(String(b.observation.operator)));
+    const best = ranked[0];
+    const operators = [...new Set(best.nodes.map((entry) => entry.operator))];
+    const confirmations = Math.min(...best.nodes.map((entry) => Number(entry.confirmations)));
+    transfers.push({
+      txid,
+      height: best.observation.height,
+      blockHash: best.observation.blockHash,
+      pool: best.observation.pool,
+      confirmations,
+      confirmed: confirmations >= minConfirmations && !best.observation.pool,
+      amountAtomic: best.observation.amountAtomic,
+      amountVerified: best.observation.amountVerified,
+      outputs: best.observation.outputs,
+      locked: best.observation.locked,
+      unlock: best.observation.unlock,
+      operators,
+      agreed: operators.length >= 2,
+      agreedBy: best.nodes.map((entry) => ({ url: entry.url, operator: entry.operator, confirmations: entry.confirmations })),
+      disagreements: ranked.length > 1
+        ? ranked.slice(1).map((entry) => ({ operators: [...new Set(entry.nodes.map((node) => node.operator))], amountAtomic: entry.observation.amountAtomic }))
+        : [],
+    });
+  }
+  transfers.sort((a, b) => (a.height === null ? Number.MAX_SAFE_INTEGER : a.height) - (b.height === null ? Number.MAX_SAFE_INTEGER : b.height)
+    || String(a.txid).localeCompare(String(b.txid)));
+
+  const ready = transfers.some((transfer) => transfer.agreed && transfer.confirmed && !transfer.locked);
+  const agreed = transfers.some((transfer) => transfer.agreed);
+  return {
+    state: ready ? "ready" : (agreed ? "pending" : (transfers.length ? "one-node" : "none")),
+    transfers,
+    tip,
+    fromHeight,
+    minConfirmations,
+    complete,
+    checked,
+    failed,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // WITNESS-V1: FIXED BLOCK SLICES FOR THE SHADOW CHECK
 // ---------------------------------------------------------------------------

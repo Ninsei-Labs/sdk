@@ -730,6 +730,14 @@ export interface SwapsApi {
    */
   verifyArrival(request: XmrArrivalRequest): Promise<XmrArrivalVerdict>;
   /**
+   * THE RECOVERY READ. Returns every transfer to the address from `fromHeight` with its verified outputs,
+   * confirmations, unlock state and the operators that agreed on the observation. There is no expected amount:
+   * a short, overpaid or split payment is data, not a refusal. A transfer still in a node's pool is returned
+   * with `pool: true` and `confirmed: false`. `agreed` is false when fewer than two operators saw the same
+   * observation; `complete` is false when a block or pool read failed.
+   */
+  verifyRecovery(request: XmrRecoveryRequest): Promise<XmrRecoveryVerdict>;
+  /**
    * RUN THE EXACT CHECK AND THE WITNESS-V1 SLICE CHECK SIDE BY SIDE. The exact verdict still decides; this
    * returns both readings and any difference, and changes no swap state. `witnessNodes` must name at least one
    * node with `protocol: "witness-v1"`. It is the staging step before slice-only verification.
@@ -848,6 +856,52 @@ export interface XmrArrivalRequest {
   readonly timeoutMs?: number;
   /** The transport for node and witness reads; absent - the client's `fetch`, otherwise the global fetch. */
   readonly fetch?: FetchLike;
+}
+
+/** Inputs for the recovery read: the same watch identity, but NO quoted amount. */
+export interface XmrRecoveryRequest {
+  readonly nodes: readonly (XmrNode | string)[];
+  readonly address: string;
+  readonly viewSecret: string | bigint;
+  readonly spendPub: string;
+  readonly fromHeight: number;
+  readonly minConfirmations?: number;
+  readonly nowSec?: number;
+  readonly timeoutMs?: number;
+  readonly fetch?: FetchLike;
+}
+
+/** One verified transfer returned by the recovery read. */
+export interface XmrRecoveryTransfer {
+  readonly txid: string;
+  /** null while the transfer is still in a node's pool. */
+  readonly height: number | null;
+  readonly blockHash: string | null;
+  readonly pool: boolean;
+  readonly confirmations: number;
+  readonly confirmed: boolean;
+  readonly amountAtomic: string;
+  readonly amountVerified: boolean;
+  readonly outputs: readonly { readonly index: number; readonly key: string; readonly amountAtomic: string | null; readonly amountVerified: boolean }[];
+  readonly locked: boolean;
+  readonly unlock: { readonly locked: boolean; readonly untilHeight: number | null; readonly untilTime: number | null } | null;
+  readonly operators: readonly string[];
+  readonly agreed: boolean;
+  readonly agreedBy: readonly { readonly url: string; readonly operator: string; readonly confirmations: number }[];
+  readonly disagreements: readonly { readonly operators: readonly string[]; readonly amountAtomic: string }[];
+}
+
+/** The recovery read's answer. `ready` means at least one agreed, confirmed, unlocked transfer exists. */
+export interface XmrRecoveryVerdict {
+  readonly state: "ready" | "pending" | "one-node" | "none";
+  readonly transfers: readonly XmrRecoveryTransfer[];
+  readonly tip: number;
+  readonly fromHeight: number;
+  readonly minConfirmations: number;
+  /** False when any read failed; a caller must not treat the list as exhaustive. */
+  readonly complete: boolean;
+  readonly checked: readonly { readonly url: string; readonly operator: string; readonly height: number; readonly synchronized: boolean }[];
+  readonly failed: readonly { readonly url: string; readonly operator: string; readonly code?: string; readonly why?: string; readonly height?: number; readonly status?: number }[];
 }
 
 /** The slice check's extra input: independent witnesses that serve witness-v1. */

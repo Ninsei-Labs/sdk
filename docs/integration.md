@@ -162,7 +162,10 @@ Production arrival still uses `swaps.verifyArrival`: first operator walks from t
 witness is asked for the located block so the observations can be compared. When no block holds a matching transfer
 but a node's pool does, the verdict is `state: "pool"` with the txid, amount, `confirmations: 0` and `height: null`.
 It is information for the screen, not an arrival: `seen` stays false and the two-operator/confirmation rules do not
-change. Before slice-only verification is enabled, `swaps.verifyArrivalShadow` runs that exact check and a
+change. Recovery uses `swaps.verifyRecovery`, which has no quoted amount: it returns every transfer from the order's
+start height with its verified outputs, confirmations, unlock state and agreeing operators. Short, overpaid and
+split payments are data there, not refusals.
+Before slice-only verification is enabled, `swaps.verifyArrivalShadow` runs that exact check and a
 `witness-v1` slice check side by side:
 
 ```js

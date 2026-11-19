@@ -44,6 +44,7 @@ import { claimSenderCheck } from "./check-claim-sender.mjs";
 import { relayClaimCheck } from "./check-relay-claim.mjs";
 import { chainGuardCheck } from "./check-chain-guard.mjs";
 import { actionsWalletErrorsCheck } from "./check-actions-wallet-errors.mjs";
+import { arrivalRecoveryCheck } from "./check-arrival-recovery.mjs";
 import { settlementProfilesCheck } from "./check-settlement-profiles.mjs";
 import { dleqVectorsCheck } from "./check-dleq-vectors.mjs";
 import { swapNetworkCheck } from "./check-swap-network.mjs";
@@ -2701,6 +2702,7 @@ const CHECKS = {
   "sell-watch": sellWatchCheck,
   "sell-start": sellStartCheck,
   "arrival-consensus": arrivalConsensusCheck,
+  "arrival-recovery": arrivalRecoveryCheck,
   "arrival-shadow": arrivalShadowCheck,
   "arrival-teeth": arrivalTeethCheck,
   "arrival-real": arrivalRealCheck,
