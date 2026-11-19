@@ -724,8 +724,9 @@ export interface SwapsApi {
    * key and `ready` opens only when at least two nodes of DIFFERENT operators see the transaction IN THE SAME BLOCK
    * (the block hash matches) with the required confirmations. Refusals come as CODES: `xmr-nodes-disagree` (a synced
    * node has no such transaction there or a different block hash), `xmr-no-nodes` (nothing reachable),
-   * `xmr-underpaid`, `xmr-locked`, `xmr-too-late`. A waiting state is RETURNED as `state` (`pending` | `one-node`),
-   * never a silent success.
+   * `xmr-underpaid`, `xmr-locked`, `xmr-too-late`. A waiting state is RETURNED as `state` (`pending` | `one-node` |
+   * `pool`), never a silent success. `pool` carries the matching txid while the transfer is still in a node's
+   * mempool; it is information only and never counts as seen or arrived.
    */
   verifyArrival(request: XmrArrivalRequest): Promise<XmrArrivalVerdict>;
   /**
@@ -895,18 +896,24 @@ export interface XmrArrivalShadowResult {
 /** The XMR state the watch hands to the interface: the fact, the waiting state, or a refusal with a code. */
 export interface XmrArrivalVerdict {
   readonly seen: boolean;
-  readonly state: "arrived" | "pending" | "one-node";
+  readonly state: "arrived" | "pending" | "one-node" | "pool";
   /** True only when a node completed the walk and found no matching transaction. */
   readonly absent?: boolean;
   /** The operators whose completed walk found no matching transaction. */
   readonly completedOperators?: readonly string[];
   readonly txid: string | null;
-  readonly height?: number;
+  /** A block height; null when the matching transfer is still in a node's pool. */
+  readonly height?: number | null;
   readonly blockHash?: string;
   readonly amountAtomic?: string;
   readonly confirmations?: number;
   readonly needConfirmations?: number;
   readonly operators?: readonly string[];
+  /** The node that reported the pool match. Present only for `state: "pool"`. */
+  readonly poolFrom?: { readonly url: string; readonly operator: string };
+  /** Whether the transaction's `unlock_time` bars the outputs at the reported tip. */
+  readonly locked?: boolean;
+  readonly unlock?: { readonly locked: boolean; readonly untilHeight: number | null; readonly untilTime: number | null } | null;
   readonly agreedBy?: readonly { readonly url: string; readonly operator: string; readonly blockHash: string; readonly confirmations: number }[];
 }
 

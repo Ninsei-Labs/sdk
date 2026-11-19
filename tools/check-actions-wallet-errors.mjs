@@ -8,7 +8,7 @@
 // error. The guards have to pass first, so the refusal is exercised at the send boundary rather than at input
 // validation.
 import * as engine from "../src/engine.mjs";
-import { createActions } from "../src/actions.mjs";
+import { createActions, walletError } from "../src/actions.mjs";
 import { halfCommitmentHex } from "../engine/atomic/orderHalfCommit.js";
 import { keccak256, secp256k1 } from "../src/primitives.mjs";
 
@@ -116,6 +116,15 @@ export const actionsWalletErrorsCheck = async () => {
     ok("a malformed eth_call answer is unknown/bad-answer");
   } else {
     bad("malformed read: " + JSON.stringify(readCaught && { code: readCaught.code, params: readCaught.params }));
+  }
+
+  // FUNDING USES THE SAME CLASSIFIER. `swaps.start` catches the lock send and rethrows this value; a numeric
+  // provider failure must not become `server-unavailable` on the way out.
+  const lockFailure = walletError(Object.assign(new Error("fetch failed"), { code: -32603 }), "lock");
+  if (lockFailure && lockFailure.code === "wallet-not-connected" && lockFailure.params && lockFailure.params.step === "lock") {
+    ok("the lock path reuses the wallet classifier");
+  } else {
+    bad("lock classifier: " + JSON.stringify(lockFailure && { code: lockFailure.code, params: lockFailure.params }));
   }
 
   return {

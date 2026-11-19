@@ -28,7 +28,7 @@ import { probeMoneroNode } from "./probes.mjs";
 // MARKING READY - A FINISHED STEP, NOT A SECOND IMPLEMENTATION OF IT: it requires the order expectations and checks
 // the slots against the chain BEFORE signing (actions.markReady). The watch must call exactly it, otherwise "we saw
 // the XMR" and "we allowed the settlement to be taken" would diverge.
-import { createActions } from "./actions.mjs";
+import { createActions, walletError } from "./actions.mjs";
 // THE ONE RECOVERY KEY: the taker's halves come from it, not from a fresh random pair per swap.
 import {
   createRecoveryKeyFile, importRecoveryKey, loadRecoveryKey,
@@ -1291,8 +1291,9 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
           record.swap.escrow = { ...record.swap.escrow, fundingPending: false, fundingReason: "send-rejected" };
           try { engine.swap.saveSwap(record.swap, store); } catch { /* the pending record stays; never resend blind */ }
         }
-        if (error && typeof error.code === "string") throw error;
-        throw new SdkError("server-unavailable", { step: "lock" });
+        // A NUMERIC WALLET ERROR IS NOT A SERVER FAILURE. Use the same classifier as markReady/claim/refund:
+        // 4001 stays a rejection, 4100/-32002/transport stay wallet-side, and only a real revert is a chain answer.
+        throw walletError(error, "lock");
       }
       // A SENT TRANSACTION IS NOT A FUNDED ESCROW. Without a status-1 receipt and the expected OrderCreated, the
       // address is unknown and calling the step xmr-incoming would make the person wait for XMR at a guess. Keep

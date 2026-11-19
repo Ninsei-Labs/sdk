@@ -104,6 +104,14 @@ const actionFailure = (error, step) => {
   throw new SdkError("unknown", { step, why: "unclassified" });
 };
 
+// THE SAME CLASSIFIER FOR THE FUNDING PATH. `actionFailure` throws because the actions wrapper wants that shape;
+// funding needs the named error as a value so it can rethrow it after its own pending-record cleanup.
+export const walletError = (error, step) => {
+  try { actionFailure(error, step); }
+  catch (named) { return named; }
+  return new SdkError("unknown", { step, why: "unclassified" });
+};
+
 const withCodes = async (step, work) => {
   try { return await work(); }
   catch (error) { actionFailure(error, step); }

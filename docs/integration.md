@@ -159,8 +159,11 @@ subpath, but only public order data leaves the client.
 ## 7a. The arrival shadow
 
 Production arrival still uses `swaps.verifyArrival`: first operator walks from the order's start height, and every
-witness is asked for the located block so the observations can be compared. Before slice-only verification is
-enabled, `swaps.verifyArrivalShadow` runs that exact check and a `witness-v1` slice check side by side:
+witness is asked for the located block so the observations can be compared. When no block holds a matching transfer
+but a node's pool does, the verdict is `state: "pool"` with the txid, amount, `confirmations: 0` and `height: null`.
+It is information for the screen, not an arrival: `seen` stays false and the two-operator/confirmation rules do not
+change. Before slice-only verification is enabled, `swaps.verifyArrivalShadow` runs that exact check and a
+`witness-v1` slice check side by side:
 
 ```js
 const shadow = await sdk.swaps.verifyArrivalShadow({
