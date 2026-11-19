@@ -176,6 +176,21 @@ try {
   }
 }
 
+// A CLOCK THAT IS NOT A NUMBER IS NOT A DEVICE CLOCK. The old fallback turned a NaN injected `now()` into
+// Date.now(), so a caller's broken clock silently became a valid one.
+{
+  const nanClock = createSwaps({ config: {}, call: read, now: () => Number.NaN });
+  try {
+    await nanClock.startSell({ offer: { ...gateOffer, escrow: "0x" + "fd".repeat(20),
+      quote: { ...gateOffer.quote, id: "oq_gate_nan" }, jointAddress: "5" + "F".repeat(94) },
+      recoveryKey: mnemonic, onRecoveryKey: accept });
+    check(false, "a NaN clock passed the sale gate");
+  } catch (error) {
+    check(error && error.code === "quote-refused" && error.params && error.params.why === "clock-unreadable",
+      "a NaN clock is refused, not replaced with Date.now()");
+  }
+}
+
 try {
   const slotsRead = gateRead(1, { [encodeRead("commitHalfLocker")]: bytes("0x" + "00".repeat(32)) });
   const wrongSlots = createSwaps({ config: {}, call: slotsRead });

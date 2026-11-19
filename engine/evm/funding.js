@@ -40,13 +40,14 @@ export function newSecret() {
 // TWO DEADLINES THAT DO NOT COINCIDE: until readyBy the depositor marks readiness ("I see the XMR"), from t1 a
 // claim is closed and anyone may refund. Coincidence would restore a window where both paths are valid and gas
 // would decide the dispute.
-export function testOrderTerms({ locker, claimer, commitHalfLocker, commitHalfClaimer, edPointLocker, edPointClaimer, edViewPointLocker, amountWei, salt, claimWindowSeconds = 3600, readyWindowSeconds = 14400, readyBy, t1 }) {
+export function testOrderTerms({ locker, claimer, commitHalfLocker, commitHalfClaimer, edPointLocker, edPointClaimer, edViewPointLocker, amountWei, salt, claimWindowSeconds = 3600, readyWindowSeconds = 14400, readyBy, t1, nowSec = null }) {
   // THE VIEW POINT IS ON THE REQUIRED LIST: without it the Monero address cannot be assembled from the order
   // fields, and the one who learns about it would be the claimer, after funding.
   for (const [k, v] of Object.entries({ commitHalfLocker, commitHalfClaimer, edPointLocker, edPointClaimer, edViewPointLocker })) {
     if (!v) throw new Error("order term not set: " + k);
   }
-  const now = Math.floor(Date.now() / 1000);
+  const now = Number.isSafeInteger(Number(nowSec)) && Number(nowSec) > 0
+    ? Number(nowSec) : Math.floor(Date.now() / 1000);
   // DEADLINES MAY BE PASSED IN READY-MADE, AND THAT IS NECESSITY, NOT CONVENIENCE. They enter the canonical order
   // context the proof is bound to, and the proof is computed BEFORE funding. Computing the deadlines here and now
   // would put them AFTER the proof, so the proof would bind one set of deadlines while the contract gets another.
@@ -219,7 +220,7 @@ async function waitReceipt(receiptReader, hash, { tries = 12, delayMs = 1500 } =
 
 // The full funding path. Steps are returned outward so the interface can show each one: predict is a free call,
 // createOrder and lock are transactions in the user's wallet.
-export async function fundOrder({ factory, locker, claimer, commitHalfLocker, commitHalfClaimer, edPointLocker, edPointClaimer, edViewPointLocker, salt: providedSalt, amountWei, amountLabel, claimWindowSeconds, readyWindowSeconds, readyBy, t1, quote, call, send, receipt, onStep, onPredicted }) {
+export async function fundOrder({ factory, locker, claimer, commitHalfLocker, commitHalfClaimer, edPointLocker, edPointClaimer, edViewPointLocker, salt: providedSalt, amountWei, amountLabel, claimWindowSeconds, readyWindowSeconds, readyBy, t1, quote, call, send, receipt, onStep, onPredicted, nowSec = null }) {
   if (!factory) throw new Error("no escrow factory address set for this network");
   if (!locker) throw new Error("no EVM wallet connected: there is nobody to deposit");
   if (!claimer) throw new Error("the order recipient (claimer) is not set");
@@ -229,6 +230,18 @@ export async function fundOrder({ factory, locker, claimer, commitHalfLocker, co
   // A signed quote is mandatory. It carries the fee, the registry address and the provider. Without it, the order
   // cannot be created, and funding would use the wrong amount.
   if (!quote || typeof quote !== "object") throw new Error("a signed quote is required: the factory takes a quote, not bare order terms");
+  // THE QUOTE'S EXPIRY IS JUDGED AT THE FUNDING BOUNDARY. A device clock behind the chain lets an expired quote
+  // reach createOrderAndFund, which reverts after the fee is paid. The caller passes the chain time; when it is
+  // absent this is a test seam and the device clock remains the only clock available.
+  const fundingNowSec = Number.isSafeInteger(Number(nowSec)) && Number(nowSec) > 0
+    ? Number(nowSec) : Math.floor(Date.now() / 1000);
+  const validUntil = Number(quote.validUntil);
+  if (Number.isSafeInteger(validUntil) && validUntil > 0 && validUntil <= fundingNowSec) {
+    const error = new Error("the signed quote has expired at the funding boundary");
+    error.code = "quote-expired";
+    error.params = { validUntil, now: fundingNowSec, step: "lock" };
+    throw error;
+  }
 
   // Commitments and points are mandatory. Without them the order can be created but cannot be claimed, and its link
   // to the Monero address cannot be proven.
@@ -236,7 +249,7 @@ export async function fundOrder({ factory, locker, claimer, commitHalfLocker, co
   const salt = providedSalt || newSecret(); // CREATE2 salt: determines the escrow address
   const terms = testOrderTerms({
     locker, claimer, commitHalfLocker, commitHalfClaimer, edPointLocker, edPointClaimer, edViewPointLocker,
-    amountWei, salt, claimWindowSeconds, readyWindowSeconds, readyBy, t1,
+    amountWei, salt, claimWindowSeconds, readyWindowSeconds, readyBy, t1, nowSec,
   });
   // Reuse the salt from the deal when it already has one. The salt determines the escrow address, so a new salt
   // creates a new escrow while the record keeps the old address. Reuse also makes a retry hit the same address.

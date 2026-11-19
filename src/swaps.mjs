@@ -459,7 +459,9 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
     // for hosts that did not configure `evmBlock` at all (simulation and tests).
     if (typeof evmBlock === "function") return null;
     if (typeof now === "function") {
-      const value = Math.floor(clockMs() / 1000);
+      // AN INJECTED CLOCK THAT IS NOT A NUMBER IS NOT A DEVICE CLOCK. The old `clockMs` fallback turned NaN into
+      // Date.now(), so a broken caller clock silently became a valid one.
+      const value = Math.floor(Number(now()) / 1000);
       return Number.isSafeInteger(value) && value > 0 ? value : null;
     }
     return null;
@@ -657,7 +659,15 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
     // Compatibility with a caller that has neither a wallet nor a block seam: the reads still go to `latest`,
     // and the deadline falls back to the documented `now` seam. A live sell carries one of the two.
     const gate = { call: reader, blockTag: snapshot ? snapshot.blockTag : "latest" };
-    const chainNow = snapshot ? snapshot.timestamp : Math.floor((typeof now === "function" ? now() : Date.now()) / 1000);
+    let chainNow = snapshot && Number.isSafeInteger(Number(snapshot.timestamp)) && Number(snapshot.timestamp) > 0
+      ? Number(snapshot.timestamp) : null;
+    if (chainNow === null) {
+      const raw = typeof now === "function" ? Number(now()) : Date.now();
+      chainNow = Number.isFinite(raw) ? Math.floor(raw / 1000) : null;
+    }
+    if (!Number.isSafeInteger(chainNow) || chainNow <= 0) {
+      throw new SdkError("quote-refused", { step: "send-xmr", why: "clock-unreadable" });
+    }
     let status = null;
     try { status = await flow.orderStatus(escrow, gate); }
     catch (e) { throw new SdkError("quote-refused", { step: "send-xmr", why: "escrow-unreadable" }); }
@@ -1221,23 +1231,29 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       }
       // THE SIGNED QUOTE MUST STILL BE VALID WHEN THE MONEY MOVES. The proof and the record work take seconds; a
       // quote that expired in that window would reach the wallet and revert at the factory. Check the signed field
-      // immediately before the send, with a small margin for the next block.
+      // immediately before the send, against the CHAIN clock, with a small margin for the next block.
+      let lockNowSec = null;
       const validUntil = request.orderQuote && request.orderQuote.validUntil !== undefined
         ? request.orderQuote.validUntil
         : undefined;
       if (validUntil !== undefined && validUntil !== null) {
         const until = Number(validUntil);
-        // THE CLOCK IS THE SDK'S OWN SEAM, IN MILLISECONDS, LIKE EVERY OTHER NOW IN THE FACADE.
-        const nowMs = typeof now === "function" ? Number(now()) : Date.now();
-        const nowSec = Math.floor(nowMs / 1000);
+        const snapshot = await chainSnapshot(wallet);
+        lockNowSec = snapshot && Number.isSafeInteger(Number(snapshot.timestamp)) && Number(snapshot.timestamp) > 0
+          ? Number(snapshot.timestamp)
+          : (typeof evmBlock === "function" ? null
+            : Math.floor(Number(typeof now === "function" ? now() : Date.now()) / 1000));
+        if (!Number.isSafeInteger(lockNowSec) || lockNowSec <= 0) {
+          throw new SdkError("quote-unchecked", { step: "lock", why: "clock-unreadable" });
+        }
         // THE PREPARATION WAS ALREADY PAID FOR AT THE ANSWER. This check runs after the proof, the record and the
         // chain reads; requiring START_PREP_SEC again would refuse a quote that the answer accepted and spent those
         // seconds on. Only the next-block margin remains between here and the send.
-        const life = quoteLifeVerdict({ validUntil: until, nowSec, side: "ask", prepSec: 0 });
+        const life = quoteLifeVerdict({ validUntil: until, nowSec: lockNowSec, side: "ask", prepSec: 0 });
         if (!life.ok) {
           throw new SdkError("quote-expired", {
             validUntil: Number.isFinite(until) ? until : null,
-            now: Number.isFinite(nowSec) ? nowSec : null,
+            now: lockNowSec,
             remainingSec: life.remainingSec,
             marginSec: life.marginSec,
             prepSec: life.prepSec,
@@ -1260,7 +1276,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         catch { throw new SdkError("storage-unavailable", { step: "save-pending" }); }
       };
       let funded = null;
-      try { funded = await lock.send(lockRequest, wallet, { call: reader, onPredicted: notePredicted }); }
+      try { funded = await lock.send(lockRequest, wallet, { call: reader, nowSec: lockNowSec, onPredicted: notePredicted }); }
       catch (error) {
         // A REJECTION BEFORE BROADCAST MUST NOT LEAVE THE SWAP STUCK IN funding-pending. The pre-send record exists
         // for a process that dies while the send is in flight; an explicit wallet refusal is the other case, and the

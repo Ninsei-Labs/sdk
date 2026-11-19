@@ -60,6 +60,18 @@ console.log("=== 1) AN ADDRESS -> NETWORK AND KEYS ===");
   if (threw) ok("a non-address is refused, not guessed");
   else bad("a non-address was accepted");
 }
+{
+  const last = ADDRESS.slice(-1);
+  const tampered = ADDRESS.slice(0, -1) + (last === "2" ? "3" : "2");
+  let threw = false;
+  try { decodeAddressKeys(tampered); } catch { threw = true; }
+  if (threw) ok("a checksum typo is refused before its keys are used");
+  else bad("an address with a broken checksum was accepted");
+  let short = false;
+  try { decodeAddressKeys(ADDRESS.slice(0, -1)); } catch { short = true; }
+  if (short) ok("an address with the wrong length is refused");
+  else bad("an address with the wrong length was accepted");
+}
 
 console.log("=== 2) THE SCALAR FORM ===");
 eq("1 -> 01 followed by zeros (low byte first)", scalarToLeHex(1), "01" + "00".repeat(31));
