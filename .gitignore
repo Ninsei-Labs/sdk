@@ -9,3 +9,6 @@ coverage/
 # Editor and OS noise.
 .DS_Store
 Thumbs.db
+
+# Local Hermes state.
+.hermes/
