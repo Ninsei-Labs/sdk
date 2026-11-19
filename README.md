@@ -93,6 +93,19 @@ const verdict = await sdk.preflight(quote, { payBalanceWei, payAmountWei });
 if (!verdict.ok) render(verdict.blockedBy);   // codes, not phrases
 ```
 
+A local anvil deployment is supplied by the caller, because a fresh `Deploy.s.sol` changes the factory and cashier
+addresses:
+
+```js
+const sdk = createNinsei({
+  settlement: { chain: "local-anvil", escrow: { address: factory, cashier, implementationCodeHash } },
+  xmrNetwork: "fakechain",
+});
+```
+
+The override is refused for a public network. `testnet` and `fakechain` have an empty node map by default; pass
+`nodes: { testnet: [...] }` or `addNodes: [...]` to name the nodes that witness the arrival.
+
 ## Code tables
 
 It is the interface that must show the person anything based on these codes: the SDK has not a single

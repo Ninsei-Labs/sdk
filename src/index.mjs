@@ -44,6 +44,38 @@ const normalizeOptions = (options) => {
   if (settlement.vm !== undefined && (typeof settlement.vm !== "string" || !settlement.vm)) {
     fail("bad-input", { field: "settlement.vm" });
   }
+  const escrowOverride = (() => {
+    const raw = settlement.escrow;
+    if (raw === undefined) return null;
+    if (settlement.chain !== "local-anvil") {
+      fail("bad-input", { field: "settlement.escrow", why: "only-local-anvil" });
+    }
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) fail("bad-input", { field: "settlement.escrow" });
+    const address = String(raw.address || "");
+    if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
+      fail("bad-input", { field: "settlement.escrow.address" });
+    }
+    for (const field of ["cashier", "registry"]) {
+      if (raw[field] !== undefined && raw[field] !== null && !/^0x[0-9a-fA-F]{40}$/.test(String(raw[field]))) {
+        fail("bad-input", { field: "settlement.escrow." + field });
+      }
+    }
+    if (raw.implementationCodeHash !== undefined && raw.implementationCodeHash !== null
+      && !/^0x[0-9a-fA-F]{64}$/.test(String(raw.implementationCodeHash))) {
+      fail("bad-input", { field: "settlement.escrow.implementationCodeHash" });
+    }
+    if (raw.deploymentBlock !== undefined && raw.deploymentBlock !== null
+      && (!Number.isSafeInteger(Number(raw.deploymentBlock)) || Number(raw.deploymentBlock) < 0)) {
+      fail("bad-input", { field: "settlement.escrow.deploymentBlock" });
+    }
+    return {
+      address,
+      cashier: raw.cashier === undefined ? null : raw.cashier,
+      registry: raw.registry === undefined ? null : raw.registry,
+      implementationCodeHash: raw.implementationCodeHash === undefined ? null : raw.implementationCodeHash,
+      deploymentBlock: raw.deploymentBlock === undefined ? null : Number(raw.deploymentBlock),
+    };
+  })();
   if (typeof o.xmrNetwork !== "string" || !o.xmrNetwork) fail("bad-input", { field: "xmrNetwork" });
   const mode = o.mode === undefined ? "live" : o.mode;
   if (mode !== "live" && mode !== "sim") fail("bad-input", { field: "mode", known: ["live", "sim"] });
@@ -136,7 +168,7 @@ const normalizeOptions = (options) => {
     }
   }
   return {
-    settlement: { chain: settlement.chain, vm: settlement.vm },
+    settlement: { chain: settlement.chain, vm: settlement.vm, escrow: escrowOverride },
     xmrNetwork: o.xmrNetwork,
     assetsBase: typeof o.assetsBase === "string" && o.assetsBase ? o.assetsBase : "/",
     mode,

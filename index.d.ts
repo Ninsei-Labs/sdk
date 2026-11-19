@@ -40,7 +40,22 @@ export interface NinseiOptions {
    * `vm` may be omitted: it is taken from the network registry, and a foreign one cannot be substituted - a network
    * without a driver answers with the code `not-implemented`, rather than being assumed EVM by default.
    */
-  settlement: { chain: string; vm?: string };
+  settlement: {
+    chain: string;
+    vm?: string;
+    /**
+     * THE LOCAL ANVIL DEPLOYMENT, WHEN THE CALLER CREATED IT. A local chain's factory address depends on the
+     * deployer and nonce, so a client cannot use a constant after a fresh `Deploy.s.sol`. This override is accepted
+     * only for `local-anvil`; public network pins remain reviewed configuration. It changes addresses, never a check.
+     */
+    escrow?: {
+      readonly address: string;
+      readonly cashier?: string | null;
+      readonly registry?: string | null;
+      readonly implementationCodeHash?: string | null;
+      readonly deploymentBlock?: number | null;
+    };
+  };
   /**
    * The Monero network. A value from `sdk.config.xmrNetworks`. Besides mainnet/stagenet/testnet it names
    * `fakechain` - the official network name monerod reports in regtest mode, which the withdrawal page picks up
