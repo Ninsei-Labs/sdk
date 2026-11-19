@@ -2653,7 +2653,7 @@ const nodeTestCheck = (tool, expected) => {
 const CHECKS = {
   fees: feesCheck,
   "native-amount": nativeAmountCheck,
-  "adapter-contract": () => nodeTestCheck("check-adapter-contract.mjs", { tests: 2, pass: 0, fail: 0, skipped: 2 }),
+  "adapter-contract": () => nodeTestCheck("check-adapter-contract.mjs", { tests: 3, pass: 3, fail: 0, skipped: 0 }),
   "spent-status": () => nodeTestCheck("check-spent-status.mjs", { tests: 9, pass: 9, fail: 0, skipped: 0 }),
   "sweep-relay": () => nodeTestCheck("check-sweep-relay.mjs", { tests: 3, pass: 3, fail: 0, skipped: 0 }),
   syntax: syntaxCheck,

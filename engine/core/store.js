@@ -60,6 +60,14 @@ const storageFailure = (step, cause) => {
   return error;
 };
 
+// THE DECLARED STORE IS SYNCHRONOUS. A Promise returned from one of its three methods is not a value the store
+// can read or write; waiting for it would make the caller's save happen after the swap state was decided. Refuse it
+// at the seam instead of letting JSON.parse turn it into a misleading parse error.
+const ensureSync = (value, step) => {
+  if (value && typeof value.then === "function") throw storageFailure(step);
+  return value;
+};
+
 /** Swap the storage for setup and tests. It also releases the exclusive binding, so a later client may bind. */
 export function setStorage(next) {
   checkAdapter(next);
@@ -86,7 +94,7 @@ export const storage = () => adapter;
 function loadStateFrom(source) {
   let raw;
   try {
-    raw = source.get(APP.storageKey);
+    raw = ensureSync(source.get(APP.storageKey), "read");
   } catch (error) {
     throw storageFailure("read", error);
   }
@@ -120,7 +128,7 @@ function saveStateTo(source, state) {
     throw storageFailure("serialize", error);
   }
   try {
-    source.set(APP.storageKey, text);
+    ensureSync(source.set(APP.storageKey, text), "write");
   } catch (error) {
     throw storageFailure("write", error);
   }
@@ -153,7 +161,7 @@ export function update(mutator) {
 
 export function reset() {
   try {
-    adapter.remove(APP.storageKey);
+    ensureSync(adapter.remove(APP.storageKey), "remove");
   } catch (error) {
     throw storageFailure("remove", error);
   }
