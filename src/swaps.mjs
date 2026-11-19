@@ -1238,7 +1238,11 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         : undefined;
       if (validUntil !== undefined && validUntil !== null) {
         const until = Number(validUntil);
-        const snapshot = await chainSnapshot(wallet);
+        // AN UNREADABLE BLOCK IS A NAMED REFUSAL, NOT AN UNCODED ERROR. The sell gate already maps this failure to
+        // `block-unreadable`; the lock path must speak the same vocabulary.
+        let snapshot = null;
+        try { snapshot = await chainSnapshot(wallet); }
+        catch { throw new SdkError("quote-unchecked", { step: "lock", why: "clock-unreadable" }); }
         lockNowSec = snapshot && Number.isSafeInteger(Number(snapshot.timestamp)) && Number(snapshot.timestamp) > 0
           ? Number(snapshot.timestamp)
           : (typeof evmBlock === "function" ? null
