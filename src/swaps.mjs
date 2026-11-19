@@ -2021,8 +2021,10 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         params: entry.params || null, txid: entry.txid || null,
       }));
       const latest = priorAttempts[priorAttempts.length - 1];
-      if (latest && (latest.outcome === "sending" || latest.outcome === "unknown")
-        && Number.isFinite(Number(latest.at))) {
+      // A PREVIOUS ATTEMPT OWNS ITS SLOT EVEN WHEN IT REFUSED. The refusal proves that THIS POST sent nothing, but
+      // the next call still starts after the slot closes: the retry is bounded by the same clock as a first run and
+      // cannot race a request whose answer was lost or still in flight.
+      if (latest && Number.isFinite(Number(latest.at))) {
         const gate = await windowOf();
         if (!gate.ok) {
           // A PRIOR ATTEMPT MAY HAVE SENT THE HALF. The same late-read rule as the sender loop applies here: do not

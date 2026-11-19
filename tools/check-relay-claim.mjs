@@ -1029,6 +1029,7 @@ export const relayClaimCheck = async () => {
       "the refused sender was not written before the next call");
 
     const urls = [];
+    const secondStarted = clockMs;
     const second = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender, secondSender],
       fetchImpl: async (url) => {
         urls.push(url);
@@ -1039,6 +1040,8 @@ export const relayClaimCheck = async () => {
     check(second && second.state === "claimed" && second.provider === lower(secondSender)
       && urls.length === 2 && urls[0].includes(lower(relaySender)) && urls[1].includes(lower(secondSender)),
       "a reload did not retry the refused sender before the next one: " + JSON.stringify({ second, urls }));
+    check(clockMs - secondStarted >= 20_000,
+      "a refused sender was retried inside its slot: " + JSON.stringify({ moved: clockMs - secondStarted }));
 
     resetAttempts();
     resetChain();
@@ -1093,6 +1096,59 @@ export const relayClaimCheck = async () => {
       } });
     check(posts === 1 && statusReads <= 3,
       "a slow POST stretched the sender slot: " + JSON.stringify({ posts, statusReads }));
+  }
+
+  // (10a) EACH NAMED REFUSAL IS RETRIED ON THE NEXT CALL, NOT TREATED AS A PERMANENT SKIP.
+  for (const code of ["rate_limited", "bad_request", "unsupported_version", "no_quote", "claim-tip-too-small"]) {
+    resetAttempts();
+    resetChain();
+    clockMs = 1_900_000_000_000;
+    const first = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender],
+      fetchImpl: async () => refusal(code) });
+    check(first && first.state === "claim-yourself",
+      "the " + code + " fixture did not refuse: " + JSON.stringify(first));
+    const started = clockMs;
+    const dbg = engine.swap.getSwap(record.id, store);
+    const priorAt = dbg && dbg.claimAttempts && dbg.claimAttempts[dbg.claimAttempts.length - 1]
+      && Number(dbg.claimAttempts[dbg.claimAttempts.length - 1].at);
+    let calls = 0;
+    const second = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender],
+      fetchImpl: async () => {
+        calls += 1;
+        chainStatus.claimed = true;
+        return answer(relaySender, "0x" + "ab".repeat(32));
+      } });
+    check(second && second.state === "claimed" && calls === 1,
+      "a " + code + " refusal was not retried: " + JSON.stringify({ second, calls }));
+    check(Number.isFinite(priorAt) && clockMs >= (priorAt + 20) * 1000,
+      "a " + code + " refusal was retried inside its slot: " + JSON.stringify({ moved: clockMs - started, priorAt }));
+  }
+
+  // (10b) AN UNKNOWN SENDER IS RETRIED AFTER ITS SLOT, NOT LEFT AS A PERMANENT SKIP.
+  {
+    resetAttempts();
+    resetChain();
+    clockMs = 1_900_000_000_000;
+    let firstCalls = 0;
+    const first = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender],
+      fetchImpl: async () => { firstCalls += 1; throw Object.assign(new Error("lost"), { code: "claim-unknown" }); } });
+    check(first && first.state === "claim-yourself" && firstCalls === 1,
+      "the unknown fixture did not finish its first slot: " + JSON.stringify({ first, firstCalls }));
+    const started = clockMs;
+    const resumed = engine.swap.getSwap(record.id, store);
+    const priorAt = resumed && resumed.claimAttempts && resumed.claimAttempts[resumed.claimAttempts.length - 1]
+      && Number(resumed.claimAttempts[resumed.claimAttempts.length - 1].at);
+    let secondCalls = 0;
+    const second = await swaps.claimViaRelay({ id: record.id, claimSenders: [relaySender],
+      fetchImpl: async () => {
+        secondCalls += 1;
+        chainStatus.claimed = true;
+        return answer(relaySender, "0x" + "ac".repeat(32));
+      } });
+    check(second && second.state === "claimed" && secondCalls === 1,
+      "an unknown sender was not retried: " + JSON.stringify({ second, secondCalls }));
+    check(Number.isFinite(priorAt) && clockMs >= (priorAt + 20) * 1000,
+      "an unknown sender was retried inside its slot: " + JSON.stringify({ moved: clockMs - started, priorAt }));
   }
 
   // (12) A TINY POLL IS FLOORED, SO ONE SLOT CANNOT BURN THE CHAIN.
