@@ -231,7 +231,7 @@ sole reason for a user-facing message or a retry decision.
 ## 11. Support matrix
 
 - ESM only.
-- Node.js 24.22.1 or newer for the package build and Node consumers.
+- Node.js 24.22.3 or newer for the package build and Node consumers.
 - Browser use requires a bundler that understands the package `exports` map and the `assetsBase` path.
 - EVM wallets must expose EIP-1193 `request`, `eth_accounts`, `eth_chainId`, `eth_sendTransaction` and
   `eth_getTransactionReceipt`. WalletConnect is supported through the same adapter shape.

@@ -36,7 +36,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: '24.22.1'
+          node-version: '24.22.3'
           cache: pnpm
 
       # ANVIL AND CAST COME FROM THE SAME PINNED FOUNDRY THE CONTRACT REPOSITORY USES. The fork check below needs
@@ -292,7 +292,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: '24.22.1'
+          node-version: '24.22.3'
           cache: pnpm
 
       - name: Install the pinned Foundry release
@@ -357,7 +357,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: '24.22.1'
+          node-version: '24.22.3'
           cache: pnpm
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7

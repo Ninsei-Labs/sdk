@@ -100,7 +100,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: "24.22.1"
+          node-version: "24.22.3"
 
       # pnpm is this repository's package manager, so the lock file is pnpm's.
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
@@ -203,7 +203,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: "24.22.1"
+          node-version: "24.22.3"
           registry-url: "https://registry.npmjs.org" # wires up the .npmrc the OIDC exchange rides on
 
       # The npm bundled with the runner image can be older than the trusted publishing floor (11.12.1), and an

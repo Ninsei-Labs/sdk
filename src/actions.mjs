@@ -60,7 +60,7 @@ const actionFailure = (error, step) => {
   // wrapping them a second time would erase `why` and turn a named refusal into a generic one.
   if (error instanceof SdkError) throw error;
   if (typeof (error && error.code) === "string" && ERROR_CODES.includes(error.code)) {
-    throw new SdkError(error.code, { step, ...(error.params || {}) });
+    throw new SdkError(error.code, { ...(error.params || {}), step });
   }
   const code = codeOfError(error);
   const message = messageOfError(error);

@@ -352,12 +352,14 @@ export async function verifyArrival(request) {
     // stays false and the confirmation rule stays untouched.
     let poolHit = null;
     const poolFailed = [];
+    const poolChecked = new Set();
     for (const { node, info } of live) {
       if (!info.synced) continue;
       try {
         const hit = await findPoolTransfer(node, {
           expectedAtomic, watched, tip: top, nowSec, fetchImpl, timeoutMs,
         });
+        poolChecked.add(node.operator);
         if (hit) { poolHit = hit; break; }
       } catch (error) {
         poolFailed.push({ ...failureOf(error, node), why: "pool-read" });
@@ -380,6 +382,9 @@ export async function verifyArrival(request) {
     failed.push(...staleWitnesses);
     // ABSENCE IS A CLAIM ABOUT MONEY, SO IT NEEDS TWO OPERATORS. One node can withhold a transaction and make
     // this walk look empty; a refund signed on that answer would take the depositor's ETH from a maker who paid.
+    // ONLY A NODE WHOSE POOL WAS ALSO READ COUNTS. A completed block walk with a failed pool read is unknown
+    // about the mempool, and a transfer relayed only there must not become `absent: true`.
+    const absenceOperators = [...completedOperators].filter((operator) => poolChecked.has(operator));
     // Only when no node finished the walk is every node unreachable.
     if (!completedOperators.size) {
       // A LIVE BUT UNSYNCHRONIZED NODE IS UNKNOWN, NOT ABSENT. Returning pending keeps the refund closed while
@@ -390,7 +395,7 @@ export async function verifyArrival(request) {
       }
       throw new SdkError("xmr-no-nodes", { tried: nodes.map((n) => n.url), nodes: failed });
     }
-    return { seen: false, state: "pending", absent: completedOperators.size >= 2, txid: txidHint, tip, completedOperators: [...completedOperators], checked: live.map((l) => ({ url: l.node.url, operator: l.node.operator, height: l.info.height, synchronized: l.info.synced })), failed };
+    return { seen: false, state: "pending", absent: absenceOperators.length >= 2, txid: txidHint, tip, completedOperators: absenceOperators, checked: live.map((l) => ({ url: l.node.url, operator: l.node.operator, height: l.info.height, synchronized: l.info.synced })), failed };
   }
 
   // 3. VERIFY ON EVERY NODE: the SAME block hash, the SAME transaction inside it, the confirmations and the money.

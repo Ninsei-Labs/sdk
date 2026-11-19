@@ -200,6 +200,7 @@ console.log("=== 1c) A POOL TRANSFER IS REPORTED WITH A TXID, BUT IS NOT AN ARRI
   const tx = fixture();
   const other = "c".repeat(64);
   let poolHashesSeen = null;
+  let poolTxRequestHashes = null;
   const poolFetch = async (url, init) => {
     const body = JSON.parse(init.body);
     if (body.method === "get_info") return { ok: true, json: async () => ({ result: { height: 121, synchronized: true } }) };
@@ -209,6 +210,7 @@ console.log("=== 1c) A POOL TRANSFER IS REPORTED WITH A TXID, BUT IS NOT AN ARRI
       return { ok: true, json: async () => ({ tx_hashes: poolHashesSeen }) };
     }
     const hashes = (body.txs_hashes || []).map((hash) => String(hash).toLowerCase());
+    poolTxRequestHashes = hashes;
     return { ok: true, json: async () => ({
       txs: hashes.map((hash) => ({ tx_hash: hash, block_height: null, confirmations: 0 })),
       txs_as_json: hashes.map((hash) => JSON.stringify(hash === TXID ? tx : { extra: [], vout: [] })),
@@ -232,6 +234,38 @@ console.log("=== 1c) A POOL TRANSFER IS REPORTED WITH A TXID, BUT IS NOT AN ARRI
   if (Array.isArray(poolHashesSeen) && poolHashesSeen.includes(TXID) && poolHashesSeen.includes(other)) {
     ok("the whole pool is requested, not the watched txid");
   } else bad("pool request: " + JSON.stringify(poolHashesSeen));
+  if (Array.isArray(poolTxRequestHashes) && poolTxRequestHashes.includes(TXID) && poolTxRequestHashes.includes(other)) {
+    ok("the transaction request carries the unrelated pool hash too");
+  } else bad("pool transaction request: " + JSON.stringify(poolTxRequestHashes));
+}
+
+console.log("=== 1d) A FAILED POOL READ DOES NOT COUNT AS AN ABSENT WITNESS ===");
+{
+  const quorumFetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (body.method === "get_info") return { ok: true, json: async () => ({ result: { height: 121, synchronized: true } }) };
+    if (body.method === "get_block") return { ok: true, json: async () => ({ result: { block_header: { hash: BLOCK_HASH }, tx_hashes: [] } }) };
+    if (url.endsWith("/get_transaction_pool_hashes")) {
+      if (new URL(url).hostname === "a.example") return { ok: false, status: 503 };
+      return { ok: true, json: async () => ({ tx_hashes: [] }) };
+    }
+    throw new Error("unexpected request " + url);
+  };
+  let verdict = null;
+  let error = null;
+  try {
+    verdict = await verifyArrival({
+      nodes: [{ url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" }],
+      address, viewSecret: VIEW, spendPub, expectedAtomic: AMOUNT, minConfirmations: 10,
+      fromHeight: 100, txid: TXID, fetch: quorumFetch,
+    });
+  } catch (e) { error = e; }
+  if (!error && verdict && verdict.state === "pending" && verdict.absent === false
+    && Array.isArray(verdict.failed) && verdict.failed.some((entry) => entry.why === "pool-read")) {
+    ok("a failed pool read keeps the verdict pending, not absent");
+  } else {
+    bad("pool-read quorum: " + JSON.stringify({ error: error && (error.code || error.message), verdict }));
+  }
 }
 
 console.log("=== 1) TWO HONEST NODES AGREE ===");

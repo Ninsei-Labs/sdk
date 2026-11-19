@@ -906,9 +906,14 @@ export interface XmrArrivalVerdict {
   readonly height?: number | null;
   readonly blockHash?: string;
   readonly amountAtomic?: string;
+  /** Present on a pool match: every reported output passed its Pedersen amount check. */
+  readonly amountVerified?: boolean;
   readonly confirmations?: number;
   readonly needConfirmations?: number;
+  readonly tip?: number;
   readonly operators?: readonly string[];
+  readonly checked?: readonly { readonly url: string; readonly operator: string; readonly height?: number; readonly synchronized?: boolean; readonly state?: string }[];
+  readonly failed?: readonly { readonly url: string; readonly operator: string; readonly code?: string; readonly why?: string; readonly status?: number }[];
   /** The node that reported the pool match. Present only for `state: "pool"`. */
   readonly poolFrom?: { readonly url: string; readonly operator: string };
   /** Whether the transaction's `unlock_time` bars the outputs at the reported tip. */
