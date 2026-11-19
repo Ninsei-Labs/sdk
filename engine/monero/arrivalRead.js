@@ -13,10 +13,13 @@
 // THE NETWORK TABLE IS DERIVED from the package's own prefix table rather than written out with numbers: a prefix
 // typed from memory (stagenet is not 18) already produced an address that no wallet would open.
 import { decodeMoneroBase58, PREFIX_BY_NETWORK } from "./address.js";
+import { keccak256 } from "../../src/primitives.mjs";
 
 const NETWORK_BY_PREFIX = Object.fromEntries(
   Object.entries(PREFIX_BY_NETWORK).map(([network, kinds]) => [kinds.primary, network]),
 );
+const PRIMARY_BYTES = 69; // 1-byte prefix + 2 * 32-byte keys + 4-byte checksum
+const INTEGRATED_BYTES = 77; // primary + 8-byte payment id
 
 const toHex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
@@ -26,7 +29,17 @@ const toHex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0"
  */
 export function decodeAddressKeys(address) {
   const raw = decodeMoneroBase58(String(address == null ? "" : address).trim());
-  if (!raw || raw.length < 69) throw new Error("not a Monero address: " + (raw ? raw.length + " bytes" : "not base58"));
+  // THE LENGTH AND CHECKSUM ARE PART OF THE BINDING. A typo that still decodes to 69/77 bytes would otherwise
+  // produce public keys from a different address and be accepted as the watched identity.
+  if (raw.length !== PRIMARY_BYTES && raw.length !== INTEGRATED_BYTES) {
+    throw new Error("not a Monero address: " + raw.length + " bytes");
+  }
+  const payload = raw.slice(0, raw.length - 4);
+  const checksum = raw.slice(raw.length - 4);
+  const digest = Uint8Array.from(keccak256(payload));
+  if (!checksum.every((byte, index) => byte === digest[index])) {
+    throw new Error("not a Monero address: checksum mismatch");
+  }
   const netByte = raw[0];
   return {
     network: NETWORK_BY_PREFIX[netByte] || null,

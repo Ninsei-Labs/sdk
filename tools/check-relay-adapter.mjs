@@ -194,14 +194,17 @@ function relayFetch({ tamperProof = false, cashierAddress = cashier, validUntil 
   };
 }
 
-function makeQuotes({ providerWord = provider, factoryWord = factory, cashierPin = cashier, registryPin = null, denylist = null, now = null, chunkOptions = null } = {}) {
+function makeQuotes({ providerWord = provider, factoryWord = factory, cashierPin = cashier, registryPin = null, denylist = null, now = null, chunkOptions = null, blockTimestamp = null } = {}) {
+  const clock = now || (() => nowSec * 1000);
   return createQuotes({
     denylist,
     chunkOptions,
     config: { settlement: { chain: { escrow: { ...(cashierPin ? { cashier: cashierPin } : {}), ...(registryPin ? { registry: registryPin } : {}) } } } },
-    now: now || (() => nowSec * 1000),
+    now: clock,
     evmCall: chainReads({ providerWord, factoryWord }),
-    evmBlock: async () => ({ baseFeePerGas: "0" }),
+    // THE DECLARED BLOCK SHAPE CARRIES THE CHAIN CLOCK. The adapter's injected `now` and the block timestamp are
+    // the same instant here, so a case that changes the clock changes both clocks.
+    evmBlock: async () => ({ number: 1, timestamp: blockTimestamp ?? Math.floor(clock() / 1000), baseFeePerGas: "0" }),
   });
 }
 
@@ -327,6 +330,17 @@ console.log("=== 1a) THE REGISTRY IS PINNED TO THE NETWORK ===");
     ok("the network's own registry is accepted");
   } catch (error) {
     bad("the pinned registry was refused: " + JSON.stringify({ code: error && error.code, params: error && error.params }));
+  }
+}
+
+console.log("=== 1c) THE ANSWER'S EXPIRY USES THE CHAIN CLOCK, NOT THE DEVICE ===");
+{
+  try {
+    await call(makeQuotes({ blockTimestamp: nowSec + 3600 }), { fetchImpl: relayFetch().fetchImpl });
+    bad("a quote expired on the chain passed under a device clock behind it");
+  } catch (error) {
+    if (error && error.code === "quote-expired") ok("the chain timestamp expires the quote");
+    else bad("chain-clock expiry gave " + JSON.stringify({ code: error && error.code, params: error && error.params }));
   }
 }
 

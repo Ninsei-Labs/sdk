@@ -16,6 +16,7 @@ import { addressFromKeys } from "../engine/monero/address.js";
 
 const G = ed25519.Point.BASE;
 const TXID = "a".repeat(64);
+const TXID_TIE = "c".repeat(64);
 const BLOCK_HASH = "b".repeat(64);
 const AMOUNT = 1_000_000_000n;
 const VIEW = 11n;
@@ -76,9 +77,9 @@ const address = addressFromKeys({ network: "stagenet", kind: "primary", spendPub
 const tx = fixture();
 const requests = [];
 
-function blockFor(height) {
+function blockFor(height, tie = false) {
   const hash = height === 105 ? BLOCK_HASH : String(height).padStart(64, "0");
-  return { block_header: { hash }, tx_hashes: height === 105 ? [TXID] : [] };
+  return { block_header: { hash }, tx_hashes: height === 105 ? (tie ? [TXID, TXID_TIE] : [TXID]) : [] };
 }
 
 function witnessIndex(url) {
@@ -90,7 +91,7 @@ function witnessIndex(url) {
 const perWitness = (values, index, fallback) => Array.isArray(values) && index >= 0 && index < values.length
   ? values[index] : fallback;
 
-function fetchBoth({ witnessHash = BLOCK_HASH, witnessHashes = null, witnessTop = 119, witnessTops = null,
+function fetchBoth({ tie = false, witnessHash = BLOCK_HASH, witnessHashes = null, witnessTop = 119, witnessTops = null,
   witnessTxids = null, witnessInfoTop = null, exactInfoHeight = 120,
   exactStaleHeight = null, witnessPartialAt = null, witnessPartialTo = null, witnessPartialTos = null,
   witnessBroken = null, witnessFailAt = null, network = "stagenet" } = {}) {
@@ -114,7 +115,7 @@ function fetchBoth({ witnessHash = BLOCK_HASH, witnessHashes = null, witnessTop 
         return {
           height,
           hash: height === 105 ? perWitness(witnessHashes, witnessAt, witnessHash) : String(height).padStart(64, "0"),
-          txids: height === 105 && perWitness(witnessTxids, witnessAt, TXID) ? [TXID] : [],
+          txids: height === 105 && perWitness(witnessTxids, witnessAt, TXID) ? (tie ? [TXID, TXID_TIE] : [TXID]) : [],
         };
       });
       const complete = to === sliceEnd;
@@ -130,15 +131,17 @@ function fetchBoth({ witnessHash = BLOCK_HASH, witnessHashes = null, witnessTop 
       return { ok: true, json: async () => ({ result: { height, synchronized: !stale, status: "OK", nettype: network } }) };
     }
     if (body.method === "get_block") {
-      return { ok: true, json: async () => ({ result: blockFor(Number(body.params.height)) }) };
+      return { ok: true, json: async () => ({ result: blockFor(Number(body.params.height), tie) }) };
     }
     if (typeof body.method === "string") {
-      return { ok: true, json: async () => ({ txs: [{ tx_hash: TXID, block_height: 105, confirmations: 16 }],
-        txs_as_json: [JSON.stringify(tx)] }) };
+      const ids = tie ? [TXID, TXID_TIE] : [TXID];
+      return { ok: true, json: async () => ({ txs: ids.map((txid) => ({ tx_hash: txid, block_height: 105, confirmations: 16 })),
+        txs_as_json: ids.map(() => JSON.stringify(tx)) }) };
     }
     if (Array.isArray(body.txs_hashes)) {
-      return { ok: true, json: async () => ({ txs: [{ tx_hash: TXID, block_height: 105, confirmations: 16 }],
-        txs_as_json: [JSON.stringify(tx)] }) };
+      const ids = tie ? [TXID, TXID_TIE] : [TXID];
+      return { ok: true, json: async () => ({ txs: ids.map((txid) => ({ tx_hash: txid, block_height: 105, confirmations: 16 })),
+        txs_as_json: ids.map(() => JSON.stringify(tx)) }) };
     }
     return { ok: false, status: 404, json: async () => ({}) };
   };
@@ -464,6 +467,18 @@ console.log("=== 17) A PERFECT CANDIDATE BELOW THE TIP DOES NOT END THE WALK ===
   } else {
     bad("deep-payment agreement: " + JSON.stringify({ agrees: result.agrees, problems: result.problems,
       quorum: result.witness.quorum, witness: result.witness }));
+  }
+}
+
+console.log("=== 18) EQUAL CANDIDATES PICK THE SAME TXID IN BOTH WALKS ===");
+{
+  const result = await shadow({ tie: true, witnessOperators: ["W", "X"] });
+  const chosen = result.exact && result.exact.txid;
+  if (chosen === TXID && result.agrees === true && result.problems.length === 0) {
+    ok("two equal-score payments resolve to the lower txid in the exact and shadow walks");
+  } else {
+    bad("tie break: " + JSON.stringify({ exact: result.exact, agrees: result.agrees, problems: result.problems,
+      checked: result.witness && result.witness.checked }));
   }
 }
 

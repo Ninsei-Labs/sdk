@@ -48,6 +48,18 @@ export async function feesCheck() {
   assert.equal(sent[0].to, factory, "funding targets the requested factory");
   assert.equal(BigInt(sent[0].value), 334332n, "buy funding includes 999 wei fee on 333333 wei principal");
   assert.equal(reads.length, 2, "funding predicts and checks the escrow before sending");
+  const expiredSent = [];
+  let expiredError = null;
+  try {
+    await fundOrder({ ...quote, amountWei: quote.amount, quote: { ...quote, validUntil: 1999996300 },
+      nowSec: 1999996400,
+      call: async () => { throw new Error("a read happened after the quote expiry"); },
+      send: async (request) => { expiredSent.push(request); return hash; },
+      receipt: async () => ({ status: "0x1", transactionHash: hash, logs: [] }),
+    });
+  } catch (error) { expiredError = error; }
+  assert.equal(expiredError && expiredError.code, "quote-expired", "an expired quote is refused at the funding boundary");
+  assert.equal(expiredSent.length, 0, "the expired quote sends nothing");
   resetFeeCache();
   return { note: "non-zero buy/sell fees, rounding, ceiling and funding value", problems: [] };
 }

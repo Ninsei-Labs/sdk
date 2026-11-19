@@ -6,6 +6,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { normalizeHistory, historyVerdict } from "./deployment-history.mjs";
 import {
   CHAINS,
   DEPLOYMENTS,
@@ -21,6 +22,28 @@ const problems = [];
 
 function check(condition, message) {
   if (!condition) problems.push(message);
+}
+
+// THE CHAIN IDENTITY MUST SURVIVE NORMALIZATION. The generator refused every valid mainnet history because the
+// normalized object dropped chainRef; this pair pins the accepted mainnet and the refused testnet rule.
+const historyFixture = (chainRef, network) => ({
+  schema: 1,
+  vm: "evm",
+  network,
+  chainRef,
+  caip2: `eip155:${chainRef}`,
+  factories: [{ address: "0x" + "11".repeat(20), deploymentBlock: 123, release: { tag: "old-release" } }],
+});
+{
+  const mainnet = normalizeHistory(historyFixture("42161", "arbitrum-one"), "test:mainnet-history.json");
+  check(mainnet.chainRef === "42161", "mainnet history lost its chainRef during normalization");
+  const accepted = historyVerdict(mainnet, { "arbitrum-one": {} });
+  check(accepted.ok === true, "a valid mainnet history was refused: " + accepted.why);
+
+  const testnet = normalizeHistory(historyFixture("421614", "arbitrum-sepolia"), "test:testnet-history.json");
+  const refused = historyVerdict(testnet, { "arbitrum-sepolia": {} });
+  check(refused.ok === false && /mainnet-only/.test(refused.why),
+    "a testnet history was not refused as mainnet-only: " + refused.why);
 }
 
 function sameEscrow(chainEscrow, pinEscrow) {

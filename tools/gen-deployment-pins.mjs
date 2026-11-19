@@ -8,6 +8,7 @@
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { normalizeHistory, historyVerdict } from "./deployment-history.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const MANIFESTS = join(ROOT, "deployments");
@@ -106,31 +107,6 @@ function normalize(manifest, file) {
   };
 }
 
-function normalizeHistory(manifest, file) {
-  const label = relative(ROOT, file).replaceAll("\\", "/");
-  if (manifest.schema !== 1) fail(`${label}: history schema is ${JSON.stringify(manifest.schema)}, expected 1`);
-  if (manifest.vm !== "evm") fail(`${label}: history vm ${JSON.stringify(manifest.vm)} has no validator yet`);
-  if (typeof manifest.network !== "string" || !networkPattern.test(manifest.network)) fail(`${label}: bad network`);
-  if (typeof manifest.chainRef !== "string" || !positiveInteger.test(manifest.chainRef)) fail(`${label}: bad chainRef`);
-  if (manifest.caip2 !== `eip155:${manifest.chainRef}`) fail(`${label}: caip2 does not match chainRef`);
-  if (!Array.isArray(manifest.factories) || manifest.factories.length === 0) fail(`${label}: factories is empty`);
-
-  const seen = new Set();
-  const factories = manifest.factories.map((entry, index) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) fail(`${label}: factories[${index}] is not an object`);
-    if (!addressPattern.test(entry.address || "")) fail(`${label}: factories[${index}].address is not an address`);
-    const address = entry.address.toLowerCase();
-    if (seen.has(address)) fail(`${label}: duplicate factory ${entry.address}`);
-    seen.add(address);
-    const block = Number(entry.deploymentBlock);
-    if (!Number.isSafeInteger(block) || block <= 0) fail(`${label}: factories[${index}].deploymentBlock is not a positive integer`);
-    const tag = entry.release && entry.release.tag;
-    if (typeof tag !== "string" || !tag.trim()) fail(`${label}: factories[${index}].release.tag is empty`);
-    return { address: entry.address, deploymentBlock: block, release: { tag } };
-  });
-  return { network: manifest.network, factories };
-}
-
 function readHistoryFiles() {
   if (!existsSync(HISTORY)) return [];
   const files = [];
@@ -161,13 +137,9 @@ function generate() {
   const data = Object.fromEntries(Object.entries(deployments).sort(([a], [b]) => a.localeCompare(b)));
   const history = {};
   for (const file of readHistoryFiles()) {
-    const normalized = normalizeHistory(JSON.parse(readFileSync(file, "utf8")), file);
-    if (!deployments[normalized.network]) fail(`history network ${normalized.network} has no deployment manifest`);
-    // HISTORY IS MAINNET ONLY. A development chain replaces its factory on every switch; a retired entry there
-    // would make recovery search addresses no user should depend on. Add mainnet chain ids here when they ship.
-    if (normalized.chainRef !== "42161") {
-      fail(`${normalized.network}: factory history is mainnet-only (chain 42161)`);
-    }
+    const normalized = normalizeHistory(JSON.parse(readFileSync(file, "utf8")), relative(ROOT, file).replaceAll("\\", "/"));
+    const verdict = historyVerdict(normalized, deployments);
+    if (!verdict.ok) fail(verdict.why);
     if (history[normalized.network]) fail(`duplicate history for ${normalized.network}`);
     history[normalized.network] = normalized.factories;
   }

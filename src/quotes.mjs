@@ -123,6 +123,17 @@ export function createQuotes({ config, now = () => Date.now(), evmCall = null, e
   const implementationPolicy = Array.isArray(knownImplementationCodes) && knownImplementationCodes.length
     ? knownImplementationCodes.map((h) => String(h).toLowerCase()).filter(Boolean)
     : null;
+  // THE CHAIN'S CLOCK, NOT THE DEVICE'S. A quote is signed for a timestamp; a device clock behind the chain lets
+  // an expired quote pass. The block seam is optional for simulation/tests, where the injected clock is the only
+  // clock available.
+  const chainNowSec = async () => {
+    if (typeof evmBlock !== "function") return Math.floor(Number(now()) / 1000);
+    let block = null;
+    try { block = await evmBlock("latest"); } catch { fail("quote-unchecked", { step: "clock", why: "block-read-failed" }); }
+    const timestamp = block && Number(block.timestamp);
+    if (!Number.isSafeInteger(timestamp) || timestamp <= 0) fail("quote-unchecked", { step: "clock", why: "timestamp-missing" });
+    return timestamp;
+  };
   return {
     /**
      * A firm quote through the relay, starting from the one recovery key.
@@ -219,6 +230,8 @@ export function createQuotes({ config, now = () => Date.now(), evmCall = null, e
       const derivation = { kind: "salt-v2", salt };
       const own = await buildOwnSideFromHalvesChunked(order, { spendHalf: derived.spendHalf, viewHalf: derived.viewHalf },
         chunkOptions || {});
+      const quoteNowSec = await chainNowSec();
+      if (!Number.isSafeInteger(quoteNowSec) || quoteNowSec <= 0) fail("quote-unchecked", { step: "clock", why: "timestamp-missing" });
       const xa = secp256k1.Point.fromHex(own.side.proof.XA);
       const clientHalf = {
         commitHalf: bytesToHexQ(keccak256(xa.toBytes(false).slice(1))),
@@ -230,7 +243,7 @@ export function createQuotes({ config, now = () => Date.now(), evmCall = null, e
         partner: request.partner,
         fetchImpl: request.fetchImpl || fetchImpl,
         timeoutMs: request.timeoutMs,
-        now,
+        now: quoteNowSec * 1000,
         features,
         terms: {
           market,
@@ -377,7 +390,10 @@ export function createQuotes({ config, now = () => Date.now(), evmCall = null, e
       // happen first; a quote that had 31 s on arrival has less by now, and showing a confirmation would waste the
       // person's time only to refuse at the lock. A sell (bid) is checked by its own expiry alone: its escrow is
       // already funded, so there is no local lock to prepare and no margin to reserve.
-      const answerNowSec = Math.floor(Number(now()) / 1000);
+      // THE LIFE CHECK RUNS AFTER ALL THE WORK THE ANSWER NEEDS. The chain clock is read again: the proof, the
+      // predict and the registry reads took time, and a device clock behind the chain must not grant it back.
+      const answerNowSec = await chainNowSec();
+      if (!Number.isSafeInteger(answerNowSec) || answerNowSec <= 0) fail("quote-unchecked", { step: "clock", why: "timestamp-missing" });
       const life = quoteLifeVerdict({ validUntil: quote.validUntil, nowSec: answerNowSec, side });
       if (!life.ok) {
         fail("quote-too-short", { step: "answer", side,
