@@ -73,6 +73,10 @@ const cases = [
   ["plain revert", Object.assign(new Error("execution reverted"), { code: "CALL_EXCEPTION", data: "0x08c379a0" }), "contract-reverted", "revert"],
   ["status-0 receipt", Object.assign(new Error("transaction failed"), { receipt: { status: 0 } }), "contract-reverted", "revert"],
   ["ACTION_REJECTED", Object.assign(new Error("Wallet declined"), { code: "ACTION_REJECTED" }), "wallet-rejected"],
+  ["4001 with revert text", Object.assign(new Error("request cannot be reverted"), { code: 4001, data: "0x1234" }), "wallet-rejected"],
+  ["insufficient funds", Object.assign(new Error("insufficient funds for gas * price + value"), { code: "INSUFFICIENT_FUNDS" }), "insufficient-funds"],
+  ["nested 4100", Object.assign(new Error("not authorized"), { data: { originalError: { code: 4100 } } }), "wallet-not-connected", "unauthorized"],
+  ["unclassified", new Error("boom"), "unknown", "unclassified"],
 ];
 
 export const actionsWalletErrorsCheck = async () => {
@@ -94,6 +98,24 @@ export const actionsWalletErrorsCheck = async () => {
       if (good) ok(`${label}: ${errorLabel} -> ${code}${why ? "/" + why : ""}`);
       else bad(`${label}: ${errorLabel} -> ` + JSON.stringify(caught && { code: caught.code, params: caught.params }));
     }
+  }
+
+  // THE READ PATH HAS ITS OWN ANSWER. A malformed `eth_call` result is not a wallet state and not a revert;
+  // `unknown/bad-answer` is the honest code, and this path is exercised without an explicit `call` seam.
+  const readWallet = {
+    ...walletFor(new Error("send must not run")),
+    driver: () => ({ request: async () => "not-hex" }),
+  };
+  let readCaught = null;
+  try {
+    await createActions({ blockTime: async () => 1_000 }).markReady(
+      { escrow: ESCROW, expect }, readWallet,
+    );
+  } catch (error) { readCaught = error; }
+  if (readCaught && readCaught.code === "unknown" && readCaught.params && readCaught.params.why === "bad-answer") {
+    ok("a malformed eth_call answer is unknown/bad-answer");
+  } else {
+    bad("malformed read: " + JSON.stringify(readCaught && { code: readCaught.code, params: readCaught.params }));
   }
 
   return {
