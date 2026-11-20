@@ -1189,7 +1189,7 @@ export async function verifyArrivalFromRead(request) {
   }
   const seenByAmount = rule === "exact" ? total === expectedAtomic : total >= expectedAtomic;
   const seen = seenByAmount && recovery.complete === true;
-  const poolHit = recovery.transfers.find((transfer) => transfer.agreed && transfer.pool);
+  const poolHit = recovery.transfers.find((transfer) => transfer.pool);
   const completedOperators = recovery.completedOperators || [];
   const absent = recovery.complete === true && chosen.length === 0 && !poolHit && completedOperators.length >= 2;
   const outputs = [];
