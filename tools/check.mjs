@@ -2590,6 +2590,8 @@ const keyImageCheck = () => runScriptCheck("check-key-image.mjs", "key image");
 const keyImageTeethCheck = () => runScriptCheck("check-key-image-teeth.mjs", "key image teeth");
 const recoveryReadCheck = () => runScriptCheck("check-recovery-read.mjs", "recovery read");
 const recoveryReadTeethCheck = () => runScriptCheck("check-recovery-read-teeth.mjs", "recovery read teeth");
+const recoveryWitnessCheck = () => runScriptCheck("check-recovery-witness.mjs", "recovery witness");
+const recoveryWitnessTeethCheck = () => runScriptCheck("check-recovery-witness-teeth.mjs", "recovery witness teeth");
 const pendingTeethCheck = () => runScriptCheck("check-pending-teeth.mjs", "pending funding teeth");
 const relayViewCheck = () => runScriptCheck("check-relay-view.mjs", "relay view");
 const relayTermsCheck = () => runScriptCheck("check-relay-terms.mjs", "relay terms");
@@ -2711,6 +2713,8 @@ const CHECKS = {
   "arrival-recovery": arrivalRecoveryCheck,
   "recovery-read": recoveryReadCheck,
   "recovery-read-teeth": recoveryReadTeethCheck,
+  "recovery-witness": recoveryWitnessCheck,
+  "recovery-witness-teeth": recoveryWitnessTeethCheck,
   "arrival-shadow": arrivalShadowCheck,
   "arrival-teeth": arrivalTeethCheck,
   "arrival-real": arrivalRealCheck,

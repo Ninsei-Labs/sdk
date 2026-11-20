@@ -101,3 +101,8 @@ jobs:
         run: pnpm run check:recovery-read-live
         env:
           RECOVERY_LIVE_NODE: http://127.0.0.1:38281
+
+      - name: Check the live plain-daemon witness
+        run: pnpm run check:recovery-witness-live
+        env:
+          RECOVERY_LIVE_NODE: http://127.0.0.1:38281
