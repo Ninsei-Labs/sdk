@@ -30,6 +30,7 @@ import * as engine from "../src/engine.mjs";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SWEEP_MJS = join(ROOT, "src", "sweep.mjs");
 const PASSPHRASE = "sweep-refusal-test-pass";
+const KEY_IMAGE = "aa".repeat(32);
 
 let pass = 0;
 const fails = [];
@@ -59,7 +60,7 @@ function fakeWallet({ unlocked = 0n, syncThrows = true, syncThrowsOnCall = null,
       if (unlockedThrows && (unlockedThrowsOnCall === null || unlocks === unlockedThrowsOnCall)) throw new Error("failed to get hashes");
       return unlocked;
     },
-    async sweepUnlocked() { calls.sweepUnlocked += 1; if (sweepThrows) throw new Error("failed to get hashes"); return { signed: true }; },
+    async sweepUnlocked() { calls.sweepUnlocked += 1; if (sweepThrows) throw new Error("failed to get hashes"); return { getInputs: () => [{ getKeyImage: () => ({ getHex: () => KEY_IMAGE }) }] }; },
     async fee() { calls.fee += 1; return fee; },
     async relay() { calls.relay += 1; return []; },
     async close() { calls.close += 1; },
@@ -88,7 +89,7 @@ async function planRequest() {
   });
   engine.recoveryFile.validatePayload(payload);
   const contents = await engine.recoveryFile.createRecoveryFile(payload, PASSPHRASE);
-  return { file: { contents }, passphrase: PASSPHRASE, to: address };
+  return { file: { contents }, passphrase: PASSPHRASE, to: address, keyImages: [KEY_IMAGE] };
 }
 
 function facade(mod) {

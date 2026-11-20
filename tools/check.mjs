@@ -2665,6 +2665,7 @@ const CHECKS = {
   "spent-status": () => nodeTestCheck("check-spent-status.mjs", { tests: 9, pass: 9, fail: 0, skipped: 0 }),
   "sweep-relay": () => nodeTestCheck("check-sweep-relay.mjs", { tests: 3, pass: 3, fail: 0, skipped: 0 }),
   "sweep-sign-guards": () => nodeTestCheck("check-sweep-sign-guards.mjs", { tests: 11, pass: 11, fail: 0, skipped: 0 }),
+  "sweep-inputs": () => nodeTestCheck("check-sweep-inputs.mjs", { tests: 5, pass: 5, fail: 0, skipped: 0 }),
   syntax: syntaxCheck,
   import: importCheck,
   surface: surfaceCheck,
