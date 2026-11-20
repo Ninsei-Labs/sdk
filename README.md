@@ -298,6 +298,12 @@ privacy-preserving path for a recovery page, because the RPC does not learn whic
 the answer is `sweep-relay-unknown`: the session token, the signed set and any known txids stay in the open session.
 The same token never relays that set again. Check the chain before signing a new withdrawal.
 
+`sweep.reconcile` is the later answer when the token is gone and only the signed bytes remain. It reads the swap
+address through `swaps.readRecovery`, with the signed hash and the verified `keyImages`, and never signs or relays:
+`present` means the hash is in a block or in the pool; `inputs-spent` means the hash is absent but an input moved;
+`unknown` means the read could not decide and the bytes stay; only `absent` with `resend: true` permits the same
+bytes, with the same hash, to be sent once.
+
 `sweep.sign` refuses with `sweep-scan-incomplete` unless `sweep.restore` first completed a full scan on that same
 wallet adapter; a behind-node, failed rescan or missing spent status is not a zero balance. A public node that refuses
 the optional `rescanSpent` pass no longer fails the restore: the full scan is kept and the result names

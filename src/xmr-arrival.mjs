@@ -676,22 +676,26 @@ async function scanRecoveryBlocks(node, { watched, fromHeight, toHeight, nowSec,
   return { transfers, failures, complete };
 }
 
-async function scanRecoveryPoolState(node, { watched, tracked, tip, nowSec, fetchImpl, timeoutMs }) {
+async function scanRecoveryPoolState(node, { watched, tracked, tip, nowSec, fetchImpl, timeoutMs, txid = null }) {
   const body = await call(node, "/get_transaction_pool_hashes", {}, fetchImpl, timeoutMs);
   const hashes = Array.isArray(body.tx_hashes)
     ? body.tx_hashes.map((hash) => String(hash).replace(/^0x/, "").toLowerCase()).filter((hash) => /^[0-9a-f]{64}$/.test(hash))
     : [];
-  if (!hashes.length) return { transfers: [], spends: [] };
+  if (!hashes.length) return { transfers: [], spends: [], target: null };
   const txs = await getBlockTxs(node, hashes, fetchImpl, timeoutMs);
   const transfers = [];
   const spends = [];
+  let target = null;
   for (const tx of txs) {
+    if (txid !== null && target === null && String(tx.tx_hash || "").replace(/^0x/, "").toLowerCase() === txid) {
+      target = { txid, height: null, blockHash: null, pool: true };
+    }
     spends.push(...spendsOfTx(tx, tracked, node, { height: null, blockHash: null, pool: true }));
     const hit = engine.xmrScan.matchTransaction(tx, [watched], { height: null, tipHeight: Math.max(0, tip), nowSec });
     if (!hit.length) continue;
     transfers.push(recoveryObservation(tx, hit, node, { height: null, blockHash: null, confirmations: 0, pool: true }));
   }
-  return { transfers, spends };
+  return { transfers, spends, target };
 }
 
 async function scanRecoveryPool(node, { watched, tip, nowSec, fetchImpl, timeoutMs }) {
@@ -800,11 +804,14 @@ export async function readRecovery(request) {
   }
   const watched = { address: request.address, viewSecret: bound.viewSecret, spendPub: bound.spendPub };
   const tracked = normalizeKeyImages(request.keyImages);
+  const targetTxid = request.txid === undefined || request.txid === null ? null : normalizedHash(request.txid);
+  if (targetTxid !== null && !hash64(targetTxid)) throw new SdkError("bad-input", { field: "txid" });
+  let target = null;
   let info;
   try { info = await getInfo(node, fetchImpl, timeoutMs, { signal }); }
   catch (error) {
     return { transfers: [], tip: null, fromHeight, minConfirmations,
-      complete: false, through: null, checkpoint: null, blocked: false, failed: [failureOf(error, node)] };
+      target, complete: false, through: null, checkpoint: null, blocked: false, failed: [failureOf(error, node)] };
   }
   const network = isStr(request.network) ? request.network : info.nettype;
   if (!isStr(network)) throw new SdkError("bad-input", { field: "network" });
@@ -813,13 +820,32 @@ export async function readRecovery(request) {
   }
   if (!info.synced) {
     return { transfers: [], tip: info.height, fromHeight, minConfirmations,
-      complete: false, through: null, checkpoint: null, blocked: true,
+      target, complete: false, through: null, checkpoint: null, blocked: true,
       failed: [{ url: node.url, operator: node.operator, code: "stale", why: "not-synchronized" }] };
   }
   const top = Math.max(0, info.height - 1);
   if (top < fromHeight) {
-    return { transfers: [], tip: info.height, fromHeight, minConfirmations, complete: true, through: null,
-      checkpoint: null, blocked: false, failed: [] };
+    // A RANGE ABOVE THE TIP HAS NO BLOCKS, BUT THE POOL IS STILL READ. The old early return called an empty
+    // block range complete without asking the pool, so a withdrawal already waiting there looked absent.
+    let transfers = [];
+    let spends = [];
+    let poolFailure = null;
+    try {
+      const pool = await scanRecoveryPoolState(node, {
+        watched, tracked, tip: top, nowSec: request.nowSec, fetchImpl, timeoutMs, txid: targetTxid,
+      });
+      if (pool.target) target = pool.target;
+      transfers = pool.transfers;
+      spends = pool.spends;
+    } catch (error) {
+      poolFailure = { ...failureOf(error, node), why: "pool-read" };
+    }
+    return { transfers, tip: info.height, fromHeight, minConfirmations, target,
+      complete: poolFailure === null, through: null, spends, checkpoint: null, blocked: false,
+      ...(poolFailure
+        ? { failed: [poolFailure] }
+        : { availableAtomic: availableAtomicOf(transfers, tracked, spends, minConfirmations),
+          availableSource: { url: node.url, operator: node.operator }, failed: [] }) };
   }
   const identity = { network, address: request.address, fromHeight };
   let bytes = 0;
@@ -835,6 +861,7 @@ export async function readRecovery(request) {
   }
   let replay = 0;
   const run = async (startRecord) => {
+    target = null;
     let transfers = [];
     let spends = [];
     const spendMap = new Map();
@@ -856,7 +883,7 @@ export async function readRecovery(request) {
         const failure = failureOf(error, node);
         failure.height = through.height;
         return { transfers, tip: info.height, fromHeight, minConfirmations, complete: false, through,
-          spends: [...spendMap.values()],
+          target, spends: [...spendMap.values()],
           checkpoint: checkpointRecord({ ...identity, through, transfers, spends: [...spendMap.values()] }), blocked: false, failed: [failure] };
       }
       if (!anchor.hash || normalizedHash(anchor.hash) !== through.hash) throw new Error("reorg");
@@ -887,10 +914,13 @@ export async function readRecovery(request) {
         const failure = failureOf(error, node);
         failure.height = height;
         return { transfers, tip: info.height, fromHeight, minConfirmations, complete: false, through,
-          spends: [...spendMap.values()],
+          target, spends: [...spendMap.values()],
           checkpoint: through ? checkpointRecord({ ...identity, through, transfers, spends: [...spendMap.values()] }) : null, blocked: false, failed: [failure] };
       }
       for (const tx of txs) {
+        if (targetTxid !== null && target === null && normalizedHash(tx.tx_hash) === targetTxid) {
+          target = { txid: targetTxid, height, blockHash: normalizedHash(block.hash), pool: false };
+        }
         addSpends(spendMap, spendsOfTx(tx, tracked, node, { height, blockHash: block.hash }));
         const hit = engine.xmrScan.matchTransaction(tx, [watched], { height, tipHeight: top, nowSec: request.nowSec });
         if (!hit.length) continue;
@@ -909,8 +939,9 @@ export async function readRecovery(request) {
     let poolFailure = null;
     try {
       const pool = await scanRecoveryPoolState(node, {
-        watched, tracked, tip: top, nowSec: request.nowSec, fetchImpl, timeoutMs,
+        watched, tracked, tip: top, nowSec: request.nowSec, fetchImpl, timeoutMs, txid: targetTxid,
       });
+      if (target === null && pool.target) target = pool.target;
       const known = new Set(transfers.map((transfer) => transfer.txid));
       for (const transfer of pool.transfers) {
         if (known.has(transfer.txid)) continue;
@@ -926,12 +957,12 @@ export async function readRecovery(request) {
     const confirmedTransfers = transfers.filter((transfer) => transfer.pool !== true);
     if (poolFailure) {
       return { transfers, tip: info.height, fromHeight, minConfirmations, complete: false, through,
-        spends,
+        target, spends,
         checkpoint: through ? checkpointRecord({ ...identity, through, transfers: confirmedTransfers, spends: confirmedSpends }) : null,
         blocked: false, failed: [poolFailure] };
     }
     return { transfers, tip: info.height, fromHeight, minConfirmations, complete: true, through,
-      spends, availableAtomic: availableAtomicOf(transfers, tracked, spends, minConfirmations),
+      target, spends, availableAtomic: availableAtomicOf(transfers, tracked, spends, minConfirmations),
       availableSource: { url: node.url, operator: node.operator },
       checkpoint: through ? checkpointRecord({ ...identity, through, transfers: confirmedTransfers, spends: confirmedSpends }) : null,
       blocked: false, failed: [] };
@@ -952,7 +983,7 @@ export async function readRecovery(request) {
       }
       const failure = failureOf(error, node);
       return { transfers: [], tip: info.height, fromHeight, minConfirmations, complete: false, through: null,
-        checkpoint: null, blocked: false, failed: [failure] };
+        target, checkpoint: null, blocked: false, failed: [failure] };
     }
   }
 }

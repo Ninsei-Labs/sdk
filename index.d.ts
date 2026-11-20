@@ -959,9 +959,18 @@ export interface XmrRecoveryReadRequest {
   readonly timeoutMs?: number;
   readonly fetch?: FetchLike;
   readonly keyImages?: readonly (string | XmrRecoveryKeyImage)[];
+  /** The signed withdrawal hash to note if this walk meets it in a block or in the pool. */
+  readonly txid?: string;
   readonly checkpoint?: XmrRecoveryCheckpointStore;
   readonly onProgress?: (event: XmrRecoveryProgress) => void;
   readonly signal?: AbortSignal;
+}
+
+export interface XmrRecoveryTarget {
+  readonly txid: string;
+  readonly height: number | null;
+  readonly blockHash: string | null;
+  readonly pool: boolean;
 }
 
 export interface XmrRecoveryReadVerdict {
@@ -971,6 +980,8 @@ export interface XmrRecoveryReadVerdict {
   readonly minConfirmations: number;
   readonly complete: boolean;
   readonly through: { readonly height: number; readonly hash: string } | null;
+  /** The requested `txid`, when the walk met it in a block or in the pool. */
+  readonly target?: XmrRecoveryTarget | null;
   readonly spends?: readonly XmrRecoverySpend[];
   /** Verified, confirmed, unlocked funding outputs minus matched spends. Null when the read is incomplete or a key image has no `outputKey`. */
   readonly availableAtomic?: string | null;
@@ -1712,6 +1723,12 @@ export interface SweepApi {
    * that were used for signing; when a fresh post-sign read matters, call `sign` and `relay` separately.
    */
   run(request: SweepRunRequest): Promise<SweepRunResult>;
+  /**
+   * A LATER LOOK AFTER THE TOKEN IS GONE. Reads the swap address through the same recovery read and decides whether
+   * the saved signed bytes may be sent again. `present` and `inputs-spent` never resend; `unknown` keeps the bytes and
+   * signs nothing; only `absent` with `resend: true` permits the same bytes, with the same hash, to be sent once.
+   */
+  reconcile(request: SweepReconcileRequest): Promise<SweepReconcileResult>;
 }
 
 /** What `restore` needs: the withdrawal adapter and the height named by the file. */
@@ -2057,6 +2074,42 @@ export interface SweepRunResult {
   readonly outcome: "sent";
   readonly txids: readonly string[];
   readonly swept: string;
+}
+
+/** The saved signed withdrawal, read later without a session token. */
+export interface SweepReconcileRequest {
+  readonly node: XmrNode | string;
+  readonly address: string;
+  readonly viewSecret: string | bigint;
+  readonly spendPub: string;
+  readonly fromHeight: number;
+  /** The hash the signed bytes already have. */
+  readonly txid: string;
+  /** The same verified unspent set that was used for signing. */
+  readonly keyImages: readonly (string | SweepKeyImage)[];
+  readonly minConfirmations?: number;
+  readonly network?: string;
+  readonly nowSec?: number;
+  readonly timeoutMs?: number;
+  readonly fetch?: FetchLike;
+  readonly signal?: AbortSignal;
+}
+
+export interface SweepReconcileResult {
+  /**
+   * `present` - the hash is in a block or in the pool; `inputs-spent` - the hash is absent but an input moved;
+   * `unknown` - the read could not decide; `absent` - the hash is absent and every input is still unspent.
+   */
+  readonly outcome: "present" | "inputs-spent" | "unknown" | "absent";
+  /** True only for `absent`: the same signed bytes, with the same hash, may be sent once. */
+  readonly resend: boolean;
+  readonly txid: string;
+  readonly height: number | null;
+  readonly blockHash: string | null;
+  readonly pool: boolean;
+  /** Whether the underlying recovery read covered every block and the pool. */
+  readonly complete: boolean;
+  readonly failed: readonly { readonly url: string; readonly operator: string; readonly code?: string; readonly why?: string; readonly height?: number; readonly status?: number }[];
 }
 
 // --- Recovery// --- Recovery ------------------------------------------------------------------------------
