@@ -2586,6 +2586,8 @@ const coverageMergeCheck = () => {
 };
 const backupConfirmationCheck = () => runScriptCheck("check-backup-confirmation.mjs", "backup confirmation");
 const keyViewCheck = () => runScriptCheck("check-key-view.mjs", "key view");
+const keyImageCheck = () => runScriptCheck("check-key-image.mjs", "key image");
+const keyImageTeethCheck = () => runScriptCheck("check-key-image-teeth.mjs", "key image teeth");
 const pendingTeethCheck = () => runScriptCheck("check-pending-teeth.mjs", "pending funding teeth");
 const relayViewCheck = () => runScriptCheck("check-relay-view.mjs", "relay view");
 const relayTermsCheck = () => runScriptCheck("check-relay-terms.mjs", "relay terms");
@@ -2689,6 +2691,8 @@ const CHECKS = {
   "coverage-merge": coverageMergeCheck,
   "backup-confirmation": backupConfirmationCheck,
   "key-view": keyViewCheck,
+  "key-image": keyImageCheck,
+  "key-image-teeth": keyImageTeethCheck,
   "pending-teeth": pendingTeethCheck,
   "relay-view": relayViewCheck,
   "relay-terms": relayTermsCheck,

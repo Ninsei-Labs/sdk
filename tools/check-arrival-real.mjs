@@ -51,6 +51,9 @@ if (verdict.seen === true && verdict.state === "arrived") ok("the real arrival i
 else bad("verdict: " + JSON.stringify(verdict));
 if (verdict.amountAtomic === expectedAtomic) ok("the agreed amount is the decoded one");
 else bad("arrived amount: " + verdict.amountAtomic);
+if (verdict.outputs && verdict.outputs.length === 1 && verdict.outputs[0].derivation === outputs[0].derivation) {
+  ok("the arrived verdict carries the verified output derivation");
+} else bad("arrived outputs: " + JSON.stringify(verdict.outputs));
 
 console.log("=== 4) THE SAME REAL TRANSACTION WITH A CHANGED AMOUNT IS A DISAGREEMENT ===");
 const forged = structuredClone(tx);

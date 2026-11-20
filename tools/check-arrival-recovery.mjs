@@ -9,8 +9,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { ed25519, keccak256 } from "../src/primitives.mjs";
 import { verifyRecovery } from "../src/xmr-arrival.mjs";
+import { createSweep } from "../src/sweep.mjs";
+import { keyImageFromSpendKey } from "../engine/monero/keyImage.js";
 import {
-  amountMaskCommitment, bytesToHex, derivedOutputKey, hashToScalar, hexToBytes, keyDerivation,
+  amountMaskCommitment, bytesToHex, derivedOutputKey, ED_ORDER, hashToScalar, hexToBytes, keyDerivation,
   scalarToBytesLE, varint,
 } from "../engine/monero/scan.js";
 import { addressFromKeys } from "../engine/monero/address.js";
@@ -23,6 +25,7 @@ const R = 17n;
 const SPEND_PUB = G.multiply(SPEND).toHex();
 const VIEW_PUB = G.multiply(VIEW).toHex();
 const ADDRESS = addressFromKeys({ network: "stagenet", kind: "primary", spendPub: SPEND_PUB, viewPub: VIEW_PUB }, { keccak256 });
+const le32 = (value) => BigInt(value).toString(16).padStart(64, "0").match(/../g).reverse().join("");
 
 let pass = 0;
 const fails = [];
@@ -156,6 +159,22 @@ console.log("=== 1c) A LOWER-TIP NODE DOES NOT FALSIFY THE WALK ===");
     && verdict.failed.length === 0) {
     ok("a node one block behind is clamped to its own top, not failed");
   } else bad("lower-tip recovery: " + JSON.stringify(verdict));
+}
+
+console.log("=== 1b) THE RECOVERY OUTPUT CARRIES A DERIVATION AND FEEDS keyImages ===");
+{
+  const txs = { [T2]: fixture(ATOMIC_QUOTE) };
+  const verdict = await verifyRecovery(request(rpc({ blockTxids: [T2], txs })));
+  const transfer = verdict.transfers && verdict.transfers[0];
+  const output = transfer && transfer.outputs && transfer.outputs[0];
+  const keys = { privateSpendKey: le32(SPEND), privateViewKey: le32(VIEW), address: ADDRESS };
+  const expected = output && keyImageFromSpendKey({
+    outputKey: output.key, privateSpendKey: le32((hashToScalar(hexToBytes(output.derivation), varint(output.index)) + SPEND) % ED_ORDER),
+  });
+  const images = transfer ? await createSweep().keyImages({ keys, arrival: transfer }) : [];
+  if (output && output.derivation && images.length === 1 && images[0].keyImage === expected) {
+    ok("a recovery transfer derives the same image as its known spend scalar");
+  } else bad("recovery key image: " + JSON.stringify({ output, images, expected }));
 }
 
 console.log("=== 2) A TRANSFER SEEN BY ONE OPERATOR IS NOT AN AGREED TRANSFER ===");
