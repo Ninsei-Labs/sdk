@@ -12,6 +12,8 @@ import * as engine from "./engine.mjs";
 import { restoreWallet } from "./sweep-restore.mjs";
 import { moneroWalletAdapter } from "./adapters/monero-wallet.mjs";
 import { checkDestination } from "./destination.mjs";
+import { readRecovery } from "./xmr-arrival.mjs";
+import { reconcileVerdict } from "./sweep-reconcile.mjs";
 import { revealedHalfWord } from "./sweep-half.mjs";
 import { takerHalvesV2 } from "./recovery-key.mjs";
 import { jointAddress } from "./order.mjs";
@@ -560,6 +562,26 @@ export function createSweep({ call = null, fetchImpl = null } = {}) {
       // NO SERVICE REPORT. The transfer is on the Monero network; the SDK does not ask the page's own host to
       // record it, so the host cannot link the visitor's IP to the escrow and the withdrawal.
       return { outcome: "sent", txids: list, swept: plan.address };
+    },
+
+    // A LATER LOOK AFTER THE TOKEN IS GONE. The signed bytes and their hash are the caller's; this only reads the
+    // swap address through the same #388 recovery read and says whether those bytes may be sent again. It never
+    // signs: `absent` with `resend: true` is the only answer that permits the same bytes, and every incomplete or
+    // positive answer forbids a resend.
+    async reconcile(request) {
+      if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
+      const txid = String(request.txid == null ? "" : request.txid).replace(/^0x/i, "").toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(txid)) throw new SdkError("bad-input", { field: "txid" });
+      if (request.node === undefined || request.node === null) throw new SdkError("bad-input", { field: "node" });
+      if (!Number.isSafeInteger(request.fromHeight) || request.fromHeight < 0) {
+        throw new SdkError("bad-input", { field: "fromHeight" });
+      }
+      if (!Array.isArray(request.keyImages) || !request.keyImages.length) {
+        throw new SdkError("bad-input", { field: "keyImages", why: "empty" });
+      }
+      const keyImages = request.keyImages;
+      const read = await readRecovery({ ...request, txid, keyImages, checkpoint: undefined });
+      return reconcileVerdict({ read, txid, keyImages });
     },
 
     // THE WITHDRAWAL AS A WHOLE - THE SAME ORDER, ONE CALL. This is a WRAPPER over sign and relay, NOT a second

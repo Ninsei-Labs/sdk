@@ -2590,6 +2590,7 @@ const keyImageCheck = () => runScriptCheck("check-key-image.mjs", "key image");
 const keyImageTeethCheck = () => runScriptCheck("check-key-image-teeth.mjs", "key image teeth");
 const recoveryReadCheck = () => runScriptCheck("check-recovery-read.mjs", "recovery read");
 const recoveryReadTeethCheck = () => runScriptCheck("check-recovery-read-teeth.mjs", "recovery read teeth");
+const sweepReconcileCheck = () => runScriptCheck("check-sweep-reconcile.mjs", "sweep reconcile");
 const recoveryWitnessCheck = () => runScriptCheck("check-recovery-witness.mjs", "recovery witness");
 const recoveryWitnessTeethCheck = () => runScriptCheck("check-recovery-witness-teeth.mjs", "recovery witness teeth");
 const pendingTeethCheck = () => runScriptCheck("check-pending-teeth.mjs", "pending funding teeth");
@@ -2665,6 +2666,7 @@ const CHECKS = {
   "spent-status": () => nodeTestCheck("check-spent-status.mjs", { tests: 9, pass: 9, fail: 0, skipped: 0 }),
   "sweep-relay": () => nodeTestCheck("check-sweep-relay.mjs", { tests: 3, pass: 3, fail: 0, skipped: 0 }),
   "sweep-sign-guards": () => nodeTestCheck("check-sweep-sign-guards.mjs", { tests: 11, pass: 11, fail: 0, skipped: 0 }),
+  "sweep-reconcile": sweepReconcileCheck,
   syntax: syntaxCheck,
   import: importCheck,
   surface: surfaceCheck,
