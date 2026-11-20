@@ -51,6 +51,8 @@
     "check:key-view": "node tools/check-key-view.mjs",
     "check:key-image": "node tools/check-key-image.mjs",
     "check:key-image-teeth": "node tools/check-key-image-teeth.mjs",
+    "check:key-image-oracle": "node tools/check-key-image-oracle.mjs",
+    "check:key-image-stand": "node tools/check-key-image-stand.mjs",
     "check:relay-view": "node tools/check-relay-view.mjs",
     "check:relay-terms": "node tools/check-relay-terms.mjs",
     "check:relay-features": "node tools/check-relay-features.mjs",

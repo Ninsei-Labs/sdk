@@ -22,6 +22,7 @@ import { biasedHashToEc, hashToPoint, keyImageFromOutput, keyImageFromSpendKey }
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const vectors = JSON.parse(readFileSync(join(ROOT, "tools/fixtures/key-image-vectors.json"), "utf8"));
+const rustVectors = JSON.parse(readFileSync(join(ROOT, "tools/fixtures/key-image-rust-vectors.json"), "utf8"));
 const problems = [];
 let checks = 0;
 const check = (condition, message) => { checks += 1; if (!condition) problems.push(message); };
@@ -38,9 +39,14 @@ for (const row of vectors.generate_key_image) {
   const got = keyImageFromSpendKey({ outputKey: row[1], privateSpendKey: row[2] });
   check(got === row[3], `generate_key_image ${row[1]} -> ${got}, want ${row[3]}`);
 }
+for (const row of rustVectors.vectors) {
+  const got = keyImageFromSpendKey({ outputKey: row.outputKey, privateSpendKey: row.privateSpendKey });
+  check(got === row.keyImage, `Rust oracle ${row.outputKey} -> ${got}, want ${row.keyImage}`);
+}
 console.log("  ok    " + vectors.hash_to_point.length + " Monero hash_to_point vectors");
 console.log("  ok    " + vectors.biased_hash_to_ec.length + " Monero biased_hash_to_ec vectors");
 console.log("  ok    " + vectors.generate_key_image.length + " Monero generate_key_image vectors");
+console.log("  ok    " + rustVectors.vectors.length + " independently generated Rust vectors");
 
 // A synthetic output whose spend scalar is known. The output key is x*G; the arrival carries the derivation and
 // index, exactly as `findOurOutputs` returns them.
