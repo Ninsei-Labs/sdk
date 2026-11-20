@@ -52,6 +52,7 @@ function daemon({ failAt: initialFailAt = null, shortAt = null, hashShift: initi
       const hashes = TXS[height] ? Object.keys(TXS[height]) : [];
       return { ok: true, json: async () => ({ result: { block_header: { height, hash: H(height + hashShift), prev_hash: H(height - 1 + hashShift), num_txes: hashes.length }, tx_hashes: hashes } }) };
     }
+    if (path.endsWith("/get_transaction_pool_hashes")) return { ok: true, json: async () => ({ tx_hashes: [] }) };
     if (path.endsWith("/get_transactions")) {
       const hashes = body.txs_hashes || [];
       const height = Number(Object.keys(TXS).find((h) => TXS[h][hashes[0]]));

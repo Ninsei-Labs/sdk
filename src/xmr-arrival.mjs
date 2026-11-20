@@ -586,6 +586,71 @@ function recoveryObservation(tx, hit, node, { height, blockHash, confirmations, 
   };
 }
 
+// KEY IMAGES OF THE FUNDING OUTPUTS, SUPPLIED BY THE CALLER. A recovery read carries the view key and the public
+// spend key, not the private spend key: it must not derive key images itself. `sweep.keyImages` returns these from
+// an arrival; mapping them back to output keys is what makes a spend local instead of a `is_key_image_spent` call.
+function normalizeKeyImages(value) {
+  const empty = { provided: false, byImage: new Map(), byOutput: new Map() };
+  if (value === undefined || value === null) return empty;
+  if (!Array.isArray(value)) throw new SdkError("bad-input", { field: "keyImages" });
+  const byImage = new Map();
+  const byOutput = new Map();
+  value.forEach((entry, position) => {
+    const raw = typeof entry === "string" ? entry : entry && entry.keyImage;
+    const keyImage = typeof raw === "string" ? raw.replace(/^0x/, "").toLowerCase() : "";
+    if (!hash64(keyImage)) throw new SdkError("bad-input", { field: "keyImages", why: "key-image", position });
+    if (byImage.has(keyImage)) throw new SdkError("bad-input", { field: "keyImages", why: "duplicate", position });
+    const outputKey = entry && typeof entry === "object" && typeof entry.outputKey === "string"
+      ? entry.outputKey.replace(/^0x/, "").toLowerCase() : null;
+    if (outputKey !== null && !hash64(outputKey)) throw new SdkError("bad-input", { field: "keyImages", why: "output-key", position });
+    const record = { keyImage, outputKey };
+    byImage.set(keyImage, record);
+    if (outputKey) byOutput.set(outputKey, keyImage);
+  });
+  return { provided: true, byImage, byOutput };
+}
+
+function spendsOfTx(tx, tracked, node, { height, blockHash, pool = false }) {
+  if (!tracked.provided) return [];
+  const records = [];
+  const vin = Array.isArray(tx.vin) ? tx.vin : [];
+  for (const entry of vin) {
+    const raw = entry && entry.key && entry.key.k_image;
+    const keyImage = typeof raw === "string" ? raw.replace(/^0x/, "").toLowerCase() : "";
+    if (!hash64(keyImage) || !tracked.byImage.has(keyImage)) continue;
+    records.push({
+      keyImage, outputKey: tracked.byImage.get(keyImage).outputKey,
+      txid: String(tx.tx_hash || "").replace(/^0x/, "").toLowerCase(),
+      height, blockHash, pool,
+    });
+  }
+  return records;
+}
+
+function addSpends(target, records) {
+  for (const spend of records) {
+    const previous = target.get(spend.keyImage);
+    if (!previous || (previous.pool && !spend.pool)) target.set(spend.keyImage, spend);
+  }
+}
+
+function availableAtomicOf(transfers, tracked, spends, minConfirmations = 1) {
+  if (!tracked.provided) return null;
+  const spent = new Set(spends.map((spend) => spend.keyImage));
+  let total = 0n;
+  let complete = true;
+  for (const transfer of transfers) {
+    if (transfer.pool || transfer.locked || Number(transfer.confirmations) < minConfirmations) continue;
+    for (const output of transfer.outputs || []) {
+      if (!output.amountVerified || output.amountAtomic === null || output.amountAtomic === undefined) continue;
+      const keyImage = tracked.byOutput.get(String(output.key || "").toLowerCase());
+      if (!keyImage) { complete = false; continue; }
+      if (!spent.has(keyImage)) total += BigInt(output.amountAtomic);
+    }
+  }
+  return complete ? total.toString() : null;
+}
+
 async function scanRecoveryBlocks(node, { watched, fromHeight, toHeight, nowSec, fetchImpl, timeoutMs }) {
   const transfers = [];
   const failures = [];
@@ -610,20 +675,27 @@ async function scanRecoveryBlocks(node, { watched, fromHeight, toHeight, nowSec,
   return { transfers, failures, complete };
 }
 
-async function scanRecoveryPool(node, { watched, tip, nowSec, fetchImpl, timeoutMs }) {
+async function scanRecoveryPoolState(node, { watched, tracked, tip, nowSec, fetchImpl, timeoutMs }) {
   const body = await call(node, "/get_transaction_pool_hashes", {}, fetchImpl, timeoutMs);
   const hashes = Array.isArray(body.tx_hashes)
     ? body.tx_hashes.map((hash) => String(hash).replace(/^0x/, "").toLowerCase()).filter((hash) => /^[0-9a-f]{64}$/.test(hash))
     : [];
-  if (!hashes.length) return [];
+  if (!hashes.length) return { transfers: [], spends: [] };
   const txs = await getBlockTxs(node, hashes, fetchImpl, timeoutMs);
   const transfers = [];
+  const spends = [];
   for (const tx of txs) {
+    spends.push(...spendsOfTx(tx, tracked, node, { height: null, blockHash: null, pool: true }));
     const hit = engine.xmrScan.matchTransaction(tx, [watched], { height: null, tipHeight: Math.max(0, tip), nowSec });
     if (!hit.length) continue;
     transfers.push(recoveryObservation(tx, hit, node, { height: null, blockHash: null, confirmations: 0, pool: true }));
   }
-  return transfers;
+  return { transfers, spends };
+}
+
+async function scanRecoveryPool(node, { watched, tip, nowSec, fetchImpl, timeoutMs }) {
+  const state = await scanRecoveryPoolState(node, { watched, tracked: normalizeKeyImages(null), tip, nowSec, fetchImpl, timeoutMs });
+  return state.transfers;
 }
 
 // ---------------------------------------------------------------------------
@@ -648,14 +720,14 @@ function checkpointDigest(record) {
   return engine.xmrScan.bytesToHex(engine.xmrScan.keccak(new TextEncoder().encode(text)));
 }
 
-function checkpointRecord({ network, address, fromHeight, through, transfers, kind = null }) {
+function checkpointRecord({ network, address, fromHeight, through, transfers, spends = [], kind = null }) {
   const record = {
     version: CHECKPOINT_VERSION, network, address, fromHeight, through,
     transfers,
     outputs: transfers.flatMap((transfer) => transfer.outputs.map((output) => ({
       txid: transfer.txid, height: transfer.height, blockHash: transfer.blockHash, ...output,
     }))),
-    spends: [],
+    spends,
   };
   if (kind) record.kind = kind;
   if (kind === "witness") record.grid = WITNESS_SLICE_BLOCKS;
@@ -726,6 +798,7 @@ export async function readRecovery(request) {
     throw new SdkError("bad-input", { field: "network", why: "address-network-mismatch" });
   }
   const watched = { address: request.address, viewSecret: bound.viewSecret, spendPub: bound.spendPub };
+  const tracked = normalizeKeyImages(request.keyImages);
   let info;
   try { info = await getInfo(node, fetchImpl, timeoutMs, { signal }); }
   catch (error) {
@@ -762,11 +835,15 @@ export async function readRecovery(request) {
   let replay = 0;
   const run = async (startRecord) => {
     let transfers = [];
+    let spends = [];
+    const spendMap = new Map();
     let through = null;
     let blocksVerified = 0;
     let previousHash = null;
     if (startRecord) {
       transfers = startRecord.transfers.slice();
+      spends = startRecord.spends.slice();
+      addSpends(spendMap, spends);
       through = { height: startRecord.through.height, hash: normalizedHash(startRecord.through.hash) };
       blocksVerified = through.height - fromHeight + 1;
       previousHash = through.hash;
@@ -778,7 +855,8 @@ export async function readRecovery(request) {
         const failure = failureOf(error, node);
         failure.height = through.height;
         return { transfers, tip: info.height, fromHeight, minConfirmations, complete: false, through,
-          checkpoint: checkpointRecord({ ...identity, through, transfers }), blocked: false, failed: [failure] };
+          spends: [...spendMap.values()],
+          checkpoint: checkpointRecord({ ...identity, through, transfers, spends: [...spendMap.values()] }), blocked: false, failed: [failure] };
       }
       if (!anchor.hash || normalizedHash(anchor.hash) !== through.hash) throw new Error("reorg");
     }
@@ -808,9 +886,11 @@ export async function readRecovery(request) {
         const failure = failureOf(error, node);
         failure.height = height;
         return { transfers, tip: info.height, fromHeight, minConfirmations, complete: false, through,
-          checkpoint: through ? checkpointRecord({ ...identity, through, transfers }) : null, blocked: false, failed: [failure] };
+          spends: [...spendMap.values()],
+          checkpoint: through ? checkpointRecord({ ...identity, through, transfers, spends: [...spendMap.values()] }) : null, blocked: false, failed: [failure] };
       }
       for (const tx of txs) {
+        addSpends(spendMap, spendsOfTx(tx, tracked, node, { height, blockHash: block.hash }));
         const hit = engine.xmrScan.matchTransaction(tx, [watched], { height, tipHeight: top, nowSec: request.nowSec });
         if (!hit.length) continue;
         const confirmations = confirmationsOf(tx, height, top);
@@ -820,13 +900,40 @@ export async function readRecovery(request) {
       previousHash = through.hash;
       blocksVerified += 1;
       if (checkpoint && typeof checkpoint.save === "function") {
-        try { checkpoint.save(checkpointRecord({ ...identity, through, transfers })); }
+        try { checkpoint.save(checkpointRecord({ ...identity, through, transfers, spends: [...spendMap.values()] })); }
         catch (error) { throw callerFailure("checkpoint.save", error); }
       }
       emit();
     }
+    let poolFailure = null;
+    try {
+      const pool = await scanRecoveryPoolState(node, {
+        watched, tracked, tip: top, nowSec: request.nowSec, fetchImpl, timeoutMs,
+      });
+      const known = new Set(transfers.map((transfer) => transfer.txid));
+      for (const transfer of pool.transfers) {
+        if (known.has(transfer.txid)) continue;
+        known.add(transfer.txid);
+        transfers.push(transfer);
+      }
+      addSpends(spendMap, pool.spends);
+    } catch (error) {
+      poolFailure = { ...failureOf(error, node), why: "pool-read" };
+    }
+    spends = [...spendMap.values()];
+    const confirmedSpends = spends.filter((spend) => spend.pool !== true);
+    const confirmedTransfers = transfers.filter((transfer) => transfer.pool !== true);
+    if (poolFailure) {
+      return { transfers, tip: info.height, fromHeight, minConfirmations, complete: false, through,
+        spends,
+        checkpoint: through ? checkpointRecord({ ...identity, through, transfers: confirmedTransfers, spends: confirmedSpends }) : null,
+        blocked: false, failed: [poolFailure] };
+    }
     return { transfers, tip: info.height, fromHeight, minConfirmations, complete: true, through,
-      checkpoint: through ? checkpointRecord({ ...identity, through, transfers }) : null, blocked: false, failed: [] };
+      spends, availableAtomic: availableAtomicOf(transfers, tracked, spends, minConfirmations),
+      availableSource: { url: node.url, operator: node.operator },
+      checkpoint: through ? checkpointRecord({ ...identity, through, transfers: confirmedTransfers, spends: confirmedSpends }) : null,
+      blocked: false, failed: [] };
   };
   for (;;) {
     try {
@@ -873,6 +980,10 @@ export async function readRecoveryWitness(request) {
   if (request.tipHeight !== null && request.tipHeight !== undefined && (tipHeightRaw === null || tipHeightRaw < 0)) {
     throw new SdkError("bad-input", { field: "tipHeight" });
   }
+  const minConfirmationsRaw = request.minConfirmations === null || request.minConfirmations === undefined ? null : Number(request.minConfirmations);
+  const minConfirmations = minConfirmationsRaw !== null && Number.isFinite(minConfirmationsRaw)
+    ? Math.max(1, Math.trunc(minConfirmationsRaw))
+    : 1;
   const fetchImpl = typeof request.fetch === "function" ? request.fetch : globalThis.fetch;
   if (typeof fetchImpl !== "function") throw new SdkError("bad-input", { field: "fetch" });
   const idleRaw = request.idleTimeoutMs === null || request.idleTimeoutMs === undefined ? null : Number(request.idleTimeoutMs);
@@ -893,6 +1004,7 @@ export async function readRecoveryWitness(request) {
     throw new SdkError("bad-input", { field: "network", why: "address-network-mismatch" });
   }
   const watched = { address: request.address, viewSecret: bound.viewSecret, spendPub: bound.spendPub };
+  const tracked = normalizeKeyImages(request.keyImages);
   let info;
   try { info = await getInfo(node, fetchImpl, timeoutMs, { signal }); }
   catch (error) {
@@ -931,7 +1043,7 @@ export async function readRecoveryWitness(request) {
   const lastWindow = witnessSliceIndex(targetTop);
   if (startWindow > lastWindow) {
     return { transfers: prior ? prior.transfers : [], tip: info.height, fromHeight, through: prior ? prior.through : null,
-      complete: true, checkpoint: prior ? checkpointRecord({ ...identity, through: prior.through, transfers: prior.transfers, kind: "witness" }) : null,
+      complete: true, checkpoint: prior ? checkpointRecord({ ...identity, through: prior.through, transfers: prior.transfers, spends: prior.spends, kind: "witness" }) : null,
       blocked: false, failed: [] };
   }
   let bytes = 0;
@@ -942,6 +1054,12 @@ export async function readRecoveryWitness(request) {
     const fromWindow = startRecord ? witnessSliceIndex(startRecord.through.height) : firstWindow;
     const windowStart = witnessSliceStart(fromWindow);
     let transfers = startRecord ? startRecord.transfers.filter((transfer) => transfer.height < windowStart) : [];
+    let spends = [];
+    const spendMap = new Map();
+    if (startRecord) {
+      spends = startRecord.spends.filter((spend) => spend.height === null || spend.height < windowStart);
+      addSpends(spendMap, spends);
+    }
     let through = null;
     let previousHash = null;
     let blocksVerified = 0;
@@ -973,12 +1091,15 @@ export async function readRecoveryWitness(request) {
           failure.height = height;
           const keptThrough = through || (startRecord ? startRecord.through : null);
           const keptTransfers = through ? transfers : (startRecord ? startRecord.transfers : transfers);
+          const keptSpends = through ? [...spendMap.values()] : (startRecord ? startRecord.spends : []);
           return { transfers: keptTransfers, tip: info.height, fromHeight, complete: false, through: keptThrough,
-            checkpoint: keptThrough ? checkpointRecord({ ...identity, through: keptThrough, transfers: keptTransfers, kind: "witness" }) : null,
+            spends: keptSpends,
+            checkpoint: keptThrough ? checkpointRecord({ ...identity, through: keptThrough, transfers: keptTransfers, spends: keptSpends, kind: "witness" }) : null,
             blocked: false, failed: [failure] };
         }
         if (priorThrough && height === priorThrough.height && normalizedHash(block.hash) !== priorThrough.hash) throw new Error("reorg");
         for (const tx of txs) {
+          addSpends(spendMap, spendsOfTx(tx, tracked, node, { height, blockHash: block.hash }));
           const hit = engine.xmrScan.matchTransaction(tx, [watched], { height, tipHeight: targetTop, nowSec: request.nowSec });
           if (!hit.length || height < fromHeight) continue;
           const confirmations = confirmationsOf(tx, height, targetTop);
@@ -988,14 +1109,16 @@ export async function readRecoveryWitness(request) {
         previousHash = through.hash;
         blocksVerified += 1;
         if (checkpoint && typeof checkpoint.save === "function") {
-          try { checkpoint.save(checkpointRecord({ ...identity, through, transfers, kind: "witness" })); }
+          try { checkpoint.save(checkpointRecord({ ...identity, through, transfers, spends: [...spendMap.values()], kind: "witness" })); }
           catch (error) { throw callerFailure("checkpoint.save", error); }
         }
         emit();
       }
     }
-    return { transfers, tip: info.height, fromHeight, complete: true, through,
-      checkpoint: through ? checkpointRecord({ ...identity, through, transfers, kind: "witness" }) : null,
+    spends = [...spendMap.values()];
+    return { transfers, tip: info.height, fromHeight, complete: true, through, spends,
+      availableAtomic: availableAtomicOf(transfers, tracked, spends, minConfirmations),
+      checkpoint: through ? checkpointRecord({ ...identity, through, transfers, spends, kind: "witness" }) : null,
       blocked: false, failed: [] };
   };
   for (;;) {
@@ -1046,6 +1169,7 @@ export async function verifyRecovery(request) {
   }
   const watched = { address: request.address, viewSecret: bound.viewSecret, spendPub: bound.spendPub };
 
+  const tracked = normalizeKeyImages(request.keyImages);
   const live = [];
   const failed = [];
   for (const node of nodes) {
@@ -1053,13 +1177,17 @@ export async function verifyRecovery(request) {
     catch (error) { failed.push(failureOf(error, node)); }
   }
   if (!live.length) throw new SdkError("xmr-no-nodes", { tried: nodes.map((n) => n.url), nodes: failed });
-  const tip = Math.max(...live.map((l) => l.info.height));
+  const tip = Math.max(...live.map((entry) => entry.info.height));
   const top = Math.max(0, tip - 1);
   const observations = new Map();
+  const spendMap = new Map();
   const checked = [];
   let complete = true;
+  let availableAtomic = null;
+  let primarySpends = [];
 
-  for (const { node, info } of live) {
+  for (let index = 0; index < live.length; index += 1) {
+    const { node, info } = live[index];
     checked.push({ url: node.url, operator: node.operator, height: info.height, synchronized: info.synced });
     if (!info.synced) {
       failed.push({ url: node.url, operator: node.operator, code: "stale", why: "not-synchronized" });
@@ -1067,23 +1195,47 @@ export async function verifyRecovery(request) {
       continue;
     }
     const nodeTop = Math.max(0, Math.min(top, info.height - 1));
-    const blocks = await scanRecoveryBlocks(node, { watched, fromHeight, toHeight: nodeTop, nowSec, fetchImpl, timeoutMs });
-    for (const transfer of blocks.transfers) {
+    let read;
+    try {
+      const common = {
+        address: request.address, viewSecret: request.viewSecret, spendPub: request.spendPub,
+        fromHeight, minConfirmations, network: request.network, keyImages: request.keyImages,
+        nowSec, timeoutMs, idleTimeoutMs: request.idleTimeoutMs ?? request.timeoutMs, fetch: fetchImpl,
+      };
+      read = index === 0
+        ? await readRecovery({ ...common, node })
+        : await readRecoveryWitness({ ...common, node, tipHeight: nodeTop });
+    } catch (error) {
+      failed.push(failureOf(error, node));
+      complete = false;
+      continue;
+    }
+    if (index > 0) {
+      try {
+        const pool = await scanRecoveryPoolState(node, {
+          watched, tracked, tip: nodeTop, nowSec, fetchImpl, timeoutMs,
+        });
+        for (const transfer of pool.transfers) {
+          if (!observations.has(transfer.txid)) observations.set(transfer.txid, []);
+          observations.get(transfer.txid).push(transfer);
+        }
+        addSpends(spendMap, pool.spends);
+      } catch (error) {
+        failed.push({ ...failureOf(error, node), why: "pool-read" });
+        complete = false;
+      }
+    }
+    for (const transfer of read.transfers) {
       if (!observations.has(transfer.txid)) observations.set(transfer.txid, []);
       observations.get(transfer.txid).push(transfer);
     }
-    failed.push(...blocks.failures);
-    if (!blocks.complete) complete = false;
-    try {
-      const pool = await scanRecoveryPool(node, { watched, tip: nodeTop, nowSec, fetchImpl, timeoutMs });
-      for (const transfer of pool) {
-        if (!observations.has(transfer.txid)) observations.set(transfer.txid, []);
-        observations.get(transfer.txid).push(transfer);
-      }
-    } catch (error) {
-      failed.push({ ...failureOf(error, node), why: "pool-read" });
-      complete = false;
+    if (index === 0) primarySpends = read.spends || [];
+    addSpends(spendMap, read.spends || []);
+    if (availableAtomic === null && read.availableAtomic !== null && read.availableAtomic !== undefined) {
+      availableAtomic = read.availableAtomic;
     }
+    failed.push(...(read.failed || []));
+    if (read.complete !== true) complete = false;
   }
 
   const transfers = [];
@@ -1129,6 +1281,10 @@ export async function verifyRecovery(request) {
   transfers.sort((a, b) => (a.height === null ? Number.MAX_SAFE_INTEGER : a.height) - (b.height === null ? Number.MAX_SAFE_INTEGER : b.height)
     || String(a.txid).localeCompare(String(b.txid)));
 
+  const spends = [...spendMap.values()];
+  const primarySpendSet = new Set(primarySpends.map((spend) => spend.keyImage));
+  const spendsDisagreements = spends.filter((spend) => !primarySpendSet.has(spend.keyImage));
+  const availableForVerdict = spendsDisagreements.length ? null : availableAtomic;
   const ready = transfers.some((transfer) => transfer.agreed && transfer.confirmed && !transfer.locked);
   const agreed = transfers.some((transfer) => transfer.agreed);
   return {
@@ -1137,7 +1293,11 @@ export async function verifyRecovery(request) {
     tip,
     fromHeight,
     minConfirmations,
-    complete,
+    complete: spendsDisagreements.length ? false : complete,
+    spends,
+    spendsDisagreements,
+    availableAtomic: availableForVerdict,
+    availableSource: live.length ? { url: live[0].node.url, operator: live[0].node.operator } : null,
     checked,
     failed,
   };
