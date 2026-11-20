@@ -1707,7 +1707,10 @@ export interface SweepApi {
    * required and must still match the signed inputs. A lost answer throws `sweep-relay-unknown`; the session token
    * stays valid, and the same signed set is never relayed twice. */
   relay(request: SweepRelayRequest): Promise<SweepRunResult>;
-  /** Perform the withdrawal as a whole (`sign` + `relay`). */
+  /**
+   * Perform the withdrawal as a whole (`sign` + `relay`). The relay check receives the same verified `keyImages`
+   * that were used for signing; when a fresh post-sign read matters, call `sign` and `relay` separately.
+   */
   run(request: SweepRunRequest): Promise<SweepRunResult>;
 }
 
