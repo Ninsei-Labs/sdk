@@ -42,7 +42,7 @@ const H = (height) => (height < 0 ? "00" : height.toString(16).padStart(2, "0"))
 const TX = { 6: "a".repeat(64), 9: "b".repeat(64) };
 const TXS = { 6: { [TX[6]]: fixture(100_000_000_000n) }, 9: { [TX[9]]: fixture(200_000_000_000n) } };
 
-function daemon({ failAt: initialFailAt = null, shortAt = null, hashShift: initialHashShift = 0 } = {}) {
+function daemon({ failAt: initialFailAt = null, shortAt = null, hashShift: initialHashShift = 0, nullConfirmations = false } = {}) {
   const calls = [];
   let failAt = initialFailAt, hashShift = initialHashShift;
   const fetch = async (url, init) => {
@@ -62,7 +62,7 @@ function daemon({ failAt: initialFailAt = null, shortAt = null, hashShift: initi
       const height = Object.keys(TXS).find((h) => TXS[h][hashes[0]]);
       if (shortAt === Number(height)) return { ok: true, json: async () => ({ txs: [], txs_as_json: [] }) };
       return { ok: true, json: async () => ({
-        txs: hashes.map((hash) => ({ tx_hash: hash, block_height: Number(height), confirmations: 3, in_pool: false })),
+        txs: hashes.map((hash) => ({ tx_hash: hash, block_height: Number(height), confirmations: nullConfirmations ? null : 3, in_pool: false })),
         txs_as_json: hashes.map((hash) => JSON.stringify(TXS[height][hash] || {})),
       }) };
     }
@@ -117,6 +117,17 @@ for (const failAt of [5, 6, 7, 8, 9, 10]) {
     `resume after block ${failAt} returns the full set`);
 }
 
+// A resume whose anchor fetch fails keeps the last complete prefix instead of throwing it away.
+{
+  const anchorDaemon = daemon({ failAt: 8 });
+  const anchorCheckpoint = memoryCheckpoint();
+  await readRecovery(request(anchorDaemon.fetch, anchorCheckpoint));
+  anchorDaemon.setFailAt(7);
+  const kept = await readRecovery(request(anchorDaemon.fetch, anchorCheckpoint));
+  check(kept.complete === false && kept.transfers.length === 1 && kept.through && kept.through.height === 7
+    && kept.checkpoint !== null, "a failed anchor fetch keeps the verified prefix");
+}
+
 // A moved anchor is not trusted. The read discards it and starts at fromHeight again.
 const reorgDaemon = daemon();
 const reorgCheckpoint = memoryCheckpoint();
@@ -136,6 +147,14 @@ const badDaemon = daemon();
 const badRead = await readRecovery(request(badDaemon.fetch, badCheckpoint));
 check(badRead.complete === true && badDaemon.calls.some((c) => c.method === "get_block" && c.height === 5),
   "a bad digest forces a replay");
+
+// A missing confirmation count is not a mined transfer with zero confirmations.
+{
+  const nullRead = await readRecovery(request(daemon({ nullConfirmations: true }).fetch));
+  check(nullRead.complete === true && nullRead.transfers.length === 2
+    && nullRead.transfers.map((transfer) => transfer.confirmations).sort((a, b) => a - b).join(",") === "2,5",
+    "a null confirmation count falls back to the block position, not zero");
+}
 
 // A short transaction body is unknown, never an empty range.
 const short = await readRecovery(request(daemon({ shortAt: 6 }).fetch));
@@ -157,7 +176,7 @@ check(short.complete === false && short.transfers.length === 0, "a short transac
   };
   const result = await readRecovery(request(stalled, null, { idleTimeoutMs: 20 }));
   check(result.complete === false && result.failed.some((failure) => failure.code === "timeout"),
-    "an advancing read is not bounded, but a stalled request times out");
+    "a stalled request times out without a total-walk bound");
 }
 
 // An already-cancelled caller does not read the chain.

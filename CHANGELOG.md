@@ -2,7 +2,7 @@
 
 - `sweep.keyImages` derives the key images of an arrival's verified funding outputs without a monero-ts wallet. It uses Monero's `ge_fromfe_frombytes_vartime` map and the per-output derivation, refuses an unverified or malformed output as a whole, and returns the same order as the verified outputs. Monero's own `hash_to_point`, `biased_hash_to_ec` and `generate_key_image` vectors are pinned; a local monerod stand compares the buy, refunded-sale and additional-key outputs across monero-ts, the SDK and a separate Rust `monero-ed25519` oracle.
 - `verifyArrival` and `verifyRecovery` expose each verified output's `derivation`; `XmrArrivalVerdict` carries the agreed `outputs` so a caller can derive key images from the same evidence.
-- `swaps.readRecovery` reads one chosen node from the order's start height to its head with a caller-owned checkpoint, progress events, resume and an idle stall bound. A moved anchor, a bad digest, a short block or a broken parent link is `complete: false`, never an empty range; the independent two-operator decision remains separate.
+- `swaps.readRecovery` reads one chosen node from the order's start height to its head with a caller-owned checkpoint, progress events, resume and an idle stall bound. A moved anchor, a bad digest, a short block or a broken parent link is `complete: false`, never an empty range; a missing confirmation count is derived from the block, not read as zero. The independent two-operator decision remains separate.
 
 ## Unreleased — 2026-11-19
 

@@ -202,6 +202,16 @@ async function getBlockTxs(node, hashes, fetchImpl, timeoutMs, options = {}) {
 // amount did not match its Pedersen commitment is NOT money: it contributes zero, and the caller names it.
 const sumOutputs = (hit) => hit.outputs.reduce((n, o) => n + (o.amountVerified ? (o.amountAtomic || 0n) : 0n), 0n);
 
+// `Number(null)` IS 0. A missing confirmation count is not a mined transfer with zero confirmations; it is a
+// missing field, so the block position supplies the fallback. This is used by every read that turns a daemon
+// wrapper into a transfer.
+const confirmationsOf = (tx, height, tipHeight) => {
+  const raw = tx && tx.confirmations;
+  if (raw === null || raw === undefined || raw === "") return Math.max(0, Number(tipHeight) - Number(height) + 1);
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : Math.max(0, Number(tipHeight) - Number(height) + 1);
+};
+
 // THE SAME TIE-BREAK IN THE EXACT AND THE SHADOW WALK. Score and amount decide first; two candidates that are
 // equal on both are not interchangeable, because the report names one txid. The earlier block wins, and inside one
 // block the lower txid wins - both walks see the same chain order.
@@ -456,7 +466,7 @@ export async function verifyArrival(request) {
     }));
     record.unlock = hit[0].unlock;
     // Confirmations of a block: top - height + 1, and top = info.height - 1 (see above), so this is height - located.
-    record.confirmations = Number.isFinite(Number(body.confirmations)) ? Number(body.confirmations) : (info.height - located.height);
+    record.confirmations = confirmationsOf(body, located.height, info.height);
     // A NODE THAT CHANGED THE AMOUNT IS A DISAGREEMENT, NOT A WITNESS. The commitment check above is what
     // makes this observable: without it an altered ecdhInfo.amount would still look like a valid output.
     if (!record.amountVerified) { record.state = "amount-unverified"; seen.push(record); continue; }
@@ -584,7 +594,7 @@ async function scanRecoveryBlocks(node, { watched, fromHeight, toHeight, nowSec,
         height, tipHeight: Math.max(0, toHeight), nowSec,
       });
       if (!hit.length) continue;
-      const confirmations = Number.isFinite(Number(tx.confirmations)) ? Number(tx.confirmations) : (toHeight - height + 1);
+      const confirmations = confirmationsOf(tx, height, toHeight);
       transfers.push(recoveryObservation(tx, hit, node, { height, blockHash: block.hash, confirmations }));
     }
   }
@@ -667,13 +677,19 @@ export async function readRecovery(request) {
   if (!isStr(request.address)) throw new SdkError("bad-input", { field: "address" });
   if (request.viewSecret === undefined || request.viewSecret === null) throw new SdkError("bad-input", { field: "viewSecret" });
   if (!isStr(request.spendPub)) throw new SdkError("bad-input", { field: "spendPub" });
-  const fromHeight = intOf(request.fromHeight);
+  const fromHeight = request.fromHeight === null || request.fromHeight === undefined ? null : intOf(request.fromHeight);
   if (fromHeight === null || fromHeight < 0) throw new SdkError("bad-input", { field: "fromHeight" });
   const fetchImpl = typeof request.fetch === "function" ? request.fetch : globalThis.fetch;
   if (typeof fetchImpl !== "function") throw new SdkError("bad-input", { field: "fetch" });
-  const timeoutMs = Number.isFinite(Number(request.idleTimeoutMs)) && Number(request.idleTimeoutMs) > 0
-    ? Number(request.idleTimeoutMs)
-    : (Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0 ? Number(request.timeoutMs) : 20000);
+  const idleRaw = request.idleTimeoutMs === null || request.idleTimeoutMs === undefined ? null : Number(request.idleTimeoutMs);
+  const totalRaw = request.timeoutMs === null || request.timeoutMs === undefined ? null : Number(request.timeoutMs);
+  const timeoutMs = idleRaw !== null && Number.isFinite(idleRaw) && idleRaw > 0
+    ? idleRaw
+    : (totalRaw !== null && Number.isFinite(totalRaw) && totalRaw > 0 ? totalRaw : 20000);
+  const minConfirmationsRaw = request.minConfirmations === null || request.minConfirmations === undefined ? null : Number(request.minConfirmations);
+  const minConfirmations = minConfirmationsRaw !== null && Number.isFinite(minConfirmationsRaw)
+    ? Math.max(1, Math.trunc(minConfirmationsRaw))
+    : 1;
   const signal = request.signal && typeof request.signal.addEventListener === "function" ? request.signal : null;
   const checkpoint = request.checkpoint && typeof request.checkpoint === "object" ? request.checkpoint : null;
   const onProgress = typeof request.onProgress === "function" ? request.onProgress : () => {};
@@ -682,21 +698,27 @@ export async function readRecovery(request) {
     if (bound.code === "bad-input") throw new SdkError("bad-input", { field: bound.field || "address", why: bound.why });
     throw new SdkError(bound.code, { field: bound.field || "address", address: request.address });
   }
+  const addressNetwork = bound.keys && bound.keys.network ? bound.keys.network : null;
+  if (request.network !== undefined && request.network !== null && addressNetwork && request.network !== addressNetwork) {
+    throw new SdkError("bad-input", { field: "network", why: "address-network-mismatch" });
+  }
   const watched = { address: request.address, viewSecret: bound.viewSecret, spendPub: bound.spendPub };
   let info;
   try { info = await getInfo(node, fetchImpl, timeoutMs, { signal }); }
   catch (error) {
-    return { transfers: [], tip: null, fromHeight, minConfirmations: Math.max(1, intOf(request.minConfirmations) ?? 1),
+    return { transfers: [], tip: null, fromHeight, minConfirmations,
       complete: false, through: null, checkpoint: null, blocked: false, failed: [failureOf(error, node)] };
   }
   const network = isStr(request.network) ? request.network : info.nettype;
   if (!isStr(network)) throw new SdkError("bad-input", { field: "network" });
+  if (addressNetwork && info.nettype && addressNetwork !== info.nettype) {
+    throw new SdkError("bad-input", { field: "node", why: "node-network-mismatch" });
+  }
   if (!info.synced) {
-    return { transfers: [], tip: info.height, fromHeight, minConfirmations: Math.max(1, intOf(request.minConfirmations) ?? 1),
+    return { transfers: [], tip: info.height, fromHeight, minConfirmations,
       complete: false, through: null, checkpoint: null, blocked: true,
       failed: [{ url: node.url, operator: node.operator, code: "stale", why: "not-synchronized" }] };
   }
-  const minConfirmations = Math.max(1, intOf(request.minConfirmations) ?? 1);
   const top = Math.max(0, info.height - 1);
   if (top < fromHeight) {
     return { transfers: [], tip: info.height, fromHeight, minConfirmations, complete: true, through: null,
@@ -723,7 +745,15 @@ export async function readRecovery(request) {
       blocksVerified = through.height - fromHeight + 1;
       previousHash = through.hash;
       // A stored height is a claim. The block at that height must still carry the same hash, or the chain moved.
-      const anchor = await getBlock(node, through.height, fetchImpl, timeoutMs, { signal, onBytes: countBytes });
+      let anchor;
+      try {
+        anchor = await getBlock(node, through.height, fetchImpl, timeoutMs, { signal, onBytes: countBytes });
+      } catch (error) {
+        const failure = failureOf(error, node);
+        failure.height = through.height;
+        return { transfers, tip: info.height, fromHeight, minConfirmations, complete: false, through,
+          checkpoint: checkpointRecord({ ...identity, through, transfers }), blocked: false, failed: [failure] };
+      }
       if (!anchor.hash || normalizedHash(anchor.hash) !== through.hash) throw new Error("reorg");
     }
     const total = top - fromHeight + 1;
@@ -753,7 +783,7 @@ export async function readRecovery(request) {
       for (const tx of txs) {
         const hit = engine.xmrScan.matchTransaction(tx, [watched], { height, tipHeight: top, nowSec: request.nowSec });
         if (!hit.length) continue;
-        const confirmations = Number.isFinite(Number(tx.confirmations)) ? Number(tx.confirmations) : (top - height + 1);
+        const confirmations = confirmationsOf(tx, height, top);
         transfers.push(recoveryObservation(tx, hit, node, { height, blockHash: block.hash, confirmations }));
       }
       through = { height, hash: normalizedHash(block.hash) };
