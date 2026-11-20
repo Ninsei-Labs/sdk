@@ -565,7 +565,7 @@ export function createSweep({ call = null, fetchImpl = null } = {}) {
     },
 
     // A LATER LOOK AFTER THE TOKEN IS GONE. The signed bytes and their hash are the caller's; this only reads the
-    // swap address through the same #388 recovery read and says whether those bytes may be sent again. It never
+    // swap address through the same recovery read and says whether those bytes may be sent again. It never
     // signs: `absent` with `resend: true` is the only answer that permits the same bytes, and every incomplete or
     // positive answer forbids a resend.
     async reconcile(request) {
