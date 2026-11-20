@@ -15,7 +15,7 @@ jobs:
   monero-live:
     name: Monero regtest scan
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -60,3 +60,39 @@ jobs:
         run: pnpm run check:monero-live
         env:
           MONERO_DAEMON_URL: http://127.0.0.1:38181
+
+      - name: Set up Rust for the key-image oracle
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: 1.100.0
+
+      - name: Build the key-image Rust oracle
+        run: cargo build --release --locked --manifest-path test/key-image-oracle/rust/Cargo.toml
+
+      - name: Check the key-image oracle in both directions
+        run: pnpm run check:key-image-oracle
+
+      # A SECOND DAEMON, ON TESTNET. monero-ts does not model regtest, so the stand cannot use the scanner's node;
+      # it gets its own offline testnet daemon with the same fixed difficulty as the local reproduction.
+      - name: Start testnet monerod for the key-image stand
+        run: |
+          MONEROD=$(find . -maxdepth 2 -name monerod -type f | head -1)
+          mkdir -p /tmp/monero-testnet
+          "$MONEROD" --testnet --offline --fixed-difficulty=1 \
+            --rpc-bind-port 38281 --p2p-bind-port 38280 \
+            --data-dir /tmp/monero-testnet --log-file /tmp/monerod-testnet.log --non-interactive &
+          echo $! > /tmp/monerod-testnet.pid
+          for i in $(seq 1 60); do
+            if curl -fsS -X POST http://127.0.0.1:38281/json_rpc \
+              -H 'Content-Type: application/json' \
+              -d '{"jsonrpc":"2.0","id":"0","method":"get_info"}' | grep -q '"height"'; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/monerod-testnet.log
+          exit 1
+
+      - name: Check key images against monero-ts and Rust
+        run: pnpm run check:key-image-stand
+        env:
+          KEY_IMAGE_STAND: "1"
+          KEY_IMAGE_STAND_DAEMON: http://127.0.0.1:38281

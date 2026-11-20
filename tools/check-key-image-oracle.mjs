@@ -10,7 +10,7 @@
 //
 // Run: cargo build --release --manifest-path test/key-image-oracle/rust/Cargo.toml
 //      node tools/check-key-image-oracle.mjs
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,6 +45,16 @@ const run = (requests) => {
   if (!Array.isArray(body.results)) throw new Error("oracle returned no results");
   return body.results;
 };
+
+// The Rust op is `biased_hash_to_ec` (keccak + Elligator 2 + cofactor), not the raw fromfe-only
+// `hash_to_point`; these are Monero's own biased_hash_to_ec vectors, so the naming and the implementation
+// are checked together.
+const moneroVectors = JSON.parse(readFileSync(join(ROOT, "tools/fixtures/key-image-vectors.json"), "utf8"));
+const hashResults = run(moneroVectors.biased_hash_to_ec.map((row) => ({ op: "biased_hash_to_ec", input: row[1] })));
+for (const [i, result] of hashResults.entries()) {
+  check(result.ok === true, `oracle refused biased_hash_to_ec ${i}: ${result.error || ""}`);
+  check(result.output === moneroVectors.biased_hash_to_ec[i][2], `Rust biased_hash_to_ec disagrees on ${i}`);
+}
 
 // SDK -> Rust. The spend scalar is the only input Rust gets; it must reconstruct the same image.
 const sdkRequests = [];

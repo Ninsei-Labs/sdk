@@ -5,7 +5,7 @@
 // `ge_mul8`, not a copy of `engine/monero/keyImage.js`. It never imports the SDK.
 //
 // The binary reads one JSON object from stdin and writes one JSON object to stdout:
-//   {"requests": [{"op": "hash_to_point", "input": "<hex>"}, ...]}
+//   {"requests": [{"op": "biased_hash_to_ec", "input": "<hex>"}, ...]}
 // It is a test tool only; it is not part of the SDK runtime.
 use curve25519_dalek::{constants::ED25519_BASEPOINT_POINT, scalar::Scalar};
 use monero_ed25519::Point;
@@ -80,7 +80,7 @@ fn key_image_for(output_key: &[u8; 32], spend: Scalar) -> String {
 
 fn execute(request: &Request) -> Result<Response, String> {
     match request.op.as_str() {
-        "hash_to_point" => {
+        "biased_hash_to_ec" => {
             let point = Point::biased_hash(bytes32(&request.input)?);
             Ok(Response {
                 ok: true,
