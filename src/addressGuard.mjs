@@ -8,6 +8,9 @@ import { checkAddress } from "../engine/monero/address.js";
 export async function checkAddressOrThrow(address, network, field) {
   const shape = await checkAddress(address, network ? { expectNetwork: network } : {});
   if (shape.ok === true) return;
-  const wrongNetwork = /This is a .* address, but the swap runs on/.test(String(shape.reason || ""));
+  // THE NETWORK IS A FIELD, NOT A SENTENCE. The refusal still carries the human reason for the caller, but the
+  // decision uses the actual network reported by `checkAddress`; editing its wording cannot reclassify the error.
+  const wrongNetwork = shape.network !== undefined && network !== null
+    && network !== undefined && shape.network !== network;
   throw new SdkError(wrongNetwork ? "wrong-chain" : "bad-input", { field, why: shape.reason || null });
 }

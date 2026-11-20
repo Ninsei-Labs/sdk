@@ -60,6 +60,12 @@ async function restored(sweep, adapter, fromHeight = 100) {
   return await sweep.restore({ wallet: adapter, fromHeight });
 }
 
+test("checkAddress names the actual network in a wrong-network refusal", async () => {
+  const result = await engine.xmrAddress.checkAddress(MAINNET, { expectNetwork: "stagenet" });
+  assert.equal(result.ok, false);
+  assert.equal(result.network, "mainnet");
+});
+
 test("sign without a complete restore refuses by name", async () => {
   const sweep = createSweep({});
   const adapter = wallet();

@@ -83,7 +83,7 @@ export declare function addressFromKeys(request: AddressPayloadRequest, deps: Ad
  * `ok: true, verified: false` with the reason named, never a false "checked". A refusal always names WHY.
  */
 export type AddressCheck =
-  | { readonly ok: false; readonly reason: string }
+  | { readonly ok: false; readonly reason: string; readonly network?: MoneroNetwork; readonly expectedNetwork?: MoneroNetwork }
   | { readonly ok: true; readonly verified: false; readonly network: MoneroNetwork | null; readonly reason: string }
   | { readonly ok: true; readonly verified: true; readonly network: MoneroNetwork; readonly kind: MoneroAddressKind; readonly bytes: number };
 
