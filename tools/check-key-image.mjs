@@ -5,6 +5,10 @@
 // `hash_to_point`, `biased_hash_to_ec` and `generate_key_image`. They are an independent oracle: the expected
 // bytes come from Monero's C++ implementation, not from this module.
 //
+// `key-image-rust-vectors.json` is a second independent oracle: Rust's `monero-ed25519` generated the output keys
+// and images, and this file is only a static copy of that output. `tools/check-key-image-oracle.mjs` runs the live
+// binary in both directions; this fixture keeps the fast battery anchored when Rust is not installed.
+//
 // The facade cases build an output from a known spend scalar, so the whole route `sweep.keyImages` -> output
 // binding -> key image is exercised, including the refusals that must not return a partial answer.
 //
