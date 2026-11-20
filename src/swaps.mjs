@@ -797,6 +797,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
     // want to run both itself. The watch uses exactly these, so there is one decision, not two.
     verifyArrival: (request) => xmrArrival.verifyArrival(withDefaultFetch(request)),
     verifyRecovery: (request) => xmrArrival.verifyRecovery(withDefaultFetch(request)),
+    readRecovery: (request) => xmrArrival.readRecovery(withDefaultFetch(request)),
     /**
      * SHADOW THE FIXED-SLICE WITNESS WITHOUT CHANGING THE DECISION. It runs the exact check and the witness-v1
      * slice check and returns both; `witnessNodes` must carry `{protocol: "witness-v1"}`. Nothing here opens

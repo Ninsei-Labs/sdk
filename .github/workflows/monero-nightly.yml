@@ -96,3 +96,8 @@ jobs:
         env:
           KEY_IMAGE_STAND: "1"
           KEY_IMAGE_STAND_DAEMON: http://127.0.0.1:38281
+
+      - name: Check the live primary recovery read
+        run: pnpm run check:recovery-read-live
+        env:
+          RECOVERY_LIVE_NODE: http://127.0.0.1:38281
