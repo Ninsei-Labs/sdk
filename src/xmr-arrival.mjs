@@ -773,7 +773,7 @@ export async function readRecovery(request) {
   if (!isStr(request.address)) throw new SdkError("bad-input", { field: "address" });
   if (request.viewSecret === undefined || request.viewSecret === null) throw new SdkError("bad-input", { field: "viewSecret" });
   if (!isStr(request.spendPub)) throw new SdkError("bad-input", { field: "spendPub" });
-  const fromHeight = request.fromHeight === null || request.fromHeight === undefined ? null : intOf(request.fromHeight);
+  const fromHeight = request.fromHeight === null || request.fromHeight === undefined ? 0 : intOf(request.fromHeight);
   if (fromHeight === null || fromHeight < 0) throw new SdkError("bad-input", { field: "fromHeight" });
   const fetchImpl = typeof request.fetch === "function" ? request.fetch : globalThis.fetch;
   if (typeof fetchImpl !== "function") throw new SdkError("bad-input", { field: "fetch" });
@@ -1156,7 +1156,7 @@ export async function verifyArrivalFromRead(request) {
   let expectedAtomic;
   try { expectedAtomic = BigInt(request.expectedAtomic); } catch { throw new SdkError("bad-input", { field: "expectedAtomic" }); }
   if (expectedAtomic <= 0n) throw new SdkError("bad-input", { field: "expectedAtomic" });
-  const fromHeight = request.fromHeight === null || request.fromHeight === undefined ? null : intOf(request.fromHeight);
+  const fromHeight = request.fromHeight === null || request.fromHeight === undefined ? 0 : intOf(request.fromHeight);
   if (fromHeight === null || fromHeight < 0) throw new SdkError("bad-input", { field: "fromHeight" });
   const recovery = await verifyRecovery({
     nodes: request.nodes, address: request.address, viewSecret: request.viewSecret, spendPub: request.spendPub,
@@ -1175,19 +1175,23 @@ export async function verifyArrivalFromRead(request) {
     }
   } else {
     for (const transfer of usable) {
+      let contributed = false;
       for (const output of transfer.outputs || []) {
         if (!output.amountVerified || output.amountAtomic === null || output.amountAtomic === undefined) continue;
         const id = transfer.txid + ":" + output.index;
         if (seenOutputs.has(id)) continue;
         seenOutputs.add(id);
         total += BigInt(output.amountAtomic);
+        contributed = true;
       }
-      chosen.push(transfer);
+      if (contributed) chosen.push(transfer);
     }
   }
   const seenByAmount = rule === "exact" ? total === expectedAtomic : total >= expectedAtomic;
   const seen = seenByAmount && recovery.complete === true;
   const poolHit = recovery.transfers.find((transfer) => transfer.agreed && transfer.pool);
+  const completedOperators = recovery.completedOperators || [];
+  const absent = recovery.complete === true && chosen.length === 0 && !poolHit && completedOperators.length >= 2;
   const outputs = [];
   const outputKeys = new Set();
   for (const transfer of chosen) {
@@ -1201,8 +1205,9 @@ export async function verifyArrivalFromRead(request) {
   const first = chosen[0] || poolHit || null;
   return {
     seen, state: seen ? "arrived" : (poolHit ? "pool" : "pending"),
-    absent: false,
-    txid: first ? first.txid : null,
+    absent,
+    completedOperators: absent ? completedOperators : undefined,
+    txid: first ? first.txid : txidOf(request.txid),
     height: first ? first.height : null,
     blockHash: first ? first.blockHash : null,
     amountAtomic: total.toString(),
@@ -1265,6 +1270,7 @@ export async function verifyRecovery(request) {
   const spendMap = new Map();
   const checked = [];
   let complete = true;
+  const completedOperators = new Set();
   let availableAtomic = null;
   let primarySpends = [];
 
@@ -1278,6 +1284,7 @@ export async function verifyRecovery(request) {
     }
     const nodeTop = Math.max(0, Math.min(top, info.height - 1));
     let read;
+    let poolComplete = true;
     try {
       const common = {
         address: request.address, viewSecret: request.viewSecret, spendPub,
@@ -1305,6 +1312,7 @@ export async function verifyRecovery(request) {
       } catch (error) {
         failed.push({ ...failureOf(error, node), why: "pool-read" });
         complete = false;
+        poolComplete = false;
       }
     }
     for (const transfer of read.transfers) {
@@ -1318,6 +1326,7 @@ export async function verifyRecovery(request) {
     }
     failed.push(...(read.failed || []));
     if (read.complete !== true) complete = false;
+    else if (poolComplete) completedOperators.add(node.operator);
   }
 
   const transfers = [];
@@ -1376,6 +1385,7 @@ export async function verifyRecovery(request) {
     fromHeight,
     minConfirmations,
     complete: spendsDisagreements.length ? false : complete,
+    completedOperators: [...completedOperators],
     spends,
     spendsDisagreements,
     availableAtomic: availableForVerdict,

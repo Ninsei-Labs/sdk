@@ -273,6 +273,11 @@ console.log("=== 6) THE AMOUNT RULES OVER THE SAME READ ===");
   const { spendPub: _spendPub, ...withoutSpend } = request(rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) } }));
   const viewOnly = await verifyArrival({ ...withoutSpend, amountRule: "at-least", expectedAtomic: ATOMIC_QUOTE });
   okIf(viewOnly.state === "arrived", "arrival with the address and view key only reaches the same answer");
+  const legacyViewOnly = await verifyArrival({ ...withoutSpend, expectedAtomic: ATOMIC_QUOTE });
+  okIf(legacyViewOnly.state === "arrived", "the default arrival path also works without a supplied spend key");
+  const noStart = await verifyArrival({ ...request(rpc()), fromHeight: undefined, amountRule: "at-least", expectedAtomic: ATOMIC_QUOTE });
+  okIf(noStart.state === "pending" && noStart.absent === true,
+    "an omitted fromHeight keeps the old genesis default on the amount path");
 }
 
 return { note: "recovery reads every transfer without the quoted amount", problems: fails, notes: fails.length ? [] : ["short, over, split and pool transfers are returned"] };

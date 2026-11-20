@@ -1073,6 +1073,7 @@ export interface XmrRecoveryVerdict {
   readonly minConfirmations: number;
   /** False when any read failed; a caller must not treat the list as exhaustive. */
   readonly complete: boolean;
+  readonly completedOperators?: readonly string[];
   readonly spends?: readonly XmrRecoverySpend[];
   /** Spends seen by a witness but not by the primary; the available remainder is withheld when non-empty. */
   readonly spendsDisagreements?: readonly XmrRecoverySpend[];
