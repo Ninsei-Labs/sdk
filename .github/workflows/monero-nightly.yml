@@ -106,3 +106,9 @@ jobs:
         run: pnpm run check:recovery-witness-live
         env:
           RECOVERY_LIVE_NODE: http://127.0.0.1:38281
+
+      - name: Check the live recovery acceptance request sequence
+        run: pnpm run check:recovery-acceptance
+        env:
+          RECOVERY_LIVE_PRIMARY: http://127.0.0.1:38281
+          RECOVERY_LIVE_WITNESS: http://127.0.0.1:38281

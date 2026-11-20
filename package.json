@@ -68,6 +68,7 @@
     "check:recovery-read-live": "node tools/check-recovery-read-live.mjs",
     "check:recovery-witness": "node tools/check.mjs --only=recovery-witness",
     "check:recovery-witness-live": "node tools/check-recovery-witness-live.mjs",
+    "check:recovery-acceptance": "node tools/check-recovery-acceptance.mjs",
     "check:arrival-shadow": "node tools/check-arrival-shadow.mjs",
     "check:arrival-real": "node tools/check-arrival-real.mjs",
     "check:order-proof": "node tools/check-order-proof.mjs",
