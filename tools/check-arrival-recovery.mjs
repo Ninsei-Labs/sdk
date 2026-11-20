@@ -281,7 +281,7 @@ console.log("=== 6) THE AMOUNT RULES OVER THE SAME READ ===");
     "an omitted fromHeight keeps the old genesis default on the amount path");
   const unread = await verifyArrival({
     ...request(rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) }, failAt: 110 }), undefined,
-      { amountRule: "exact", expectedAtomic: ATOMIC_OVER }),
+      { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE }),
   });
   okIf(unread.state === "pending" && unread.seen === false
     && unread.failed.some((failure) => failure.height === 110),
