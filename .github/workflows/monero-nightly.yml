@@ -106,3 +106,11 @@ jobs:
         run: pnpm run check:recovery-witness-live
         env:
           RECOVERY_LIVE_NODE: http://127.0.0.1:38281
+
+      # Depends on check:key-image-stand mining past a grid boundary; the tool reports UNREACHABLE
+      # (exit 2) when the stand has no non-aligned block inside a window.
+      - name: Check the live recovery acceptance request sequence
+        run: pnpm run check:recovery-acceptance
+        env:
+          RECOVERY_LIVE_PRIMARY: http://127.0.0.1:38281
+          RECOVERY_LIVE_WITNESS: http://127.0.0.1:38281

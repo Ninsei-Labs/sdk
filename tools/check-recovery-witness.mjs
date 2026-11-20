@@ -38,14 +38,14 @@ const H = (height) => (height < 0 ? "00" : height.toString(16).padStart(2, "0"))
 const PAYOUT = "a".repeat(64), FILLER = "c".repeat(64);
 const TXS = { 6: { [PAYOUT]: fixture(100_000_000_000n), [FILLER]: { version: 2, unlock_time: 0, extra: [], vout: [], rct_signatures: { type: 6, ecdhInfo: [], outPk: [] } } } };
 
-function daemon({ failAt: initialFailAt = null, shortAt = null, hashShift: initialHashShift = 0 } = {}) {
+function daemon({ failAt: initialFailAt = null, shortAt = null, hashShift: initialHashShift = 0, height = 11 } = {}) {
   const calls = [];
   let failAt = initialFailAt, hashShift = initialHashShift;
   const fetch = async (url, init) => {
     const body = JSON.parse(init.body);
     const path = new URL(url).pathname;
     calls.push({ path, method: body.method || null, height: body.params && body.params.height, hashes: body.txs_hashes || null });
-    if (body.method === "get_info") return { ok: true, json: async () => ({ result: { height: 11, synchronized: true, nettype: "stagenet" } }) };
+    if (body.method === "get_info") return { ok: true, json: async () => ({ result: { height, synchronized: true, nettype: "stagenet" } }) };
     if (body.method === "get_block") {
       const height = Number(body.params.height);
       if (height === failAt) return { ok: false, status: 503 };
@@ -90,6 +90,17 @@ const inside = await readRecoveryWitness(request(sameWindow.fetch, null, { fromH
 check(inside.complete === true && inside.transfers.length === 1, "a start inside the same window is read from the same window");
 check(JSON.stringify(sameWindow.calls) === JSON.stringify(witness.calls),
   "two start heights inside one window produce the identical request sequence");
+
+for (const [start, tip, expected] of [
+  [19, 19, Array.from({ length: 20 }, (_, i) => i)],
+  [20, 20, [20]],
+  [21, 21, [20, 21]],
+]) {
+  const table = daemon({ height: tip + 1 });
+  await readRecoveryWitness(request(table.fetch, null, { fromHeight: start, tipHeight: tip }));
+  const requested = table.calls.filter((call) => call.method === "get_block").map((call) => call.height);
+  check(requested.join(",") === expected.join(","), "the grid boundary is exact at height " + start);
+}
 
 const interrupted = daemon({ failAt: 8 });
 const checkpoint = memoryCheckpoint();
