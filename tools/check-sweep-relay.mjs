@@ -42,8 +42,13 @@ const config = { route: (name) => "http://app.invalid/" + name };
 
 function wallet({ relay } = {}) {
   const calls = { open: 0, sync: 0, unlockedBalance: 0, sweepUnlocked: 0, relay: 0, close: 0 };
+  const driver = {
+    async setRestoreHeight() {}, async rescanBlockchain() {},
+    async getBalance() { return 5_000_000_000_000n; },
+    async getHeight() { return 100; }, async getDaemonHeight() { return 100; },
+  };
   return {
-    calls,
+    calls, driver,
     async open() { calls.open += 1; },
     async sync() { calls.sync += 1; },
     async unlockedBalance() { calls.unlockedBalance += 1; return 5_000_000_000_000n; },
@@ -51,14 +56,20 @@ function wallet({ relay } = {}) {
     async fee() { return 30_000_000n; },
     async relay(signed) { calls.relay += 1; return relay ? await relay(signed) : ["tx-1"]; },
     async close() { calls.close += 1; },
+    driver: () => driver,
   };
+}
+
+async function opened(sweep, adapter) {
+  await sweep.restore({ wallet: adapter, fromHeight: 100 });
+  return await sweep.sign({ ...(await planRequest()), wallet: adapter });
 }
 
 test("a relay answer is reported as sent and closes the session", async () => {
   const adapter = wallet();
   const sweep = createSweep({ http, config });
-  const opened = await sweep.sign({ ...(await planRequest()), connectWallet: async () => adapter });
-  const result = await sweep.relay({ token: opened.token });
+  const openedResult = await opened(sweep, adapter);
+  const result = await sweep.relay({ token: openedResult.token });
   assert.equal(result.outcome, "sent");
   assert.deepEqual(result.txids, ["tx-1"]);
   assert.equal(adapter.calls.relay, 1);
@@ -68,11 +79,11 @@ test("a relay answer is reported as sent and closes the session", async () => {
 test("a lost answer keeps the session and reports unknown", async () => {
   const adapter = wallet({ relay: async () => { throw new Error("answer lost"); } });
   const sweep = createSweep({ http, config });
-  const opened = await sweep.sign({ ...(await planRequest()), connectWallet: async () => adapter });
+  const openedResult = await opened(sweep, adapter);
 
-  await assert.rejects(sweep.relay({ token: opened.token }), (error) => {
+  await assert.rejects(sweep.relay({ token: openedResult.token }), (error) => {
     assert.equal(error.code, "sweep-relay-unknown");
-    assert.equal(error.params.token, opened.token);
+    assert.equal(error.params.token, openedResult.token);
     assert.equal(error.params.outcome, "unknown");
     return true;
   });
@@ -80,7 +91,7 @@ test("a lost answer keeps the session and reports unknown", async () => {
   assert.equal(adapter.calls.close, 1);
 
   // The same token must not send the signed set a second time.
-  await assert.rejects(sweep.relay({ token: opened.token }), (error) => {
+  await assert.rejects(sweep.relay({ token: openedResult.token }), (error) => {
     assert.equal(error.code, "sweep-relay-unknown");
     assert.equal(error.params.why, "already-attempted");
     return true;
@@ -91,8 +102,8 @@ test("a lost answer keeps the session and reports unknown", async () => {
 test("an answer without a transaction id is unknown, not sent", async () => {
   const adapter = wallet({ relay: async () => [] });
   const sweep = createSweep({ http, config });
-  const opened = await sweep.sign({ ...(await planRequest()), connectWallet: async () => adapter });
-  await assert.rejects(sweep.relay({ token: opened.token }), (error) => {
+  const openedResult = await opened(sweep, adapter);
+  await assert.rejects(sweep.relay({ token: openedResult.token }), (error) => {
     assert.equal(error.code, "sweep-relay-unknown");
     assert.equal(error.params.why, "answer-txid");
     return true;

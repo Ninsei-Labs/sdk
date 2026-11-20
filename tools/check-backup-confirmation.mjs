@@ -15,6 +15,7 @@ import { halfCommitmentHex } from "../engine/atomic/orderHalfCommit.js";
 import { memoryStorage, setStorage } from "../engine/core/store.js";
 import { FACTORY_METHODS } from "../engine/evm/factory.js";
 
+const XMR_TO = "59DnddZzVBCevVg9YB3zCs24DSRH4ByS2FMBafPpYxSEB6FMegQNEbtNzbLjrrEUPNAg9NhK5uMiiAZpAvENBS4D4mEPcRq";
 const WORDS = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 const addr = (b) => "0x" + b.repeat(20);
 const now = Math.floor(Date.now() / 1000);
@@ -44,7 +45,7 @@ const deps = { mode: "live", xmrNetwork: "stagenet", logs: async () => [],
 const request = { quote: { id: "q", chain: "arbitrum-sepolia", asset: "ETH", amount: 1, size: 1 }, order, orderQuote: quote,
   counterparty: { proof: maker.side.proof, edPointClaimer: maker.spendPoint,
     viewHalfClaimer: derived.makerViewHalf, viewPoint: derived.makerViewPoint, commitHalfClaimer: quote.commitHalfClaimer },
-  recoveryKey: WORDS, recoverySalt: order.salt, receiveTo: "synthetic-xmr-destination", restoreHeight: 100, wallet,
+  recoveryKey: WORDS, recoverySalt: order.salt, receiveTo: XMR_TO, restoreHeight: 100, wallet,
   onRecoveryKey: async () => { asked += 1; return false; } };
 
 let pass = 0;

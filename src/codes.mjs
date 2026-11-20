@@ -135,6 +135,10 @@ export const ERROR_CODES = [
   // normal transfer.
   "sweep-fee-too-high",
   "sweep-fee-unknown",
+  // THE WITHDRAWAL HAS NO COMPLETE SCAN OR NEEDS MORE THAN ONE TRANSACTION. Signing without a completed restore
+  // is a blind spend; a split sweep pays several fees and turns one withdrawal into several transactions.
+  "sweep-scan-incomplete",
+  "sweep-split",
   // THE WITHDRAWAL WAS SENT BUT THE WALLET DID NOT CONFIRM THE RESULT. A throw or an answer without a transaction
   // id leaves the signed set in the open session. The caller must check the chain before signing again; the same
   // token must not relay that set twice.
@@ -209,6 +213,8 @@ export const ERROR_META = Object.freeze({
   "insufficient-funds": { retryable: false, side: "wallet" },
   "sweep-fee-too-high": { retryable: false, side: "chain" },
   "sweep-fee-unknown": { retryable: true, side: "chain" },
+  "sweep-scan-incomplete": { retryable: true, side: "chain" },
+  "sweep-split": { retryable: false, side: "wallet" },
   "sweep-relay-unknown": { retryable: false, side: "chain" },
   "gas-refused-by-maker": { retryable: false, side: "provider" },
   "gas-not-arrived": { retryable: true, side: "chain" },

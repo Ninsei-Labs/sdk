@@ -1696,10 +1696,9 @@ export interface SweepApi {
    */
   keyImages(request: SweepKeyImagesRequest): Promise<readonly SweepKeyImage[]>;
   /**
-   * SIGN WITHOUT SENDING. Holds everything up to and including signing (the free remainder -> sign with
-   * `relay: false`), and HOLDS the signed transaction, returning the open session's token. An empty remainder stops
-   * the withdrawal here with the code `insufficient-funds`. `relay` sends it - so the interface has a place to show
-   * the person what will leave, BEFORE sending.
+   * SIGN WITHOUT SENDING. Requires a completed `restore` on the same wallet adapter: without it the answer is
+   * `sweep-scan-incomplete`. A destination with a bad checksum or another Monero network is refused before the
+   * wallet opens, and a sweep that would need more than one transaction is `sweep-split` before relay.
    */
   sign(request: SweepRunRequest): Promise<SweepSignResult>;
   /** Send what `sign` signed, close the wallet and return the transaction hashes. A lost answer throws
@@ -1751,7 +1750,7 @@ export interface SweepRestoreResult {
   readonly unlocked: string;
   /** False when the wallet did not reach the node's height after its sync; a zero balance is then not evidence. */
   readonly scanComplete: boolean;
-  /** `sync-failed`, `behind-node` or `no-heights` when `scanComplete` is false. */
+  /** `sync-failed`, `rescan-failed`, `behind-node`, `no-heights` or `spent-status-unavailable` when `scanComplete` is false. */
   readonly scanIncompleteReason?: string;
   /** The height the scan actually started from. */
   readonly scanHeight: number;
@@ -1903,6 +1902,8 @@ export interface SweepPlan {
   readonly swapId: string | null;
   /** The joint Monero address the XMR arrived at. */
   readonly address: string;
+  /** The Monero network the recovery file names, or null when it named none. */
+  readonly network: string | null;
   /** Whether there is enough data to dispose of the funds (whether our own spend-key half is present). */
   readonly spendable: boolean;
   /** The restore height: 0 - unknown. */
@@ -2281,6 +2282,10 @@ export type ErrorCode =
   /** A wallet/node reported a withdrawal fee above the SDK's ceiling; the transfer is refused. */
   | "sweep-fee-too-high"
   | "sweep-fee-unknown"
+  /** The restore did not complete on the wallet's node, so signing would spend blind. */
+  | "sweep-scan-incomplete"
+  /** The sweep needed more than one transaction; a swap address is withdrawn in one. */
+  | "sweep-split"
   | "sweep-relay-unknown"
   /** The maker declines to pay the claim gas; the refusal is shown before the deal (issue #78). */
   | "gas-refused-by-maker"

@@ -333,20 +333,36 @@ export async function restoreWallet(request = {}) {
   let unlocked = asAmount(await step("unlockedBalance", () => wallet.unlockedBalance()), "unlockedBalance");
   let passes = 1;
   let lockedPass = false;
+  // A LOCKED BALANCE MAY NEED THE OPTIONAL SPENT-STATUS PASS. A public node can refuse that call; the full scan
+  // itself is still complete, but "no spendable coins" cannot be read as "nothing is locked" when the status was
+  // never checked. Keep the scan and name the missing fact instead of failing the whole restore.
+  let spentChecked = true;
 
   // THE SECOND PASS: coins exist but none is spendable. The spent status is re-checked and the wallet is synced
   // again; the arrival may have been locked by time rather than lost.
   const rescanWhenLocked = request.rescanWhenLocked !== false;
-  if (rescanWhenLocked && total > 0n && unlocked === 0n && typeof driver.rescanSpent === "function" && passes < PASSES) {
+  if (rescanWhenLocked && total > 0n && unlocked === 0n && passes < PASSES) {
     lockedPass = true;
-    await step("rescanSpent", () => driver.rescanSpent());
-    try { await wallet.sync(); } catch (error) { syncError = error; }
-    total = asAmount(await step("getBalance", () => driver.getBalance()), "balance");
-    unlocked = asAmount(await step("unlockedBalance", () => wallet.unlockedBalance()), "unlockedBalance");
-    passes += 1;
+    if (typeof driver.rescanSpent !== "function") {
+      spentChecked = false;
+    } else {
+      try {
+        await step("rescanSpent", () => driver.rescanSpent());
+      } catch {
+        // THE OPTIONAL PASS IS NOT THE FULL SCAN. A node that refuses `rescanSpent` must not discard the balances
+        // already read; the caller receives `spent-status-unavailable` and can still decide what to do.
+        spentChecked = false;
+      }
+      if (spentChecked) {
+        try { await wallet.sync(); } catch (error) { syncError = error; }
+        total = asAmount(await step("getBalance", () => driver.getBalance()), "balance");
+        unlocked = asAmount(await step("unlockedBalance", () => wallet.unlockedBalance()), "unlockedBalance");
+        passes += 1;
+      }
+    }
   }
 
-  const completeness = await scanCompleteness(driver, { syncError, rescanError });
+  const completeness = await scanCompleteness(driver, { syncError, rescanError, spentChecked });
   return {
     total: total.toString(),
     unlocked: unlocked.toString(),

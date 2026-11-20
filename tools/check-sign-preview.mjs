@@ -70,6 +70,10 @@ const facade = (mod = { createSweep }) => mod.createSweep({ http, config });
 
 // THE STAND-IN WALLET: the withdrawal surface the signing step takes. `feeKind` decides what it reports.
 function wallet({ unlocked = 5_000_000_000_000n, feeKind = "number", fee = 30_000_000n } = {}) {
+  const driver = {
+    async setRestoreHeight() {}, async rescanBlockchain() {},
+    async getBalance() { return unlocked; }, async getHeight() { return 100; }, async getDaemonHeight() { return 100; },
+  };
   const base = {
     async open() {},
     async sync() {},
@@ -77,6 +81,7 @@ function wallet({ unlocked = 5_000_000_000_000n, feeKind = "number", fee = 30_00
     async sweepUnlocked() { return { signed: true }; },
     async relay() { return ["tx"]; },
     async close() {},
+    driver: () => driver,
   };
   if (feeKind === "none") return base;
   if (feeKind === "throws") return { ...base, async fee() { throw new Error("no fee"); } };
@@ -87,7 +92,11 @@ function wallet({ unlocked = 5_000_000_000_000n, feeKind = "number", fee = 30_00
 
 const sign = async (mod, w) => {
   const request = await planRequest();
-  try { return { kind: "ok", result: await facade(mod).sign({ ...request, connectWallet: async () => w }) }; }
+  try {
+    const api = facade(mod);
+    await api.restore({ wallet: w, fromHeight: 100 });
+    return { kind: "ok", result: await api.sign({ ...request, wallet: w }) };
+  }
   catch (error) { return { kind: "error", error }; }
 };
 
@@ -116,7 +125,7 @@ console.log("=== 2) A WALLET THAT CANNOT REPORT A FEE: sign refuses ===");
   }
 }
 
-// A split signed set is all-or-unknown, whichever transaction cannot report its fee.
+// A split signed set is refused before fees or relay: the withdrawal is one transaction.
 for (const missingAt of [0, 1, 2]) {
   const txs = [3n, 4n, 5n].map((fee, index) => ({ getFee: () => index === missingAt ? null : fee }));
   const w = wallet();
@@ -129,8 +138,8 @@ for (const missingAt of [0, 1, 2]) {
   w.fee = async (set) => signedFeeTotal(set);
   w.relay = async () => { relayed++; return ["unexpected"]; };
   const o = await sign({ createSweep }, w);
-  if (o.kind === "error" && o.error?.code === "sweep-fee-unknown" && signed === 1 && relayed === 0) ok(`partial signed fee ${missingAt} refuses before relay`);
-  else bad(`partial signed fee ${missingAt}: ${o.kind}/${o.error?.code}, signed ${signed}, relayed ${relayed}`);
+  if (o.kind === "error" && o.error?.code === "sweep-split" && signed === 1 && relayed === 0) ok(`a ${txs.length}-transaction sweep refuses before relay`);
+  else bad(`split sweep ${missingAt}: ${o.kind}/${o.error?.code}, signed ${signed}, relayed ${relayed}`);
 }
 
 console.log("=== 3) A FEE LARGER THAN THE REMAINDER: no negative receive ===");
