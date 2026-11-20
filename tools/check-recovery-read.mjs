@@ -78,6 +78,28 @@ const problems = [];
 let checks = 0;
 const check = (condition, message) => { checks += 1; if (condition) console.log("  ok    " + message); else problems.push(message); };
 
+// A THROWING CALLER CALLBACK IS NOT A NODE FAILURE. It rejects the read and names the callback; it must not be
+// returned as a daemon failure in `failed`.
+{
+  let progressError = null;
+  try {
+    await readRecovery(request(daemon().fetch, null, { onProgress: () => { throw new Error("ui bug"); } }));
+  } catch (error) { progressError = error; }
+  check(progressError && progressError.code === "bad-input" && progressError.params.field === "onProgress",
+    "a throwing onProgress rejects the read as a caller error");
+}
+{
+  let saveError = null;
+  const badCheckpoint = { read: () => null, save: () => { throw new Error("store bug"); } };
+  try {
+    await readRecovery(request(daemon().fetch, badCheckpoint));
+  } catch (error) { saveError = error; }
+  check(saveError && saveError.code === "bad-input" && saveError.params.field === "checkpoint.save",
+    "a throwing checkpoint.save rejects the read as a caller error");
+}
+
+
+
 const coldDaemon = daemon();
 const coldCheckpoint = memoryCheckpoint();
 const progress = [];

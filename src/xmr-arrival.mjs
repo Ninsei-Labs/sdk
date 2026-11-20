@@ -212,6 +212,15 @@ const confirmationsOf = (tx, height, tipHeight) => {
   return Number.isFinite(value) ? value : Math.max(0, Number(tipHeight) - Number(height) + 1);
 };
 
+// A CALLER BUG IS NOT A NODE FAILURE. A throwing progress or checkpoint callback rejects the read with its own
+// field; it must not appear in `failed` as if the daemon answered badly.
+const callerFailure = (field, cause) => {
+  const error = new SdkError("bad-input", { field, why: "callback-failed" });
+  error.caller = true;
+  error.cause = cause;
+  return error;
+};
+
 // THE SAME TIE-BREAK IN THE EXACT AND THE SHADOW WALK. Score and amount decide first; two candidates that are
 // equal on both are not interchangeable, because the report names one txid. The earlier block wins, and inside one
 // block the lower txid wins - both walks see the same chain order.
@@ -730,8 +739,11 @@ export async function readRecovery(request) {
   let prior = null;
   if (checkpoint && typeof checkpoint.read === "function") {
     try { prior = validCheckpoint(checkpoint.read(), identity); }
-    catch { prior = null; }
-    if (!prior && typeof checkpoint.discard === "function") checkpoint.discard();
+    catch (error) { throw callerFailure("checkpoint.read", error); }
+    if (!prior && typeof checkpoint.discard === "function") {
+      try { checkpoint.discard(); }
+      catch (error) { throw callerFailure("checkpoint.discard", error); }
+    }
   }
   let replay = 0;
   const run = async (startRecord) => {
@@ -757,10 +769,14 @@ export async function readRecovery(request) {
       if (!anchor.hash || normalizedHash(anchor.hash) !== through.hash) throw new Error("reorg");
     }
     const total = top - fromHeight + 1;
-    const emit = () => onProgress({
-      phase: "blocks", through: through ? through.height : null, blocksVerified, blocksTotal: total,
-      bytes, operator: node.operator,
-    });
+    const emit = () => {
+      try {
+        onProgress({
+          phase: "blocks", through: through ? through.height : null, blocksVerified, blocksTotal: total,
+          bytes, operator: node.operator,
+        });
+      } catch (error) { throw callerFailure("onProgress", error); }
+    };
     emit();
     for (let height = through ? through.height + 1 : fromHeight; height <= top; height += 1) {
       if (signal && signal.aborted) throw new SdkError("xmr-no-nodes", { node: node.url, name: "AbortError", why: "cancelled" });
@@ -790,7 +806,8 @@ export async function readRecovery(request) {
       previousHash = through.hash;
       blocksVerified += 1;
       if (checkpoint && typeof checkpoint.save === "function") {
-        checkpoint.save(checkpointRecord({ ...identity, through, transfers }));
+        try { checkpoint.save(checkpointRecord({ ...identity, through, transfers })); }
+        catch (error) { throw callerFailure("checkpoint.save", error); }
       }
       emit();
     }
@@ -801,10 +818,14 @@ export async function readRecovery(request) {
     try {
       return await run(prior);
     } catch (error) {
+      if (error && error.caller) throw error;
       if (String(error && error.message) === "reorg" && replay === 0) {
         replay += 1;
         prior = null;
-        if (checkpoint && typeof checkpoint.discard === "function") checkpoint.discard();
+        if (checkpoint && typeof checkpoint.discard === "function") {
+          try { checkpoint.discard(); }
+          catch (discardError) { throw callerFailure("checkpoint.discard", discardError); }
+        }
         continue;
       }
       const failure = failureOf(error, node);
