@@ -28,6 +28,7 @@ import * as engine from "../src/engine.mjs";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SWEEP = join(ROOT, "src", "sweep.mjs");
 const PASSPHRASE = "sign-preview-test-pass";
+const KEY_IMAGE = "aa".repeat(32);
 
 let pass = 0;
 const fails = [];
@@ -56,7 +57,7 @@ async function planRequest() {
   });
   engine.recoveryFile.validatePayload(payload);
   const contents = await engine.recoveryFile.createRecoveryFile(payload, PASSPHRASE);
-  return { file: { contents }, passphrase: PASSPHRASE, to: ADDRESS };
+  return { file: { contents }, passphrase: PASSPHRASE, to: ADDRESS, keyImages: [KEY_IMAGE] };
 }
 
 const http = {
@@ -78,7 +79,7 @@ function wallet({ unlocked = 5_000_000_000_000n, feeKind = "number", fee = 30_00
     async open() {},
     async sync() {},
     async unlockedBalance() { return unlocked; },
-    async sweepUnlocked() { return { signed: true }; },
+    async sweepUnlocked() { return { getInputs: () => [{ getKeyImage: () => ({ getHex: () => KEY_IMAGE }) }] }; },
     async relay() { return ["tx"]; },
     async close() {},
     driver: () => driver,

@@ -1707,15 +1707,21 @@ export interface SweepApi {
    */
   keyImages(request: SweepKeyImagesRequest): Promise<readonly SweepKeyImage[]>;
   /**
-   * SIGN WITHOUT SENDING. Requires a completed `restore` on the same wallet adapter: without it the answer is
-   * `sweep-scan-incomplete`. A destination with a bad checksum or another Monero network is refused before the
-   * wallet opens, and a sweep that would need more than one transaction is `sweep-split` before relay.
+   * SIGN WITHOUT SENDING. Requires a completed `restore` on the same wallet adapter and the verified unspent
+   * `keyImages`: without them the answer is `sweep-scan-incomplete` or `bad-input`. A destination with a bad checksum
+   * or another Monero network is refused before the wallet opens; the signed inputs must be exactly the verified set
+   * (`sweep-inputs-changed` / `sweep-inputs-unknown`), and a sweep that would need more than one transaction is
+   * `sweep-split` before relay.
    */
   sign(request: SweepRunRequest): Promise<SweepSignResult>;
-  /** Send what `sign` signed, close the wallet and return the transaction hashes. A lost answer throws
-   * `sweep-relay-unknown`; the session token stays valid, and the same signed set is never relayed twice. */
+  /** Send what `sign` signed, close the wallet and return the transaction hashes. A fresh `keyImages` list is
+   * required and must still match the signed inputs. A lost answer throws `sweep-relay-unknown`; the session token
+   * stays valid, and the same signed set is never relayed twice. */
   relay(request: SweepRelayRequest): Promise<SweepRunResult>;
-  /** Perform the withdrawal as a whole (`sign` + `relay`). */
+  /**
+   * Perform the withdrawal as a whole (`sign` + `relay`). The relay check receives the same verified `keyImages`
+   * that were used for signing; when a fresh post-sign read matters, call `sign` and `relay` separately.
+   */
   run(request: SweepRunRequest): Promise<SweepRunResult>;
   /**
    * A LATER LOOK AFTER THE TOKEN IS GONE. Reads the swap address through the same recovery read and decides whether
@@ -1978,6 +1984,11 @@ export type SweepMissing = "restore-height" | "spendable" | "revealed-half";
 export interface SweepRunRequest extends SweepPlanRequest {
   /** Where to withdraw the XMR to. */
   readonly to: string;
+  /**
+   * The verified unspent key images for this withdrawal, from `sweep.keyImages`. Signing refuses when the signed
+   * transaction's inputs are not exactly this set; the list is required, because an omitted list is not an empty one.
+   */
+  readonly keyImages: readonly (string | SweepKeyImage)[];
   /** An already opened and synced adapter, the same one `restore` used. */
   readonly wallet?: MoneroWalletAdapter;
   /** Returns a Monero wallet: the core does not drag in WASM. */
@@ -2051,6 +2062,11 @@ export interface SweepSignResult {
 /** Sending what was signed: the session token `sign` returned. The token stays valid when the answer is unknown. */
 export interface SweepRelayRequest {
   readonly token: string;
+  /**
+   * A fresh unspent set read after signing. Relay refuses `sweep-inputs-changed` unless it is exactly the signed
+   * input set; the session stays open for a correct retry.
+   */
+  readonly keyImages: readonly (string | SweepKeyImage)[];
 }
 
 export interface SweepRunResult {
@@ -2339,6 +2355,10 @@ export type ErrorCode =
   | "sweep-scan-incomplete"
   /** The sweep needed more than one transaction; a swap address is withdrawn in one. */
   | "sweep-split"
+  /** The signed transaction's inputs differ from the verified unspent set. */
+  | "sweep-inputs-changed"
+  /** The signed transaction did not expose readable inputs, so the set cannot be checked. */
+  | "sweep-inputs-unknown"
   | "sweep-relay-unknown"
   /** The maker declines to pay the claim gas; the refusal is shown before the deal (issue #78). */
   | "gas-refused-by-maker"

@@ -40,6 +40,7 @@
     "check:sweep-half": "node tools/check-sweep-half.mjs",
     "check:sweep-relay": "node tools/check-sweep-relay.mjs",
     "check:sweep-sign-guards": "node tools/check-sweep-sign-guards.mjs",
+    "check:sweep-inputs": "node tools/check-sweep-inputs.mjs",
     "check:sweep-reconcile": "node tools/check-sweep-reconcile.mjs",
     "sync:version": "node tools/sync-version.mjs",
     "check:restore": "node tools/check-restore.mjs",

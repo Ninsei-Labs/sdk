@@ -208,7 +208,7 @@ complete; a partial witness makes `agrees` false with `witness:not-completed`. T
 | `actions.markReady` / `claim` / `refund` | Do not send a second transaction while the first outcome is unknown. Keep the transaction hash and re-read the receipt; a repeated call is not a substitute for an unknown receipt. |
 | `sweep.relay` | `sweep-relay-unknown` means the signed set MAY have left. The session token and signed set stay open; do not relay it again. Check the txids or the chain before signing a new withdrawal. |
 | `sweep.reconcile` | The token is gone and the signed bytes remain. `present` or `inputs-spent` never resend; `unknown` keeps the bytes and signs nothing; only `absent` with `resend: true` permits the same bytes, with the same hash, to be sent once. |
-| `sweep.sign` | Requires a completed `sweep.restore` on the same wallet adapter. `sweep-scan-incomplete` and `sweep-split` refuse before relay; retry only after a complete scan or a wallet that can sweep in one transaction. |
+| `sweep.sign` | Requires a completed `sweep.restore` on the same wallet adapter and the verified unspent `keyImages`; `sweep.relay` requires a fresh list. `sweep-scan-incomplete`, `sweep-split`, `sweep-inputs-changed` and `sweep-inputs-unknown` refuse before relay; retry only after a complete scan or a matching input set. |
 | `swaps.watch` | The wait may be repeated; it reads the same Monero address and does not create an order. |
 | `recovery.open` | Pure local parsing; safe to repeat. |
 
