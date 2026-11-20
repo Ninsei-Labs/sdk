@@ -4,7 +4,7 @@
 // is unknown, and a resume re-reads the whole window that contains the checkpoint.
 // Run: node tools/check-recovery-witness.mjs
 import { ed25519, keccak256 } from "../src/primitives.mjs";
-import { readRecoveryWitness } from "../src/xmr-arrival.mjs";
+import { readRecovery, readRecoveryWitness } from "../src/xmr-arrival.mjs";
 import { addressFromKeys } from "../engine/monero/address.js";
 import {
   amountMaskCommitment, bytesToHex, derivedOutputKey, hashToScalar, hexToBytes, keyDerivation,
@@ -100,6 +100,15 @@ const resumed = await readRecoveryWitness(request(interrupted.fetch, checkpoint)
 check(checkpoint.value && checkpoint.value.kind === "witness" && checkpoint.value.grid === 20,
   "the witness checkpoint is marked as a grid record");
 check(resumed.complete === true && resumed.transfers.length === 1, "the resumed witness read completes without duplicates");
+{
+  const firstBlock = daemon({ failAt: 8 });
+  const firstBlockCheckpoint = memoryCheckpoint();
+  await readRecoveryWitness(request(firstBlock.fetch, firstBlockCheckpoint));
+  firstBlock.setFailAt(0);
+  const kept = await readRecoveryWitness(request(firstBlock.fetch, firstBlockCheckpoint));
+  check(kept.complete === false && kept.through && kept.through.height === 7 && kept.transfers.length === 1
+    && kept.checkpoint !== null, "a resume whose first window block fails keeps the checkpoint prefix");
+}
 const resumedHeights = interrupted.calls.filter((call) => call.method === "get_block").map((call) => call.height);
 check(resumedHeights.slice(-11).join(",") === "0,1,2,3,4,5,6,7,8,9,10",
   "the resume re-reads the whole window that contains the checkpoint");
@@ -116,6 +125,28 @@ check(short.complete === false && short.failed.length === 1, "a short transactio
   const replayed = await readRecoveryWitness(request(reorg.fetch, reorgCheckpoint));
   check(replayed.complete === true && replayed.transfers.length === 1,
     "a reorganisation replays the whole window and returns the same transfer");
+}
+
+// A checkpoint from the other reader is not trusted; each read starts from its own boundary.
+{
+  const primary = daemon();
+  const primaryCheckpoint = memoryCheckpoint();
+  await readRecovery(request(primary.fetch, primaryCheckpoint));
+  const witnessWithPrimary = daemon();
+  const witnessVerdict = await readRecoveryWitness(request(witnessWithPrimary.fetch, primaryCheckpoint));
+  check(witnessVerdict.complete === true
+    && witnessWithPrimary.calls.filter((call) => call.method === "get_block").map((call) => call.height).join(",") === "0,1,2,3,4,5,6,7,8,9,10",
+    "a primary checkpoint is ignored by the witness and starts at its grid boundary");
+}
+{
+  const witnessOnly = daemon();
+  const witnessCheckpoint = memoryCheckpoint();
+  await readRecoveryWitness(request(witnessOnly.fetch, witnessCheckpoint));
+  const primaryAgain = daemon();
+  const primaryVerdict = await readRecovery(request(primaryAgain.fetch, witnessCheckpoint));
+  check(primaryVerdict.complete === true
+    && primaryAgain.calls.filter((call) => call.method === "get_block").map((call) => call.height).join(",") === "5,6,7,8,9,10",
+    "a witness checkpoint is ignored by the primary read and starts at fromHeight");
 }
 
 const behind = await readRecoveryWitness(request(daemon().fetch, null, { tipHeight: 12 }));

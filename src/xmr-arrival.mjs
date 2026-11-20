@@ -971,8 +971,10 @@ export async function readRecoveryWitness(request) {
           if (String(error && error.message) === "reorg") throw error;
           const failure = failureOf(error, node);
           failure.height = height;
-          return { transfers, tip: info.height, fromHeight, complete: false, through,
-            checkpoint: through ? checkpointRecord({ ...identity, through, transfers, kind: "witness" }) : null,
+          const keptThrough = through || (startRecord ? startRecord.through : null);
+          const keptTransfers = through ? transfers : (startRecord ? startRecord.transfers : transfers);
+          return { transfers: keptTransfers, tip: info.height, fromHeight, complete: false, through: keptThrough,
+            checkpoint: keptThrough ? checkpointRecord({ ...identity, through: keptThrough, transfers: keptTransfers, kind: "witness" }) : null,
             blocked: false, failed: [failure] };
         }
         if (priorThrough && height === priorThrough.height && normalizedHash(block.hash) !== priorThrough.hash) throw new Error("reorg");
