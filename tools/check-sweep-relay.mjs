@@ -12,6 +12,7 @@ import * as engine from "../src/engine.mjs";
 
 const ADDRESS = "59DnddZzVBCevVg9YB3zCs24DSRH4ByS2FMBafPpYxSEB6FMegQNEbtNzbLjrrEUPNAg9NhK5uMiiAZpAvENBS4D4mEPcRq";
 const PASSPHRASE = "sweep-relay-test-pass";
+const KEY_IMAGE = "aa".repeat(32);
 
 async function planRequest() {
   const payload = engine.recoveryFile.buildPayload({
@@ -31,7 +32,7 @@ async function planRequest() {
     restoreHeight: 2_206_635,
   });
   engine.recoveryFile.validatePayload(payload);
-  return { file: { contents: await engine.recoveryFile.createRecoveryFile(payload, PASSPHRASE) }, passphrase: PASSPHRASE, to: ADDRESS };
+  return { file: { contents: await engine.recoveryFile.createRecoveryFile(payload, PASSPHRASE) }, passphrase: PASSPHRASE, to: ADDRESS, keyImages: [KEY_IMAGE] };
 }
 
 const http = { async json(url, options) {
@@ -52,7 +53,7 @@ function wallet({ relay } = {}) {
     async open() { calls.open += 1; },
     async sync() { calls.sync += 1; },
     async unlockedBalance() { calls.unlockedBalance += 1; return 5_000_000_000_000n; },
-    async sweepUnlocked() { calls.sweepUnlocked += 1; return [{ signed: true }]; },
+    async sweepUnlocked() { calls.sweepUnlocked += 1; return [{ getInputs: () => [{ getKeyImage: () => ({ getHex: () => KEY_IMAGE }) }] }]; },
     async fee() { return 30_000_000n; },
     async relay(signed) { calls.relay += 1; return relay ? await relay(signed) : ["tx-1"]; },
     async close() { calls.close += 1; },
@@ -69,7 +70,7 @@ test("a relay answer is reported as sent and closes the session", async () => {
   const adapter = wallet();
   const sweep = createSweep({ http, config });
   const openedResult = await opened(sweep, adapter);
-  const result = await sweep.relay({ token: openedResult.token });
+  const result = await sweep.relay({ token: openedResult.token, keyImages: [KEY_IMAGE] });
   assert.equal(result.outcome, "sent");
   assert.deepEqual(result.txids, ["tx-1"]);
   assert.equal(adapter.calls.relay, 1);
@@ -81,7 +82,7 @@ test("a lost answer keeps the session and reports unknown", async () => {
   const sweep = createSweep({ http, config });
   const openedResult = await opened(sweep, adapter);
 
-  await assert.rejects(sweep.relay({ token: openedResult.token }), (error) => {
+  await assert.rejects(sweep.relay({ token: openedResult.token, keyImages: [KEY_IMAGE] }), (error) => {
     assert.equal(error.code, "sweep-relay-unknown");
     assert.equal(error.params.token, openedResult.token);
     assert.equal(error.params.outcome, "unknown");
@@ -91,7 +92,7 @@ test("a lost answer keeps the session and reports unknown", async () => {
   assert.equal(adapter.calls.close, 1);
 
   // The same token must not send the signed set a second time.
-  await assert.rejects(sweep.relay({ token: openedResult.token }), (error) => {
+  await assert.rejects(sweep.relay({ token: openedResult.token, keyImages: [KEY_IMAGE] }), (error) => {
     assert.equal(error.code, "sweep-relay-unknown");
     assert.equal(error.params.why, "already-attempted");
     return true;
@@ -103,7 +104,7 @@ test("an answer without a transaction id is unknown, not sent", async () => {
   const adapter = wallet({ relay: async () => [] });
   const sweep = createSweep({ http, config });
   const openedResult = await opened(sweep, adapter);
-  await assert.rejects(sweep.relay({ token: openedResult.token }), (error) => {
+  await assert.rejects(sweep.relay({ token: openedResult.token, keyImages: [KEY_IMAGE] }), (error) => {
     assert.equal(error.code, "sweep-relay-unknown");
     assert.equal(error.params.why, "answer-txid");
     return true;

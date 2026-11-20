@@ -6,6 +6,7 @@
 // so the withdrawal can go. Funds do not move at this step.
 import { SdkError } from "./errors.mjs";
 import { checkAddressOrThrow } from "./addressGuard.mjs";
+import { assertSameKeyImages, normalizeKeyImages, signedKeyImages } from "./sweep-inputs.mjs";
 import { actionMaterialOf } from "./sweep-action.mjs";
 import { primitives } from "./primitives.mjs";
 import * as engine from "./engine.mjs";
@@ -453,6 +454,9 @@ export function createSweep({ call = null, fetchImpl = null } = {}) {
       // THE ADDRESS IS CHECKED BEFORE THE WALLET IS OPENED. A typo or a destination for another Monero network is
       // refused here, not discovered by the wallet after it has already built a transaction.
       await checkAddressOrThrow(request.to, plan.network, "to");
+      // THE UNSPENT SET IS REQUIRED. Without it there is nothing to compare the signature with; a missing list is
+      // not an empty wallet, and an empty list would make every signed input look foreign.
+      const expectedImages = normalizeKeyImages(request.keyImages);
       // ONE ADAPTER FOR RESTORE AND SIGN. A caller that already holds the opened and synced wallet passes it as
       // `wallet`; a caller that wants the SDK to build one passes `connectWallet`.
       const wallet = request.wallet !== undefined && request.wallet !== null
@@ -490,6 +494,10 @@ export function createSweep({ call = null, fetchImpl = null } = {}) {
         if (Array.isArray(signed) && signed.length > 1) {
           throw new SdkError("sweep-split", { count: signed.length });
         }
+        // THE SIGNED INPUTS ARE THE UNSPENT SET, NOT A SUPERSET AND NOT A DIFFERENT SET. The comparison reads the
+        // library's transaction inputs; an opaque signed object is `sweep-inputs-unknown`, never a pass.
+        const signedImages = signedKeyImages(signed);
+        assertSameKeyImages(expectedImages, signedImages, "sign");
         // WHAT THE TRANSFER COSTS, WHEN THE WALLET CAN SAY. A withdrawal moves the whole free remainder, so the fee
         // is not extra money on top - it is taken out of it, and the recipient receives the remainder MINUS the fee.
         // An adapter that cannot report a fee answers null; publishing 0 there would be a claim the package cannot
@@ -503,7 +511,7 @@ export function createSweep({ call = null, fetchImpl = null } = {}) {
         });
         if (!feeVerdict.ok) throw new SdkError(feeVerdict.code, { fee: feeVerdict.fee, limit: feeVerdict.limit, amount: feeVerdict.amount, why: feeVerdict.why });
         const token = "sweep-" + (++sessionSeq);
-        sessions.set(token, { wallet, plan, signed, relayAttempted: false, txids: [] });
+        sessions.set(token, { wallet, plan, signed, expectedImages, signedImages, relayAttempted: false, txids: [] });
         return {
           token,
           amount: unlocked.toString(),
@@ -537,6 +545,10 @@ export function createSweep({ call = null, fetchImpl = null } = {}) {
         throw new SdkError("sweep-relay-unknown", { token: request.token, why: "already-attempted",
           outcome: "unknown", txids: session.txids, swept: session.plan.address });
       }
+      // A FRESH UNSPENT SET IS CHECKED AGAIN BEFORE THE SEND. The signed bytes cannot change, so this comparison is
+      // about the caller's new observation: if the set it just verified no longer equals the signed inputs, nothing
+      // leaves and the session stays open for a correct retry.
+      assertSameKeyImages(session.signedImages, normalizeKeyImages(request.keyImages), "relay");
       session.relayAttempted = true;
       const { wallet, plan, signed } = session;
       let txids;
@@ -566,7 +578,7 @@ export function createSweep({ call = null, fetchImpl = null } = {}) {
     // step order: otherwise an edit in one place would diverge from the other.
     async run(request) {
       const opened = await api.sign(request);
-      return await api.relay({ token: opened.token });
+      return await api.relay({ token: opened.token, keyImages: request.keyImages });
     },
   };
   return api;

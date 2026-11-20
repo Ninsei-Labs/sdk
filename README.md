@@ -305,6 +305,12 @@ the optional `rescanSpent` pass no longer fails the restore: the full scan is ke
 split silently. Both `sweep.sign` and `swaps.start` check the destination with `checkAddress`, so a bad checksum or an
 address for another Monero network is refused before a wallet or a funding send.
 
+`sweep.sign` also requires the verified unspent `keyImages` (strings or records from `sweep.keyImages`). It reads the
+signed transaction's inputs from the wallet library and refuses `sweep-inputs-changed` unless that set is exactly the
+verified one; an opaque signed transaction that cannot expose its inputs is `sweep-inputs-unknown`. `sweep.relay`
+requires a fresh `keyImages` list and checks it again before sending; a changed set leaves the session open and sends
+nothing. `sweep.run` passes the same list it used for signing, so a fresh post-sign read is a `sign` → `relay` pair.
+
 A window spent check counts status `2` as spent in the pool. A short, long or non-integer `spent_status` list is not a
 spent count: `spent` is null and `scanComplete` is false with `scanIncompleteReason: "spent-status-unavailable"`.
 

@@ -139,6 +139,10 @@ export const ERROR_CODES = [
   // is a blind spend; a split sweep pays several fees and turns one withdrawal into several transactions.
   "sweep-scan-incomplete",
   "sweep-split",
+  // THE SIGNED TRANSACTION AND THE VERIFIED UNSPENT SET MUST NAME THE SAME INPUTS. A signed set that cannot be
+  // read is unknown; a set that differs is refused before relay.
+  "sweep-inputs-changed",
+  "sweep-inputs-unknown",
   // THE WITHDRAWAL WAS SENT BUT THE WALLET DID NOT CONFIRM THE RESULT. A throw or an answer without a transaction
   // id leaves the signed set in the open session. The caller must check the chain before signing again; the same
   // token must not relay that set twice.
@@ -215,6 +219,8 @@ export const ERROR_META = Object.freeze({
   "sweep-fee-unknown": { retryable: true, side: "chain" },
   "sweep-scan-incomplete": { retryable: true, side: "chain" },
   "sweep-split": { retryable: false, side: "wallet" },
+  "sweep-inputs-changed": { retryable: false, side: "chain" },
+  "sweep-inputs-unknown": { retryable: false, side: "wallet" },
   "sweep-relay-unknown": { retryable: false, side: "chain" },
   "gas-refused-by-maker": { retryable: false, side: "provider" },
   "gas-not-arrived": { retryable: true, side: "chain" },

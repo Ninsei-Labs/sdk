@@ -12,6 +12,7 @@ import * as engine from "../src/engine.mjs";
 const ADDRESS = "59DnddZzVBCevVg9YB3zCs24DSRH4ByS2FMBafPpYxSEB6FMegQNEbtNzbLjrrEUPNAg9NhK5uMiiAZpAvENBS4D4mEPcRq";
 const MAINNET = "49HjJN4ZbLjDFqe3Mus7mPZBE6Q27cRGtPLfyuNejGdYZhvke36zj1xGq5kDCbSCXbc5TLTR7vygzVDYTcgFURLaLe4Gdds";
 const PASSPHRASE = "sweep-sign-guard-pass";
+const KEY_IMAGE = "aa".repeat(32);
 
 async function planRequest() {
   const payload = engine.recoveryFile.buildPayload({
@@ -31,7 +32,7 @@ async function planRequest() {
     restoreHeight: 2_206_635,
   });
   engine.recoveryFile.validatePayload(payload);
-  return { file: { contents: await engine.recoveryFile.createRecoveryFile(payload, PASSPHRASE) }, passphrase: PASSPHRASE, to: ADDRESS };
+  return { file: { contents: await engine.recoveryFile.createRecoveryFile(payload, PASSPHRASE) }, passphrase: PASSPHRASE, to: ADDRESS, keyImages: [KEY_IMAGE] };
 }
 
 function wallet({ signed = [{ signed: true }], walletHeight = 200, nodeHeight = 200, balance = 5_000_000_000_000n, unlocked = 5_000_000_000_000n, rescanSpentFails = false, rescanSpentMissing = false, rescanFails = false } = {}) {
