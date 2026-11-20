@@ -77,12 +77,13 @@ const T4 = "d".repeat(64);
 const T5 = "e".repeat(64);
 const T6 = "f".repeat(64);
 
-function rpc({ blockTxids = [], poolHashes = [], poolFails = false, txs = {} } = {}) {
+function rpc({ blockTxids = [], poolHashes = [], poolFails = false, txs = {}, failAt = null } = {}) {
   return async (url, init) => {
     const body = JSON.parse(init.body);
     if (body.method === "get_info") return { ok: true, json: async () => ({ result: { height: 121, synchronized: true, nettype: "stagenet" } }) };
     if (body.method === "get_block") {
       const height = Number(body.params.height);
+      if (height === failAt) return { ok: false, status: 503 };
       const hashes = height === 105 ? blockTxids : [];
       return { ok: true, json: async () => ({ result: {
         block_header: {
@@ -278,6 +279,19 @@ console.log("=== 6) THE AMOUNT RULES OVER THE SAME READ ===");
   const noStart = await verifyArrival({ ...request(rpc()), fromHeight: undefined, amountRule: "at-least", expectedAtomic: ATOMIC_QUOTE });
   okIf(noStart.state === "pending" && noStart.absent === true,
     "an omitted fromHeight keeps the old genesis default on the amount path");
+  const unread = await verifyArrival({
+    ...request(rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) }, failAt: 110 }), undefined,
+      { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE }),
+  });
+  okIf(unread.state === "pending" && unread.seen === false
+    && unread.failed.some((failure) => failure.height === 110),
+    "sale exact keeps a read with a later unread part unknown, not arrived");
+  const restored = await verifyArrival({
+    ...request(rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) } }), undefined,
+      { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE }),
+  });
+  okIf(restored.state === "arrived" && restored.seen === true,
+    "a complete exact read is the only one that offers the sale arrival");
 }
 
 return { note: "recovery reads every transfer without the quoted amount", problems: fails, notes: fails.length ? [] : ["short, over, split and pool transfers are returned"] };

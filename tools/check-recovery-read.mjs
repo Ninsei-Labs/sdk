@@ -48,6 +48,10 @@ const SPENT_IMAGE = "ab".repeat(32);
 const UNSPENT_IMAGE = "cd".repeat(32);
 const POOL_CONFIRMS = "ff".repeat(32);
 const POOL_CONFIRMS_TX = fixture(50_000_000_000n, 0, R + 2n);
+const LATE = "12".repeat(32);
+const LATE_TX = fixture(50_000_000_000n, 0, R + 3n);
+const LATE_KEY = LATE_TX.vout[0].target.tagged_key.key;
+const LATE_IMAGE = "ee".repeat(32);
 const TXS = {
   6: { [TX[6]]: FUNDING_6 },
   7: { [TX[7]]: { version: 2, unlock_time: 0, extra: [], vin: [{ key: { k_image: SPENT_IMAGE } }], vout: [], rct_signatures: { type: 6, ecdhInfo: [], outPk: [] } } },
@@ -181,6 +185,29 @@ check(coldDaemon.calls.filter((c) => c.method === "get_block").map((c) => c.heig
     "a pool transfer that confirms after the checkpoint is returned once");
 }
 
+// A transfer that arrives after a withdrawal is found by the next read; the spent output stays out of the
+// available remainder.
+{
+  const lateDaemon = daemon({ topHeight: 10 });
+  const lateCheckpoint = memoryCheckpoint();
+  const before = await readRecovery(request(lateDaemon.fetch, lateCheckpoint, {
+    keyImages: [{ keyImage: SPENT_IMAGE, outputKey: FUNDING_6_KEY }, { keyImage: UNSPENT_IMAGE, outputKey: FUNDING_9_KEY }],
+  }));
+  check(before.complete === true && before.availableAtomic === "200000000000",
+    "the withdrawal leaves only the unspent funding output available");
+  TXS[10] = { [LATE]: LATE_TX };
+  lateDaemon.setTopHeight(11);
+  const after = await readRecovery(request(lateDaemon.fetch, lateCheckpoint, {
+    keyImages: [{ keyImage: SPENT_IMAGE, outputKey: FUNDING_6_KEY }, { keyImage: UNSPENT_IMAGE, outputKey: FUNDING_9_KEY },
+      { keyImage: LATE_IMAGE, outputKey: LATE_KEY }],
+  }));
+  delete TXS[10];
+  check(after.complete === true && after.transfers.some((transfer) => transfer.txid === LATE),
+    "a transfer that arrives after the withdrawal is found by the next read");
+  check(after.availableAtomic === "250000000000",
+    "the late transfer is available while the withdrawn output stays excluded (" + after.availableAtomic + ")");
+}
+
 // A failure at block 8 leaves a checkpoint at 7; the retry reads only 8..10 and produces the same answer.
 const interruptedDaemon = daemon({ failAt: 8 });
 const interruptedCheckpoint = memoryCheckpoint();
@@ -266,6 +293,41 @@ check(short.complete === false && short.transfers.length === 0, "a short transac
   const result = await readRecovery(request(stalled, null, { idleTimeoutMs: 20 }));
   check(result.complete === false && result.failed.some((failure) => failure.code === "timeout"),
     "a stalled request times out without a total-walk bound");
+}
+
+// A fake clock makes the per-request abort controllable: an advancing read never trips a total bound, while a
+// stalled request is aborted by its own idle signal.
+{
+  const originalTimeout = AbortSignal.timeout;
+  const pending = [];
+  AbortSignal.timeout = (ms) => {
+    const controller = new AbortController();
+    pending.push({ ms, controller });
+    return controller.signal;
+  };
+  try {
+    const advancing = await readRecovery(request(daemon().fetch));
+    check(advancing.complete === true && pending.length > 0,
+      "a fake clock lets an advancing read finish without a total-walk bound");
+    const base = daemon();
+    const stalled = async (url, init) => {
+      const body = JSON.parse(init.body);
+      if (body.method !== "get_block") return base.fetch(url, init);
+      return new Promise((_, reject) => {
+        init.signal.addEventListener("abort", () => {
+          reject(Object.assign(new Error("idle-timeout"), { name: "AbortError" }));
+        }, { once: true });
+      });
+    };
+    const reading = readRecovery(request(stalled, null, { idleTimeoutMs: 20 }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    pending.at(-1).controller.abort();
+    const stalledRead = await reading;
+    check(stalledRead.complete === false && stalledRead.failed.some((failure) => failure.code === "timeout"),
+      "the fake clock aborts only the stalled request");
+  } finally {
+    AbortSignal.timeout = originalTimeout;
+  }
 }
 
 // An already-cancelled caller does not read the chain.
