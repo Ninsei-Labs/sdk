@@ -92,14 +92,25 @@ export function normalizeNodes(nodes) {
 
 // ONE REQUEST. `text/plain` on purpose: the public nodes answer it without a preflight (verified on the whole
 // default list). The response body is JSON even though the content type is not.
-async function call(node, path, body, fetchImpl, timeoutMs) {
+async function call(node, path, body, fetchImpl, timeoutMs, options = {}) {
   let res;
+  const timeout = typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : null;
+  let signal = timeout;
+  const external = options.signal;
+  if (external && typeof external.addEventListener === "function") {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    if (external.aborted) abort();
+    else external.addEventListener("abort", abort, { once: true });
+    if (timeout) timeout.addEventListener("abort", abort, { once: true });
+    signal = controller.signal;
+  }
   try {
     res = await fetchImpl(node.url + path, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
       body: JSON.stringify(body),
-      signal: typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined,
+      signal: signal || undefined,
     });
   } catch (error) {
     // KEEP THE NAME: `AbortSignal.timeout` is "TimeoutError" in a browser and "AbortError" in Node; the message
@@ -108,6 +119,9 @@ async function call(node, path, body, fetchImpl, timeoutMs) {
       why: String((error && error.message) || error).slice(0, 120) });
   }
   if (!res || res.ok !== true) throw new SdkError("xmr-no-nodes", { node: node.url, status: res ? res.status : null });
+  if (typeof options.onBytes === "function") {
+    try { options.onBytes((await res.clone().arrayBuffer()).byteLength); } catch { /* the body is the answer */ }
+  }
   try { return await res.json(); } catch (error) {
     // A BODY CUT BY THE TIMEOUT IS STILL A TIMEOUT. `res.json()` rejects after the signal fired; in Node and in
     // browsers that is a TimeoutError/AbortError, not a malformed answer.
@@ -117,8 +131,8 @@ async function call(node, path, body, fetchImpl, timeoutMs) {
   }
 }
 
-async function getInfo(node, fetchImpl, timeoutMs) {
-  const j = await call(node, "/json_rpc", { jsonrpc: "2.0", id: "info", method: "get_info" }, fetchImpl, timeoutMs);
+async function getInfo(node, fetchImpl, timeoutMs, options = {}) {
+  const j = await call(node, "/json_rpc", { jsonrpc: "2.0", id: "info", method: "get_info" }, fetchImpl, timeoutMs, options);
   const r = j && j.result;
   if (!r || !Number.isFinite(Number(r.height))) throw new SdkError("xmr-no-nodes", { node: node.url, why: "no-height" });
   // A BUSY NODE HAS NOT FINISHED ITS OWN VIEW. Its height is not evidence that the walk was complete.
@@ -131,30 +145,32 @@ async function getInfo(node, fetchImpl, timeoutMs) {
 }
 
 // THE WHOLE BLOCK: its hash and ALL of its transaction hashes. This is the only form a public node is asked in.
-async function getBlock(node, height, fetchImpl, timeoutMs) {
-  const j = await call(node, "/json_rpc", { jsonrpc: "2.0", id: "block", method: "get_block", params: { height } }, fetchImpl, timeoutMs);
+async function getBlock(node, height, fetchImpl, timeoutMs, options = {}) {
+  const j = await call(node, "/json_rpc", { jsonrpc: "2.0", id: "block", method: "get_block", params: { height } }, fetchImpl, timeoutMs, options);
   const r = j && j.result;
   if (!r) throw new SdkError("xmr-no-nodes", { node: node.url, why: "no-block" });
   const hash = (r.block_header && r.block_header.hash) || null;
+  const parent = (r.block_header && r.block_header.prev_hash) || null;
+  const numTxes = r.block_header && Number.isFinite(Number(r.block_header.num_txes)) ? Number(r.block_header.num_txes) : null;
   let txHashes = Array.isArray(r.tx_hashes) ? r.tx_hashes : null;
   if (!txHashes) {
     const json = typeof r.json === "string" ? JSON.parse(r.json) : r.json;
     txHashes = (json && json.tx_hashes) || [];
   }
-  return { hash, txHashes };
+  return { hash, parent, numTxes, txHashes };
 }
 
 // ALL THE BLOCK'S TRANSACTIONS in bounded requests. Public monerod runs restricted and refuses more than 100
 // hashes per `/get_transactions`; batching keeps the request shape legal without changing which txids are named.
 const RESTRICTED_TRANSACTIONS_COUNT = 100;
 
-async function getBlockTxs(node, hashes, fetchImpl, timeoutMs) {
+async function getBlockTxs(node, hashes, fetchImpl, timeoutMs, options = {}) {
   if (!hashes.length) return [];
   const out = [];
   for (let start = 0; start < hashes.length; start += RESTRICTED_TRANSACTIONS_COUNT) {
     const batch = hashes.slice(start, start + RESTRICTED_TRANSACTIONS_COUNT);
     const batchOffset = { batchStart: start, batchEnd: start + batch.length, total: hashes.length };
-    const j = await call(node, "/get_transactions", { txs_hashes: batch, decode_as_json: true }, fetchImpl, timeoutMs);
+    const j = await call(node, "/get_transactions", { txs_hashes: batch, decode_as_json: true }, fetchImpl, timeoutMs, options);
     const wrappers = Array.isArray(j.txs) ? j.txs : [];
     const bodies = Array.isArray(j.txs_as_json) ? j.txs_as_json : [];
     // A PARTIAL ANSWER IS NOT AN EMPTY BLOCK. If the node returns fewer transactions than the batch named, the walk
@@ -185,6 +201,25 @@ async function getBlockTxs(node, hashes, fetchImpl, timeoutMs) {
 // The amount of our own outputs in a matched transaction (a swap can be paid in several outputs). An output whose
 // amount did not match its Pedersen commitment is NOT money: it contributes zero, and the caller names it.
 const sumOutputs = (hit) => hit.outputs.reduce((n, o) => n + (o.amountVerified ? (o.amountAtomic || 0n) : 0n), 0n);
+
+// `Number(null)` IS 0. A missing confirmation count is not a mined transfer with zero confirmations; it is a
+// missing field, so the block position supplies the fallback. This is used by every read that turns a daemon
+// wrapper into a transfer.
+const confirmationsOf = (tx, height, tipHeight) => {
+  const raw = tx && tx.confirmations;
+  if (raw === null || raw === undefined || raw === "") return Math.max(0, Number(tipHeight) - Number(height) + 1);
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : Math.max(0, Number(tipHeight) - Number(height) + 1);
+};
+
+// A CALLER BUG IS NOT A NODE FAILURE. A throwing progress or checkpoint callback rejects the read with its own
+// field; it must not appear in `failed` as if the daemon answered badly.
+const callerFailure = (field, cause) => {
+  const error = new SdkError("bad-input", { field, why: "callback-failed" });
+  error.caller = true;
+  error.cause = cause;
+  return error;
+};
 
 // THE SAME TIE-BREAK IN THE EXACT AND THE SHADOW WALK. Score and amount decide first; two candidates that are
 // equal on both are not interchangeable, because the report names one txid. The earlier block wins, and inside one
@@ -440,7 +475,7 @@ export async function verifyArrival(request) {
     }));
     record.unlock = hit[0].unlock;
     // Confirmations of a block: top - height + 1, and top = info.height - 1 (see above), so this is height - located.
-    record.confirmations = Number.isFinite(Number(body.confirmations)) ? Number(body.confirmations) : (info.height - located.height);
+    record.confirmations = confirmationsOf(body, located.height, info.height);
     // A NODE THAT CHANGED THE AMOUNT IS A DISAGREEMENT, NOT A WITNESS. The commitment check above is what
     // makes this observable: without it an altered ecdhInfo.amount would still look like a valid output.
     if (!record.amountVerified) { record.state = "amount-unverified"; seen.push(record); continue; }
@@ -568,7 +603,7 @@ async function scanRecoveryBlocks(node, { watched, fromHeight, toHeight, nowSec,
         height, tipHeight: Math.max(0, toHeight), nowSec,
       });
       if (!hit.length) continue;
-      const confirmations = Number.isFinite(Number(tx.confirmations)) ? Number(tx.confirmations) : (toHeight - height + 1);
+      const confirmations = confirmationsOf(tx, height, toHeight);
       transfers.push(recoveryObservation(tx, hit, node, { height, blockHash: block.hash, confirmations }));
     }
   }
@@ -589,6 +624,215 @@ async function scanRecoveryPool(node, { watched, tip, nowSec, fetchImpl, timeout
     transfers.push(recoveryObservation(tx, hit, node, { height: null, blockHash: null, confirmations: 0, pool: true }));
   }
   return transfers;
+}
+
+// ---------------------------------------------------------------------------
+// THE PRIMARY RECOVERY READ.
+//
+// One chosen node walks the whole range. The checkpoint is caller-owned storage; the SDK never persists it and never
+// silently trusts it. A checkpoint is a claim about a block hash, not a claim about money: an anchor that moved, a
+// digest that does not describe its own contents, or a chain that does not connect is a replay from the start.
+//
+// The walk is deliberately independent of `verifyRecovery`'s two-node decision. This function returns one node's
+// complete history and its progress; independent confirmation stays a separate, later step.
+const CHECKPOINT_VERSION = 1;
+const HASH64 = /^[0-9a-f]{64}$/;
+const hash64 = (value) => typeof value === "string" && HASH64.test(value.replace(/^0x/, "").toLowerCase());
+const normalizedHash = (value) => String(value || "").replace(/^0x/, "").toLowerCase();
+
+function checkpointDigest(record) {
+  const text = JSON.stringify({
+    version: record.version, network: record.network, address: record.address, fromHeight: record.fromHeight,
+    through: record.through, transfers: record.transfers, outputs: record.outputs, spends: record.spends,
+  });
+  return engine.xmrScan.bytesToHex(engine.xmrScan.keccak(new TextEncoder().encode(text)));
+}
+
+function checkpointRecord({ network, address, fromHeight, through, transfers }) {
+  const record = {
+    version: CHECKPOINT_VERSION, network, address, fromHeight, through,
+    transfers,
+    outputs: transfers.flatMap((transfer) => transfer.outputs.map((output) => ({
+      txid: transfer.txid, height: transfer.height, blockHash: transfer.blockHash, ...output,
+    }))),
+    spends: [],
+  };
+  record.digest = checkpointDigest(record);
+  return record;
+}
+
+function validCheckpoint(record, identity) {
+  if (!record || typeof record !== "object" || record.version !== CHECKPOINT_VERSION) return null;
+  if (record.network !== identity.network || record.address !== identity.address || record.fromHeight !== identity.fromHeight) return null;
+  if (!Array.isArray(record.transfers) || !Array.isArray(record.outputs) || !Array.isArray(record.spends)) return null;
+  if (!record.through || !Number.isSafeInteger(record.through.height) || !hash64(record.through.hash)) return null;
+  if (record.through.height < identity.fromHeight) return null;
+  if (record.digest !== checkpointDigest(record)) return null;
+  return record;
+}
+
+/**
+ * READ ONE NODE FROM `fromHeight` TO ITS HEAD.
+ *
+ * The checkpoint object is `{ read(), save(record), discard() }` or omitted. `onProgress` receives
+ * `{ phase, through, blocksVerified, blocksTotal, bytes, operator }`. `signal` cancels the read; `idleTimeoutMs`
+ * bounds a request, not the whole walk, so a long range may take as long as it keeps advancing. A failed body,
+ * a short transaction list, a moved anchor or a broken parent link makes the answer incomplete, never empty.
+ */
+export async function readRecovery(request) {
+  if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
+  const nodes = request.node !== undefined ? normalizeNodes([request.node]) : normalizeNodes(request.nodes);
+  const node = nodes[0];
+  if (!isStr(request.address)) throw new SdkError("bad-input", { field: "address" });
+  if (request.viewSecret === undefined || request.viewSecret === null) throw new SdkError("bad-input", { field: "viewSecret" });
+  if (!isStr(request.spendPub)) throw new SdkError("bad-input", { field: "spendPub" });
+  const fromHeight = request.fromHeight === null || request.fromHeight === undefined ? null : intOf(request.fromHeight);
+  if (fromHeight === null || fromHeight < 0) throw new SdkError("bad-input", { field: "fromHeight" });
+  const fetchImpl = typeof request.fetch === "function" ? request.fetch : globalThis.fetch;
+  if (typeof fetchImpl !== "function") throw new SdkError("bad-input", { field: "fetch" });
+  const idleRaw = request.idleTimeoutMs === null || request.idleTimeoutMs === undefined ? null : Number(request.idleTimeoutMs);
+  const totalRaw = request.timeoutMs === null || request.timeoutMs === undefined ? null : Number(request.timeoutMs);
+  const timeoutMs = idleRaw !== null && Number.isFinite(idleRaw) && idleRaw > 0
+    ? idleRaw
+    : (totalRaw !== null && Number.isFinite(totalRaw) && totalRaw > 0 ? totalRaw : 20000);
+  const minConfirmationsRaw = request.minConfirmations === null || request.minConfirmations === undefined ? null : Number(request.minConfirmations);
+  const minConfirmations = minConfirmationsRaw !== null && Number.isFinite(minConfirmationsRaw)
+    ? Math.max(1, Math.trunc(minConfirmationsRaw))
+    : 1;
+  const signal = request.signal && typeof request.signal.addEventListener === "function" ? request.signal : null;
+  const checkpoint = request.checkpoint && typeof request.checkpoint === "object" ? request.checkpoint : null;
+  const onProgress = typeof request.onProgress === "function" ? request.onProgress : () => {};
+  const bound = engine.xmrScan.watchedAddressVerdict({ address: request.address, viewSecret: request.viewSecret, spendPub: request.spendPub });
+  if (!bound.ok) {
+    if (bound.code === "bad-input") throw new SdkError("bad-input", { field: bound.field || "address", why: bound.why });
+    throw new SdkError(bound.code, { field: bound.field || "address", address: request.address });
+  }
+  const addressNetwork = bound.keys && bound.keys.network ? bound.keys.network : null;
+  if (request.network !== undefined && request.network !== null && addressNetwork && request.network !== addressNetwork) {
+    throw new SdkError("bad-input", { field: "network", why: "address-network-mismatch" });
+  }
+  const watched = { address: request.address, viewSecret: bound.viewSecret, spendPub: bound.spendPub };
+  let info;
+  try { info = await getInfo(node, fetchImpl, timeoutMs, { signal }); }
+  catch (error) {
+    return { transfers: [], tip: null, fromHeight, minConfirmations,
+      complete: false, through: null, checkpoint: null, blocked: false, failed: [failureOf(error, node)] };
+  }
+  const network = isStr(request.network) ? request.network : info.nettype;
+  if (!isStr(network)) throw new SdkError("bad-input", { field: "network" });
+  if (addressNetwork && info.nettype && addressNetwork !== info.nettype) {
+    throw new SdkError("bad-input", { field: "node", why: "node-network-mismatch" });
+  }
+  if (!info.synced) {
+    return { transfers: [], tip: info.height, fromHeight, minConfirmations,
+      complete: false, through: null, checkpoint: null, blocked: true,
+      failed: [{ url: node.url, operator: node.operator, code: "stale", why: "not-synchronized" }] };
+  }
+  const top = Math.max(0, info.height - 1);
+  if (top < fromHeight) {
+    return { transfers: [], tip: info.height, fromHeight, minConfirmations, complete: true, through: null,
+      checkpoint: null, blocked: false, failed: [] };
+  }
+  const identity = { network, address: request.address, fromHeight };
+  let bytes = 0;
+  const countBytes = (n) => { if (Number.isFinite(n) && n > 0) bytes += n; };
+  let prior = null;
+  if (checkpoint && typeof checkpoint.read === "function") {
+    try { prior = validCheckpoint(checkpoint.read(), identity); }
+    catch (error) { throw callerFailure("checkpoint.read", error); }
+    if (!prior && typeof checkpoint.discard === "function") {
+      try { checkpoint.discard(); }
+      catch (error) { throw callerFailure("checkpoint.discard", error); }
+    }
+  }
+  let replay = 0;
+  const run = async (startRecord) => {
+    let transfers = [];
+    let through = null;
+    let blocksVerified = 0;
+    let previousHash = null;
+    if (startRecord) {
+      transfers = startRecord.transfers.slice();
+      through = { height: startRecord.through.height, hash: normalizedHash(startRecord.through.hash) };
+      blocksVerified = through.height - fromHeight + 1;
+      previousHash = through.hash;
+      // A stored height is a claim. The block at that height must still carry the same hash, or the chain moved.
+      let anchor;
+      try {
+        anchor = await getBlock(node, through.height, fetchImpl, timeoutMs, { signal, onBytes: countBytes });
+      } catch (error) {
+        const failure = failureOf(error, node);
+        failure.height = through.height;
+        return { transfers, tip: info.height, fromHeight, minConfirmations, complete: false, through,
+          checkpoint: checkpointRecord({ ...identity, through, transfers }), blocked: false, failed: [failure] };
+      }
+      if (!anchor.hash || normalizedHash(anchor.hash) !== through.hash) throw new Error("reorg");
+    }
+    const total = top - fromHeight + 1;
+    const emit = () => {
+      try {
+        onProgress({
+          phase: "blocks", through: through ? through.height : null, blocksVerified, blocksTotal: total,
+          bytes, operator: node.operator,
+        });
+      } catch (error) { throw callerFailure("onProgress", error); }
+    };
+    emit();
+    for (let height = through ? through.height + 1 : fromHeight; height <= top; height += 1) {
+      if (signal && signal.aborted) throw new SdkError("xmr-no-nodes", { node: node.url, name: "AbortError", why: "cancelled" });
+      let block;
+      let txs = [];
+      try {
+        block = await getBlock(node, height, fetchImpl, timeoutMs, { signal, onBytes: countBytes });
+        if (!hash64(block.hash)) throw new SdkError("xmr-no-nodes", { node: node.url, why: "no-block", height });
+        if (block.numTxes !== null && block.txHashes.length !== block.numTxes) throw new SdkError("xmr-no-nodes", { node: node.url, why: "block-incomplete", height });
+        if (previousHash && (!block.parent || normalizedHash(block.parent) !== previousHash)) throw new Error("reorg");
+        if (!block.txHashes.every((hash) => hash64(hash))) throw new SdkError("xmr-no-nodes", { node: node.url, why: "block-incomplete", height });
+        if (block.txHashes.length) txs = await getBlockTxs(node, block.txHashes, fetchImpl, timeoutMs, { signal, onBytes: countBytes });
+      } catch (error) {
+        if (String(error && error.message) === "reorg") throw error;
+        const failure = failureOf(error, node);
+        failure.height = height;
+        return { transfers, tip: info.height, fromHeight, minConfirmations, complete: false, through,
+          checkpoint: through ? checkpointRecord({ ...identity, through, transfers }) : null, blocked: false, failed: [failure] };
+      }
+      for (const tx of txs) {
+        const hit = engine.xmrScan.matchTransaction(tx, [watched], { height, tipHeight: top, nowSec: request.nowSec });
+        if (!hit.length) continue;
+        const confirmations = confirmationsOf(tx, height, top);
+        transfers.push(recoveryObservation(tx, hit, node, { height, blockHash: block.hash, confirmations }));
+      }
+      through = { height, hash: normalizedHash(block.hash) };
+      previousHash = through.hash;
+      blocksVerified += 1;
+      if (checkpoint && typeof checkpoint.save === "function") {
+        try { checkpoint.save(checkpointRecord({ ...identity, through, transfers })); }
+        catch (error) { throw callerFailure("checkpoint.save", error); }
+      }
+      emit();
+    }
+    return { transfers, tip: info.height, fromHeight, minConfirmations, complete: true, through,
+      checkpoint: through ? checkpointRecord({ ...identity, through, transfers }) : null, blocked: false, failed: [] };
+  };
+  for (;;) {
+    try {
+      return await run(prior);
+    } catch (error) {
+      if (error && error.caller) throw error;
+      if (String(error && error.message) === "reorg" && replay === 0) {
+        replay += 1;
+        prior = null;
+        if (checkpoint && typeof checkpoint.discard === "function") {
+          try { checkpoint.discard(); }
+          catch (discardError) { throw callerFailure("checkpoint.discard", discardError); }
+        }
+        continue;
+      }
+      const failure = failureOf(error, node);
+      return { transfers: [], tip: info.height, fromHeight, minConfirmations, complete: false, through: null,
+        checkpoint: null, blocked: false, failed: [failure] };
+    }
+  }
 }
 
 /**

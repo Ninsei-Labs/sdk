@@ -753,6 +753,13 @@ export interface SwapsApi {
    */
   verifyRecovery(request: XmrRecoveryRequest): Promise<XmrRecoveryVerdict>;
   /**
+   * THE PRIMARY READ. One chosen node from `fromHeight` to its head, with a caller-owned checkpoint, progress
+   * events and a resume that continues after the verified block. It is not a two-operator decision; a complete
+   * range from this node is the history input on which the independent check (or a later confirmation) is built.
+   * A short body, a moved anchor or a broken parent link is `complete: false`, never an empty range.
+   */
+  readRecovery(request: XmrRecoveryReadRequest): Promise<XmrRecoveryReadVerdict>;
+  /**
    * RUN THE EXACT CHECK AND THE WITNESS-V1 SLICE CHECK SIDE BY SIDE. The exact verdict still decides; this
    * returns both readings and any difference, and changes no swap state. `witnessNodes` must name at least one
    * node with `protocol: "witness-v1"`. It is the staging step before slice-only verification.
@@ -884,6 +891,68 @@ export interface XmrRecoveryRequest {
   readonly nowSec?: number;
   readonly timeoutMs?: number;
   readonly fetch?: FetchLike;
+}
+
+/** The caller-owned checkpoint of the primary recovery read. */
+export interface XmrRecoveryCheckpoint {
+  readonly version: 1;
+  readonly network: string;
+  readonly address: string;
+  readonly fromHeight: number;
+  readonly through: { readonly height: number; readonly hash: string } | null;
+  readonly transfers: readonly XmrRecoveryTransfer[];
+  readonly outputs: readonly Record<string, unknown>[];
+  readonly spends: readonly Record<string, unknown>[];
+  readonly digest: string;
+}
+
+export interface XmrRecoveryCheckpointStore {
+  read(): XmrRecoveryCheckpoint | null | undefined;
+  save(record: XmrRecoveryCheckpoint): void;
+  discard?(): void;
+}
+
+export interface XmrRecoveryProgress {
+  readonly phase: "blocks";
+  readonly through: number | null;
+  readonly blocksVerified: number;
+  readonly blocksTotal: number;
+  readonly bytes: number;
+  readonly operator: string;
+}
+
+/**
+ * ONE NODE, FROM `fromHeight` TO ITS HEAD. Unlike `verifyRecovery`, this is a history/progress read, not a
+ * two-operator decision: the caller owns the independent check. The checkpoint is stored by the caller; a moved
+ * anchor or a digest that does not describe the record makes the SDK replay from `fromHeight`.
+ */
+export interface XmrRecoveryReadRequest {
+  readonly node: XmrNode | string;
+  readonly address: string;
+  readonly viewSecret: string | bigint;
+  readonly spendPub: string;
+  readonly fromHeight: number;
+  readonly minConfirmations?: number;
+  readonly network?: string;
+  readonly nowSec?: number;
+  readonly idleTimeoutMs?: number;
+  readonly timeoutMs?: number;
+  readonly fetch?: FetchLike;
+  readonly checkpoint?: XmrRecoveryCheckpointStore;
+  readonly onProgress?: (event: XmrRecoveryProgress) => void;
+  readonly signal?: AbortSignal;
+}
+
+export interface XmrRecoveryReadVerdict {
+  readonly transfers: readonly XmrRecoveryTransfer[];
+  readonly tip: number | null;
+  readonly fromHeight: number;
+  readonly minConfirmations: number;
+  readonly complete: boolean;
+  readonly through: { readonly height: number; readonly hash: string } | null;
+  readonly checkpoint: XmrRecoveryCheckpoint | null;
+  readonly blocked: boolean;
+  readonly failed: readonly { readonly url: string; readonly operator: string; readonly code?: string; readonly why?: string; readonly height?: number; readonly status?: number }[];
 }
 
 /** One verified transfer returned by the recovery read. */

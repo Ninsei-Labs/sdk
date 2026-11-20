@@ -2588,6 +2588,8 @@ const backupConfirmationCheck = () => runScriptCheck("check-backup-confirmation.
 const keyViewCheck = () => runScriptCheck("check-key-view.mjs", "key view");
 const keyImageCheck = () => runScriptCheck("check-key-image.mjs", "key image");
 const keyImageTeethCheck = () => runScriptCheck("check-key-image-teeth.mjs", "key image teeth");
+const recoveryReadCheck = () => runScriptCheck("check-recovery-read.mjs", "recovery read");
+const recoveryReadTeethCheck = () => runScriptCheck("check-recovery-read-teeth.mjs", "recovery read teeth");
 const pendingTeethCheck = () => runScriptCheck("check-pending-teeth.mjs", "pending funding teeth");
 const relayViewCheck = () => runScriptCheck("check-relay-view.mjs", "relay view");
 const relayTermsCheck = () => runScriptCheck("check-relay-terms.mjs", "relay terms");
@@ -2707,6 +2709,8 @@ const CHECKS = {
   "sell-start": sellStartCheck,
   "arrival-consensus": arrivalConsensusCheck,
   "arrival-recovery": arrivalRecoveryCheck,
+  "recovery-read": recoveryReadCheck,
+  "recovery-read-teeth": recoveryReadTeethCheck,
   "arrival-shadow": arrivalShadowCheck,
   "arrival-teeth": arrivalTeethCheck,
   "arrival-real": arrivalRealCheck,
