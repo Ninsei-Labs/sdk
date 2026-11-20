@@ -138,8 +138,10 @@ export function watchedAddressVerdict({ address, viewSecret, spendPub } = {}) {
     return { ok: false, code: "bad-input", why: "not-a-monero-address", field: "address" };
   }
   if (!keys.network) return { ok: false, code: "bad-input", why: "not-a-primary-address", field: "address" };
+  // ARRIVAL DOES NOT NEED THE PRIVATE SPEND KEY. The public spend key is in the address, so a caller that has only
+  // the address and the view secret still binds the watched identity; a supplied key is checked against it.
   const wantedSpend = String(spendPub === undefined || spendPub === null ? "" : spendPub).replace(/^0x/, "").toLowerCase();
-  if (!wantedSpend || wantedSpend !== keys.spendPub.toLowerCase()) {
+  if (wantedSpend && wantedSpend !== keys.spendPub.toLowerCase()) {
     return { ok: false, code: "xmr-address-mismatch", field: "spendPub" };
   }
   const form = viewKeyFormForAddress(viewSecret, keys.viewPub);

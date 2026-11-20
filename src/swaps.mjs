@@ -796,6 +796,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
     // THE ARRIVAL VERDICT WITHOUT THE WATCH LOOP, and the deadline check as a separate call: an interface may
     // want to run both itself. The watch uses exactly these, so there is one decision, not two.
     verifyArrival: (request) => xmrArrival.verifyArrival(withDefaultFetch(request)),
+    verifyArrivalFromRead: (request) => xmrArrival.verifyArrivalFromRead(withDefaultFetch(request)),
     verifyRecovery: (request) => xmrArrival.verifyRecovery(withDefaultFetch(request)),
     readRecovery: (request) => xmrArrival.readRecovery(withDefaultFetch(request)),
     readRecoveryWitness: (request) => xmrArrival.readRecoveryWitness(withDefaultFetch(request)),

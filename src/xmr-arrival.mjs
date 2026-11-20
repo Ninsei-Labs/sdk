@@ -317,10 +317,11 @@ async function findPoolTransfer(node, { expectedAtomic, watched, tip, nowSec, fe
  */
 export async function verifyArrival(request) {
   if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
+  if (request.amountRule !== undefined && request.amountRule !== null) return verifyArrivalFromRead(request);
   const nodes = normalizeNodes(request.nodes);
   if (!isStr(request.address)) throw new SdkError("bad-input", { field: "address" });
   if (request.viewSecret === undefined || request.viewSecret === null) throw new SdkError("bad-input", { field: "viewSecret" });
-  if (!isStr(request.spendPub)) throw new SdkError("bad-input", { field: "spendPub" });
+  if (request.spendPub !== undefined && request.spendPub !== null && !isStr(request.spendPub)) throw new SdkError("bad-input", { field: "spendPub" });
   let expectedAtomic;
   try { expectedAtomic = BigInt(request.expectedAtomic); } catch { throw new SdkError("bad-input", { field: "expectedAtomic" }); }
   if (expectedAtomic <= 0n) throw new SdkError("bad-input", { field: "expectedAtomic" });
@@ -1142,6 +1143,86 @@ export async function readRecoveryWitness(request) {
 }
 
 /**
+ * THE ARRIVAL DECISION OVER ONE READ. It uses `verifyRecovery` (primary read plus plain-daemon witnesses) and applies
+ * the owner's amount rule to the same observations:
+ *   - `at-least` (buy): the sum of distinct verified outputs across confirmed, unlocked transfers must reach the quote;
+ *   - `exact` (sale): the sum of confirmed, unlocked transfers must equal the signed amount.
+ * An incomplete read is unknown; a one-node transfer is not an arrival.
+ */
+export async function verifyArrivalFromRead(request) {
+  if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
+  const rule = request.amountRule === undefined || request.amountRule === null ? "at-least" : request.amountRule;
+  if (rule !== "at-least" && rule !== "exact") throw new SdkError("bad-input", { field: "amountRule" });
+  let expectedAtomic;
+  try { expectedAtomic = BigInt(request.expectedAtomic); } catch { throw new SdkError("bad-input", { field: "expectedAtomic" }); }
+  if (expectedAtomic <= 0n) throw new SdkError("bad-input", { field: "expectedAtomic" });
+  const fromHeight = request.fromHeight === null || request.fromHeight === undefined ? null : intOf(request.fromHeight);
+  if (fromHeight === null || fromHeight < 0) throw new SdkError("bad-input", { field: "fromHeight" });
+  const recovery = await verifyRecovery({
+    nodes: request.nodes, address: request.address, viewSecret: request.viewSecret, spendPub: request.spendPub,
+    fromHeight, minConfirmations: request.minConfirmations, nowSec: request.nowSec, timeoutMs: request.timeoutMs,
+    fetch: request.fetch, keyImages: request.keyImages,
+  });
+  const usable = recovery.transfers.filter((transfer) => transfer.agreed && transfer.confirmed
+    && !transfer.pool && !transfer.locked);
+  const chosen = [];
+  const seenOutputs = new Set();
+  let total = 0n;
+  if (rule === "exact") {
+    for (const transfer of usable) {
+      total += BigInt(transfer.amountAtomic);
+      chosen.push(transfer);
+    }
+  } else {
+    for (const transfer of usable) {
+      for (const output of transfer.outputs || []) {
+        if (!output.amountVerified || output.amountAtomic === null || output.amountAtomic === undefined) continue;
+        const id = transfer.txid + ":" + output.index;
+        if (seenOutputs.has(id)) continue;
+        seenOutputs.add(id);
+        total += BigInt(output.amountAtomic);
+      }
+      chosen.push(transfer);
+    }
+  }
+  const seenByAmount = rule === "exact" ? total === expectedAtomic : total >= expectedAtomic;
+  const seen = seenByAmount && recovery.complete === true;
+  const poolHit = recovery.transfers.find((transfer) => transfer.agreed && transfer.pool);
+  const outputs = [];
+  const outputKeys = new Set();
+  for (const transfer of chosen) {
+    for (const output of transfer.outputs || []) {
+      const id = transfer.txid + ":" + output.index;
+      if (outputKeys.has(id)) continue;
+      outputKeys.add(id);
+      outputs.push({ ...output, txid: transfer.txid, height: transfer.height, blockHash: transfer.blockHash });
+    }
+  }
+  const first = chosen[0] || poolHit || null;
+  return {
+    seen, state: seen ? "arrived" : (poolHit ? "pool" : "pending"),
+    absent: false,
+    txid: first ? first.txid : null,
+    height: first ? first.height : null,
+    blockHash: first ? first.blockHash : null,
+    amountAtomic: total.toString(),
+    amountVerified: outputs.every((output) => output.amountVerified === true),
+    amountRule: rule,
+    confirmations: chosen.length ? Math.min(...chosen.map((transfer) => Number(transfer.confirmations))) : 0,
+    needConfirmations: recovery.minConfirmations,
+    tip: recovery.tip,
+    operators: [...new Set(chosen.flatMap((transfer) => transfer.operators || []))],
+    checked: recovery.checked,
+    failed: recovery.failed,
+    outputs,
+    transfers: chosen,
+    locked: false,
+    unlock: null,
+    agreedBy: chosen.flatMap((transfer) => transfer.agreedBy || []),
+  };
+}
+
+/**
  * THE RECOVERY READ. Unlike `verifyArrival`, it has no expected amount and never calls a short transfer a refusal:
  * it returns every matching transfer from the order's start height, including a transfer still in the pool. Each
  * transfer carries its verified outputs and the operators that agreed on the same observation. A transfer seen by
@@ -1152,7 +1233,7 @@ export async function verifyRecovery(request) {
   const nodes = normalizeNodes(request.nodes);
   if (!isStr(request.address)) throw new SdkError("bad-input", { field: "address" });
   if (request.viewSecret === undefined || request.viewSecret === null) throw new SdkError("bad-input", { field: "viewSecret" });
-  if (!isStr(request.spendPub)) throw new SdkError("bad-input", { field: "spendPub" });
+  if (request.spendPub !== undefined && request.spendPub !== null && !isStr(request.spendPub)) throw new SdkError("bad-input", { field: "spendPub" });
   const fromHeight = intOf(request.fromHeight);
   if (fromHeight === null || fromHeight < 0) throw new SdkError("bad-input", { field: "fromHeight" });
   const minConfirmations = Math.max(1, intOf(request.minConfirmations) ?? 1);
@@ -1168,6 +1249,7 @@ export async function verifyRecovery(request) {
     throw new SdkError(bound.code, { field: bound.field || "address", address: request.address });
   }
   const watched = { address: request.address, viewSecret: bound.viewSecret, spendPub: bound.spendPub };
+  const spendPub = bound.spendPub;
 
   const tracked = normalizeKeyImages(request.keyImages);
   const live = [];
@@ -1198,7 +1280,7 @@ export async function verifyRecovery(request) {
     let read;
     try {
       const common = {
-        address: request.address, viewSecret: request.viewSecret, spendPub: request.spendPub,
+        address: request.address, viewSecret: request.viewSecret, spendPub,
         fromHeight, minConfirmations, network: request.network, keyImages: request.keyImages,
         nowSec, timeoutMs, idleTimeoutMs: request.idleTimeoutMs ?? request.timeoutMs, fetch: fetchImpl,
       };

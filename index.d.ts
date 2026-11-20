@@ -744,6 +744,8 @@ export interface SwapsApi {
    * mempool; it is information only and never counts as seen or arrived.
    */
   verifyArrival(request: XmrArrivalRequest): Promise<XmrArrivalVerdict>;
+  /** The same arrival decision over one recovery read with the explicit `at-least` or `exact` amount rule. */
+  verifyArrivalFromRead(request: XmrArrivalRequest): Promise<XmrArrivalVerdict>;
   /**
    * THE RECOVERY READ. Returns every transfer to the address from `fromHeight` with its verified outputs,
    * confirmations, unlock state and the operators that agreed on the observation. There is no expected amount:
@@ -876,13 +878,17 @@ export interface XmrArrivalRequest {
   readonly nodes: readonly (XmrNode | string)[];
   readonly address: string;
   readonly viewSecret: string | bigint;
-  readonly spendPub: string;
+  /** Optional for arrival: the public spend key is read from the address. A supplied key is checked. */
+  readonly spendPub?: string;
   readonly expectedAtomic: string | number | bigint;
+  /** `at-least` (buy) or `exact` (sale). Selecting a rule uses the one-read amount path. */
+  readonly amountRule?: "at-least" | "exact";
   readonly minConfirmations?: number;
   readonly txid?: string | null;
   readonly fromHeight?: number | null;
   readonly nowSec?: number;
   readonly timeoutMs?: number;
+  readonly keyImages?: readonly (string | XmrRecoveryKeyImage)[];
   /** The transport for node and witness reads; absent - the client's `fetch`, otherwise the global fetch. */
   readonly fetch?: FetchLike;
 }
@@ -892,7 +898,8 @@ export interface XmrRecoveryRequest {
   readonly nodes: readonly (XmrNode | string)[];
   readonly address: string;
   readonly viewSecret: string | bigint;
-  readonly spendPub: string;
+  /** Optional: the public spend key is read from the address; a supplied key is checked. */
+  readonly spendPub?: string;
   readonly fromHeight: number;
   readonly minConfirmations?: number;
   readonly nowSec?: number;
@@ -1149,6 +1156,9 @@ export interface XmrArrivalVerdict {
   readonly locked?: boolean;
   readonly unlock?: { readonly locked: boolean; readonly untilHeight: number | null; readonly untilTime: number | null } | null;
   readonly agreedBy?: readonly { readonly url: string; readonly operator: string; readonly blockHash: string; readonly confirmations: number }[];
+  /** Present when the one-read amount path was selected. */
+  readonly amountRule?: "at-least" | "exact";
+  readonly transfers?: readonly XmrRecoveryTransfer[];
 }
 
 /** What the client's own check established on the agreed block. */

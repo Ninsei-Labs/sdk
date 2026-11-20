@@ -8,7 +8,7 @@ import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { ed25519, keccak256 } from "../src/primitives.mjs";
-import { readRecovery, verifyRecovery } from "../src/xmr-arrival.mjs";
+import { readRecovery, verifyArrival, verifyRecovery } from "../src/xmr-arrival.mjs";
 import { createSweep } from "../src/sweep.mjs";
 import { keyImageFromSpendKey } from "../engine/monero/keyImage.js";
 import {
@@ -31,6 +31,7 @@ let pass = 0;
 const fails = [];
 const ok = (message) => { pass += 1; console.log("  ok    " + message); };
 const bad = (message) => { fails.push(message); console.log("  FAIL  " + message); };
+const okIf = (condition, message) => { if (condition) ok(message); else bad(message); };
 
 function le8(value) {
   const out = new Uint8Array(8);
@@ -251,6 +252,27 @@ console.log("=== 5) BREAKING RUN: AN AMOUNT FILTER DROPS THE SHORT TRANSFER ==="
       rmSync(mutantFile, { force: true });
     }
   }
+}
+
+console.log("=== 6) THE AMOUNT RULES OVER THE SAME READ ===");
+{
+  const split = { [T5]: fixture(100_000_000_000n), [T6]: fixture(200_000_000_000n) };
+  const buy = await verifyArrival({
+    ...request(rpc({ blockTxids: [T5, T6], txs: split }), undefined, { amountRule: "at-least", expectedAtomic: ATOMIC_QUOTE }),
+  });
+  okIf(buy.state === "arrived" && buy.amountRule === "at-least" && BigInt(buy.amountAtomic) === ATOMIC_QUOTE,
+    "buy at-least accepts two outputs that reach the quote");
+  const over = await verifyArrival({
+    ...request(rpc({ blockTxids: [T1], txs: { [T1]: fixture(ATOMIC_OVER) } }), undefined, { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE }),
+  });
+  okIf(over.state === "pending" && over.seen === false, "sale exact refuses an overpayment");
+  const exact = await verifyArrival({
+    ...request(rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) } }), undefined, { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE }),
+  });
+  okIf(exact.state === "arrived" && exact.seen === true, "sale exact accepts the signed amount");
+  const { spendPub: _spendPub, ...withoutSpend } = request(rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) } }));
+  const viewOnly = await verifyArrival({ ...withoutSpend, amountRule: "at-least", expectedAtomic: ATOMIC_QUOTE });
+  okIf(viewOnly.state === "arrived", "arrival with the address and view key only reaches the same answer");
 }
 
 return { note: "recovery reads every transfer without the quoted amount", problems: fails, notes: fails.length ? [] : ["short, over, split and pool transfers are returned"] };
