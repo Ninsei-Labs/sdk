@@ -42,7 +42,11 @@ export function reconcileVerdict({ read, txid, keyImages }) {
       failed: read.failed || [],
     };
   }
-  if (read.complete !== true) {
+  // A START ABOVE THE TIP READ NO BLOCKS. The pool is read by readRecovery, but an absent hash there is not proof
+  // that the hash is absent from the chain: the caller named a range that never reached a block.
+  const noBlockRange = read.through === null && Number.isFinite(read.fromHeight) && Number.isFinite(read.tip)
+    && read.fromHeight > Math.max(0, read.tip - 1);
+  if (read.complete !== true || noBlockRange) {
     return {
       outcome: "unknown",
       resend: false,
@@ -50,7 +54,7 @@ export function reconcileVerdict({ read, txid, keyImages }) {
       height: null,
       blockHash: null,
       pool: false,
-      complete: false,
+      complete: read.complete === true && !noBlockRange,
       failed: read.failed || [],
     };
   }

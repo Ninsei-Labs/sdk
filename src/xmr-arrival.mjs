@@ -825,8 +825,27 @@ export async function readRecovery(request) {
   }
   const top = Math.max(0, info.height - 1);
   if (top < fromHeight) {
-    return { transfers: [], tip: info.height, fromHeight, minConfirmations, target, complete: true, through: null,
-      checkpoint: null, blocked: false, failed: [] };
+    // A RANGE ABOVE THE TIP HAS NO BLOCKS, BUT THE POOL IS STILL READ. The old early return called an empty
+    // block range complete without asking the pool, so a withdrawal already waiting there looked absent.
+    let transfers = [];
+    let spends = [];
+    let poolFailure = null;
+    try {
+      const pool = await scanRecoveryPoolState(node, {
+        watched, tracked, tip: top, nowSec: request.nowSec, fetchImpl, timeoutMs, txid: targetTxid,
+      });
+      if (pool.target) target = pool.target;
+      transfers = pool.transfers;
+      spends = pool.spends;
+    } catch (error) {
+      poolFailure = { ...failureOf(error, node), why: "pool-read" };
+    }
+    return { transfers, tip: info.height, fromHeight, minConfirmations, target,
+      complete: poolFailure === null, through: null, spends, checkpoint: null, blocked: false,
+      ...(poolFailure
+        ? { failed: [poolFailure] }
+        : { availableAtomic: availableAtomicOf(transfers, tracked, spends, minConfirmations),
+          availableSource: { url: node.url, operator: node.operator }, failed: [] }) };
   }
   const identity = { network, address: request.address, fromHeight };
   let bytes = 0;

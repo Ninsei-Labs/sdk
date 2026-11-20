@@ -16,15 +16,17 @@ const TARGET = "a1".repeat(32);
 const SPEND_TX = "b2".repeat(32);
 const INPUT = "cd".repeat(32);
 const OUTPUT_KEY = "ef".repeat(32);
-const TARGET_TX = { version: 2, unlock_time: 0, extra: [], vin: [], vout: [], rct_signatures: { type: 6, ecdhInfo: [], outPk: [] } };
+const TARGET_TX = { version: 2, unlock_time: 0, extra: [], vin: [{ key: { k_image: INPUT } }], vout: [], rct_signatures: { type: 6, ecdhInfo: [], outPk: [] } };
 const SPENT_TX = { version: 2, unlock_time: 0, extra: [], vin: [{ key: { k_image: INPUT } }], vout: [], rct_signatures: { type: 6, ecdhInfo: [], outPk: [] } };
 
 function daemon(mode = "absent") {
   const calls = [];
-  const blockTxs = mode === "block" || mode === "present" ? { [TARGET]: TARGET_TX }
-    : mode === "spent" ? { [SPEND_TX]: SPENT_TX } : {};
-  const poolHashes = mode === "pool" ? [TARGET] : [];
-  const poolTxs = mode === "pool" ? { [TARGET]: TARGET_TX } : {};
+  const blockTxs = mode === "block" || mode === "block-fail" || mode === "present" ? { [TARGET]: TARGET_TX }
+    : mode === "spent" || mode === "spent-fail" ? { [SPEND_TX]: SPENT_TX } : {};
+  const poolMode = mode === "pool" || mode === "pool-beyond";
+  const poolHashes = poolMode ? [TARGET] : [];
+  const poolTxs = poolMode ? { [TARGET]: TARGET_TX } : {};
+  const failAt = mode === "fail" || mode === "block-fail" || mode === "spent-fail" ? 9 : null;
   const allTxs = { ...blockTxs, ...poolTxs };
   const fetch = async (url, init) => {
     const body = JSON.parse(init.body);
@@ -34,7 +36,7 @@ function daemon(mode = "absent") {
     }
     if (body.method === "get_block") {
       const height = Number(body.params.height);
-      if (mode === "fail" && height === 9) return { ok: false, status: 503 };
+      if (failAt === height) return { ok: false, status: 503 };
       const hashes = Object.entries(blockTxs).filter(() => height === 7).map(([id]) => id);
       return { ok: true, json: async () => ({ result: {
         block_header: { height, hash: H(height), prev_hash: H(height - 1), num_txes: hashes.length },
@@ -57,15 +59,16 @@ function daemon(mode = "absent") {
   return { fetch, calls };
 }
 
-const call = (mode, txid = TARGET, keyImages = [{ keyImage: INPUT, outputKey: OUTPUT_KEY }]) => createSweep().reconcile({
+const call = (mode, options = {}) => createSweep().reconcile({
   node: { url: "https://one.example", operator: "one" },
   address: ADDRESS,
   viewSecret: VIEW,
   spendPub: SPEND_PUB,
   fromHeight: 5,
-  txid,
-  keyImages,
+  txid: TARGET,
+  keyImages: [{ keyImage: INPUT, outputKey: OUTPUT_KEY }],
   fetch: daemon(mode).fetch,
+  ...options,
 });
 
 const problems = [];
@@ -104,8 +107,28 @@ const check = (condition, message) => { checks += 1; if (condition) console.log(
     "a broken pool read keeps the bytes and signs nothing");
 }
 {
+  const result = await call("block-fail");
+  check(result.outcome === "present" && result.resend === false && result.complete === false,
+    "a target found before a later walk break is still present");
+}
+{
+  const result = await call("spent-fail");
+  check(result.outcome === "inputs-spent" && result.resend === false && result.complete === false,
+    "a spend seen before a later walk break still never resends");
+}
+{
+  const result = await call("pool-beyond", { fromHeight: 20 });
+  check(result.outcome === "present" && result.resend === false && result.pool === true,
+    "a pool hash above the block range is still present");
+}
+{
+  const result = await call("absent", { fromHeight: 20 });
+  check(result.outcome === "unknown" && result.resend === false,
+    "a start above the tip cannot authorize a resend from an empty block range");
+}
+{
   let error = null;
-  try { await call("absent", "not-a-hash"); } catch (caught) { error = caught; }
+  try { await call("absent", { txid: "not-a-hash" }); } catch (caught) { error = caught; }
   check(error && error.code === "bad-input" && error.params && error.params.field === "txid",
     "a malformed saved hash is refused before any read");
 }
