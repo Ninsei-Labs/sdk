@@ -34,7 +34,7 @@ async function planRequest() {
   return { file: { contents: await engine.recoveryFile.createRecoveryFile(payload, PASSPHRASE) }, passphrase: PASSPHRASE, to: ADDRESS };
 }
 
-function wallet({ signed = [{ signed: true }], walletHeight = 200, nodeHeight = 200, balance = 5_000_000_000_000n, unlocked = 5_000_000_000_000n, rescanSpentFails = false, rescanFails = false } = {}) {
+function wallet({ signed = [{ signed: true }], walletHeight = 200, nodeHeight = 200, balance = 5_000_000_000_000n, unlocked = 5_000_000_000_000n, rescanSpentFails = false, rescanSpentMissing = false, rescanFails = false } = {}) {
   const calls = { sweepUnlocked: 0, relay: 0, rescanSpent: 0 };
   const driver = {
     async setRestoreHeight() {},
@@ -44,6 +44,7 @@ function wallet({ signed = [{ signed: true }], walletHeight = 200, nodeHeight = 
     async getHeight() { return walletHeight; },
     async getDaemonHeight() { return nodeHeight; },
   };
+  if (rescanSpentMissing) delete driver.rescanSpent;
   return {
     calls, driver,
     async open() {}, async sync() {}, async unlockedBalance() { return unlocked; },
@@ -68,6 +69,19 @@ test("sign without a complete restore refuses by name", async () => {
     return true;
   });
   assert.equal(adapter.calls.sweepUnlocked, 0);
+});
+
+test("a complete restore on another adapter is not evidence for this wallet", async () => {
+  const sweep = createSweep({});
+  const scanned = wallet();
+  const other = wallet();
+  await restored(sweep, scanned);
+  await assert.rejects(sweep.sign({ ...(await planRequest()), wallet: other }), (error) => {
+    assert.equal(error.code, "sweep-scan-incomplete");
+    assert.equal(error.params.reason, "no-complete-scan");
+    return true;
+  });
+  assert.equal(other.calls.sweepUnlocked, 0);
 });
 
 test("sign refuses a restore stopped behind the node", async () => {
@@ -108,6 +122,16 @@ test("a caller cannot turn a partial scan into a complete one", async () => {
     return true;
   });
   assert.equal(adapter.calls.sweepUnlocked, 0);
+});
+
+test("a driver without rescanSpent names the missing spent status on a locked balance", async () => {
+  const sweep = createSweep({});
+  const adapter = wallet({ balance: 5n, unlocked: 0n, rescanSpentMissing: true });
+  const scan = await restored(sweep, adapter);
+  assert.equal(scan.passes, 1);
+  assert.equal(scan.lockedPass, true);
+  assert.equal(scan.scanComplete, false);
+  assert.equal(scan.scanIncompleteReason, "spent-status-unavailable");
 });
 
 test("an optional rescanSpent refusal continues the full scan and names the missing spent status", async () => {
