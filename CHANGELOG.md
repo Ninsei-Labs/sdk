@@ -1,3 +1,8 @@
+## Unreleased — 2026-11-20
+
+- `sweep.keyImages` derives the key images of an arrival's verified funding outputs without a monero-ts wallet. It uses Monero's `ge_fromfe_frombytes_vartime` map and the per-output derivation, refuses an unverified or malformed output as a whole, and returns the same order as the verified outputs. Monero's own `hash_to_point`, `biased_hash_to_ec` and `generate_key_image` vectors are pinned; the key byte order is cross-checked through monero-ts.
+- `verifyArrival` and `verifyRecovery` expose each verified output's `derivation`; `XmrArrivalVerdict` carries the agreed `outputs` so a caller can derive key images from the same evidence.
+
 ## Unreleased — 2026-11-19
 
 - `createNinsei` accepts the deployment a local anvil just created (`settlement.escrow`), and the `testnet` and `fakechain` node maps are present but empty until the caller names nodes.

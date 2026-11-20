@@ -436,6 +436,7 @@ export async function verifyArrival(request) {
       key: String(o.key || "").replace(/^0x/, "").toLowerCase(),
       amountAtomic: o.amountVerified ? String(o.amountAtomic ?? null) : null,
       amountVerified: o.amountVerified === true,
+      derivation: String(o.derivation || "").replace(/^0x/, "").toLowerCase(),
     }));
     record.unlock = hit[0].unlock;
     // Confirmations of a block: top - height + 1, and top = info.height - 1 (see above), so this is height - located.
@@ -513,14 +514,14 @@ export async function verifyArrival(request) {
 
   if (best.operators.size < 2) {
     return { seen: false, state: "one-node", txid: located.txid, height: located.height, blockHash: best.observation.blockHash,
-      amountAtomic: amountAtomic.toString(), confirmations, operators: [...best.operators], agreedBy, checked: seen, failed };
+      amountAtomic: amountAtomic.toString(), outputs: best.observation.outputs, confirmations, operators: [...best.operators], agreedBy, checked: seen, failed };
   }
   if (confirmations < minConfirmations) {
     return { seen: false, state: "pending", why: "confirmations", txid: located.txid, height: located.height, blockHash: best.observation.blockHash,
-      amountAtomic: amountAtomic.toString(), confirmations, needConfirmations: minConfirmations, agreedBy, checked: seen, failed };
+      amountAtomic: amountAtomic.toString(), outputs: best.observation.outputs, confirmations, needConfirmations: minConfirmations, agreedBy, checked: seen, failed };
   }
   return { seen: true, state: "arrived", txid: located.txid, height: located.height, blockHash: best.observation.blockHash,
-    amountAtomic: amountAtomic.toString(), confirmations, needConfirmations: minConfirmations,
+    amountAtomic: amountAtomic.toString(), outputs: best.observation.outputs, confirmations, needConfirmations: minConfirmations,
     operators: [...best.operators], agreedBy, checked: seen, failed };
 }
 
@@ -535,6 +536,7 @@ function recoveryObservation(tx, hit, node, { height, blockHash, confirmations, 
     key: String(o.key || "").replace(/^0x/, "").toLowerCase(),
     amountAtomic: o.amountVerified ? String(o.amountAtomic ?? null) : null,
     amountVerified: o.amountVerified === true,
+    derivation: String(o.derivation || "").replace(/^0x/, "").toLowerCase(),
   }));
   const amountAtomic = sumOutputs(hit[0]);
   return {

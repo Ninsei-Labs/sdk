@@ -897,7 +897,7 @@ export interface XmrRecoveryTransfer {
   readonly confirmed: boolean;
   readonly amountAtomic: string;
   readonly amountVerified: boolean;
-  readonly outputs: readonly { readonly index: number; readonly key: string; readonly amountAtomic: string | null; readonly amountVerified: boolean }[];
+  readonly outputs: readonly { readonly index: number; readonly key: string; readonly amountAtomic: string | null; readonly amountVerified: boolean; readonly derivation: string }[];
   readonly locked: boolean;
   readonly unlock: { readonly locked: boolean; readonly untilHeight: number | null; readonly untilTime: number | null } | null;
   readonly operators: readonly string[];
@@ -986,6 +986,8 @@ export interface XmrArrivalVerdict {
   /** The node that reported the pool match. Present only for `state: "pool"`. */
   readonly poolFrom?: { readonly url: string; readonly operator: string };
   /** Whether the transaction's `unlock_time` bars the outputs at the reported tip. */
+  readonly outputs?: readonly { readonly index: number; readonly key: string; readonly amountAtomic: string | null;
+    readonly amountVerified: boolean; readonly derivation: string }[];
   readonly locked?: boolean;
   readonly unlock?: { readonly locked: boolean; readonly untilHeight: number | null; readonly untilTime: number | null } | null;
   readonly agreedBy?: readonly { readonly url: string; readonly operator: string; readonly blockHash: string; readonly confirmations: number }[];
@@ -1519,6 +1521,12 @@ export interface SweepApi {
    */
   keys(request: SweepPlanRequest): Promise<SweepKeys>;
   /**
+   * THE KEY IMAGES OF THE VERIFIED FUNDING OUTPUTS. The page has the spend key and the outputs; a wallet would
+   * have to download the block-hash history before it could answer the same question. Every output must be
+   * verified and carry its derivation; a malformed or unverified set is refused as a whole.
+   */
+  keyImages(request: SweepKeyImagesRequest): Promise<readonly SweepKeyImage[]>;
+  /**
    * SIGN WITHOUT SENDING. Holds everything up to and including signing (the free remainder -> sign with
    * `relay: false`), and HOLDS the signed transaction, returning the open session's token. An empty remainder stops
    * the withdrawal here with the code `insufficient-funds`. `relay` sends it - so the interface has a place to show
@@ -1749,6 +1757,32 @@ export interface SweepKeys {
   readonly privateViewKey: string;
   /** The joint Monero address the keys were assembled for. */
   readonly address: string;
+}
+
+/** One verified output as the arrival and recovery reads return it. */
+export interface XmrKeyImageOutput {
+  readonly index: number;
+  readonly key: string;
+  readonly amountAtomic: string | null;
+  readonly amountVerified: boolean;
+  /** The per-output derivation from `scan.js`; required to derive the key image without a wallet. */
+  readonly derivation: string;
+}
+
+export interface XmrKeyImageArrival {
+  readonly outputs?: readonly XmrKeyImageOutput[] | undefined;
+}
+
+export interface SweepKeyImagesRequest {
+  readonly keys: SweepKeys;
+  /** `verifyArrival` or one transfer from `verifyRecovery`. */
+  readonly arrival: XmrKeyImageArrival;
+}
+
+export interface SweepKeyImage {
+  readonly outputKey: string;
+  readonly amountAtomic: string;
+  readonly keyImage: string;
 }
 
 export type SweepStep = "unlock" | "sync" | "sweep" | "relay";

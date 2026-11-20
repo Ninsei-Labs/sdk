@@ -49,6 +49,8 @@
     "check:arrival-read": "node tools/check-arrival-read.mjs",
     "check:backup-confirmation": "node tools/check-backup-confirmation.mjs",
     "check:key-view": "node tools/check-key-view.mjs",
+    "check:key-image": "node tools/check-key-image.mjs",
+    "check:key-image-teeth": "node tools/check-key-image-teeth.mjs",
     "check:relay-view": "node tools/check-relay-view.mjs",
     "check:relay-terms": "node tools/check-relay-terms.mjs",
     "check:relay-features": "node tools/check-relay-features.mjs",
@@ -185,6 +187,7 @@
   "sideEffects": false,
   "devDependencies": {
     "esbuild": "0.28.2",
+    "monero-ts": "0.11.22",
     "typescript": "7.0.2"
   },
   "allowScripts": {

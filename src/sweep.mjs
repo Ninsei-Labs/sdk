@@ -15,6 +15,7 @@ import { revealedHalfWord } from "./sweep-half.mjs";
 import { takerHalvesV2 } from "./recovery-key.mjs";
 import { jointAddress } from "./order.mjs";
 import { formatXmr } from "../engine/core/xmrAmount.js";
+import { keyImageFromOutput } from "../engine/monero/keyImage.js";
 
 // THE XMR AMOUNT IS PART OF THE RECOVERY FILE. A found order carries the amount the provider signed, in atomic
 // units; the file keeps it in whole XMR, the unit every other payload user reads. An order without the amount
@@ -346,6 +347,50 @@ export function createSweep({ call = null, fetchImpl = null } = {}) {
         // not an engine exception with text inside.
         throw new SdkError("bad-input", { field: "revealedHalf", step: "verify" });
       }
+    },
+
+    // THE KEY IMAGES OF THE VERIFIED FUNDING OUTPUTS. This is the wallet-free half of the spent check: the page
+    // already has the spend key and the outputs from `verifyArrival` / `verifyRecovery`; a full monero-ts wallet
+    // would have to download the block-hash history before it could answer the same question.
+    //
+    // EVERY OUTPUT MUST ALREADY BE VERIFIED. An amount the Pedersen commitment did not confirm is not a funding
+    // output, and a key image for it would be a guess. Missing derivations are refused too: an older caller can
+    // pass an arrival from a build before this field existed, and an empty answer would look like "nothing spent".
+    async keyImages(request = {}) {
+      const keys = request && request.keys;
+      const arrival = request && request.arrival;
+      if (!keys || typeof keys !== "object" || typeof keys.privateSpendKey !== "string") {
+        throw new SdkError("bad-input", { field: "keys" });
+      }
+      if (!arrival || typeof arrival !== "object" || !Array.isArray(arrival.outputs) || !arrival.outputs.length) {
+        throw new SdkError("bad-input", { field: "arrival.outputs" });
+      }
+      const seen = new Set();
+      return arrival.outputs.map((output, position) => {
+        if (!output || typeof output !== "object" || !Number.isSafeInteger(Number(output.index)) || Number(output.index) < 0) {
+          throw new SdkError("bad-input", { field: "arrival.outputs", why: "index", position });
+        }
+        if (output.amountVerified !== true || output.amountAtomic === null || output.amountAtomic === undefined) {
+          throw new SdkError("bad-input", { field: "arrival.outputs", why: "unverified", position });
+        }
+        if (typeof output.key !== "string" || typeof output.derivation !== "string") {
+          throw new SdkError("bad-input", { field: "arrival.outputs", why: "derivation", position });
+        }
+        const id = String(output.key).replace(/^0x/i, "").toLowerCase() + ":" + Number(output.index);
+        if (seen.has(id)) throw new SdkError("bad-input", { field: "arrival.outputs", why: "duplicate", position });
+        seen.add(id);
+        let keyImage;
+        try {
+          keyImage = keyImageFromOutput({
+            outputKey: output.key, derivation: output.derivation, index: Number(output.index),
+            privateSpendKey: keys.privateSpendKey,
+          });
+        } catch {
+          throw new SdkError("bad-input", { field: "arrival.outputs", why: "key-image", position });
+        }
+        return { outputKey: String(output.key).replace(/^0x/i, "").toLowerCase(),
+          amountAtomic: String(output.amountAtomic), keyImage };
+      });
     },
 
     // THE PASS BEFORE SIGNING: set the height, rescan, sync, read the balance, and - when coins exist but none is
