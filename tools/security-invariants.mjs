@@ -42,10 +42,10 @@ export const SECURITY_INVARIANTS = [
     id: "RECOVERY-01",
     statement: "Recovery halves are bound to chain, factory, role and public salt; the mnemonic never leaves the client.",
     files: ["src/recovery-key.mjs", "src/recovery.mjs", "src/public/recovery.mjs", "src/sweep.mjs",
-      "src/sweep-restore.mjs", "engine/monero/keyImage.js"],
+      "src/sweep-restore.mjs", "src/addressGuard.mjs", "engine/monero/keyImage.js"],
     checks: ["tools/check-recovery-key.mjs", "tools/check-recovery-open.mjs", "tools/check-sweep-relay.mjs",
-      "tools/check-spent-status.mjs", "tools/check-sweep-adapter.mjs", "tools/check-key-image.mjs",
-      "tools/check-key-image-teeth.mjs"],
+      "tools/check-spent-status.mjs", "tools/check-sweep-adapter.mjs", "tools/check-sweep-sign-guards.mjs",
+      "tools/check-key-image.mjs", "tools/check-key-image-teeth.mjs"],
   },
   {
     id: "STORE-01",

@@ -5,6 +5,7 @@
 // address, ask the app for the restore height (on the page it is taken by address) and say aloud what is missing
 // so the withdrawal can go. Funds do not move at this step.
 import { SdkError } from "./errors.mjs";
+import { checkAddressOrThrow } from "./addressGuard.mjs";
 import { actionMaterialOf } from "./sweep-action.mjs";
 import { primitives } from "./primitives.mjs";
 import * as engine from "./engine.mjs";
@@ -201,6 +202,10 @@ export function createSweep({ call = null, fetchImpl = null } = {}) {
   // owned by the library's wallet.
   const sessions = new Map();
   let sessionSeq = 0;
+  // THE SCAN THAT PRECEDED SIGNING. `sweep.restore` records its own answer against the exact wallet adapter that
+  // performed it; `sign` accepts only a complete scan from that same adapter. This is what keeps a stale or partial
+  // restore from becoming a signature, without adding a caller-supplied boolean that a page could forget or forge.
+  const scans = new WeakMap();
 
   // THE NETWORK NAME MONERO-TS TAKES. The adapter speaks a string ("stagenet") because that is what a node says and
   // what a human reads; the library wants its own enum. That translation used to be a callback on the sweep page -
@@ -308,6 +313,9 @@ export function createSweep({ call = null, fetchImpl = null } = {}) {
       return {
         swapId: payload.swapId || null,
         address,
+        // The Monero network is part of the destination check: a file's address and a recipient typed for another
+        // network must not be treated as interchangeable.
+        network: wallet.network || null,
         spendable,
         restoreHeight,
         steps: STEPS,
@@ -404,7 +412,19 @@ export function createSweep({ call = null, fetchImpl = null } = {}) {
       // THE INSTANCE TRANSPORT REACHES THE WINDOW AND KEY-IMAGE READS TOO. A per-call `fetchImpl` still wins;
       // without this fallback a Tor/proxy caller's restore would silently use the page's global fetch.
       if (typeof merged.fetchImpl !== "function" && typeof fetchImpl === "function") merged.fetchImpl = fetchImpl;
-      return await restoreWallet(merged);
+      const result = await restoreWallet(merged);
+      // A PARTIAL SCAN IS STILL RECORDED: `sign` must name why it refuses, not pretend no restore ever happened.
+      // COPY THE VERDICT. The returned object belongs to the caller; keeping that reference would let a page flip
+      // `scanComplete` after the fact and turn the guard off.
+      if (merged.wallet && result && typeof result === "object") {
+        scans.set(merged.wallet, {
+          scanComplete: result.scanComplete === true,
+          ...(result.scanIncompleteReason ? { scanIncompleteReason: result.scanIncompleteReason } : {}),
+          walletHeight: result.walletHeight ?? null,
+          nodeHeight: result.nodeHeight ?? null,
+        });
+      }
+      return result;
     },
 
     // THE WITHDRAWAL ITSELF. The wallet arrives as an adapter (the WASM and the worker live with whoever builds the
@@ -430,6 +450,9 @@ export function createSweep({ call = null, fetchImpl = null } = {}) {
     async sign(request) {
       const plan = await api.plan(request);
       if (!request || typeof request.to !== "string" || !request.to) throw new SdkError("bad-input", { field: "to" });
+      // THE ADDRESS IS CHECKED BEFORE THE WALLET IS OPENED. A typo or a destination for another Monero network is
+      // refused here, not discovered by the wallet after it has already built a transaction.
+      await checkAddressOrThrow(request.to, plan.network, "to");
       // ONE ADAPTER FOR RESTORE AND SIGN. A caller that already holds the opened and synced wallet passes it as
       // `wallet`; a caller that wants the SDK to build one passes `connectWallet`.
       const wallet = request.wallet !== undefined && request.wallet !== null
@@ -441,6 +464,17 @@ export function createSweep({ call = null, fetchImpl = null } = {}) {
       const missing = role.filter((name) => !wallet || typeof wallet[name] !== "function");
       if (missing.length) throw new SdkError("bad-input", { field: "wallet", missing });
 
+      // NO COMPLETE SCAN, NO SIGNATURE. The check is tied to this exact wallet adapter because `restore` stored its
+      // answer against that object; a restore for another wallet or another node is not evidence for this one.
+      const scan = scans.get(wallet);
+      if (!scan || scan.scanComplete !== true) {
+        throw new SdkError("sweep-scan-incomplete", {
+          reason: scan && scan.scanIncompleteReason ? scan.scanIncompleteReason : "no-complete-scan",
+          walletHeight: scan && scan.walletHeight !== undefined ? scan.walletHeight : null,
+          nodeHeight: scan && scan.nodeHeight !== undefined ? scan.nodeHeight : null,
+        });
+      }
+
       await wallet.open(plan);
       try {
         // A SYNC PASS - BEST-EFFORT, NOT THE VERDICT. A node whose chain the wallet cannot scan makes the library
@@ -451,6 +485,11 @@ export function createSweep({ call = null, fetchImpl = null } = {}) {
         // zero, and the refusal would look like success.
         if (unlocked <= 0n) throw new SdkError("insufficient-funds", { unlocked: unlocked.toString() });
         const signed = await walletStep("sweepUnlocked", () => wallet.sweepUnlocked({ address: request.to, relay: false }));
+        // ONE SWAP ADDRESS, ONE TRANSACTION. A wallet that had to split the sweep pays a fee on every part and the
+        // page cannot present one withdrawal as several; refuse before the signed set can reach `relay`.
+        if (Array.isArray(signed) && signed.length > 1) {
+          throw new SdkError("sweep-split", { count: signed.length });
+        }
         // WHAT THE TRANSFER COSTS, WHEN THE WALLET CAN SAY. A withdrawal moves the whole free remainder, so the fee
         // is not extra money on top - it is taken out of it, and the recipient receives the remainder MINUS the fee.
         // An adapter that cannot report a fee answers null; publishing 0 there would be a claim the package cannot

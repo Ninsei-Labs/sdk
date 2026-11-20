@@ -195,7 +195,8 @@ export async function checkAddress(addr, opts = {}) {
   }
   const shape = networkFromShape(a);
   if (opts.expectNetwork && shape && shape !== opts.expectNetwork) {
-    return { ok: false, reason: `This is a ${shape} address, but the swap runs on ${opts.expectNetwork}` };
+    return { ok: false, reason: `This is a ${shape} address, but the swap runs on ${opts.expectNetwork}`,
+      network: shape, expectedNetwork: opts.expectNetwork };
   }
   try {
     const bytes = decodeMoneroBase58(a);
@@ -215,7 +216,8 @@ export async function checkAddress(addr, opts = {}) {
     const meta = PREFIXES[prefix] || { network: "unknown", kind: "unknown" };
     if (meta.network === "unknown") return { ok: false, reason: `Unsupported address prefix ${prefix}` };
     if (opts.expectNetwork && meta.network !== opts.expectNetwork) {
-      return { ok: false, reason: `This is a ${meta.network} address, but the swap runs on ${opts.expectNetwork}` };
+      return { ok: false, reason: `This is a ${meta.network} address, but the swap runs on ${opts.expectNetwork}`,
+        network: meta.network, expectedNetwork: opts.expectNetwork };
     }
     return { ok: true, verified: true, network: meta.network, kind: meta.kind, bytes: bytes.length };
   } catch (e) {

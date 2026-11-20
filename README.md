@@ -298,6 +298,13 @@ privacy-preserving path for a recovery page, because the RPC does not learn whic
 the answer is `sweep-relay-unknown`: the session token, the signed set and any known txids stay in the open session.
 The same token never relays that set again. Check the chain before signing a new withdrawal.
 
+`sweep.sign` refuses with `sweep-scan-incomplete` unless `sweep.restore` first completed a full scan on that same
+wallet adapter; a behind-node, failed rescan or missing spent status is not a zero balance. A public node that refuses
+the optional `rescanSpent` pass no longer fails the restore: the full scan is kept and the result names
+`spent-status-unavailable`. A sweep that needs more than one transaction is refused with `sweep-split`; it is never
+split silently. Both `sweep.sign` and `swaps.start` check the destination with `checkAddress`, so a bad checksum or an
+address for another Monero network is refused before a wallet or a funding send.
+
 A window spent check counts status `2` as spent in the pool. A short, long or non-integer `spent_status` list is not a
 spent count: `spent` is null and `scanComplete` is false with `scanIncompleteReason: "spent-status-unavailable"`.
 
@@ -377,8 +384,8 @@ still checks the address shape, so a mainnet withdrawal is not refused because t
 stagenet. The withdrawal window retries a `429`, a timeout or a `5xx` before it gives up. If the window still cannot be read,
 `restoreWallet` falls back to the full scan and reports `window.fallback: true` with `fallbackWhy: "window-read"` and
 the node's status; a withdrawal is not refused because the node was busy. When the wallet cannot reach the node's
-height, the result says `scanComplete: false` with `scanIncompleteReason: "sync-failed"`, `"behind-node"` or
-`"no-heights"`; a zero balance in that state is not an empty wallet.
+height, the result says `scanComplete: false` with `scanIncompleteReason: "sync-failed"`, `"rescan-failed"`, `"behind-node"`,
+`"no-heights"` or `"spent-status-unavailable"`; a zero balance in that state is not an empty wallet.
 
 ## Extending to other networks (Tron, Solana and beyond)
 

@@ -18,6 +18,7 @@ import { FACTORY_METHODS, ORDER_CREATED_TOPIC } from "../engine/evm/factory.js";
 import { encodeStatus } from "../engine/evm/escrow.js";
 import { takerHalvesV2 } from "../src/recovery-key.mjs";
 
+const XMR_TO = "59DnddZzVBCevVg9YB3zCs24DSRH4ByS2FMBafPpYxSEB6FMegQNEbtNzbLjrrEUPNAg9NhK5uMiiAZpAvENBS4D4mEPcRq";
 const WORDS = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 const addr = (b) => "0x" + b.repeat(20);
 const now = Math.floor(Date.now() / 1000);
@@ -62,7 +63,7 @@ async function startWith(view, salt = order.salt, extra = {}, autoSalt = false, 
   const activeQuote = Object.prototype.hasOwnProperty.call(options, "quote") ? options.quote : quote;
   const request = { quote: { id: "q", chain: "arbitrum-sepolia", asset: "ETH", amount: 1, size: 1, xmrAmount: quote.xmrAmount }, order: activeOrder, orderQuote: activeQuote,
     counterparty, recoveryKey: WORDS, ...(autoSalt ? {} : { recoverySalt: salt }),
-    receiveTo: "synthetic-xmr-destination", restoreHeight: 100, wallet, onRecoveryKey: async () => true };
+    receiveTo: XMR_TO, restoreHeight: 100, wallet, onRecoveryKey: async () => true };
   const result = await createSwaps({ mode: "live", xmrNetwork: "stagenet", logs: async () => [],
     chunkOptions: options.chunkOptions || null,
     createRecord: options.createRecord || undefined,
@@ -96,7 +97,7 @@ console.log("=== 0) A SELL START IS REFUSED BEFORE ANY WALLET ===");
 
 console.log("=== 0) THE PER-SWAP FILE PATH IS GONE ===");
 {
-  const result = await createSwaps({}).start({ quote: {}, order: {}, receiveTo: "synthetic-xmr-destination" }).catch((error) => error);
+  const result = await createSwaps({}).start({ quote: {}, order: {}, receiveTo: XMR_TO }).catch((error) => error);
   if (result && result.code === "bad-input" && result.params && result.params.field === "recoveryKey") {
     ok("a start without a recovery key is refused by name");
   } else bad("start without a key -> " + JSON.stringify(result && (result.code || result)));
@@ -182,7 +183,7 @@ async function startPending({ fresh = true, receipt = { status: "0x1", logs: [],
   const baseQuote = withSignature ? quote : { ...quote, signature: undefined };
   const activeQuote = { ...baseQuote, ...quotePatch };
   const request = { quote: { ...(withId ? { id: "q" } : {}), chain: "arbitrum-sepolia", asset: "ETH", amount: 1, size: 1 }, order: { ...order, salt: orderSalt, ...orderPatch }, ...(withQuote ? { orderQuote: activeQuote } : {}),
-    counterparty, recoveryKey: WORDS, recoverySalt, receiveTo: "synthetic-xmr-destination",
+    counterparty, recoveryKey: WORDS, recoverySalt, receiveTo: XMR_TO,
     restoreHeight: 100, wallet, onRecoveryKey: async () => true, ...(escrow ? { escrow } : {}) };
   const fundedStatus = "0x" + [1, 0, 0, 0].map((value) => BigInt(value).toString(16).padStart(64, "0")).join("");
   const result = await createSwaps({ mode: "live", xmrNetwork: "stagenet", logs: async () => [],

@@ -5,6 +5,7 @@
 // order and halves -> server -> watching the Monero address. A lock without a recovery file is a lock with nothing
 // to open it with if the browser is lost, so the confirmation stands BEFORE anything that locks funds.
 import { SdkError } from "./errors.mjs";
+import { checkAddressOrThrow } from "./addressGuard.mjs";
 import { quoteLifeVerdict } from "./quotePolicy.mjs";
 import { SDK_VERSION } from "./version.mjs";
 import * as engine from "./engine.mjs";
@@ -919,13 +920,16 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       if (request.side === "sell") {
         throw new SdkError("bad-input", { field: "side", why: "sell-not-supported", surface: "swaps.start" });
       }
+      if (!request.receiveTo || typeof request.receiveTo !== "string") throw new SdkError("bad-input", { field: "receiveTo" });
+      // THE RECIPIENT IS CHECKED BEFORE THE QUOTE, THE RECOVERY KEY OR THE CHAIN. A bad checksum or another Monero
+      // network would otherwise be recorded into the swap and only discovered at withdrawal, after the XMR had arrived.
+      await checkAddressOrThrow(request.receiveTo, xmrNetwork, "receiveTo");
       if (!request.quote || typeof request.quote !== "object") throw new SdkError("bad-input", { field: "quote" });
       // THE PER-SWAP FILE PATH IS GONE. One key covers every swap, and a per-swap file issued before funding cannot
       // name the escrow (it does not exist yet), so `sweep.plan` could not read the revealed half from it.
       if (request.recoveryKey === undefined || request.recoveryKey === null) {
         throw new SdkError("bad-input", { field: "recoveryKey", why: "required" });
       }
-      if (!request.receiveTo || typeof request.receiveTo !== "string") throw new SdkError("bad-input", { field: "receiveTo" });
       // A START WITHOUT THE SIGNED XMR AMOUNT IS NOT A START. `quote.size` is a rounded display value and the relay
       // answer does not carry it; the arrival check needs the exact integer the order quote signed. Refuse here, before
       // a wallet or a funding send, instead of recording an incomplete swap that later reads "no amount".

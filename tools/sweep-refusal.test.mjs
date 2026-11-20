@@ -39,13 +39,26 @@ const bad = (m) => { fails.push(m); console.log("  FAIL  " + m); };
 // THE STAND-IN WITHDRAWAL WALLET: the adapter's surface (open/sync/unlockedBalance/sweepUnlocked/relay/close), but
 // instead of the library - the FACTS this run needs: how much is free and what input selection does. `sync` fails
 // low-level, the way monero-ts did on the regtest contour.
-function fakeWallet({ unlocked = 0n, syncThrows = true, sweepThrows = false, unlockedThrows = false, fee = 2_000_000n } = {}) {
+function fakeWallet({ unlocked = 0n, syncThrows = true, syncThrowsOnCall = null, sweepThrows = false, unlockedThrows = false, unlockedThrowsOnCall = null, fee = 2_000_000n } = {}) {
   const calls = { open: 0, sync: 0, unlockedBalance: 0, sweepUnlocked: 0, fee: 0, relay: 0, close: 0 };
+  const driver = {
+    async setRestoreHeight() {}, async rescanBlockchain() {},
+    async getBalance() { return unlocked; }, async getHeight() { return 100; }, async getDaemonHeight() { return 100; },
+  };
+  let syncs = 0;
+  let unlocks = 0;
   return {
-    calls,
+    calls, driver: () => driver,
     async open() { calls.open += 1; },
-    async sync() { calls.sync += 1; if (syncThrows) throw new Error("failed to get hashes"); },
-    async unlockedBalance() { calls.unlockedBalance += 1; if (unlockedThrows) throw new Error("failed to get hashes"); return unlocked; },
+    async sync() {
+      calls.sync += 1; syncs += 1;
+      if (syncThrows && (syncThrowsOnCall === null || syncs === syncThrowsOnCall)) throw new Error("failed to get hashes");
+    },
+    async unlockedBalance() {
+      calls.unlockedBalance += 1; unlocks += 1;
+      if (unlockedThrows && (unlockedThrowsOnCall === null || unlocks === unlockedThrowsOnCall)) throw new Error("failed to get hashes");
+      return unlocked;
+    },
     async sweepUnlocked() { calls.sweepUnlocked += 1; if (sweepThrows) throw new Error("failed to get hashes"); return { signed: true }; },
     async fee() { calls.fee += 1; return fee; },
     async relay() { calls.relay += 1; return []; },
@@ -89,7 +102,9 @@ function facade(mod) {
 async function signOutcome(mod, wallet) {
   const request = await planRequest();
   try {
-    return { kind: "signed", result: await facade(mod).sign({ ...request, connectWallet: async () => wallet }) };
+    const api = facade(mod);
+    await api.restore({ wallet, fromHeight: 100 });
+    return { kind: "signed", result: await api.sign({ ...request, wallet }) };
   } catch (error) {
     return { kind: "error", error };
   }
@@ -116,7 +131,7 @@ const importFresh = (file) => import(pathToFileURL(file).href + "?run=" + Math.r
 
 console.log("=== 1) ZERO REMAINDER: refused with the code insufficient-funds, input selection untouched ===");
 {
-  const wallet = fakeWallet({ unlocked: 0n, syncThrows: true, sweepThrows: true });
+  const wallet = fakeWallet({ unlocked: 0n, syncThrows: true, syncThrowsOnCall: 2, sweepThrows: true });
   const outcome = await signOutcome({ createSweep }, wallet);
   if (outcome.kind !== "error") bad("a zero remainder did not refuse: " + JSON.stringify(outcome.result));
   else {
@@ -126,8 +141,8 @@ console.log("=== 1) ZERO REMAINDER: refused with the code insufficient-funds, in
     else bad("expected insufficient-funds, got: " + JSON.stringify({ code: (error && error.code) || null, message: String(error && error.message) }));
     if (wallet.calls.sweepUnlocked === 0) ok("input selection (sweepUnlocked) is never touched: the refusal comes BEFORE signing");
     else bad("input selection was called " + wallet.calls.sweepUnlocked + " time(s) - the refusal came too late");
-    if (wallet.calls.sync === 1) ok("the failing sync() does not escape: the remainder decides, not the scan");
-    else bad("sync() was called " + wallet.calls.sync + " time(s) - exactly one pass was expected");
+    if (wallet.calls.sync === 2) ok("the failing sync() does not escape: the remainder decides, not the scan");
+    else bad("sync() was called " + wallet.calls.sync + " time(s) - one restore pass and one signing pass were expected");
     if (wallet.calls.close === 1) ok("the wallet is closed after the refusal (it is not left open)");
     else bad("the wallet was not closed after the refusal (close called " + wallet.calls.close + " time(s))");
   }
@@ -148,7 +163,7 @@ console.log("=== 2) NON-ZERO REMAINDER: the run REACHES SIGNING ===");
 
 console.log("=== 3) A LOW-LEVEL LIBRARY ERROR COMES OUT WITH A CODE, NOT null ===");
 {
-  const wallet = fakeWallet({ unlocked: 0n, syncThrows: false, unlockedThrows: true });
+  const wallet = fakeWallet({ unlocked: 0n, syncThrows: false, unlockedThrows: true, unlockedThrowsOnCall: 2 });
   const outcome = await signOutcome({ createSweep }, wallet);
   if (outcome.kind !== "error") bad("a raw balance-read error did not refuse: " + JSON.stringify(outcome.result));
   else {
@@ -189,7 +204,7 @@ console.log("=== 4) BREAKING RUN A: cut the remainder check -> the refusal stops
   });
   try {
     const mod = await importFresh(file);
-    const wallet = fakeWallet({ unlocked: 0n, syncThrows: true, sweepThrows: true });
+    const wallet = fakeWallet({ unlocked: 0n, syncThrows: true, syncThrowsOnCall: 2, sweepThrows: true });
     const outcome = await signOutcome(mod, wallet);
     const code = outcome.kind === "error" ? (outcome.error && outcome.error.code) || null : null;
     console.log("        without the remainder check the refusal is: " + JSON.stringify({ code, sweepUnlocked: wallet.calls.sweepUnlocked }));
@@ -214,7 +229,7 @@ console.log("=== 5) BREAKING RUN B: cut the wrapper -> code: null + failed to ge
   });
   try {
     const mod = await importFresh(file);
-    const wallet = fakeWallet({ unlocked: 0n, syncThrows: false, unlockedThrows: true });
+    const wallet = fakeWallet({ unlocked: 0n, syncThrows: false, unlockedThrows: true, unlockedThrowsOnCall: 2 });
     const outcome = await signOutcome(mod, wallet);
     const code = outcome.kind === "error" ? (outcome.error && outcome.error.code) || null : null;
     const message = outcome.kind === "error" ? String((outcome.error && outcome.error.message) || "") : "";
