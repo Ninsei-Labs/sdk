@@ -896,6 +896,7 @@ export interface XmrRecoveryRequest {
   readonly fromHeight: number;
   readonly minConfirmations?: number;
   readonly nowSec?: number;
+  readonly idleTimeoutMs?: number;
   readonly timeoutMs?: number;
   readonly fetch?: FetchLike;
   /** Key images from `sweep.keyImages`; without them spends and the available remainder are unknown. */
@@ -964,7 +965,10 @@ export interface XmrRecoveryReadVerdict {
   readonly complete: boolean;
   readonly through: { readonly height: number; readonly hash: string } | null;
   readonly spends?: readonly XmrRecoverySpend[];
+  /** Verified, confirmed, unlocked funding outputs minus matched spends. Null when the read is incomplete or a key image has no `outputKey`. */
   readonly availableAtomic?: string | null;
+  /** The primary node that supplied `availableAtomic`; available is a one-node claim, not a two-operator agreement. */
+  readonly availableSource?: { readonly url: string; readonly operator: string };
   readonly checkpoint: XmrRecoveryCheckpoint | null;
   readonly blocked: boolean;
   readonly failed: readonly { readonly url: string; readonly operator: string; readonly code?: string; readonly why?: string; readonly height?: number; readonly status?: number }[];
@@ -989,6 +993,7 @@ export interface XmrRecoveryWitnessRequest {
   readonly fromHeight: number;
   /** The top the primary read reached. A witness below it returns `complete: false`. */
   readonly tipHeight?: number;
+  readonly minConfirmations?: number;
   readonly network?: string;
   readonly nowSec?: number;
   readonly idleTimeoutMs?: number;
@@ -1007,13 +1012,16 @@ export interface XmrRecoveryWitnessVerdict {
   readonly complete: boolean;
   readonly through: { readonly height: number; readonly hash: string } | null;
   readonly spends?: readonly XmrRecoverySpend[];
+  /** Verified, confirmed, unlocked funding outputs minus matched spends. Null when the read is incomplete or a key image has no `outputKey`. */
   readonly availableAtomic?: string | null;
+  /** The primary node that supplied `availableAtomic`; available is a one-node claim, not a two-operator agreement. */
+  readonly availableSource?: { readonly url: string; readonly operator: string };
   readonly checkpoint: XmrRecoveryCheckpoint | null;
   readonly blocked: boolean;
   readonly failed: readonly { readonly url: string; readonly operator: string; readonly code?: string; readonly why?: string; readonly height?: number; readonly status?: number }[];
 }
 
-/** One key image supplied by `sweep.keyImages`; the output key lets the read subtract a spent funding output. */
+/** One key image supplied by `sweep.keyImages`; `outputKey` is required for the available remainder. */
 export interface XmrRecoveryKeyImage {
   readonly keyImage: string;
   readonly outputKey?: string;
@@ -1059,7 +1067,12 @@ export interface XmrRecoveryVerdict {
   /** False when any read failed; a caller must not treat the list as exhaustive. */
   readonly complete: boolean;
   readonly spends?: readonly XmrRecoverySpend[];
+  /** Spends seen by a witness but not by the primary; the available remainder is withheld when non-empty. */
+  readonly spendsDisagreements?: readonly XmrRecoverySpend[];
+  /** Verified, confirmed, unlocked funding outputs minus matched spends. Null when the read is incomplete or a key image has no `outputKey`. */
   readonly availableAtomic?: string | null;
+  /** The primary node that supplied `availableAtomic`; available is a one-node claim, not a two-operator agreement. */
+  readonly availableSource?: { readonly url: string; readonly operator: string } | null;
   readonly checked: readonly { readonly url: string; readonly operator: string; readonly height: number; readonly synchronized: boolean }[];
   readonly failed: readonly { readonly url: string; readonly operator: string; readonly code?: string; readonly why?: string; readonly height?: number; readonly status?: number }[];
 }

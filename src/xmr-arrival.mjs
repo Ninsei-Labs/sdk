@@ -634,12 +634,13 @@ function addSpends(target, records) {
   }
 }
 
-function availableAtomicOf(transfers, tracked, spends) {
+function availableAtomicOf(transfers, tracked, spends, minConfirmations = 1) {
   if (!tracked.provided) return null;
   const spent = new Set(spends.map((spend) => spend.keyImage));
   let total = 0n;
   let complete = true;
   for (const transfer of transfers) {
+    if (transfer.pool || transfer.locked || Number(transfer.confirmations) < minConfirmations) continue;
     for (const output of transfer.outputs || []) {
       if (!output.amountVerified || output.amountAtomic === null || output.amountAtomic === undefined) continue;
       const keyImage = tracked.byOutput.get(String(output.key || "").toLowerCase());
@@ -854,6 +855,7 @@ export async function readRecovery(request) {
         const failure = failureOf(error, node);
         failure.height = through.height;
         return { transfers, tip: info.height, fromHeight, minConfirmations, complete: false, through,
+          spends: [...spendMap.values()],
           checkpoint: checkpointRecord({ ...identity, through, transfers, spends: [...spendMap.values()] }), blocked: false, failed: [failure] };
       }
       if (!anchor.hash || normalizedHash(anchor.hash) !== through.hash) throw new Error("reorg");
@@ -884,6 +886,7 @@ export async function readRecovery(request) {
         const failure = failureOf(error, node);
         failure.height = height;
         return { transfers, tip: info.height, fromHeight, minConfirmations, complete: false, through,
+          spends: [...spendMap.values()],
           checkpoint: through ? checkpointRecord({ ...identity, through, transfers, spends: [...spendMap.values()] }) : null, blocked: false, failed: [failure] };
       }
       for (const tx of txs) {
@@ -919,14 +922,17 @@ export async function readRecovery(request) {
     }
     spends = [...spendMap.values()];
     const confirmedSpends = spends.filter((spend) => spend.pool !== true);
+    const confirmedTransfers = transfers.filter((transfer) => transfer.pool !== true);
     if (poolFailure) {
       return { transfers, tip: info.height, fromHeight, minConfirmations, complete: false, through,
-        checkpoint: through ? checkpointRecord({ ...identity, through, transfers, spends: confirmedSpends }) : null,
+        spends,
+        checkpoint: through ? checkpointRecord({ ...identity, through, transfers: confirmedTransfers, spends: confirmedSpends }) : null,
         blocked: false, failed: [poolFailure] };
     }
     return { transfers, tip: info.height, fromHeight, minConfirmations, complete: true, through,
-      spends, availableAtomic: availableAtomicOf(transfers, tracked, spends),
-      checkpoint: through ? checkpointRecord({ ...identity, through, transfers, spends: confirmedSpends }) : null,
+      spends, availableAtomic: availableAtomicOf(transfers, tracked, spends, minConfirmations),
+      availableSource: { url: node.url, operator: node.operator },
+      checkpoint: through ? checkpointRecord({ ...identity, through, transfers: confirmedTransfers, spends: confirmedSpends }) : null,
       blocked: false, failed: [] };
   };
   for (;;) {
@@ -974,6 +980,10 @@ export async function readRecoveryWitness(request) {
   if (request.tipHeight !== null && request.tipHeight !== undefined && (tipHeightRaw === null || tipHeightRaw < 0)) {
     throw new SdkError("bad-input", { field: "tipHeight" });
   }
+  const minConfirmationsRaw = request.minConfirmations === null || request.minConfirmations === undefined ? null : Number(request.minConfirmations);
+  const minConfirmations = minConfirmationsRaw !== null && Number.isFinite(minConfirmationsRaw)
+    ? Math.max(1, Math.trunc(minConfirmationsRaw))
+    : 1;
   const fetchImpl = typeof request.fetch === "function" ? request.fetch : globalThis.fetch;
   if (typeof fetchImpl !== "function") throw new SdkError("bad-input", { field: "fetch" });
   const idleRaw = request.idleTimeoutMs === null || request.idleTimeoutMs === undefined ? null : Number(request.idleTimeoutMs);
@@ -1107,7 +1117,7 @@ export async function readRecoveryWitness(request) {
     }
     spends = [...spendMap.values()];
     return { transfers, tip: info.height, fromHeight, complete: true, through, spends,
-      availableAtomic: availableAtomicOf(transfers, tracked, spends),
+      availableAtomic: availableAtomicOf(transfers, tracked, spends, minConfirmations),
       checkpoint: through ? checkpointRecord({ ...identity, through, transfers, spends, kind: "witness" }) : null,
       blocked: false, failed: [] };
   };
@@ -1174,6 +1184,7 @@ export async function verifyRecovery(request) {
   const checked = [];
   let complete = true;
   let availableAtomic = null;
+  let primarySpends = [];
 
   for (let index = 0; index < live.length; index += 1) {
     const { node, info } = live[index];
@@ -1189,7 +1200,7 @@ export async function verifyRecovery(request) {
       const common = {
         address: request.address, viewSecret: request.viewSecret, spendPub: request.spendPub,
         fromHeight, minConfirmations, network: request.network, keyImages: request.keyImages,
-        nowSec, timeoutMs, idleTimeoutMs: request.timeoutMs, fetch: fetchImpl,
+        nowSec, timeoutMs, idleTimeoutMs: request.idleTimeoutMs ?? request.timeoutMs, fetch: fetchImpl,
       };
       read = index === 0
         ? await readRecovery({ ...common, node })
@@ -1218,6 +1229,7 @@ export async function verifyRecovery(request) {
       if (!observations.has(transfer.txid)) observations.set(transfer.txid, []);
       observations.get(transfer.txid).push(transfer);
     }
+    if (index === 0) primarySpends = read.spends || [];
     addSpends(spendMap, read.spends || []);
     if (availableAtomic === null && read.availableAtomic !== null && read.availableAtomic !== undefined) {
       availableAtomic = read.availableAtomic;
@@ -1269,6 +1281,10 @@ export async function verifyRecovery(request) {
   transfers.sort((a, b) => (a.height === null ? Number.MAX_SAFE_INTEGER : a.height) - (b.height === null ? Number.MAX_SAFE_INTEGER : b.height)
     || String(a.txid).localeCompare(String(b.txid)));
 
+  const spends = [...spendMap.values()];
+  const primarySpendSet = new Set(primarySpends.map((spend) => spend.keyImage));
+  const spendsDisagreements = spends.filter((spend) => !primarySpendSet.has(spend.keyImage));
+  const availableForVerdict = spendsDisagreements.length ? null : availableAtomic;
   const ready = transfers.some((transfer) => transfer.agreed && transfer.confirmed && !transfer.locked);
   const agreed = transfers.some((transfer) => transfer.agreed);
   return {
@@ -1277,9 +1293,11 @@ export async function verifyRecovery(request) {
     tip,
     fromHeight,
     minConfirmations,
-    complete,
-    spends: [...spendMap.values()],
-    availableAtomic,
+    complete: spendsDisagreements.length ? false : complete,
+    spends,
+    spendsDisagreements,
+    availableAtomic: availableForVerdict,
+    availableSource: live.length ? { url: live[0].node.url, operator: live[0].node.operator } : null,
     checked,
     failed,
   };
