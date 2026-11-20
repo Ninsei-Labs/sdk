@@ -648,7 +648,7 @@ function checkpointDigest(record) {
   return engine.xmrScan.bytesToHex(engine.xmrScan.keccak(new TextEncoder().encode(text)));
 }
 
-function checkpointRecord({ network, address, fromHeight, through, transfers }) {
+function checkpointRecord({ network, address, fromHeight, through, transfers, kind = null }) {
   const record = {
     version: CHECKPOINT_VERSION, network, address, fromHeight, through,
     transfers,
@@ -657,12 +657,26 @@ function checkpointRecord({ network, address, fromHeight, through, transfers }) 
     }))),
     spends: [],
   };
+  if (kind) record.kind = kind;
+  if (kind === "witness") record.grid = WITNESS_SLICE_BLOCKS;
   record.digest = checkpointDigest(record);
   return record;
 }
 
 function validCheckpoint(record, identity) {
   if (!record || typeof record !== "object" || record.version !== CHECKPOINT_VERSION) return null;
+  if (record.kind && record.kind !== "primary") return null;
+  if (record.network !== identity.network || record.address !== identity.address || record.fromHeight !== identity.fromHeight) return null;
+  if (!Array.isArray(record.transfers) || !Array.isArray(record.outputs) || !Array.isArray(record.spends)) return null;
+  if (!record.through || !Number.isSafeInteger(record.through.height) || !hash64(record.through.hash)) return null;
+  if (record.through.height < identity.fromHeight) return null;
+  if (record.digest !== checkpointDigest(record)) return null;
+  return record;
+}
+
+function validWitnessCheckpoint(record, identity) {
+  if (!record || typeof record !== "object" || record.version !== CHECKPOINT_VERSION) return null;
+  if (record.kind !== "witness" || record.grid !== WITNESS_SLICE_BLOCKS) return null;
   if (record.network !== identity.network || record.address !== identity.address || record.fromHeight !== identity.fromHeight) return null;
   if (!Array.isArray(record.transfers) || !Array.isArray(record.outputs) || !Array.isArray(record.spends)) return null;
   if (!record.through || !Number.isSafeInteger(record.through.height) || !hash64(record.through.hash)) return null;
@@ -831,6 +845,173 @@ export async function readRecovery(request) {
       const failure = failureOf(error, node);
       return { transfers: [], tip: info.height, fromHeight, minConfirmations, complete: false, through: null,
         checkpoint: null, blocked: false, failed: [failure] };
+    }
+  }
+}
+
+/**
+ * THE WITNESS READ ON A PLAIN MONEROD.
+ *
+ * The witness is asked for whole fixed windows of the zero-aligned grid, never for the order's exact start, a payout
+ * height, a single transaction or a key image. Every height of a window is read, then every transaction hash in those
+ * blocks; a matching transfer never stops the walk. The residual leak is the grid bucket that contains the start.
+ *
+ * `tipHeight` is the top the primary read reached. When it is above this witness, the witness is behind and the
+ * answer is incomplete; when it is omitted, the witness's own top is the target. A checkpoint re-reads the whole
+ * window that contains it, so a cold and a resumed read of the same window issue the same requests.
+ */
+export async function readRecoveryWitness(request) {
+  if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
+  const nodes = request.node !== undefined ? normalizeNodes([request.node]) : normalizeNodes(request.nodes);
+  const node = nodes[0];
+  if (!isStr(request.address)) throw new SdkError("bad-input", { field: "address" });
+  if (request.viewSecret === undefined || request.viewSecret === null) throw new SdkError("bad-input", { field: "viewSecret" });
+  if (!isStr(request.spendPub)) throw new SdkError("bad-input", { field: "spendPub" });
+  const fromHeight = request.fromHeight === null || request.fromHeight === undefined ? null : intOf(request.fromHeight);
+  if (fromHeight === null || fromHeight < 0) throw new SdkError("bad-input", { field: "fromHeight" });
+  const tipHeightRaw = request.tipHeight === null || request.tipHeight === undefined ? null : intOf(request.tipHeight);
+  if (request.tipHeight !== null && request.tipHeight !== undefined && (tipHeightRaw === null || tipHeightRaw < 0)) {
+    throw new SdkError("bad-input", { field: "tipHeight" });
+  }
+  const fetchImpl = typeof request.fetch === "function" ? request.fetch : globalThis.fetch;
+  if (typeof fetchImpl !== "function") throw new SdkError("bad-input", { field: "fetch" });
+  const idleRaw = request.idleTimeoutMs === null || request.idleTimeoutMs === undefined ? null : Number(request.idleTimeoutMs);
+  const totalRaw = request.timeoutMs === null || request.timeoutMs === undefined ? null : Number(request.timeoutMs);
+  const timeoutMs = idleRaw !== null && Number.isFinite(idleRaw) && idleRaw > 0
+    ? idleRaw
+    : (totalRaw !== null && Number.isFinite(totalRaw) && totalRaw > 0 ? totalRaw : 20000);
+  const signal = request.signal && typeof request.signal.addEventListener === "function" ? request.signal : null;
+  const checkpoint = request.checkpoint && typeof request.checkpoint === "object" ? request.checkpoint : null;
+  const onProgress = typeof request.onProgress === "function" ? request.onProgress : () => {};
+  const bound = engine.xmrScan.watchedAddressVerdict({ address: request.address, viewSecret: request.viewSecret, spendPub: request.spendPub });
+  if (!bound.ok) {
+    if (bound.code === "bad-input") throw new SdkError("bad-input", { field: bound.field || "address", why: bound.why });
+    throw new SdkError(bound.code, { field: bound.field || "address", address: request.address });
+  }
+  const addressNetwork = bound.keys && bound.keys.network ? bound.keys.network : null;
+  if (request.network !== undefined && request.network !== null && addressNetwork && request.network !== addressNetwork) {
+    throw new SdkError("bad-input", { field: "network", why: "address-network-mismatch" });
+  }
+  const watched = { address: request.address, viewSecret: bound.viewSecret, spendPub: bound.spendPub };
+  let info;
+  try { info = await getInfo(node, fetchImpl, timeoutMs, { signal }); }
+  catch (error) {
+    return { transfers: [], tip: null, fromHeight, through: null, complete: false, checkpoint: null, blocked: false, failed: [failureOf(error, node)] };
+  }
+  const network = isStr(request.network) ? request.network : info.nettype;
+  if (!isStr(network)) throw new SdkError("bad-input", { field: "network" });
+  if (addressNetwork && info.nettype && addressNetwork !== info.nettype) {
+    throw new SdkError("bad-input", { field: "node", why: "node-network-mismatch" });
+  }
+  if (!info.synced) {
+    return { transfers: [], tip: info.height, fromHeight, through: null, complete: false, checkpoint: null, blocked: true,
+      failed: [{ url: node.url, operator: node.operator, code: "stale", why: "not-synchronized" }] };
+  }
+  const top = Math.max(0, info.height - 1);
+  if (tipHeightRaw !== null && tipHeightRaw > top) {
+    return { transfers: [], tip: info.height, fromHeight, through: null, complete: false, checkpoint: null, blocked: false,
+      failed: [{ url: node.url, operator: node.operator, code: "stale", why: "witness-behind", height: top, wanted: tipHeightRaw }] };
+  }
+  const targetTop = tipHeightRaw === null ? top : Math.min(tipHeightRaw, top);
+  if (targetTop < fromHeight) {
+    return { transfers: [], tip: info.height, fromHeight, through: null, complete: true, checkpoint: null, blocked: false, failed: [] };
+  }
+  const identity = { network, address: request.address, fromHeight };
+  let prior = null;
+  if (checkpoint && typeof checkpoint.read === "function") {
+    try { prior = validWitnessCheckpoint(checkpoint.read(), identity); }
+    catch (error) { throw callerFailure("checkpoint.read", error); }
+    if (!prior && typeof checkpoint.discard === "function") {
+      try { checkpoint.discard(); }
+      catch (error) { throw callerFailure("checkpoint.discard", error); }
+    }
+  }
+  const firstWindow = witnessSliceIndex(fromHeight);
+  const startWindow = prior ? witnessSliceIndex(prior.through.height) : firstWindow;
+  const lastWindow = witnessSliceIndex(targetTop);
+  if (startWindow > lastWindow) {
+    return { transfers: prior ? prior.transfers : [], tip: info.height, fromHeight, through: prior ? prior.through : null,
+      complete: true, checkpoint: prior ? checkpointRecord({ ...identity, through: prior.through, transfers: prior.transfers, kind: "witness" }) : null,
+      blocked: false, failed: [] };
+  }
+  let bytes = 0;
+  const countBytes = (n) => { if (Number.isFinite(n) && n > 0) bytes += n; };
+  const total = targetTop - witnessSliceStart(firstWindow) + 1;
+  let replay = 0;
+  const run = async (startRecord) => {
+    const fromWindow = startRecord ? witnessSliceIndex(startRecord.through.height) : firstWindow;
+    const windowStart = witnessSliceStart(fromWindow);
+    let transfers = startRecord ? startRecord.transfers.filter((transfer) => transfer.height < windowStart) : [];
+    let through = null;
+    let previousHash = null;
+    let blocksVerified = 0;
+    const priorThrough = startRecord ? startRecord.through : null;
+    const emit = () => {
+      try {
+        onProgress({ phase: "witness", through: through ? through.height : null, blocksVerified, blocksTotal: total,
+          bytes, operator: node.operator, window: through ? witnessSliceIndex(through.height) : fromWindow });
+      } catch (error) { throw callerFailure("onProgress", error); }
+    };
+    emit();
+    for (let window = fromWindow; window <= lastWindow; window += 1) {
+      const start = witnessSliceStart(window);
+      const end = Math.min(witnessSliceEnd(window), targetTop);
+      for (let height = start; height <= end; height += 1) {
+        if (signal && signal.aborted) throw new SdkError("xmr-no-nodes", { node: node.url, name: "AbortError", why: "cancelled" });
+        let block;
+        let txs = [];
+        try {
+          block = await getBlock(node, height, fetchImpl, timeoutMs, { signal, onBytes: countBytes });
+          if (!hash64(block.hash)) throw new SdkError("xmr-no-nodes", { node: node.url, why: "no-block", height });
+          if (block.numTxes !== null && block.txHashes.length !== block.numTxes) throw new SdkError("xmr-no-nodes", { node: node.url, why: "block-incomplete", height });
+          if (previousHash && (!block.parent || normalizedHash(block.parent) !== previousHash)) throw new Error("reorg");
+          if (!block.txHashes.every((hash) => hash64(hash))) throw new SdkError("xmr-no-nodes", { node: node.url, why: "block-incomplete", height });
+          if (block.txHashes.length) txs = await getBlockTxs(node, block.txHashes, fetchImpl, timeoutMs, { signal, onBytes: countBytes });
+        } catch (error) {
+          if (String(error && error.message) === "reorg") throw error;
+          const failure = failureOf(error, node);
+          failure.height = height;
+          return { transfers, tip: info.height, fromHeight, complete: false, through,
+            checkpoint: through ? checkpointRecord({ ...identity, through, transfers, kind: "witness" }) : null,
+            blocked: false, failed: [failure] };
+        }
+        if (priorThrough && height === priorThrough.height && normalizedHash(block.hash) !== priorThrough.hash) throw new Error("reorg");
+        for (const tx of txs) {
+          const hit = engine.xmrScan.matchTransaction(tx, [watched], { height, tipHeight: targetTop, nowSec: request.nowSec });
+          if (!hit.length || height < fromHeight) continue;
+          const confirmations = confirmationsOf(tx, height, targetTop);
+          transfers.push(recoveryObservation(tx, hit, node, { height, blockHash: block.hash, confirmations }));
+        }
+        through = { height, hash: normalizedHash(block.hash) };
+        previousHash = through.hash;
+        blocksVerified += 1;
+        if (checkpoint && typeof checkpoint.save === "function") {
+          try { checkpoint.save(checkpointRecord({ ...identity, through, transfers, kind: "witness" })); }
+          catch (error) { throw callerFailure("checkpoint.save", error); }
+        }
+        emit();
+      }
+    }
+    return { transfers, tip: info.height, fromHeight, complete: true, through,
+      checkpoint: through ? checkpointRecord({ ...identity, through, transfers, kind: "witness" }) : null,
+      blocked: false, failed: [] };
+  };
+  for (;;) {
+    try {
+      return await run(prior);
+    } catch (error) {
+      if (error && error.caller) throw error;
+      if (String(error && error.message) === "reorg" && replay === 0) {
+        replay += 1;
+        prior = null;
+        if (checkpoint && typeof checkpoint.discard === "function") {
+          try { checkpoint.discard(); }
+          catch (discardError) { throw callerFailure("checkpoint.discard", discardError); }
+        }
+        continue;
+      }
+      const failure = failureOf(error, node);
+      return { transfers: [], tip: info.height, fromHeight, complete: false, through: null, checkpoint: null, blocked: false, failed: [failure] };
     }
   }
 }

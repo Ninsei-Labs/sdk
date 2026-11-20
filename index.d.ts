@@ -760,6 +760,13 @@ export interface SwapsApi {
    */
   readRecovery(request: XmrRecoveryReadRequest): Promise<XmrRecoveryReadVerdict>;
   /**
+   * THE WITNESS READ ON A PLAIN MONEROD. It asks for whole fixed windows of the zero-aligned grid, never for the
+   * exact start or a payout height, and reads every height and every transaction hash of each window. A matching
+   * transfer does not stop the walk. `tipHeight` is the primary read's top; a witness below it is incomplete.
+   * The residual privacy leak is the grid bucket that contains the start.
+   */
+  readRecoveryWitness(request: XmrRecoveryWitnessRequest): Promise<XmrRecoveryWitnessVerdict>;
+  /**
    * RUN THE EXACT CHECK AND THE WITNESS-V1 SLICE CHECK SIDE BY SIDE. The exact verdict still decides; this
    * returns both readings and any difference, and changes no swap state. `witnessNodes` must name at least one
    * node with `protocol: "witness-v1"`. It is the staging step before slice-only verification.
@@ -893,9 +900,12 @@ export interface XmrRecoveryRequest {
   readonly fetch?: FetchLike;
 }
 
-/** The caller-owned checkpoint of the primary recovery read. */
+/** The caller-owned checkpoint of the primary or witness recovery read. */
 export interface XmrRecoveryCheckpoint {
   readonly version: 1;
+  /** Absent on records written before the witness read existed; `"witness"` marks a grid-window record. */
+  readonly kind?: "primary" | "witness";
+  readonly grid?: number;
   readonly network: string;
   readonly address: string;
   readonly fromHeight: number;
@@ -948,6 +958,46 @@ export interface XmrRecoveryReadVerdict {
   readonly tip: number | null;
   readonly fromHeight: number;
   readonly minConfirmations: number;
+  readonly complete: boolean;
+  readonly through: { readonly height: number; readonly hash: string } | null;
+  readonly checkpoint: XmrRecoveryCheckpoint | null;
+  readonly blocked: boolean;
+  readonly failed: readonly { readonly url: string; readonly operator: string; readonly code?: string; readonly why?: string; readonly height?: number; readonly status?: number }[];
+}
+
+export interface XmrRecoveryWitnessProgress {
+  readonly phase: "witness";
+  readonly through: number | null;
+  readonly blocksVerified: number;
+  readonly blocksTotal: number;
+  readonly bytes: number;
+  readonly operator: string;
+  readonly window: number;
+}
+
+/** One plain-monerod witness, read by whole fixed windows; the exact start is only a local grid selector. */
+export interface XmrRecoveryWitnessRequest {
+  readonly node: XmrNode | string;
+  readonly address: string;
+  readonly viewSecret: string | bigint;
+  readonly spendPub: string;
+  readonly fromHeight: number;
+  /** The top the primary read reached. A witness below it returns `complete: false`. */
+  readonly tipHeight?: number;
+  readonly network?: string;
+  readonly nowSec?: number;
+  readonly idleTimeoutMs?: number;
+  readonly timeoutMs?: number;
+  readonly fetch?: FetchLike;
+  readonly checkpoint?: XmrRecoveryCheckpointStore;
+  readonly onProgress?: (event: XmrRecoveryWitnessProgress) => void;
+  readonly signal?: AbortSignal;
+}
+
+export interface XmrRecoveryWitnessVerdict {
+  readonly transfers: readonly XmrRecoveryTransfer[];
+  readonly tip: number | null;
+  readonly fromHeight: number;
   readonly complete: boolean;
   readonly through: { readonly height: number; readonly hash: string } | null;
   readonly checkpoint: XmrRecoveryCheckpoint | null;
