@@ -8,7 +8,7 @@ import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { ed25519, keccak256 } from "../src/primitives.mjs";
-import { verifyRecovery } from "../src/xmr-arrival.mjs";
+import { readRecovery, verifyRecovery } from "../src/xmr-arrival.mjs";
 import { createSweep } from "../src/sweep.mjs";
 import { keyImageFromSpendKey } from "../engine/monero/keyImage.js";
 import {
@@ -79,11 +79,17 @@ const T6 = "f".repeat(64);
 function rpc({ blockTxids = [], poolHashes = [], poolFails = false, txs = {} } = {}) {
   return async (url, init) => {
     const body = JSON.parse(init.body);
-    if (body.method === "get_info") return { ok: true, json: async () => ({ result: { height: 121, synchronized: true } }) };
+    if (body.method === "get_info") return { ok: true, json: async () => ({ result: { height: 121, synchronized: true, nettype: "stagenet" } }) };
     if (body.method === "get_block") {
+      const height = Number(body.params.height);
+      const hashes = height === 105 ? blockTxids : [];
       return { ok: true, json: async () => ({ result: {
-        block_header: { hash: BLOCK_HASH },
-        tx_hashes: Number(body.params.height) === 105 ? blockTxids : [],
+        block_header: {
+          height, hash: (height < 0 ? "00" : height.toString(16).padStart(2, "0")).repeat(32),
+          prev_hash: (height <= 0 ? "00" : (height - 1).toString(16).padStart(2, "0")).repeat(32),
+          num_txes: hashes.length,
+        },
+        tx_hashes: hashes,
       } }) };
     }
     if (url.endsWith("/get_transaction_pool_hashes")) {
@@ -99,8 +105,8 @@ function rpc({ blockTxids = [], poolHashes = [], poolFails = false, txs = {} } =
   };
 }
 
-const request = (fetch, nodes = [{ url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" }]) => ({
-  nodes, address: ADDRESS, viewSecret: VIEW, spendPub: SPEND_PUB, fromHeight: 100, minConfirmations: 1, fetch,
+const request = (fetch, nodes = [{ url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" }], extra = {}) => ({
+  nodes, address: ADDRESS, viewSecret: VIEW, spendPub: SPEND_PUB, fromHeight: 100, minConfirmations: 1, fetch, ...extra,
 });
 
 export const arrivalRecoveryCheck = async () => {
@@ -150,7 +156,7 @@ console.log("=== 1c) A LOWER-TIP NODE DOES NOT FALSIFY THE WALK ===");
   const mixedFetch = async (url, init) => {
     const body = JSON.parse(init.body);
     if (body.method === "get_info" && new URL(url).hostname === "b.example") {
-      return { ok: true, json: async () => ({ result: { height: 104, synchronized: true } }) };
+      return { ok: true, json: async () => ({ result: { height: 104, synchronized: true, nettype: "stagenet" } }) };
     }
     return baseFetch(url, init);
   };
@@ -175,6 +181,21 @@ console.log("=== 1b) THE RECOVERY OUTPUT CARRIES A DERIVATION AND FEEDS keyImage
   if (output && output.derivation && images.length === 1 && images[0].keyImage === expected) {
     ok("a recovery transfer derives the same image as its known spend scalar");
   } else bad("recovery key image: " + JSON.stringify({ output, images, expected }));
+}
+
+console.log("=== 1c) A SPENT FUNDING OUTPUT IS EXCLUDED FROM THE AVAILABLE REMAINDER ===");
+{
+  const funded = fixture(ATOMIC_SHORT);
+  const outputKey = funded.vout[0].target.tagged_key.key;
+  const spendImage = "ab".repeat(32);
+  const verdict = await verifyRecovery({
+    ...request(rpc({ blockTxids: [T1], txs: { [T1]: { ...funded, vin: [{ key: { k_image: spendImage } }] } } })),
+    keyImages: [{ keyImage: spendImage, outputKey }],
+  });
+  if (verdict.complete === true && verdict.spends.length === 1 && verdict.spends[0].keyImage === spendImage
+    && verdict.availableAtomic === "0") {
+    ok("a spend is reported and removed from the available remainder");
+  } else bad("spend/available recovery: " + JSON.stringify({ spends: verdict.spends, availableAtomic: verdict.availableAtomic }));
 }
 
 console.log("=== 2) A TRANSFER SEEN BY ONE OPERATOR IS NOT AN AGREED TRANSFER ===");
@@ -213,15 +234,15 @@ console.log("=== 5) BREAKING RUN: AN AMOUNT FILTER DROPS THE SHORT TRANSFER ==="
   const sourceFile = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "xmr-arrival.mjs");
   const mutantFile = join(dirname(sourceFile), ".recovery-mutant-" + process.pid + ".mjs");
   const source = readFileSync(sourceFile, "utf8").replace(/\r\n/g, "\n");
-  const from = "if (!hit.length) continue;\n      const confirmations";
+  const from = "if (!hit.length) continue;\n        const confirmations = confirmationsOf(tx, height, top);";
   if (!source.includes(from)) {
     bad("the breaking-run mutation did not apply");
   } else {
-    const changed = source.split(from).join("if (!hit.length || sumOutputs(hit[0]) < 300000000000n) continue;\n      const confirmations");
+    const changed = source.split(from).join("if (!hit.length || sumOutputs(hit[0]) < 300000000000n) continue;\n        const confirmations = confirmationsOf(tx, height, top);");
     writeFileSync(mutantFile, changed, "utf8");
     try {
       const mutant = await import(pathToFileURL(mutantFile).href + "?v=" + process.pid);
-      const verdict = await mutant.verifyRecovery(request(rpc({
+      const verdict = await mutant.readRecovery(request(rpc({
         blockTxids: [T1], txs: { [T1]: fixture(ATOMIC_SHORT) },
       })));
       if (verdict.transfers.length === 0) ok("the amount filter removes the short transfer (the guard is load-bearing)");

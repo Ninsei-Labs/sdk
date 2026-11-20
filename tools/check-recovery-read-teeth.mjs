@@ -67,6 +67,7 @@ const daemon = ({ failAt: initialFailAt = null } = {}) => {
       if (height === failAt) return { ok: false, status: 503 };
       return { ok: true, json: async () => ({ result: { block_header: { height, hash: H(height), prev_hash: H(height - 1), num_txes: TXS[height] ? 1 : 0 }, tx_hashes: TXS[height] ? Object.keys(TXS[height]) : [] } }) };
     }
+    if (new URL(url).pathname.endsWith("/get_transaction_pool_hashes")) return { ok: true, json: async () => ({ tx_hashes: [] }) };
     if (new URL(url).pathname.endsWith("/get_transactions")) {
       const hashes = body.txs_hashes || [];
       const height = Object.keys(TXS).find((h) => TXS[h][hashes[0]]);

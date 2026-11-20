@@ -898,6 +898,8 @@ export interface XmrRecoveryRequest {
   readonly nowSec?: number;
   readonly timeoutMs?: number;
   readonly fetch?: FetchLike;
+  /** Key images from `sweep.keyImages`; without them spends and the available remainder are unknown. */
+  readonly keyImages?: readonly (string | XmrRecoveryKeyImage)[];
 }
 
 /** The caller-owned checkpoint of the primary or witness recovery read. */
@@ -912,7 +914,7 @@ export interface XmrRecoveryCheckpoint {
   readonly through: { readonly height: number; readonly hash: string } | null;
   readonly transfers: readonly XmrRecoveryTransfer[];
   readonly outputs: readonly Record<string, unknown>[];
-  readonly spends: readonly Record<string, unknown>[];
+  readonly spends: readonly XmrRecoverySpend[];
   readonly digest: string;
 }
 
@@ -948,6 +950,7 @@ export interface XmrRecoveryReadRequest {
   readonly idleTimeoutMs?: number;
   readonly timeoutMs?: number;
   readonly fetch?: FetchLike;
+  readonly keyImages?: readonly (string | XmrRecoveryKeyImage)[];
   readonly checkpoint?: XmrRecoveryCheckpointStore;
   readonly onProgress?: (event: XmrRecoveryProgress) => void;
   readonly signal?: AbortSignal;
@@ -960,6 +963,8 @@ export interface XmrRecoveryReadVerdict {
   readonly minConfirmations: number;
   readonly complete: boolean;
   readonly through: { readonly height: number; readonly hash: string } | null;
+  readonly spends?: readonly XmrRecoverySpend[];
+  readonly availableAtomic?: string | null;
   readonly checkpoint: XmrRecoveryCheckpoint | null;
   readonly blocked: boolean;
   readonly failed: readonly { readonly url: string; readonly operator: string; readonly code?: string; readonly why?: string; readonly height?: number; readonly status?: number }[];
@@ -989,6 +994,7 @@ export interface XmrRecoveryWitnessRequest {
   readonly idleTimeoutMs?: number;
   readonly timeoutMs?: number;
   readonly fetch?: FetchLike;
+  readonly keyImages?: readonly (string | XmrRecoveryKeyImage)[];
   readonly checkpoint?: XmrRecoveryCheckpointStore;
   readonly onProgress?: (event: XmrRecoveryWitnessProgress) => void;
   readonly signal?: AbortSignal;
@@ -1000,9 +1006,27 @@ export interface XmrRecoveryWitnessVerdict {
   readonly fromHeight: number;
   readonly complete: boolean;
   readonly through: { readonly height: number; readonly hash: string } | null;
+  readonly spends?: readonly XmrRecoverySpend[];
+  readonly availableAtomic?: string | null;
   readonly checkpoint: XmrRecoveryCheckpoint | null;
   readonly blocked: boolean;
   readonly failed: readonly { readonly url: string; readonly operator: string; readonly code?: string; readonly why?: string; readonly height?: number; readonly status?: number }[];
+}
+
+/** One key image supplied by `sweep.keyImages`; the output key lets the read subtract a spent funding output. */
+export interface XmrRecoveryKeyImage {
+  readonly keyImage: string;
+  readonly outputKey?: string;
+}
+
+/** One input whose key image belongs to the funding outputs. */
+export interface XmrRecoverySpend {
+  readonly keyImage: string;
+  readonly outputKey: string | null;
+  readonly txid: string;
+  readonly height: number | null;
+  readonly blockHash: string | null;
+  readonly pool: boolean;
 }
 
 /** One verified transfer returned by the recovery read. */
@@ -1034,6 +1058,8 @@ export interface XmrRecoveryVerdict {
   readonly minConfirmations: number;
   /** False when any read failed; a caller must not treat the list as exhaustive. */
   readonly complete: boolean;
+  readonly spends?: readonly XmrRecoverySpend[];
+  readonly availableAtomic?: string | null;
   readonly checked: readonly { readonly url: string; readonly operator: string; readonly height: number; readonly synchronized: boolean }[];
   readonly failed: readonly { readonly url: string; readonly operator: string; readonly code?: string; readonly why?: string; readonly height?: number; readonly status?: number }[];
 }

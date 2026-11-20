@@ -26,8 +26,8 @@ const factor = (label, scalarLE) => {
   buf.set(name); buf.set(scalarLE, name.length);
   return keccak256(buf);
 };
-const fixture = (amount, index = 0) => {
-  const txPublicKey = G.multiply(R).toHex();
+const fixture = (amount, index = 0, r = R) => {
+  const txPublicKey = G.multiply(r).toHex();
   const derivation = keyDerivation(txPublicKey, VIEW);
   const scalarLE = scalarToBytesLE(hashToScalar(derivation, varint(index)));
   const amountCipher = xor(Array.from(le8(amount)), factor("amount", scalarLE));
@@ -39,10 +39,20 @@ const fixture = (amount, index = 0) => {
     rct_signatures: { type: 6, ecdhInfo: [{ amount: bytesToHex(Uint8Array.from(amountCipher)) }], outPk: [outPk] } };
 };
 const H = (height) => (height < 0 ? "00" : height.toString(16).padStart(2, "0")).repeat(32);
-const TX = { 6: "a".repeat(64), 9: "b".repeat(64) };
-const TXS = { 6: { [TX[6]]: fixture(100_000_000_000n) }, 9: { [TX[9]]: fixture(200_000_000_000n) } };
+const TX = { 6: "a".repeat(64), 7: "e".repeat(64), 9: "b".repeat(64) };
+const FUNDING_6 = fixture(100_000_000_000n);
+const FUNDING_6_KEY = FUNDING_6.vout[0].target.tagged_key.key;
+const FUNDING_9 = fixture(200_000_000_000n, 0, R + 1n);
+const FUNDING_9_KEY = FUNDING_9.vout[0].target.tagged_key.key;
+const SPENT_IMAGE = "ab".repeat(32);
+const UNSPENT_IMAGE = "cd".repeat(32);
+const TXS = {
+  6: { [TX[6]]: FUNDING_6 },
+  7: { [TX[7]]: { version: 2, unlock_time: 0, extra: [], vin: [{ key: { k_image: SPENT_IMAGE } }], vout: [], rct_signatures: { type: 6, ecdhInfo: [], outPk: [] } } },
+  9: { [TX[9]]: FUNDING_9 },
+};
 
-function daemon({ failAt: initialFailAt = null, shortAt = null, hashShift: initialHashShift = 0, nullConfirmations = false } = {}) {
+function daemon({ failAt: initialFailAt = null, shortAt = null, hashShift: initialHashShift = 0, nullConfirmations = false, poolHashes = [], poolTxs = {}, poolFails = false } = {}) {
   const calls = [];
   let failAt = initialFailAt, hashShift = initialHashShift;
   const fetch = async (url, init) => {
@@ -57,13 +67,16 @@ function daemon({ failAt: initialFailAt = null, shortAt = null, hashShift: initi
         height, hash: H(height + hashShift), prev_hash: H(height - 1 + hashShift), num_txes: TXS[height] ? 1 : 0,
       }, tx_hashes: TXS[height] ? Object.keys(TXS[height]) : [] } }) };
     }
+    if (path.endsWith("/get_transaction_pool_hashes")) return poolFails ? { ok: false, status: 503 } : { ok: true, json: async () => ({ tx_hashes: poolHashes }) };
     if (path.endsWith("/get_transactions")) {
       const hashes = body.txs_hashes || [];
       const height = Object.keys(TXS).find((h) => TXS[h][hashes[0]]);
-      if (shortAt === Number(height)) return { ok: true, json: async () => ({ txs: [], txs_as_json: [] }) };
+      const inPool = height === undefined;
+      const source = inPool ? poolTxs : TXS[height];
+      if (!inPool && shortAt === Number(height)) return { ok: true, json: async () => ({ txs: [], txs_as_json: [] }) };
       return { ok: true, json: async () => ({
-        txs: hashes.map((hash) => ({ tx_hash: hash, block_height: Number(height), confirmations: nullConfirmations ? null : 3, in_pool: false })),
-        txs_as_json: hashes.map((hash) => JSON.stringify(TXS[height][hash] || {})),
+        txs: hashes.map((hash) => ({ tx_hash: hash, block_height: inPool ? null : Number(height), confirmations: inPool ? 0 : (nullConfirmations ? null : 3), in_pool: inPool })),
+        txs_as_json: hashes.map((hash) => JSON.stringify(source[hash] || {})),
       }) };
     }
     return { ok: false, status: 404 };
@@ -113,6 +126,40 @@ check(progress.length >= 7 && progress.at(-1).blocksVerified === 6 && progress.a
   "progress reports every block and the total");
 check(coldDaemon.calls.filter((c) => c.method === "get_block").map((c) => c.height).join(",") === "5,6,7,8,9,10",
   "the primary node is read in order");
+
+// Key images from sweep.keyImages make a spend and the available remainder local.
+{
+  const spendCheckpoint = memoryCheckpoint();
+  const spendRead = await readRecovery(request(daemon().fetch, spendCheckpoint, {
+    keyImages: [{ keyImage: SPENT_IMAGE, outputKey: FUNDING_6_KEY }, { keyImage: UNSPENT_IMAGE, outputKey: FUNDING_9_KEY }],
+  }));
+  check(spendRead.complete === true && spendRead.spends.length === 1
+    && spendRead.spends[0].keyImage === SPENT_IMAGE && spendRead.spends[0].height === 7,
+    "a funding output's key image in a block input is reported as a spend");
+  check(spendRead.availableAtomic === "200000000000", "the spent output is excluded from the available remainder");
+  check(spendCheckpoint.value.spends.length === 1, "the spend is stored in the checkpoint");
+}
+
+// A withdrawal in the fresh pool is a spend even when the block height did not move.
+{
+  const poolSpend = "ef".repeat(32);
+  const poolRead = await readRecovery(request(daemon({
+    poolHashes: [poolSpend],
+    poolTxs: { [poolSpend]: { version: 2, unlock_time: 0, extra: [], vin: [{ key: { k_image: UNSPENT_IMAGE } }], vout: [], rct_signatures: { type: 6, ecdhInfo: [], outPk: [] } } },
+  }).fetch, null, {
+    keyImages: [{ keyImage: SPENT_IMAGE, outputKey: FUNDING_6_KEY }, { keyImage: UNSPENT_IMAGE, outputKey: FUNDING_9_KEY }],
+  }));
+  check(poolRead.spends.some((spend) => spend.keyImage === UNSPENT_IMAGE && spend.pool === true),
+    "a pool input is reported as a pool spend");
+  check(poolRead.availableAtomic === "0", "a pool spend is excluded from the available remainder");
+}
+
+// A failed pool read is unknown about the mempool, never an empty pool.
+{
+  const poolFailed = await readRecovery(request(daemon({ poolFails: true }).fetch));
+  check(poolFailed.complete === false && poolFailed.failed.some((failure) => failure.why === "pool-read"),
+    "a failed pool read makes the answer incomplete");
+}
 
 // A failure at block 8 leaves a checkpoint at 7; the retry reads only 8..10 and produces the same answer.
 const interruptedDaemon = daemon({ failAt: 8 });
