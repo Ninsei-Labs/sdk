@@ -4,8 +4,8 @@
 // What this proves, against a real daemon (not a fake):
 //   - the primary read starts at the exact order start, completes, and reads the pool;
 //   - the witness read starts at the grid boundary of that non-aligned start, completes, reads
-//     every height of its window and every transaction hash in those blocks, and never asks for a
-//     slice route;
+//     every height of its window and, when the window contains transactions, every transaction
+//     hash in those blocks; it never asks for a slice route;
 //   - the witness requests do not carry the exact start as a separate parameter;
 //   - a cold witness read and a resume of the same window issue the same request sequence.
 //
@@ -39,14 +39,39 @@ const recordingFetch = () => {
   const fetchImpl = async (url, init) => {
     let body = null;
     try { body = JSON.parse(init.body); } catch { body = null; }
-    calls.push({ url, body });
-    return globalThis.fetch(url, init);
+    const response = await globalThis.fetch(url, init);
+    let payload = null;
+    try { payload = await response.clone().json(); } catch { payload = null; }
+    calls.push({ method: (init && init.method) || "GET", url: String(url), body, payload });
+    return response;
   };
   return { calls, fetchImpl };
 };
 const memoryCheckpoint = () => {
   let saved = null;
-  return { read: () => saved, save: (value) => { saved = structuredClone(value); }, discard: () => { saved = null; } };
+  const counts = { reads: 0, saves: 0 };
+  return {
+    counts,
+    read: () => { counts.reads += 1; return saved; },
+    save: (value) => { counts.saves += 1; saved = structuredClone(value); },
+    discard: () => { saved = null; },
+    get value() { return saved; },
+  };
+};
+const requestRecord = (call) => JSON.stringify({ method: call.method, url: call.url, body: call.body });
+const absoluteHeights = (calls) => calls.filter((call) => call.body && call.body.method === "get_block")
+  .map((call) => Number(call.body.params.height));
+const noExactStart = (calls, label) => {
+  const allowed = new Set(["/json_rpc", "/get_transactions"]);
+  for (const call of calls) {
+    const parsed = new URL(call.url);
+    if (!allowed.has(parsed.pathname)) fail(label + " used an unexpected endpoint " + parsed.pathname);
+    if (parsed.search) fail(label + " carries a query string");
+    const text = JSON.stringify(call.body || {});
+    if (/fromHeight|startHeight|start_height|orderStart/i.test(text)) {
+      fail(label + " carries the exact start");
+    }
+  }
 };
 const infoOf = async (url) => {
   const response = await fetch(url.replace(/\/+$/, "") + "/json_rpc", {
@@ -102,7 +127,6 @@ try {
 const witnessMs = Date.now() - witnessStarted;
 if (witnessRead.complete !== true) fail("the witness read is incomplete");
 
-const firstCalls = witness.calls.map((call) => JSON.stringify(call.body));
 const resumedWitness = recordingFetch();
 let resumedRead;
 try {
@@ -112,37 +136,60 @@ try {
   });
 } catch (error) { unreachable(error); }
 if (resumedRead.complete !== true) fail("the resumed witness read is incomplete");
-const resumedCalls = resumedWitness.calls.map((call) => JSON.stringify(call.body));
 
-const primaryBlockHeights = primary.calls.filter((call) => call.body && call.body.method === "get_block")
-  .map((call) => Number(call.body.params.height));
-if (!primaryBlockHeights.length || primaryBlockHeights[0] !== orderStart) {
-  fail("the primary did not start at the exact order start");
-}
-for (let height = orderStart; height <= tipHeight; height += 1) {
-  if (!primaryBlockHeights.includes(height)) fail("the primary skipped height " + height);
+const primaryTop = primaryRead.through && Number(primaryRead.through.height);
+if (!Number.isSafeInteger(primaryTop) || primaryTop < orderStart) fail("the primary read has no completed span");
+const expectedPrimaryHeights = [];
+for (let height = orderStart; height <= primaryTop; height += 1) expectedPrimaryHeights.push(height);
+const primaryBlockHeights = absoluteHeights(primary.calls);
+if (JSON.stringify(primaryBlockHeights) !== JSON.stringify(expectedPrimaryHeights)) {
+  fail("the primary did not request the exact range in order (expected " + expectedPrimaryHeights.join(",") + "; got " + primaryBlockHeights.join(",") + ")");
 }
 if (!primary.calls.some((call) => new URL(call.url).pathname === "/get_transaction_pool_hashes")) {
   fail("the primary did not read the pool");
 }
 
-if (witness.calls.some((call) => new URL(call.url).pathname === "/v1/witness/slice")) {
-  fail("the witness was asked for a slice route");
+noExactStart(witness.calls, "cold witness");
+noExactStart(resumedWitness.calls, "resumed witness");
+const expectedWitnessHeights = [];
+for (let height = boundary; height <= tipHeight; height += 1) expectedWitnessHeights.push(height);
+const blockHeights = absoluteHeights(witness.calls);
+if (JSON.stringify(blockHeights) !== JSON.stringify(expectedWitnessHeights)) {
+  fail("the witness did not request the exact window in order");
 }
-const blockHeights = witness.calls.filter((call) => call.body && call.body.method === "get_block")
-  .map((call) => Number(call.body.params.height));
-if (!blockHeights.length || blockHeights[0] !== boundary) {
-  fail("the witness did not start at its grid boundary");
+if (JSON.stringify(absoluteHeights(resumedWitness.calls)) !== JSON.stringify(expectedWitnessHeights)) {
+  fail("the resumed witness did not request the exact window in order");
 }
-for (let height = boundary; height <= tipHeight; height += 1) {
-  if (!blockHeights.includes(height)) fail("the witness skipped height " + height);
+
+const blockTxs = new Set();
+for (const call of witness.calls) {
+  const result = call.payload && call.payload.result;
+  const hashes = result && (Array.isArray(result.tx_hashes) ? result.tx_hashes
+    : (result.json && Array.isArray(result.json.tx_hashes) ? result.json.tx_hashes : []));
+  for (const hash of hashes) blockTxs.add(hash);
 }
-const witnessBodies = witness.calls.map((call) => JSON.stringify(call.body));
-if (witnessBodies.some((body) => body.includes("fromHeight") || body.includes("startHeight"))) {
-  fail("a witness request carries the exact start");
+if (blockTxs.size) {
+  const requested = new Set();
+  for (const call of witness.calls) {
+    if (!call.body || !Array.isArray(call.body.txs_hashes)) continue;
+    for (const hash of call.body.txs_hashes) requested.add(hash);
+  }
+  if (requested.size !== blockTxs.size || [...blockTxs].some((hash) => !requested.has(hash))) {
+    fail("the witness did not request every transaction hash of the window");
+  }
+  console.log("recovery acceptance: checked " + blockTxs.size + " transaction hashes");
+} else {
+  console.log("recovery acceptance: the window has no transactions; hash coverage is vacuous");
 }
-if (firstCalls.length !== resumedCalls.length || firstCalls.some((body, index) => body !== resumedCalls[index])) {
+
+const firstCalls = witness.calls.map(requestRecord);
+const resumedCalls = resumedWitness.calls.map(requestRecord);
+if (firstCalls.length !== resumedCalls.length || firstCalls.some((record, index) => record !== resumedCalls[index])) {
   fail("cold and resumed witness reads issued different requests");
 }
+if (checkpoint.counts.reads < 1 || checkpoint.counts.saves < 1 || !checkpoint.value
+  || checkpoint.value.kind !== "witness" || checkpoint.value.grid !== GRID) {
+  fail("the resumed read did not take a witness checkpoint");
+}
 console.log("recovery acceptance: primary " + primaryMs + " ms, witness " + witnessMs + " ms");
-console.log("recovery acceptance: primary " + orderStart + ".." + tipHeight + ", witness window " + boundary + ".." + tipHeight + ", cold/resume identical, no exact-start request");
+console.log("recovery acceptance: primary " + orderStart + ".." + primaryTop + ", witness window " + boundary + ".." + tipHeight + ", cold/resume records identical, no exact-start parameter");

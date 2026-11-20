@@ -27,6 +27,20 @@ const mutantSource = source
   .replace('from "./witness-slice.mjs"', `from "${pathToFileURL(join(ROOT, "src/witness-slice.mjs")).href}"`)
   .replace(guard, "const start = fromHeight;");
 writeFileSync(mutantPath, mutantSource, "utf8");
+const slicePath = join(ROOT, "src/witness-slice.mjs");
+const sliceSource = readFileSync(slicePath, "utf8");
+const sliceGuard = "return Math.floor(value / WITNESS_SLICE_BLOCKS);";
+if (!sliceSource.includes(sliceGuard)) throw new Error("the slice index moved; update this teeth check");
+const sliceMutantPath = join(temp, "witness-slice.mjs");
+writeFileSync(sliceMutantPath, sliceSource
+  .replace('from "./errors.mjs"', `from "${pathToFileURL(join(ROOT, "src/errors.mjs")).href}"`)
+  .replace(sliceGuard, "return Math.floor((value - 1) / WITNESS_SLICE_BLOCKS);"), "utf8");
+const boundaryMutantPath = join(temp, "xmr-arrival-boundary.mjs");
+const boundaryMutantSource = source
+  .replace('from "./errors.mjs"', `from "${pathToFileURL(join(ROOT, "src/errors.mjs")).href}"`)
+  .replace('from "./engine.mjs"', `from "${pathToFileURL(join(ROOT, "src/engine.mjs")).href}"`)
+  .replace('from "./witness-slice.mjs"', `from "${pathToFileURL(sliceMutantPath).href}"`);
+writeFileSync(boundaryMutantPath, boundaryMutantSource, "utf8");
 
 const G = ed25519.Point.BASE;
 const VIEW = 11n, SPEND = 13n, R = 17n;
@@ -53,12 +67,12 @@ const fixture = (amount) => {
 };
 const H = (height) => (height < 0 ? "00" : height.toString(16).padStart(2, "0")).repeat(32);
 const TX = { 6: { ["a".repeat(64)]: fixture(100_000_000_000n) } };
-const daemon = () => {
+const daemon = ({ height = 11 } = {}) => {
   const calls = [];
   const fetch = async (url, init) => {
     const body = JSON.parse(init.body);
     calls.push({ method: body.method || null, height: body.params && body.params.height });
-    if (body.method === "get_info") return { ok: true, json: async () => ({ result: { height: 11, synchronized: true, nettype: "stagenet" } }) };
+    if (body.method === "get_info") return { ok: true, json: async () => ({ result: { height, synchronized: true, nettype: "stagenet" } }) };
     if (body.method === "get_block") {
       const height = Number(body.params.height);
       const hashes = TX[height] ? Object.keys(TX[height]) : [];
@@ -91,7 +105,19 @@ try {
     throw new Error("replacing the grid start with the exact start did not change the requests: the check is not load-bearing");
   }
 } finally {
-  rmSync(temp, { recursive: true, force: true });
+  // Keep the temp directory until both mutants have run.
 }
 console.log("  ok    replacing the grid start with the exact start changes the requests");
+
+{
+  const e = daemon({ height: 21 });
+  const mutantBoundary = await import(pathToFileURL(boundaryMutantPath).href + "?v=" + process.pid);
+  await mutantBoundary.readRecoveryWitness({ ...request(e.fetch, 20), tipHeight: 20 });
+  const requested = e.calls.filter((call) => call.method === "get_block").map((call) => call.height).join(",");
+  if (requested !== "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19") {
+    throw new Error("moving the grid boundary by one did not change the start for height 20");
+  }
+  console.log("  ok    moving the grid boundary by one changes the start for height 20");
+}
+rmSync(temp, { recursive: true, force: true });
 console.log("recovery witness teeth: the grid boundary is load-bearing");
