@@ -167,17 +167,18 @@ interface's: this package holds no user-facing string.
 
 ### Errors (`error.code`, `SdkError.code`)
 
-`not-implemented`, `bad-input`, `wallet-not-connected`, `wallet-rejected`, `wrong-chain`, `quote-unavailable`,
+`not-implemented`, `bad-input`, `wallet-not-connected`, `wallet-rejected`, `caller-refused`, `wrong-chain`, `quote-unavailable`,
 `quote-refused`, `quote-too-short`, `quote-expired`, `address-denied`, `quote-stale`, `recovery-declined`,
 `recovery-failed`, `storage-unavailable`, `xmr-address-mismatch`, `server-unavailable`, `server-refused`,
 `claim-unknown`, `xmr-timeout`, `xmr-locked`, `contract-reverted`, `insufficient-funds`, `unknown`.
 
-Three refusals that are easy to merge into one are named DIFFERENTLY, because the advice differs:
+Several refusals that are easy to merge into one are named DIFFERENTLY, because the advice differs:
 `server-unavailable` — the service did not answer (retry); `server-refused` — it answered and did not accept (its
 reason and status are in `params`; investigate); `xmr-timeout` — the wait for the XMR to arrive expired (this is a
 state of the money, not a breakdown); `xmr-locked` — XMR is on the address but the transaction's `unlock_time`
 barred it until a height or a date (`params.until`), so the funds are not an arrival and the ready mark is not
-signed (issue #84).
+signed (issue #84). `caller-refused` — the caller's own `wallet.send` threw a string code the SDK does not own; the
+original is in `params.callerCode`, and the person is not told to reconnect.
 `address-denied` (issue #16) - the address is on the interface's `denylist` (refused before any
 request) or the node's own `denied-address` refusal, WITHOUT the node's `why` text and WITHOUT the address: the
 interface shows its own neutral message.

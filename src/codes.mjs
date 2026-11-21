@@ -45,6 +45,10 @@ export const ERROR_CODES = [
   "bad-input",
   "wallet-not-connected",
   "wallet-rejected",
+  // A CALLER'S OWN REFUSAL THROWN INSIDE `wallet.send`. The code belongs to the client, not to the provider; the
+  // original code is carried in `params.callerCode`. Without this, a site's `operation-changed` or
+  // `wallet-unsupported-testnet` looked like a transport failure and told the person to reconnect the wallet.
+  "caller-refused",
   "wrong-chain",
   // THE SENDER CHANGED BETWEEN THE ACTION GUARD AND eth_sendTransaction. A claim or refund reveals a half, so
   // signing from another account would publish the half without paying the claimer; the adapter refuses first.
@@ -179,6 +183,7 @@ export const ERROR_META = Object.freeze({
   "bad-input": { retryable: false, side: "caller" },
   "wallet-not-connected": { retryable: false, side: "wallet" },
   "wallet-rejected": { retryable: false, side: "wallet" },
+  "caller-refused": { retryable: false, side: "caller" },
   "wrong-chain": { retryable: false, side: "wallet" },
   "wrong-account": { retryable: false, side: "wallet" },
   "quote-unavailable": { retryable: true, side: "provider" },

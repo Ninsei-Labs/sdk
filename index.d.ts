@@ -2300,6 +2300,11 @@ export type ErrorCode =
   | "bad-input"
   | "wallet-not-connected"
   | "wallet-rejected"
+  /**
+   * The caller's own `wallet.send` refused for a reason the SDK does not own. The original string code is in
+   * `params.callerCode`; it is not a transport failure and the person should not be told to reconnect.
+   */
+  | "caller-refused"
   | "wrong-chain"
   | "wrong-account"
   | "quote-unavailable"

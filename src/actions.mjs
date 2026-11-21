@@ -55,6 +55,36 @@ const isProviderError = (error) => {
   const code = codeOfError(error);
   return typeof code === "number" || (typeof code === "string" && !ERROR_CODES.includes(code));
 };
+// PROVIDER LIBRARIES ALSO USE STRING CODES. These are not a caller's own refusal: ethers names a revert, a
+// transport failure or a gas-estimation problem this way, and they keep the existing transport/revert handling.
+// Any OTHER string code came from the caller's own `send` wrapper, so it is preserved as `caller-refused`.
+const PROVIDER_STRING_CODES = new Set([
+  "ACTION_REJECTED",
+  "INSUFFICIENT_FUNDS",
+  "CALL_EXCEPTION",
+  "NETWORK_ERROR",
+  "SERVER_ERROR",
+  "TIMEOUT",
+  "UNKNOWN_ERROR",
+  "UNPREDICTABLE_GAS_LIMIT",
+  "NONCE_EXPIRED",
+  "REPLACEMENT_UNDERPRICED",
+  "UNSUPPORTED_OPERATION",
+  "BAD_DATA",
+  // The remaining ethers v6 error codes. They describe a provider/tooling failure, not a caller's own refusal.
+  "INVALID_ARGUMENT",
+  "MISSING_ARGUMENT",
+  "UNEXPECTED_ARGUMENT",
+  "NUMERIC_FAULT",
+  "BUFFER_OVERRUN",
+  "UNCONFIGURED_NAME",
+  "OFFCHAIN_FAULT",
+  "TRANSACTION_REPLACED",
+  "NOT_IMPLEMENTED",
+  "INVALID_STATE",
+]);
+const isCallerRefusal = (code) => typeof code === "string"
+  && !ERROR_CODES.includes(code) && !PROVIDER_STRING_CODES.has(code);
 const actionFailure = (error, step) => {
   // ERRORS ALREADY NAMED BY THE SDK KEEP THEIR CODE. The flow and the chain guards speak the same vocabulary;
   // wrapping them a second time would erase `why` and turn a named refusal into a generic one.
@@ -95,6 +125,12 @@ const actionFailure = (error, step) => {
   if (code === 4100) throw new SdkError("wallet-not-connected", { step, why: "unauthorized" });
   if (code === -32002 || /already pending|already processing/i.test(message)) {
     throw new SdkError("wallet-not-connected", { step, why: "request-pending" });
+  }
+  // THE CALLER REFUSED INSIDE ITS OWN SEND. A string code the SDK does not know and a provider library does not
+  // use is the client's own decision. Keep it in `callerCode` instead of calling it a transport failure.
+  if (isCallerRefusal(code)) {
+    const params = error && error.params && typeof error.params === "object" ? error.params : {};
+    throw new SdkError("caller-refused", { ...params, step, callerCode: code });
   }
   if (isProviderError(error)) {
     throw new SdkError("wallet-not-connected", { step, why: "transport", providerCode: code ?? null });

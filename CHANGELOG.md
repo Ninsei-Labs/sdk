@@ -1,3 +1,7 @@
+## Unreleased — 2026-11-21
+
+- A string code thrown by the caller's own `wallet.send` is no longer reported as a transport failure: `actions.claim`, `actions.markReady`, `actions.refund` and `swaps.start` return `caller-refused` with the original code in `params.callerCode`. A numeric `4001` at the funding send is still `wallet-rejected`, not `bad-input`.
+
 ## 0.62.0 — 2026-11-21
 
 - **BREAKING:** `quotes.firmRequest` places `readyBy` and `t1` inside the signed window for one market, side and Monero network on the chain's clock; `firmRelay` now selects that window by the Monero network too. `@ninsei-labs/sdk/evm` exports `feeWeiFor`, `principalForTotal`, `salePayoutBeforeClaim` (guaranteed minimum and seller-sent figure), `salePayoutAfterClaim` (actual payout judged by `msg.sender`), `GAS_CREATE_ORDER_AND_FUND` and `fundingGasReserveWei` for the Max reserve. Balance reads accept only an ETH JSON-RPC quantity or one 32-byte ABI word; an empty, malformed or boolean answer is `null`, never zero.

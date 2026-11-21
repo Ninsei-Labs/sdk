@@ -9,6 +9,7 @@ import { SdkError } from "./errors.mjs";
 import * as engine from "./engine.mjs";
 // The deal flow is a package module. The registry address is read through it, as the actions read the order flow.
 import * as flow from "./swap-flow.mjs";
+import { walletError } from "./actions.mjs";
 import { assertWalletChain } from "./chainGuard.mjs";
 
 // Bring these bytes32 fields to 0x form once, at the boundary. The encoder requires the prefix. These are the
@@ -102,6 +103,13 @@ export async function send(request, wallet, deps = {}) {
   } catch (error) {
     // A named reason passes as is. The adapter and reader codes are the answer and must not be overridden.
     if (error && typeof error.code === "string") throw error;
+    // A NUMERIC PROVIDER CODE IS A WALLET ANSWER, NOT BAD INPUT. The funding send runs through the same adapter as
+    // markReady/claim/refund; 4001 is a person's rejection, 4100/-32002 are wallet state. Classify it before this
+    // boundary turns every non-string code into `bad-input`.
+    const nested = error && error.data && error.data.originalError;
+    if (typeof (error && error.code) === "number" || (nested && typeof nested.code === "number")) {
+      throw walletError(error, "lock");
+    }
     // Name the reason and choose the code by it: transport is server-unavailable, order or data is bad-input.
     const why = sanitizeWhy((error && error.message) || error);
     throw new SdkError(transportish(why) ? "server-unavailable" : "bad-input", { step: "fund-order", why });
