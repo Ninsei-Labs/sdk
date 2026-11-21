@@ -52,8 +52,9 @@ async function startWith(view, salt = order.salt, extra = {}, autoSalt = false, 
   if (options.fresh !== false) setStorage(memoryStorage());
   let sent = 0;
   let atSend = null;
+  const failure = options.failure || Object.assign(new Error("stop before broadcast"), { code: "wallet-rejected" });
   const wallet = { chainId: async () => order.chainId, address: async () => order.locker,
-    send: async () => { sent += 1; atSend = loadState(); throw Object.assign(new Error("stop before broadcast"), { code: "wallet-rejected" }); },
+    send: async () => { sent += 1; atSend = loadState(); throw failure; },
     receipt: async () => null };
   const counterparty = { proof: maker.side.proof, edPointClaimer: maker.spendPoint,
     commitHalfClaimer: quote.commitHalfClaimer, ...extra };
@@ -108,6 +109,25 @@ console.log("=== 1) THE DERIVED VIEW HALF IS ACCEPTED ===");
   const { result, sent } = await startWith(derived.makerViewHalf);
   if (result && result.code === "wallet-rejected" && sent === 1) ok("the derived half reaches the wallet");
   else bad("derived half: " + JSON.stringify({ code: result && result.code, sent }));
+}
+
+console.log("=== 1a) A NUMERIC WALLET REFUSAL REACHES START AS A REFUSAL === ");
+{
+  const refusal = Object.assign(new Error("User rejected the request."), { code: 4001 });
+  const { result, sent } = await startWith(derived.makerViewHalf, order.salt, {}, false, { failure: refusal });
+  if (result && result.code === "wallet-rejected" && result.params && result.params.step === "lock" && sent === 1) {
+    ok("a numeric 4001 at the funding send is still a wallet rejection");
+  } else bad("numeric 4001 at start: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
+}
+
+console.log("=== 1a2) A CALLER'S OWN REFUSAL REACHES START AS CALLER-REFUSED ===");
+{
+  const refusal = Object.assign(new Error("the recovery key changed"), { code: "operation-changed" });
+  const { result, sent } = await startWith(derived.makerViewHalf, order.salt, {}, false, { failure: refusal });
+  if (result && result.code === "caller-refused" && result.params && result.params.step === "lock"
+      && result.params.callerCode === "operation-changed" && sent === 1) {
+    ok("a caller refusal at the funding send keeps its own code");
+  } else bad("caller refusal at start: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
 }
 
 console.log("=== 1b2) A START USES THE CHUNKED ORDER STEP ===");

@@ -6,7 +6,8 @@
 //
 // This check runs the three actions through the real flow with a fake chain and a wallet whose send throws each
 // error. The guards have to pass first, so the refusal is exercised at the send boundary rather than at input
-// validation.
+// validation. A caller's own string refusal is `caller-refused` with `params.callerCode`; provider string codes
+// remain transport answers.
 import * as engine from "../src/engine.mjs";
 import { createActions, walletError } from "../src/actions.mjs";
 import { halfCommitmentHex } from "../engine/atomic/orderHalfCommit.js";
@@ -76,6 +77,11 @@ const cases = [
   ["4001 with revert text", Object.assign(new Error("request cannot be reverted"), { code: 4001, data: "0x1234" }), "wallet-rejected"],
   ["insufficient funds", Object.assign(new Error("insufficient funds for gas * price + value"), { code: "INSUFFICIENT_FUNDS" }), "insufficient-funds"],
   ["nested 4100", Object.assign(new Error("not authorized"), { data: { originalError: { code: 4100 } } }), "wallet-not-connected", "unauthorized"],
+  ["caller operation-changed", Object.assign(new Error("the recovery key changed"), { code: "operation-changed" }), "caller-refused", undefined, "operation-changed"],
+  ["caller wallet-unsupported-testnet", Object.assign(new Error("the wallet cannot sign on this testnet"), { code: "wallet-unsupported-testnet" }), "caller-refused", undefined, "wallet-unsupported-testnet"],
+  ["provider NETWORK_ERROR", Object.assign(new Error("network error"), { code: "NETWORK_ERROR" }), "wallet-not-connected", "transport"],
+  ["provider INVALID_ARGUMENT", Object.assign(new Error("invalid argument"), { code: "INVALID_ARGUMENT" }), "wallet-not-connected", "transport"],
+  ["ambiguous request rejected", new Error("Request rejected"), "unknown", "unclassified"],
   ["unclassified", new Error("boom"), "unknown", "unclassified"],
 ];
 
@@ -86,7 +92,7 @@ export const actionsWalletErrorsCheck = async () => {
 
   console.log("=== EVERY ACTION KEEPS THE WALLET'S OWN REFUSAL ===");
   for (const [label, method, scenario, request] of actions) {
-    for (const [errorLabel, failure, code, why] of cases) {
+    for (const [errorLabel, failure, code, why, callerCode] of cases) {
       const api = createActions({ call: chainFor(scenario), blockTime: async () => scenario.now });
       let caught = null;
       try {
@@ -94,7 +100,8 @@ export const actionsWalletErrorsCheck = async () => {
       } catch (error) { caught = error; }
       const good = caught && caught.code === code
         && caught.params && caught.params.step === label
-        && (why === undefined || caught.params.why === why);
+        && (why === undefined || caught.params.why === why)
+        && (callerCode === undefined || caught.params.callerCode === callerCode);
       if (good) ok(`${label}: ${errorLabel} -> ${code}${why ? "/" + why : ""}`);
       else bad(`${label}: ${errorLabel} -> ` + JSON.stringify(caught && { code: caught.code, params: caught.params }));
     }
@@ -128,9 +135,9 @@ export const actionsWalletErrorsCheck = async () => {
   }
 
   return {
-    note: "wallet refusals keep their wallet-side codes through markReady, claim and refund",
+    note: "wallet refusals keep their wallet-side codes and caller refusals stay caller-refused",
     problems,
-    notes: problems.length ? [] : ["4001, 4100, 4902, -32002, a dropped RPC and a plain revert are distinguished at the send boundary"],
+    notes: problems.length ? [] : ["4001, 4100, 4902, -32002, a dropped RPC, a plain revert and a caller refusal are distinguished at the send boundary"],
   };
 };
 
