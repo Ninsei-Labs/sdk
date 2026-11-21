@@ -1,5 +1,6 @@
 ## Unreleased — 2026-11-21
 
+- `feeWeiFor` and `principalForTotal` accept a fee rate only as a whole number from 0 to 200: a missing, empty, fractional or out-of-range rate is refused instead of being read as zero. `firmWindowFor` is exported from the package entry for a price listing that runs before a client or wallet exists.
 - A string code thrown by the caller's own `wallet.send` is no longer reported as a transport failure: `actions.claim`, `actions.markReady`, `actions.refund` and `swaps.start` return `caller-refused` with the original code in `params.callerCode`. A numeric `4001` at the funding send is still `wallet-rejected`, not `bad-input`.
 
 ## 0.62.0 — 2026-11-21

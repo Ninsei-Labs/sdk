@@ -8,6 +8,7 @@ import { GAS_CREATE_ORDER_AND_FUND } from "../engine/evm/funding.js";
 import { fundingGasReserveWei, orderGasReserveWei } from "../engine/evm/gasReserve.js";
 import { balances } from "../src/legs/evm.mjs";
 import * as evmPublic from "../src/public/evm.mjs";
+import * as sdk from "../src/index.mjs";
 
 const problems = [];
 let checks = 0;
@@ -60,6 +61,20 @@ const now = 1_000_000;
   // 982 + floor(982*200/10000) = 1001; 983 would be 1002.
   equal(principalForTotal(1001n, 200), 982n, "a total that does not divide evenly keeps the floor rule");
   equal(982n + feeWeiFor(982n, 200), 1001n, "the inverse and the fee recombine to the total");
+}
+{
+  // A missing or invalid rate is NOT zero. Explicit zero and the string form of a whole rate are valid.
+  equal(feeWeiFor(100_000n, "0"), 0n, "a zero rate as a string is explicit zero");
+  equal(feeWeiFor(100_000n, 0n), 0n, "a zero bigint rate is explicit zero");
+  const invalid = [undefined, null, "", "abc", "1.5", NaN, Infinity, -1, 201, 1.5, true, false];
+  for (const rate of invalid) {
+    let feeError = null;
+    try { feeWeiFor(100_000n, rate); } catch (error) { feeError = error; }
+    check(feeError !== null, `feeWeiFor refuses the invalid rate ${String(rate)}`);
+    let principalError = null;
+    try { principalForTotal(100_000n, rate); } catch (error) { principalError = error; }
+    check(principalError !== null, `principalForTotal refuses the invalid rate ${String(rate)}`);
+  }
 }
 
 // --- 3. Sale payout: before and after the claim -----------------------------------------------------------------
@@ -137,6 +152,7 @@ for (const bad of ["0x" + "0".repeat(62), "0x" + "0".repeat(66)]) {
   const names = ["MAX_FEE_BPS", "feeWeiFor", "principalForTotal", "salePayoutBeforeClaim", "salePayoutAfterClaim",
     "GAS_CREATE_ORDER_AND_FUND", "fundingGasReserveWei"];
   check(names.every((name) => evmPublic[name] !== undefined), "the EVM subpath exports the money arithmetic");
+  check(sdk.firmWindowFor === firmWindowFor, "the package entry exports the firm-window selector");
 }
 
 if (problems.length) {

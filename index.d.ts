@@ -484,6 +484,12 @@ export interface FirmRequestResult {
 }
 
 /**
+ * Pick the one signed firm window for a market, side and Monero network. This is the same selection rule
+ * `quotes.firmRequest` uses, exposed for a price listing that runs before a client or wallet exists.
+ */
+export declare function firmWindowFor(request: Omit<FirmRequestInput, "chainNow">): ReadyWindow;
+
+/**
  * Every code a route provider of this package refuses with.
  *
  * The providers already name them in their own tables (`COW_REFUSAL_CODES` and its three siblings), and the

@@ -19,7 +19,7 @@ export async function feesCheck() {
       assert.deepEqual(terms, { bps, feeWei: fee, totalWei: total, recipient, feeOnTop, legacy: false }, "fee roles and wei");
     }
   }
-  for (const bps of [201, -1, NaN, Infinity]) {
+  for (const bps of [201, -1, NaN, Infinity, 1.5, undefined, null, "", "abc"]) {
     assert.throws(() => feeTermsFromQuote({ ...base, feeBps: bps }), /outside the ceiling/, `rate ${bps}`);
   }
   assert.throws(() => feeTermsFromQuote({ ...base, fee: "1000" }), /diverges from the formula/, "rounded-up signed fee");
