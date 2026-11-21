@@ -282,6 +282,12 @@ try {
   const picked = await call(makeQuotes(), { features: twoNetworkFeatures, fetchImpl: twoNetworkWire.fetchImpl });
   if (picked.readyWindow.xmrNetwork === "stagenet") ok("firmRelay selects the window for the request's Monero network");
   else bad("firmRelay picked another network: " + JSON.stringify(picked.readyWindow));
+  let ambiguous = null;
+  try { await call(makeQuotes(), { features: twoNetworkFeatures, xmrNetwork: undefined }); }
+  catch (error) { ambiguous = error; }
+  if (ambiguous && ambiguous.code === "bad-input" && ambiguous.params && ambiguous.params.field === "xmrNetwork"
+    && ambiguous.params.why === "ambiguous") ok("firmRelay refuses an unnamed network when two windows match");
+  else bad("an unnamed ambiguous network was not refused: " + JSON.stringify(ambiguous && (ambiguous.code || ambiguous.message)));
 } catch (error) { bad("valid adapter call failed: " + JSON.stringify(error && (error.code || error.message)) + " " + JSON.stringify(error && error.params)); }
 
 console.log("=== 1b) A BUY QUOTE MUST KEEP THE START MARGIN AND THE PREPARATION TIME ===");
