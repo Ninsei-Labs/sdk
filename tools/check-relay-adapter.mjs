@@ -276,6 +276,12 @@ try {
     && result.startRequest.orderQuote === result.orderQuote && result.startRequest.recoverySalt === order.salt) {
     ok("the relay answer exposes a start request");
   } else bad("start request: " + JSON.stringify(result.startRequest));
+  // TWO NETWORKS FOR ONE MARKET: the request's own network selects the window, not the first entry.
+  const twoNetworkFeatures = nodeFeatures({ firmWindows: [window("ask"), { ...window("ask"), xmrNetwork: "mainnet" }] });
+  const twoNetworkWire = relayFetch();
+  const picked = await call(makeQuotes(), { features: twoNetworkFeatures, fetchImpl: twoNetworkWire.fetchImpl });
+  if (picked.readyWindow.xmrNetwork === "stagenet") ok("firmRelay selects the window for the request's Monero network");
+  else bad("firmRelay picked another network: " + JSON.stringify(picked.readyWindow));
 } catch (error) { bad("valid adapter call failed: " + JSON.stringify(error && (error.code || error.message)) + " " + JSON.stringify(error && error.params)); }
 
 console.log("=== 1b) A BUY QUOTE MUST KEEP THE START MARGIN AND THE PREPARATION TIME ===");
