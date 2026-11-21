@@ -250,6 +250,8 @@ export function createNinsei(options) {
     quotes: {
       // THE ONLY QUOTE PATH: one recovery key in, a signed orderQuote and the maker's view half out.
       firmRelay: (request) => quotes.firmRelay(request),
+      // The deadlines for one signed firm window, by market, side and Monero network on the chain's clock.
+      firmRequest: (request) => quotes.firmRequest(request),
     },
     // READING STATE WORKS, STARTING IS NAMED HONESTLY: list/get raise swaps from storage after a page reload;
     // start holds the step order and runs into the step that creates the record (stage 2).

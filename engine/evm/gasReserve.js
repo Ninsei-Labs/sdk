@@ -63,6 +63,16 @@ export function orderGasReserveWei({ gasPriceWei, readyGasLimit = ORDER_READY_GA
   return gp * (ready + refund + deposit) + extra;
 }
 
+// THE FUNDING RESERVE FOR MAX. The deposit is a separate transaction (`createOrderAndFund`) with its own gas limit;
+// the balance must keep that limit times the maximum fee per gas. `orderGasReserveWei` remains the mark/refund
+// reserve and does NOT include this deposit by default.
+export function fundingGasReserveWei({ gasLimit = GAS_CREATE_ORDER_AND_FUND, maxFeePerGasWei } = {}) {
+  const limit = toBig(gasLimit);
+  const maxFee = toBig(maxFeePerGasWei);
+  if (limit === null || limit <= 0n || maxFee === null || maxFee <= 0n) return null;
+  return limit * maxFee;
+}
+
 // DISPLAY IN BOTH UNITS. A person coming from USDC has no sense of ETH scale, so the reserve is shown both
 // in ETH and in dollars. The dollar is an estimate at the live native rate; no rate - no estimate (null), not a made-up one.
 export function gasReserveDisplay({ reserveWei, nativeUsd, decimals = 18 } = {}) {

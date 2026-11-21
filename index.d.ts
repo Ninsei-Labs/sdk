@@ -457,6 +457,30 @@ export interface QuotesApi {
    * requested terms and the on-chain registry/factory binding before it is returned.
    */
   firmRelay(request: FirmRelayOffer): Promise<FirmRelayAnswer>;
+  /**
+   * Place `readyBy` and `t1` inside the signed window for one market, side and Monero network, measured from the
+   * chain's `chainNow`. It reads nothing and signs nothing; the caller spreads the deadlines into the order.
+   */
+  firmRequest(request: FirmRequestInput): FirmRequestResult;
+}
+
+export interface FirmRequestInput {
+  /** The signed public features that carry `firmWindows`. */
+  readonly features: Readonly<Record<string, unknown>>;
+  readonly side: "ask" | "bid";
+  readonly market: string;
+  readonly xmrNetwork: string;
+  /** The latest chain block time in Unix seconds. */
+  readonly chainNow: number;
+}
+
+export interface FirmRequestResult {
+  readonly market: string;
+  readonly side: "ask" | "bid";
+  readonly xmrNetwork: string;
+  readonly window: ReadyWindow;
+  readonly readyBy: number;
+  readonly t1: number;
 }
 
 /**

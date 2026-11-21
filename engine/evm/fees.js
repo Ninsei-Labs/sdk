@@ -30,6 +30,68 @@ export function feeWeiFor(amountWei, feeBps) {
   return (amount * bps) / 10000n;   // DOWN, as in Solidity: amount * feeBps / 10000
 }
 
+// THE INVERSE OF A BUY'S TOTAL. A buy pays `p + floor(p*bps/10000)` and the person names the total; this returns the
+// largest principal that still fits. The inequality is solved exactly, so a total that does not divide evenly keeps
+// the rounding down of the fee formula instead of gaining a wei.
+export function principalForTotal(totalWei, feeBps) {
+  const total = BigInt(totalWei);
+  const bps = BigInt(Number(feeBps));
+  if (total < 0n || !Number.isFinite(Number(feeBps)) || bps < 0n || bps > BigInt(MAX_FEE_BPS)) {
+    throw new Error("principal: invalid total or fee rate");
+  }
+  return ((total + 1n) * 10000n - 1n) / (10000n + bps);
+}
+
+const payoutBig = (value, { allowZero = true } = {}) => {
+  if (value === null || value === undefined || value === "") return null;
+  try {
+    const n = BigInt(value);
+    return n < 0n || (!allowZero && n === 0n) ? null : n;
+  } catch { return null; }
+};
+
+/**
+ * THE SALE'S TWO FIGURES BEFORE THE CLAIM. The escrow holds `amount`; `fee` and `claimTip` are separate fields. The
+ * guaranteed minimum is `amount - fee - claimTip` (a third party sends the claim and takes the tip); the payout when
+ * the seller sends it is `amount - fee`.
+ */
+export function salePayoutBeforeClaim({ amountWei, feeWei, claimTipWei = 0 } = {}) {
+  const amount = payoutBig(amountWei, { allowZero: false });
+  const fee = payoutBig(feeWei);
+  const tip = payoutBig(claimTipWei);
+  if (amount === null || fee === null || tip === null || fee > amount || fee + tip > amount) return null;
+  return {
+    amountWei: amount,
+    feeWei: fee,
+    claimTipWei: tip,
+    guaranteedMinimumWei: amount - fee - tip,
+    sellerClaimWei: amount - fee,
+  };
+}
+
+/**
+ * THE SELLER'S ACTUAL PAYOUT AFTER A CONFIRMED CLAIM. `sender` is the contract's `msg.sender`, not `tx.from`: a claim
+ * routed through another contract has a different caller. A tip of zero pays `amount - fee` even when the caller is
+ * unknown; a positive tip pays `amount - fee` only when the claimer sent it, otherwise `amount - fee - claimTip`, and
+ * is unknown when the actual caller is not known. A promised tip is never reported as the seller's payout.
+ */
+export function salePayoutAfterClaim({ amountWei, feeWei, claimTipWei = 0, claimed = false, claimSucceeded = false,
+  sender = null, claimer = null } = {}) {
+  const amount = payoutBig(amountWei, { allowZero: false });
+  const fee = payoutBig(feeWei);
+  const tip = payoutBig(claimTipWei);
+  if (amount === null || fee === null || tip === null) return { outcome: "unknown", payoutWei: null };
+  if (!claimed || !claimSucceeded || fee > amount || fee + tip > amount) {
+    return { outcome: "unknown", payoutWei: null };
+  }
+  if (tip === 0n) return { outcome: "claimed", payoutWei: amount - fee };
+  const from = typeof sender === "string" ? sender.trim().toLowerCase() : "";
+  const to = typeof claimer === "string" ? claimer.trim().toLowerCase() : "";
+  if (!from || !to) return { outcome: "unknown", payoutWei: null };
+  if (from === to) return { outcome: "claimed", payoutWei: amount - fee };
+  return { outcome: "claimed", payoutWei: amount - fee - tip };
+}
+
 const sameAddr = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
 const zeroAddr = (a) => !a || /^0x0{40}$/i.test(String(a));
 

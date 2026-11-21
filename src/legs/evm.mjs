@@ -29,7 +29,15 @@ export const sameChain = (walletChainIdValue, chain) => {
 // match is checked by tools/check-sdk.mjs - it reads the engine's registry and fails if they diverge.
 export const BALANCE_OF_SELECTOR = "0x70a08231";
 
-const toMinimal = (hex) => {
+const ETH_QUANTITY = /^0x(?:0|[1-9a-f][0-9a-f]*)$/i;
+const ABI_WORD = /^0x[0-9a-fA-F]{64}$/;
+
+// BALANCE ANSWERS HAVE EXACT FORMATS. A JSON-RPC ETH quantity and a 32-byte ABI word are different answers; anything
+// else is unknown, never zero. `BigInt("")` is 0n, which is exactly why an empty or malformed answer must be refused
+// before the conversion.
+const toMinimal = (hex, kind) => {
+  if (typeof hex !== "string") return null;
+  if (kind === "eth" ? !ETH_QUANTITY.test(hex) : !ABI_WORD.test(hex)) return null;
   try {
     return BigInt(hex).toString(10);
   } catch {
@@ -50,10 +58,10 @@ export async function balances({ driver, address, tokens }) {
     let amount = null;
     try {
       if (token.address === null) {
-        amount = toMinimal(await driver.request({ method: "eth_getBalance", params: [address, "latest"] }));
+        amount = toMinimal(await driver.request({ method: "eth_getBalance", params: [address, "latest"] }), "eth");
       } else {
         const data = BALANCE_OF_SELECTOR + addrWord(address);
-        amount = toMinimal(await driver.request({ method: "eth_call", params: [{ to: token.address, data }, "latest"] }));
+        amount = toMinimal(await driver.request({ method: "eth_call", params: [{ to: token.address, data }, "latest"] }), "token");
       }
     } catch {
       amount = null;
