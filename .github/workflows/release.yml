@@ -59,6 +59,8 @@ jobs:
   build:
     name: Build and verify
     runs-on: ubuntu-latest
+    # The wait for CI below plus the build itself, with room to spare.
+    timeout-minutes: 75
     outputs:
       tag: ${{ steps.dist-tag.outputs.tag }}
     steps:
@@ -66,7 +68,7 @@ jobs:
 
       # A VERSION IS PUBLISHED ONLY FROM A COMMIT ON MAIN WHOSE CI PASSED. The run read is CI's run of the push to
       # main for this exact commit. A tag is often pushed while that run still goes, so a queued or running run is
-      # read again every 30 s for at most 20 minutes; then anything but success (cancelled, failed, missing, still
+      # read again every 30 s for at most 60 minutes; then anything but success (cancelled, failed, missing, still
       # running) refuses before anything is built. Every run that publishes is checked, a manual one too; a dry run
       # publishes nothing and may build any branch.
       - name: The commit is on main and its CI passed
@@ -82,7 +84,7 @@ jobs:
             exit 1
           fi
           runs="repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$sha&event=push&branch=main"
-          deadline=$((SECONDS + 1200))
+          deadline=$((SECONDS + 3600))
           while :; do
             state=$(gh api "$runs" --jq '.workflow_runs[0] | .conclusion // .status // "missing"')
             case $state in

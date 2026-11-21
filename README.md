@@ -495,7 +495,7 @@ decision: a plain `X.Y.Z`, the only shape that publishes under `latest`.
 
 Every publish, a prerelease too, comes from a commit on `main` whose CI run on the push to `main` passed. The release
 workflow checks both before it builds, for a tag and for a manual run that publishes, and refuses any other commit; a
-CI run still going is waited for, at most 20 minutes. A dry run builds any branch.
+CI run still going is waited for, at most 60 minutes. A dry run builds any branch.
 
 The tag is passed to `npm publish` explicitly (`--tag <tag>`), and `tools/npm-tag.mjs` refuses the two ways this
 can go wrong **by name** - a prerelease that would take `latest`, and a plain version that would slide into a
