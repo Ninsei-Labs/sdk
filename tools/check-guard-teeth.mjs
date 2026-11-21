@@ -63,7 +63,7 @@ const cases = [
   },
   {
     check: "fees", source: "engine/evm/fees.js", name: "the fee cap rejects its boundary",
-    from: "bps > MAX_FEE_BPS", to: "bps >= MAX_FEE_BPS", wants: "fee rate outside the ceiling",
+    from: "bps > BigInt(MAX_FEE_BPS)", to: "bps >= BigInt(MAX_FEE_BPS)", wants: "fee rate must be an integer from 0 to 200",
   },
   {
     check: "arrival-consensus", source: "src/xmr-arrival.mjs", name: "the fastest node supplies confirmations",

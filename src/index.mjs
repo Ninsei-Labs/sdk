@@ -275,6 +275,9 @@ export function createNinsei(options) {
 
 export { SdkError, ERROR_CODES, ERROR_META, ERROR_SIDES, STEP_CODES, CHECK_CODES };
 export { SDK_VERSION } from "./version.mjs";
+// THE FIRM-WINDOW SELECTOR IS PUBLIC: a price listing needs the same market/side/network rule before a wallet is
+// connected, not only through `quotes.firmRequest` on an assembled client.
+export { firmWindowFor } from "./firmRequest.mjs";
 // THE QUOTE LIFETIME AND THE START MARGIN ARE ONE PUBLIC DEFAULT. A node imports the lifetime, so its signed quote
 // cannot be shorter than the margin the SDK enforces before it opens the wallet.
 export { LOCK_START_MARGIN_SEC, START_PREP_SEC, DEFAULT_ORDER_QUOTE_TTL_SEC } from "./quotePolicy.mjs";

@@ -21,12 +21,25 @@
 // meaningful rate from a corrupted one: reading garbage as a rate and computing a fee from it is not allowed.
 export const MAX_FEE_BPS = 200;
 
+// ONE STRICT RATE PARSER FOR EVERY MONEY FIGURE. A missing, empty, fractional or out-of-range rate is NOT zero:
+// reading it as zero would understate a displayed fee or a Max reserve. An explicit 0 and its exact decimal string
+// are valid. BigInt is accepted because callers may already carry the rate in that form.
+const feeBpsOf = (feeBps) => {
+  let bps;
+  if (typeof feeBps === "bigint") bps = feeBps;
+  else if (typeof feeBps === "number" && Number.isSafeInteger(feeBps)) bps = BigInt(feeBps);
+  else if (typeof feeBps === "string" && /^\d+$/.test(feeBps)) bps = BigInt(feeBps);
+  else throw new Error("fee rate must be an integer from 0 to 200");
+  if (bps < 0n || bps > BigInt(MAX_FEE_BPS)) throw new Error("fee rate must be an integer from 0 to 200");
+  return bps;
+};
+
 // THE MIRROR OF THE CONTRACT FORMULA. One place for the whole page: a second copy would diverge from the first
 // exactly where it is most expensive - on the amount the escrow requires.
 export function feeWeiFor(amountWei, feeBps) {
   const amount = BigInt(amountWei === null || amountWei === undefined || amountWei === "" ? 0 : amountWei);
-  const bps = BigInt(Number(feeBps) || 0);
-  if (amount < 0n || bps < 0n) throw new Error("fee: negative amount or rate");
+  const bps = feeBpsOf(feeBps);
+  if (amount < 0n) throw new Error("fee: negative amount");
   return (amount * bps) / 10000n;   // DOWN, as in Solidity: amount * feeBps / 10000
 }
 
@@ -35,10 +48,8 @@ export function feeWeiFor(amountWei, feeBps) {
 // the rounding down of the fee formula instead of gaining a wei.
 export function principalForTotal(totalWei, feeBps) {
   const total = BigInt(totalWei);
-  const bps = BigInt(Number(feeBps));
-  if (total < 0n || !Number.isFinite(Number(feeBps)) || bps < 0n || bps > BigInt(MAX_FEE_BPS)) {
-    throw new Error("principal: invalid total or fee rate");
-  }
+  const bps = feeBpsOf(feeBps);
+  if (total < 0n) throw new Error("principal: invalid total");
   return ((total + 1n) * 10000n - 1n) / (10000n + bps);
 }
 
@@ -110,8 +121,12 @@ export function resetFeeCache() {
 export function feeTermsFromQuote(quote) {
   if (!quote || typeof quote !== "object") throw new Error("no signed quote: there is nowhere to take the fee and the registry address");
   const amount = BigInt(String(quote.amount));
-  const bps = Number(quote.feeBps === undefined || quote.feeBps === null ? 0 : quote.feeBps);
-  if (!Number.isFinite(bps) || bps < 0 || bps > MAX_FEE_BPS) throw new Error("fee rate outside the ceiling: " + quote.feeBps);
+  let bps;
+  try {
+    bps = Number(feeBpsOf(quote.feeBps));
+  } catch {
+    throw new Error("fee rate outside the ceiling or missing: " + quote.feeBps);
+  }
   const fee = feeWeiFor(amount, bps);
   if (BigInt(String(quote.fee === undefined || quote.fee === null ? 0 : quote.fee)) !== fee) {
     throw new Error("signed fee " + quote.fee + " diverges from the formula amount * rate (" + fee + ") - signature not started");
