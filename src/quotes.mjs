@@ -11,7 +11,7 @@ import { takerHalvesV2, recoverySaltOf } from "./recovery-key.mjs";
 import { acceptCounterpartyChunked, buildOwnSideFromHalvesChunked, jointAddress } from "./order.mjs";
 import { requestFirmQuote } from "./relayFirmClient.mjs";
 import { predictEscrow } from "./predictEscrow.mjs";
-import { readReadyWindow } from "./readyWindow.mjs";
+import { firmRequest as buildFirmRequest, firmWindowFor } from "./firmRequest.mjs";
 import { quoteLifeVerdict } from "./quotePolicy.mjs";
 // THE CHAIN READ NEEDED TO ASK THE REGISTRY WHO OWNS THE KEY. The selector is COMPUTED from the signature, not
 // remembered: a single wrong hex digit would call another function and return a zero address - and a zero
@@ -136,6 +136,14 @@ export function createQuotes({ config, now = () => Date.now(), evmCall = null, e
   };
   return {
     /**
+     * THE DEADLINES OF A FIRM REQUEST. Places `readyBy` and `t1` inside the maker's signed window for this market,
+     * side and Monero network, measured from the chain's `chainNow`. It reads nothing and signs nothing.
+     */
+    firmRequest(request) {
+      return buildFirmRequest(request);
+    },
+
+    /**
      * A firm quote through the relay, starting from the one recovery key.
      *
      * The caller gives the signed features, the order terms and the recovery key; this method derives the
@@ -203,10 +211,23 @@ export function createQuotes({ config, now = () => Date.now(), evmCall = null, e
       const markets = [...new Set(windows.map((entry) => entry.market).filter((value) => typeof value === "string" && value))];
       const market = request.market !== undefined ? String(request.market) : (markets.length === 1 ? markets[0] : null);
       if (!market) fail("bad-input", { field: "market" });
-      const window = windows.find((entry) => entry.market === market) || null;
-      if (!window) fail("quote-refused", { step: "features", why: "window" });
-      const readyWindow = readReadyWindow(window, { side, field: "features.firmWindows" });
-      const xmrNetwork = request.xmrNetwork !== undefined ? String(request.xmrNetwork) : window.xmrNetwork;
+      const requestedNetwork = request.xmrNetwork !== undefined && request.xmrNetwork !== null
+        ? String(request.xmrNetwork) : null;
+      const networks = [...new Set(windows.filter((entry) => entry && entry.market === market)
+        .map((entry) => entry.xmrNetwork).filter((value) => typeof value === "string" && value))];
+      if (requestedNetwork === null && networks.length !== 1) {
+        // TWO NETWORKS FOR ONE MARKET ARE A REAL CASE. Guessing the first would sign an order on the wrong Monero
+        // network; the caller must name the one its key uses.
+        fail("bad-input", { field: "xmrNetwork", why: "ambiguous" });
+      }
+      const xmrNetwork = requestedNetwork !== null ? requestedNetwork : networks[0];
+      let readyWindow;
+      try {
+        readyWindow = firmWindowFor({ features, side, market, xmrNetwork });
+      } catch (error) {
+        if (error && typeof error.code === "string") fail("quote-refused", { step: "features", why: "window", market, xmrNetwork });
+        throw error;
+      }
       if (!xmrNetwork) fail("bad-input", { field: "xmrNetwork" });
       if (request.xmrAmount === undefined || request.xmrAmount === null || request.xmrAmount === "") {
         fail("bad-input", { field: "xmrAmount" });

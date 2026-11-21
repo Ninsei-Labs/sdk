@@ -2591,6 +2591,7 @@ const keyImageTeethCheck = () => runScriptCheck("check-key-image-teeth.mjs", "ke
 const recoveryReadCheck = () => runScriptCheck("check-recovery-read.mjs", "recovery read");
 const recoveryReadTeethCheck = () => runScriptCheck("check-recovery-read-teeth.mjs", "recovery read teeth");
 const sweepReconcileCheck = () => runScriptCheck("check-sweep-reconcile.mjs", "sweep reconcile");
+const quoteFiguresCheck = () => runScriptCheck("check-quote-figures.mjs", "quote and money figures");
 const recoveryWitnessCheck = () => runScriptCheck("check-recovery-witness.mjs", "recovery witness");
 const recoveryWitnessTeethCheck = () => runScriptCheck("check-recovery-witness-teeth.mjs", "recovery witness teeth");
 const pendingTeethCheck = () => runScriptCheck("check-pending-teeth.mjs", "pending funding teeth");
@@ -2661,6 +2662,7 @@ const nodeTestCheck = (tool, expected) => {
 };
 const CHECKS = {
   fees: feesCheck,
+  "quote-figures": quoteFiguresCheck,
   "native-amount": nativeAmountCheck,
   "adapter-contract": () => nodeTestCheck("check-adapter-contract.mjs", { tests: 3, pass: 3, fail: 0, skipped: 0 }),
   "spent-status": () => nodeTestCheck("check-spent-status.mjs", { tests: 9, pass: 9, fail: 0, skipped: 0 }),

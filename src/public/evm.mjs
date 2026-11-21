@@ -27,3 +27,23 @@ export {
   claimMaxFeePerGasWei,
   claimRequiredWei,
 } from "../../engine/evm/claimGas.js";
+
+export {
+  MAX_FEE_BPS,
+  feeTermsFromQuote,
+  feeWeiFor,
+  principalForTotal,
+  salePayoutAfterClaim,
+  salePayoutBeforeClaim,
+} from "../../engine/evm/fees.js";
+
+export { GAS_CREATE_ORDER_AND_FUND } from "../../engine/evm/funding.js";
+
+export {
+  ORDER_DEPOSIT_GAS_LIMIT,
+  ORDER_GAS_LIMIT,
+  ORDER_READY_GAS_LIMIT,
+  ORDER_REFUND_GAS_LIMIT,
+  fundingGasReserveWei,
+  orderGasReserveWei,
+} from "../../engine/evm/gasReserve.js";

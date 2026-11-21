@@ -184,3 +184,87 @@ export interface ClaimGasGiftRequest {
 
 /** The claim cost the client requires, plus the reserve margin. The ONE computation of the gift size. */
 export declare function claimGasGiftWei(request?: ClaimGasGiftRequest): bigint | null;
+
+/** The contract's fee ceiling: 200 basis points (2%). */
+export declare const MAX_FEE_BPS: number;
+
+/** `floor(amount * bps / 10000)`, the contract's fee formula. */
+export declare function feeWeiFor(amountWei: string | number | bigint, feeBps: string | number | bigint): bigint;
+
+/** The largest principal whose principal plus fee fits a buy's total. */
+export declare function principalForTotal(totalWei: string | number | bigint, feeBps: string | number | bigint): bigint;
+
+export interface FeeTerms {
+  readonly bps: number;
+  readonly feeWei: bigint;
+  readonly totalWei: bigint;
+  readonly recipient: string | null;
+  readonly feeOnTop: boolean;
+  readonly legacy: false;
+}
+
+/** The signed quote's fee: rate, amount, recipient and direction, cross-checked against the formula. */
+export declare function feeTermsFromQuote(quote: Readonly<Record<string, unknown>>): FeeTerms;
+
+export interface SalePayoutBeforeClaimRequest {
+  readonly amountWei: string | number | bigint;
+  readonly feeWei: string | number | bigint;
+  readonly claimTipWei?: string | number | bigint;
+}
+
+export interface SalePayoutBeforeClaim {
+  readonly amountWei: bigint;
+  readonly feeWei: bigint;
+  readonly claimTipWei: bigint;
+  /** `amount - fee - claimTip`, when another address sends the claim. */
+  readonly guaranteedMinimumWei: bigint;
+  /** `amount - fee`, when the seller sends the claim. */
+  readonly sellerClaimWei: bigint;
+}
+
+/** The two labelled figures before the claim; null when the signed amounts do not add up. */
+export declare function salePayoutBeforeClaim(request: SalePayoutBeforeClaimRequest): SalePayoutBeforeClaim | null;
+
+export interface SalePayoutAfterClaimRequest extends SalePayoutBeforeClaimRequest {
+  readonly claimed?: boolean;
+  readonly claimSucceeded?: boolean;
+  /** The contract's actual `msg.sender`, not `tx.from`. */
+  readonly sender?: string | null;
+  readonly claimer?: string | null;
+}
+
+export interface SalePayoutAfterClaim {
+  readonly outcome: "claimed" | "unknown";
+  /** The seller's amount actually paid; null when the outcome is not determined. */
+  readonly payoutWei: bigint | null;
+}
+
+/** The seller's payout after a claim, judged by the contract's `msg.sender`. */
+export declare function salePayoutAfterClaim(request: SalePayoutAfterClaimRequest): SalePayoutAfterClaim;
+
+/** The gas limit of `createOrderAndFund`, the funding deposit. */
+export declare const GAS_CREATE_ORDER_AND_FUND: bigint;
+
+export declare const ORDER_READY_GAS_LIMIT: bigint;
+export declare const ORDER_REFUND_GAS_LIMIT: bigint;
+export declare const ORDER_GAS_LIMIT: bigint;
+export declare const ORDER_DEPOSIT_GAS_LIMIT: bigint;
+
+/** What the mark and possible refund reserve; the deposit is opt-in through `depositGasLimit`. */
+export interface OrderGasReserveRequest {
+  readonly gasPriceWei?: string | number | bigint | null;
+  readonly readyGasLimit?: string | number | bigint | null;
+  readonly refundGasLimit?: string | number | bigint | null;
+  readonly depositGasLimit?: string | number | bigint | null;
+  readonly extraFeeWei?: string | number | bigint | null;
+}
+
+export declare function orderGasReserveWei(request?: OrderGasReserveRequest): bigint | null;
+
+/** The funding deposit's reserve: its gas limit times the maximum fee per gas. */
+export interface FundingGasReserveRequest {
+  readonly gasLimit?: string | number | bigint | null;
+  readonly maxFeePerGasWei?: string | number | bigint | null;
+}
+
+export declare function fundingGasReserveWei(request?: FundingGasReserveRequest): bigint | null;

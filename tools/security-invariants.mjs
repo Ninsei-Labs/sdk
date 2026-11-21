@@ -17,8 +17,8 @@ export const SECURITY_INVARIANTS = [
   {
     id: "QUOTE-POLICY-01",
     statement: "Factory and implementation code policy has one explicit semantic for absent, null, empty and populated lists.",
-    files: ["src/quotes.mjs", "src/index.mjs", "src/factoryPolicy.mjs"],
-    checks: ["tools/check-relay-adapter.mjs", "tools/check.mjs"],
+    files: ["src/quotes.mjs", "src/index.mjs", "src/factoryPolicy.mjs", "src/firmRequest.mjs"],
+    checks: ["tools/check-relay-adapter.mjs", "tools/check.mjs", "tools/check-quote-figures.mjs"],
   },
   {
     id: "QUOTE-TTL-01",
@@ -82,9 +82,9 @@ export const SECURITY_INVARIANTS = [
   {
     id: "AMOUNT-01",
     statement: "A native, fee or XMR amount is exact: no silent rounding, truncation or Number precision loss reaches funding.",
-    files: ["engine/evm/fees.js", "engine/evm/funding.js", "engine/core/xmrAmount.js"],
+    files: ["engine/evm/fees.js", "engine/evm/funding.js", "engine/core/xmrAmount.js", "src/legs/evm.mjs"],
     checks: ["tools/check-fees.mjs", "tools/check-native-amount.mjs", "tools/check-xmr-amount.mjs",
-      "tools/check-native-amount-teeth.mjs"],
+      "tools/check-native-amount-teeth.mjs", "tools/check-quote-figures.mjs"],
   },
   {
     id: "ADAPTER-01",

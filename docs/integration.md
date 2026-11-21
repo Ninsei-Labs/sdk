@@ -55,7 +55,7 @@ for the latest block; a different provider would let the guard read a different 
 The host normally follows this sequence:
 
 1. Build the offer or choose the provider.
-2. Call `quotes.firmRelay` for the flow; there is no direct quote route in the SDK.
+2. Call `quotes.firmRelay` for the flow; there is no direct quote route in the SDK. Use `quotes.firmRequest` with the signed `features`, side, market, Monero network and chain time to place `readyBy`/`t1` inside the maker's window before building the order.
 3. Show the signed terms and the recovery key to the person.
 4. Call `swaps.start` with the quote, the wallet and the confirmation that the recovery key is saved. A relay answer
    carries `startRequest` with the quote, order, orderQuote, counterparty, recovery salt and predicted escrow; add

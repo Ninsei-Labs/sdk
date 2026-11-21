@@ -201,6 +201,17 @@ verified. `quotes.firmRelay` refuses a shorter one with `quote-too-short` before
 for its own expiry: the node has already funded the escrow and the client opens no wallet. The lock step then checks only
 the 30 s margin: the preparation was already spent between the answer and the send.
 
+`quotes.firmRequest({ features, side, market, xmrNetwork, chainNow })` selects the one signed window for that market,
+side and Monero network and places `readyBy` and `t1` inside it on the chain's clock. `firmRelay` uses the same
+selection; two windows for one market on different networks are refused unless `xmrNetwork` names the one to use.
+
+The money arithmetic is exported from `@ninsei-labs/sdk/evm`: `feeWeiFor` and `principalForTotal` for a buy,
+`salePayoutBeforeClaim` for the guaranteed minimum and the seller-sent figure, and `salePayoutAfterClaim` for the
+amount actually paid (judged by the contract's `msg.sender`, not `tx.from`). `fundingGasReserveWei` is the Max
+reserve: `GAS_CREATE_ORDER_AND_FUND × maxFeePerGas`; `orderGasReserveWei` remains the mark/refund reserve. Balance
+answers are accepted only as an ETH JSON-RPC quantity or one 32-byte ABI word; anything else is `null` (unknown) and
+never zero. The sale's `monero:` URI amount comes from `formatXmr` in `@ninsei-labs/sdk/core`, not a second formatter.
+
 ## Selling and claiming
 
 A bid is a sale of XMR. `quotes.firmRelay({ side: "bid", claimTip, ... })` returns the signed quote, the escrow,
