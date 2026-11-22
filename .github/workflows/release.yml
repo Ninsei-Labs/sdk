@@ -105,7 +105,7 @@ jobs:
           node-version: "24.22.3"
 
       # pnpm is this repository's package manager, so the lock file is pnpm's.
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
         # No version here on purpose: packageManager in package.json is the one place that names pnpm.
 
       - name: Install and verify
