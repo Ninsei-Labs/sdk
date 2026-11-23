@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 // #393: one place for the firm window's deadlines, the fee and payout arithmetic, the funding reserve and the
 // exact balance formats. Every case is a worked example; no network is read.
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { firmRequest, firmDeadlines, firmWindowFor } from "../src/firmRequest.mjs";
 import { MAX_FEE_BPS, feeWeiFor, principalForTotal, salePayoutBeforeClaim, salePayoutAfterClaim } from "../engine/evm/fees.js";
 import { claimMaxFeePerGasWei } from "../engine/evm/claimGas.js";
@@ -129,6 +133,25 @@ const OTHER = "0x" + "22".repeat(20);
     claimed: true, claimSucceeded: true, claimer: CLAIMER, to: escrow, from: CLAIMER });
   check(noEscrow.outcome === "unknown" && noEscrow.payoutWei === null,
     "transaction metadata without the escrow is not trusted as the sender");
+
+  // BREAKING RUN: removing the `to === escrow` comparison must make the routed-claim case claim a payout. If it
+  // stays unknown, this case proves something else and the trust boundary is not load-bearing.
+  const dir = mkdtempSync(join(tmpdir(), "sdk-quote-figures-"));
+  try {
+    const source = readFileSync(new URL("../engine/evm/fees.js", import.meta.url), "utf8");
+    const anchor = "text(to) === text(escrow)";
+    const mutated = source.replace(anchor, "true");
+    check(mutated !== source, "the breaking run could not find the escrow comparison");
+    if (mutated !== source) {
+      const copy = join(dir, "fees.js");
+      writeFileSync(copy, mutated);
+      const broken = await import(pathToFileURL(copy).href + "?run=" + Date.now());
+      const result = broken.salePayoutAfterClaim({ amountWei: AMOUNT, feeWei: FEE, claimTipWei: TIP,
+        claimed: true, claimSucceeded: true, claimer: CLAIMER, escrow, to: router, from: CLAIMER });
+      check(result.outcome === "claimed" && result.payoutWei === 99_700_000_000_000_000n,
+        "removing the escrow comparison did not change the routed claim");
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
 // --- 4. Funding reserve for Max ----------------------------------------------------------------------------------
