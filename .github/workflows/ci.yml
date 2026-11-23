@@ -141,9 +141,8 @@ jobs:
       - name: Check the withdrawal refusal (empty remainder -> insufficient-funds)
         run: pnpm run check:sweep
 
-      # A revealed half is one 32-byte word. Read the full word, never an address tail.
-      - name: Check the revealed half (32 bytes, never an address tail)
-        run: pnpm run check:sweep-half
+      # A revealed half is one 32-byte word. Read the full word, never an address tail. The guard is in the
+      # coverage battery (`sweep-half`); no named step here, or it would run twice.
 
       # READING AN ARRIVAL WITHOUT A WALLET: the address and its keys, the little-endian scalar, whether a view key
       # matches, and the unlock_time rule. A second copy of the last one is the expensive kind - locked money reads
