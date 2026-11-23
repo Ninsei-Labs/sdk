@@ -193,6 +193,10 @@ export interface StoredClaimAttempt {
   readonly sender: string;
   readonly at?: number;
   readonly outcome: "sending" | "refused" | "unknown" | "unconfirmed" | "claimed";
+  /**
+   * The SDK outcome code. A relay-level answer that leaves the attempt unknown keeps its own code in
+   * `params.code`, while this field stays `claim-unknown`.
+   */
   readonly code?: string | null;
   readonly params?: Readonly<Record<string, unknown>> | null;
   readonly txid?: string | null;
@@ -1359,6 +1363,11 @@ export interface RelayClaimRequest {
 export interface RelayClaimAttempt {
   readonly sender: string;
   readonly outcome: "refused" | "unknown" | "unconfirmed";
+  /**
+   * The SDK outcome code (`claim-unknown`, `quote-refused`, ...). When a relay-level answer
+   * (`rate_limited`, `bad_request`, `unsupported_version`, `no_quote`) leaves the outcome unknown,
+   * `params.code` keeps the relay's own code; `code` stays `claim-unknown`.
+   */
   readonly code?: string | null;
   readonly params?: Readonly<Record<string, unknown>> | null;
   readonly txid?: string | null;

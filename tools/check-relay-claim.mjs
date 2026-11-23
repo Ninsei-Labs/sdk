@@ -360,8 +360,15 @@ export const relayClaimCheck = async () => {
         return answer(secondSender, "0x" + "f0".repeat(32));
       } });
     check(result && result.state === "claimed" && calls === 2
-      && result.tried[0] && result.tried[0].outcome === "unknown",
-      code + " was treated as a sender refusal: " + JSON.stringify({ result, calls }));
+      && result.tried[0] && result.tried[0].outcome === "unknown"
+      && result.tried[0].code === "claim-unknown"
+      && result.tried[0].params && result.tried[0].params.code === code,
+      code + " was treated as a sender refusal or lost its relay code: " + JSON.stringify({ result, calls }));
+    const saved = engine.swap.getSwap(record.id, store);
+    const firstAttempt = saved && Array.isArray(saved.claimAttempts) ? saved.claimAttempts[0] : null;
+    check(firstAttempt && firstAttempt.outcome === "unknown" && firstAttempt.code === "claim-unknown"
+      && firstAttempt.params && firstAttempt.params.code === code,
+      code + " was not kept with its relay code in the durable attempt: " + JSON.stringify(firstAttempt));
   }
 
   // A 200 ANSWER WITH A RELAY-LEVEL CODE IS THE SAME HOP-LEVEL ANSWER. The second interception must not fall
@@ -386,8 +393,11 @@ export const relayClaimCheck = async () => {
         return answer(secondSender, "0x" + "f1".repeat(32));
       } });
     check(result && result.state === "claimed" && calls === 2
-      && result.tried[0] && result.tried[0].outcome === "unknown",
-      "a 200 relay-level answer was treated as a sender refusal: " + JSON.stringify({ result, calls }));
+      && result.tried[0] && result.tried[0].outcome === "unknown"
+      && result.tried[0].code === "claim-unknown"
+      && result.tried[0].params && result.tried[0].params.code === "rate_limited",
+      "a 200 relay-level answer was treated as a sender refusal or lost its relay code: "
+        + JSON.stringify({ result, calls }));
   }
   clockMs = 1_900_000_000_000;
   readyMark = 1;

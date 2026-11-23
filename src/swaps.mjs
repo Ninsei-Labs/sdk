@@ -2124,9 +2124,13 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
           await sleepFor(Math.min(pollMs, left));
         }
         const ended = { sender, outcome: failure ? "unknown" : "unconfirmed",
-          txid: answer ? answer.txid : null, code: failure ? failure.code : null };
+          txid: answer ? answer.txid : null, code: failure ? failure.code : null,
+          // THE RELAY'S OWN CODE STAYS ON THE ATTEMPT. `code` is the SDK category (`claim-unknown`); for a
+          // relay-level answer (`rate_limited`, `bad_request`, ...) `params.code` is the relay's code, so a caller
+          // can tell a temporary hop problem from a terminal one without parsing the message.
+          params: failure ? (failure.params || null) : null };
         tried.push(ended);
-        finishAttempt(attempt, ended.outcome, { txid: ended.txid, code: ended.code });
+        finishAttempt(attempt, ended.outcome, { txid: ended.txid, code: ended.code, params: ended.params });
         if (refunded) break;
       }
 
