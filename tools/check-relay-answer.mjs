@@ -97,9 +97,13 @@ console.log("=== 2b) A BETTER XMR AMOUNT IS ACCEPTED, A WORSE ONE IS REFUSED ===
     ["ask equal", "ask", "1000000000000", "1000000000000", true],
     ["ask better", "ask", "1000000000000", "1000000000001", true],
     ["ask worse", "ask", "1000000000001", "1000000000000", false],
+    ["ask zero", "ask", "1000000000000", "0", false],
+    ["ask negative", "ask", "1000000000000", "-1", false],
     ["bid equal", "bid", "1000000000000", "1000000000000", true],
     ["bid better", "bid", "1000000000001", "1000000000000", true],
     ["bid worse", "bid", "1000000000000", "1000000000001", false],
+    ["bid zero", "bid", "1000000000000", "0", false],
+    ["bid negative", "bid", "1000000000000", "-1", false],
     ["unreadable", "ask", "not-a-number", "1000000000000", false],
     ["unknown side", "sideways", "1000000000000", "1000000000000", false],
   ];
