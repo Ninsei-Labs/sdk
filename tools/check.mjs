@@ -2728,6 +2728,7 @@ const CHECKS = {
   "order-proof": orderProofCheck,
   "sweep-window": sweepWindowCheck,
   "sweep-order": sweepFromOrderCheck,
+  "sweep-half": () => runScriptCheck("check-sweep-half.mjs", "sweep half"),
   "sweep-adapter": sweepAdapterCheck,
   "claim-sender": claimSenderCheck,
   "claim-tip": claimTipCheck,

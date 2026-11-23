@@ -145,4 +145,6 @@ assert.notEqual(mutated.revealedHalfWord(WORD), WORD, "the old 20-byte truncatio
   assert.equal(alias.privateViewKey, real.privateViewKey, "the alias changed the view key");
 }
 
-console.log("sweep-half: passed (full word, zero/short refused, plan uses the full word, breaking run red)");
+console.log("  ok    plan/keys use a supplied revealed half without an escrow call");
+console.log("  ok    keys match the chain half; a wrong half is refused at verify");
+console.log("sweep-half: passed (full word, zero/short refused, plan uses the full word, known half, breaking run red)");
