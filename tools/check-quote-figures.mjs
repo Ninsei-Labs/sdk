@@ -110,6 +110,26 @@ const OTHER = "0x" + "22".repeat(20);
   check(undetermined.outcome === "unknown" && undetermined.payoutWei === null,
     "an outcome that is not determined gives no payout");
 }
+{
+  // A DIRECT CLAIM'S TRANSACTION METADATA IS THE SENDER FACT. `to` must be the escrow; a claim routed through
+  // another contract has a different `msg.sender` and must stay unknown.
+  const escrow = "0x" + "33".repeat(20);
+  const router = "0x" + "44".repeat(20);
+  const direct = salePayoutAfterClaim({ amountWei: AMOUNT, feeWei: FEE, claimTipWei: TIP,
+    claimed: true, claimSucceeded: true, claimer: CLAIMER, escrow, to: escrow.toUpperCase().replace("0X", "0x"), from: CLAIMER });
+  equal(direct.payoutWei, 99_700_000_000_000_000n, "a direct claim by the seller reports amount - fee");
+  const thirdParty = salePayoutAfterClaim({ amountWei: AMOUNT, feeWei: FEE, claimTipWei: TIP,
+    claimed: true, claimSucceeded: true, claimer: CLAIMER, escrow, to: escrow, from: OTHER });
+  equal(thirdParty.payoutWei, 99_680_000_000_000_000n, "a direct third-party claim reports amount - fee - tip");
+  const routed = salePayoutAfterClaim({ amountWei: AMOUNT, feeWei: FEE, claimTipWei: TIP,
+    claimed: true, claimSucceeded: true, claimer: CLAIMER, escrow, to: router, from: CLAIMER });
+  check(routed.outcome === "unknown" && routed.payoutWei === null,
+    "a claim routed through another contract does not claim the caller as msg.sender");
+  const noEscrow = salePayoutAfterClaim({ amountWei: AMOUNT, feeWei: FEE, claimTipWei: TIP,
+    claimed: true, claimSucceeded: true, claimer: CLAIMER, to: escrow, from: CLAIMER });
+  check(noEscrow.outcome === "unknown" && noEscrow.payoutWei === null,
+    "transaction metadata without the escrow is not trusted as the sender");
+}
 
 // --- 4. Funding reserve for Max ----------------------------------------------------------------------------------
 {

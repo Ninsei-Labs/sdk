@@ -208,7 +208,9 @@ selection; two windows for one market on different networks are refused unless `
 
 The money arithmetic is exported from `@ninsei-labs/sdk/evm`: `feeWeiFor` and `principalForTotal` for a buy,
 `salePayoutBeforeClaim` for the guaranteed minimum and the seller-sent figure, and `salePayoutAfterClaim` for the
-amount actually paid (judged by the contract's `msg.sender`, not `tx.from`). A fee rate is a whole number from 0 to
+amount actually paid (judged by the contract's `msg.sender`, not `tx.from`). For a direct claim the caller may pass
+the transaction's `{ to, from }` and the `escrow`: `from` is used only when `to` is that escrow, while a claim routed
+through another contract stays unknown. A fee rate is a whole number from 0 to
 200; a missing, empty, fractional or out-of-range rate is refused rather than read as zero, while an explicit `0` is
 valid. `fundingGasReserveWei` is the Max reserve: `GAS_CREATE_ORDER_AND_FUND × maxFeePerGas`; `orderGasReserveWei`
 remains the mark/refund reserve. Balance answers are accepted only as an ETH JSON-RPC quantity or one 32-byte ABI
