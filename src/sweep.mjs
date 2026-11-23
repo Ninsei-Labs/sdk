@@ -295,13 +295,19 @@ export function createSweep({ call = null, fetchImpl = null } = {}) {
       let restoreHeight = Number(wallet.restoreHeight) || 0;
       if (!(restoreHeight > 0)) missing.push("restore-height");
 
-      // THE COUNTERPARTY'S REVEALED HALF - FROM THE CHAIN WHEN THE CALLER HAS A CHAIN READ. The half is public:
-      // `claim` and `refund` store it in `revealedHalf()` and emit `HalfRevealed`. There is no service fallback: a
-      // caller without a chain read gets `missing: ["revealed-half"]`, not a request to its own origin.
+      // THE COUNTERPARTY'S REVEALED HALF - FROM THE CALLER FIRST, THEN THE CHAIN. A caller that already read the
+      // public half from `HalfRevealed` passes `revealedHalf`; the SDK must not name an escrow to its RPC just to
+      // read the same value. Without it, the old chain read remains the fallback for a caller that has one.
       let revealed = false;
       let revealedValue = null;
       const escrowAddress = wallet.escrowAddress || (payload.escrow && payload.escrow.address) || null;
-      if (escrowAddress && typeof call === "function") {
+      const suppliedHalf = request.revealedHalf;
+      if (suppliedHalf !== undefined && suppliedHalf !== null) {
+        const half = revealedHalfWord(suppliedHalf);
+        if (half === null) throw new SdkError("bad-input", { field: "revealedHalf", why: "not-a-half" });
+        revealed = true;
+        revealedValue = half;
+      } else if (escrowAddress && typeof call === "function") {
         try {
           const word = String((await call({ to: escrowAddress, data: REVEALED_HALF_SELECTOR })) || "");
           const half = revealedHalfWord(word);

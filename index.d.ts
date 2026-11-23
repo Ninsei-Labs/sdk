@@ -1958,6 +1958,11 @@ export interface SweepFromOrderResult {
 export interface SweepPlanRequest {
   readonly file: { readonly contents: string } | string;
   readonly passphrase: string;
+  /**
+   * The counterparty's revealed half, already read from `HalfRevealed` or another public source. When present,
+   * `plan` and `keys` use it as-is and make no escrow read.
+   */
+  readonly revealedHalf?: string;
 }
 
 export interface SweepPlan {
@@ -1976,6 +1981,8 @@ export interface SweepPlan {
   readonly missing: readonly SweepMissing[];
   /** The counterparty's revealed half, if the app returned it. This is a public value: it lies on the chain. */
   readonly half: string | null;
+  /** Whether a revealed half is available, either supplied by the caller or read from the chain. */
+  readonly revealedHalf: boolean;
 }
 
 /**
