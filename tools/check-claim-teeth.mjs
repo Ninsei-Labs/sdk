@@ -95,6 +95,13 @@ const cases = [
     to: "const rawSenders = explicitList || (Array.isArray(swap.claimSenders) ? swap.claimSenders : []);",
     wants: "not-in-record",
   },
+  {
+    check: "relay-claim", source: "src/swaps.mjs",
+    name: "an unknown attempt drops the relay's params",
+    from: "params: failure ? (failure.params || null) : null };",
+    to: "params: null };",
+    wants: "lost its relay code",
+  },
 ];
 
 const originals = new Map();

@@ -1,3 +1,7 @@
+## Unreleased — 2026-11-23
+
+- A relay-level claim answer keeps the relay's own code in `tried[].params.code` and in the durable `claimAttempts` entry; `code` remains `claim-unknown`, so a caller can distinguish `rate_limited` from `no_quote`.
+
 ## Unreleased — 2026-11-21
 
 - `feeWeiFor` and `principalForTotal` accept a fee rate only as a whole number from 0 to 200: a missing, empty, fractional or out-of-range rate is refused instead of being read as zero. `firmWindowFor` is exported from the package entry for a price listing that runs before a client or wallet exists.
