@@ -82,12 +82,14 @@ export function salePayoutBeforeClaim({ amountWei, feeWei, claimTipWei = 0 } = {
 
 /**
  * THE SELLER'S ACTUAL PAYOUT AFTER A CONFIRMED CLAIM. `sender` is the contract's `msg.sender`, not `tx.from`: a claim
- * routed through another contract has a different caller. A tip of zero pays `amount - fee` even when the caller is
- * unknown; a positive tip pays `amount - fee` only when the claimer sent it, otherwise `amount - fee - claimTip`, and
- * is unknown when the actual caller is not known. A promised tip is never reported as the seller's payout.
+ * routed through another contract has a different caller. A direct claim can supply the transaction's `{ to, from }`
+ * together with `escrow`; `from` is trusted only when `to` is that escrow. A tip of zero pays `amount - fee` even when
+ * the caller is unknown; a positive tip pays `amount - fee` only when the claimer sent it, otherwise
+ * `amount - fee - claimTip`, and is unknown when the actual caller is not known. A promised tip is never reported as
+ * the seller's payout.
  */
 export function salePayoutAfterClaim({ amountWei, feeWei, claimTipWei = 0, claimed = false, claimSucceeded = false,
-  sender = null, claimer = null } = {}) {
+  sender = null, claimer = null, to = null, from = null, escrow = null } = {}) {
   const amount = payoutBig(amountWei, { allowZero: false });
   const fee = payoutBig(feeWei);
   const tip = payoutBig(claimTipWei);
@@ -96,10 +98,15 @@ export function salePayoutAfterClaim({ amountWei, feeWei, claimTipWei = 0, claim
     return { outcome: "unknown", payoutWei: null };
   }
   if (tip === 0n) return { outcome: "claimed", payoutWei: amount - fee };
-  const from = typeof sender === "string" ? sender.trim().toLowerCase() : "";
-  const to = typeof claimer === "string" ? claimer.trim().toLowerCase() : "";
-  if (!from || !to) return { outcome: "unknown", payoutWei: null };
-  if (from === to) return { outcome: "claimed", payoutWei: amount - fee };
+  // A DIRECT CLAIM'S `from` IS `msg.sender` ONLY WHEN `to` IS THE ESCROW. A claim routed through another contract
+  // has a different caller; without the escrow there is no way to check `to`, so the sender stays unknown.
+  const text = (value) => typeof value === "string" ? value.trim().toLowerCase() : "";
+  const actualSender = text(sender) ? sender
+    : (text(to) && text(from) && text(escrow) && text(to) === text(escrow) ? from : null);
+  const senderText = text(actualSender);
+  const claimerText = text(claimer);
+  if (!senderText || !claimerText) return { outcome: "unknown", payoutWei: null };
+  if (senderText === claimerText) return { outcome: "claimed", payoutWei: amount - fee };
   return { outcome: "claimed", payoutWei: amount - fee - tip };
 }
 

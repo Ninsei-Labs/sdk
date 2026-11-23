@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 // #393: one place for the firm window's deadlines, the fee and payout arithmetic, the funding reserve and the
 // exact balance formats. Every case is a worked example; no network is read.
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { firmRequest, firmDeadlines, firmWindowFor } from "../src/firmRequest.mjs";
 import { MAX_FEE_BPS, feeWeiFor, principalForTotal, salePayoutBeforeClaim, salePayoutAfterClaim } from "../engine/evm/fees.js";
 import { claimMaxFeePerGasWei } from "../engine/evm/claimGas.js";
@@ -109,6 +113,45 @@ const OTHER = "0x" + "22".repeat(20);
     claimed: true, claimSucceeded: false, sender: CLAIMER, claimer: CLAIMER });
   check(undetermined.outcome === "unknown" && undetermined.payoutWei === null,
     "an outcome that is not determined gives no payout");
+}
+{
+  // A DIRECT CLAIM'S TRANSACTION METADATA IS THE SENDER FACT. `to` must be the escrow; a claim routed through
+  // another contract has a different `msg.sender` and must stay unknown.
+  const escrow = "0x" + "33".repeat(20);
+  const router = "0x" + "44".repeat(20);
+  const direct = salePayoutAfterClaim({ amountWei: AMOUNT, feeWei: FEE, claimTipWei: TIP,
+    claimed: true, claimSucceeded: true, claimer: CLAIMER, escrow, to: escrow.toUpperCase().replace("0X", "0x"), from: CLAIMER });
+  equal(direct.payoutWei, 99_700_000_000_000_000n, "a direct claim by the seller reports amount - fee");
+  const thirdParty = salePayoutAfterClaim({ amountWei: AMOUNT, feeWei: FEE, claimTipWei: TIP,
+    claimed: true, claimSucceeded: true, claimer: CLAIMER, escrow, to: escrow, from: OTHER });
+  equal(thirdParty.payoutWei, 99_680_000_000_000_000n, "a direct third-party claim reports amount - fee - tip");
+  const routed = salePayoutAfterClaim({ amountWei: AMOUNT, feeWei: FEE, claimTipWei: TIP,
+    claimed: true, claimSucceeded: true, claimer: CLAIMER, escrow, to: router, from: CLAIMER });
+  check(routed.outcome === "unknown" && routed.payoutWei === null,
+    "a claim routed through another contract does not claim the caller as msg.sender");
+  const noEscrow = salePayoutAfterClaim({ amountWei: AMOUNT, feeWei: FEE, claimTipWei: TIP,
+    claimed: true, claimSucceeded: true, claimer: CLAIMER, to: escrow, from: CLAIMER });
+  check(noEscrow.outcome === "unknown" && noEscrow.payoutWei === null,
+    "transaction metadata without the escrow is not trusted as the sender");
+
+  // BREAKING RUN: removing the `to === escrow` comparison must make the routed-claim case claim a payout. If it
+  // stays unknown, this case proves something else and the trust boundary is not load-bearing.
+  const dir = mkdtempSync(join(tmpdir(), "sdk-quote-figures-"));
+  try {
+    const source = readFileSync(new URL("../engine/evm/fees.js", import.meta.url), "utf8");
+    const anchor = "text(to) === text(escrow)";
+    const mutated = source.replace(anchor, "true");
+    check(mutated !== source, "the breaking run could not find the escrow comparison");
+    if (mutated !== source) {
+      const copy = join(dir, "fees.js");
+      writeFileSync(copy, mutated);
+      const broken = await import(pathToFileURL(copy).href + "?run=" + Date.now());
+      const result = broken.salePayoutAfterClaim({ amountWei: AMOUNT, feeWei: FEE, claimTipWei: TIP,
+        claimed: true, claimSucceeded: true, claimer: CLAIMER, escrow, to: router, from: CLAIMER });
+      check(result.outcome === "claimed" && result.payoutWei === 99_700_000_000_000_000n,
+        "removing the escrow comparison did not change the routed claim");
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
 // --- 4. Funding reserve for Max ----------------------------------------------------------------------------------

@@ -228,8 +228,14 @@ export declare function salePayoutBeforeClaim(request: SalePayoutBeforeClaimRequ
 export interface SalePayoutAfterClaimRequest extends SalePayoutBeforeClaimRequest {
   readonly claimed?: boolean;
   readonly claimSucceeded?: boolean;
-  /** The contract's actual `msg.sender`, not `tx.from`. */
+  /** The contract's actual `msg.sender`, not `tx.from`. Takes precedence over the transaction fields. */
   readonly sender?: string | null;
+  /** The claim transaction's `to`; used only when `sender` is absent. */
+  readonly to?: string | null;
+  /** The claim transaction's `from`; it is `msg.sender` only when `to` is `escrow`. */
+  readonly from?: string | null;
+  /** The escrow the claim targets. Required to trust `from` from a direct transaction. */
+  readonly escrow?: string | null;
   readonly claimer?: string | null;
 }
 
