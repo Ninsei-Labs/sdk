@@ -1,5 +1,6 @@
 ## Unreleased — 2026-11-23
 
+- `sweep.plan` and `sweep.keys` accept a `revealedHalf` already read from `HalfRevealed`; when supplied, the SDK makes no escrow call, and `keys` still verifies `(s_a + s_b)·G` against the order's spend point.
 - A relay-level claim answer keeps the relay's own code in `tried[].params.code` and in the durable `claimAttempts` entry; `code` remains `claim-unknown`, so a caller can distinguish `rate_limited` from `no_quote`.
 
 ## Unreleased — 2026-11-21
