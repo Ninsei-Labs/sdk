@@ -27,7 +27,9 @@ export function xmrAmountVerdict({ side, requested, signed } = {}) {
       : { ok: false, reason: "worse", side, requested: want.toString(), signed: got.toString() };
   }
   if (side === "bid") {
-    return got <= want
+    // A BID IS A SALE OF XMR: the signed amount must be positive. `got <= want` alone accepts zero, while the relay
+    // and relay-v1.md 7.2 require `signed > 0`; a zero-XMR bid is refused before it can reach a client as valid.
+    return got > 0n && got <= want
       ? { ok: true, side, requested: want.toString(), signed: got.toString() }
       : { ok: false, reason: "worse", side, requested: want.toString(), signed: got.toString() };
   }
