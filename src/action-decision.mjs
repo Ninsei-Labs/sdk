@@ -10,7 +10,6 @@ export const ACTION_DECISION_DEFAULTS = Object.freeze({
   refundMarginSec: 180,
   claimMarginSec: 60,
   markReadyMarginSec: 60,
-  saleLeadSec: 1_200,
 });
 
 const bad = (field, why = null) => new SdkError("bad-input", why ? { field, why } : { field });
@@ -105,7 +104,11 @@ export function actionDecision(request) {
   const refundMarginSec = optionalInt(request.refundMarginSec, "refundMarginSec", ACTION_DECISION_DEFAULTS.refundMarginSec);
   const claimMarginSec = optionalInt(request.claimMarginSec, "claimMarginSec", ACTION_DECISION_DEFAULTS.claimMarginSec);
   const markReadyMarginSec = optionalInt(request.markReadyMarginSec, "markReadyMarginSec", ACTION_DECISION_DEFAULTS.markReadyMarginSec);
-  const saleLeadSec = optionalInt(request.saleLeadSec, "saleLeadSec", ACTION_DECISION_DEFAULTS.saleLeadSec);
+  // A SALE MUST NAME ITS LEAD. The node's signed window owns this number; a silent 1200 s default would recreate the
+  // disagreement issue #390 removes.
+  const saleLeadSec = request.side === "sale"
+    ? int(request.saleLeadSec, "saleLeadSec")
+    : optionalInt(request.saleLeadSec, "saleLeadSec", 0);
   const earlyRefundClosesAt = readyBy - refundMarginSec;
   const claimClosesAt = t1 - claimMarginSec;
 

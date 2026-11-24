@@ -2365,7 +2365,7 @@ export interface ActionDecisionRequest {
   readonly claimMarginSec?: number;
   /** The protective margin that closes the ready mark. Default 60 s. */
   readonly markReadyMarginSec?: number;
-  /** The lead before readyBy for sending XMR; the node's signed window supplies it. Default 1200 s. */
+  /** The lead before readyBy for sending XMR; required for a sale, supplied by the node's signed window. */
   readonly saleLeadSec?: number;
 }
 
@@ -2390,7 +2390,6 @@ export declare const ACTION_DECISION_DEFAULTS: Readonly<{
   readonly refundMarginSec: number;
   readonly claimMarginSec: number;
   readonly markReadyMarginSec: number;
-  readonly saleLeadSec: number;
 }>;
 
 /** Terms are the on-chain OrderTerms event: the fee and claim tip are not in OrderCreated. */

@@ -60,6 +60,11 @@ console.log("=== 0) INPUTS ARE EXPLICIT ===");
   catch (error) { refused = error; }
   check(refused && refused.code === "bad-input" && refused.params.field === "deviceTimeSec",
     "a missing device time is refused", refused && refused.params);
+  refused = null;
+  try { actionDecision({ side: "sale", escrow: escrow(), deviceTimeSec: BLOCK }); }
+  catch (error) { refused = error; }
+  check(refused && refused.code === "bad-input" && refused.params.field === "saleLeadSec",
+    "a sale without its node lead is refused", refused && refused.params);
   equal(decide({ escrow: null }).action, "unknown", "an unreadable escrow is unknown");
 }
 
