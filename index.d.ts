@@ -2335,6 +2335,7 @@ export interface OrderHistoryRequest {
   readonly factories?: readonly (string | { readonly address?: string; readonly factory?: string; readonly deploymentBlock?: number | null })[] | null;
   readonly address?: string | null;
   readonly evmLogs: (request: { address: readonly string[]; topics: (string | null)[][]; fromBlock: number | string; toBlock: number | string }) => Promise<unknown[]>;
+  /** Required with an explicit `escrows` list; a key search derives it from the shared start rule. */
   readonly fromBlock?: number | string;
   readonly toBlock?: number | string;
   readonly deploymentBlock?: number | null;

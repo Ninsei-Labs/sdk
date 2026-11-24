@@ -111,7 +111,7 @@ const createdLog = ({ removed = false, blockNumber = 100, salt = "0x" + "ab".rep
     evmLogs: async () => [termsLog()],
   });
   const read = await sdk.order.read(ESCROW);
-  const history = await sdk.order.history({ escrows: [ESCROW], toBlock: 42 });
+  const history = await sdk.order.history({ escrows: [ESCROW], fromBlock: 0, toBlock: 42 });
   const lookup = await sdk.order.lookup(ESCROW, { factory: FACTORY, toBlock: 42 });
   const funding = await sdk.order.funding({ escrow: ESCROW, validUntil: 100 });
   check(read.block.number === 42 && history.escrows[0].terms.amount === "1000" && funding.state === "landed",
@@ -155,6 +155,10 @@ const createdLog = ({ removed = false, blockNumber = 100, salt = "0x" + "ab".rep
   check(history.checkpoint && history.checkpoint.number === 20 && history.checkpoint.hash === H(20), "history returned its block checkpoint");
   check(requests.length === 1 && requests[0].address[0] === ESCROW.toLowerCase(), "history did not use one address-filtered request");
   check(history.escrows.length === 1, "history returned an escrow that was not requested");
+  let noStart = null;
+  try { await orderHistory({ escrows: [ESCROW], evmLogs: async () => [] }); } catch (error) { noStart = error; }
+  check(noStart && noStart.code === "bad-input" && noStart.params.field === "fromBlock",
+    "an explicit list was refused without fromBlock");
 }
 {
   const calls = [];
@@ -250,6 +254,20 @@ const createdLog = ({ removed = false, blockNumber = 100, salt = "0x" + "ab".rep
     block: async () => ({ number: 5, hash: H(5), timestamp: 1000 }),
   });
   check(landed.state === "landed" && landed.status.isFunded === true, "a funded escrow was landed");
+  let depth = null;
+  try { await orderFunding({ escrow: ESCROW, validUntil: 100, network: "bsc", call, block }); } catch (error) { depth = error; }
+  check(depth && depth.code === "bad-input" && depth.params.field === "finality" && depth.params.why === "depth-not-tag",
+    "a depth network silently used a formal tag");
+  let invalid = null;
+  try { await orderFunding({ escrow: ESCROW, validUntil: 100, finality: "head", call, block }); } catch (error) { invalid = error; }
+  check(invalid && invalid.code === "bad-input" && invalid.params.field === "finality", "an unknown finality was accepted");
+  let badStatus = null;
+  try {
+    await orderFunding({ escrow: ESCROW, validUntil: 100, finality: "safe",
+      call: async () => "0x1234", block: async () => ({ number: 1, hash: H(1), timestamp: 99 }) });
+  } catch (error) { badStatus = error; }
+  check(badStatus && badStatus.code === "bad-input" && badStatus.params.field === "status",
+    "an unreadable status was not a named refusal");
   let missing = null;
   try { await orderFunding({ escrow: ESCROW, validUntil: 100, call, block: null }); } catch (error) { missing = error; }
   check(missing && missing.code === "bad-input" && missing.params.field === "block", "funding without a block read was refused");

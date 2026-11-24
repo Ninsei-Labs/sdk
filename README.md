@@ -303,8 +303,8 @@ whoever sends the claim.
 It returns the decoded values plus `{ number, hash, timestamp }` from that same tag. A block reader that answers
 another height, or a missing one, is `bad-input`; the result never mixes a latest value with a newer block header.
 
-`order.history` reads terms and settlement events from logs in one address-filtered request. Supply `escrows`, or a
-recovery key and let `findSwaps` name them first. Terms come from `OrderTerms`, so `amount`, `feeBps`, `fee`,
+`order.history` reads terms and settlement events from logs in one address-filtered request. Supply `escrows` with a
+`fromBlock`, or a recovery key and let `findSwaps` name them first; an explicit list without a range is refused. Terms come from `OrderTerms`, so `amount`, `feeBps`, `fee`,
 `feeRecipient` and `claimTip` are present; state comes from `HalfRevealed`, `Ready` and `Declined`. Removed logs are
 dropped. The result carries a `checkpoint` of `{ number, hash }`; pass the previous result's `escrows` as
 `previous` to resume, and the read merges the events above the checkpoint. It resumes only when that block still has
@@ -317,6 +317,7 @@ terms. `found: false` means the creation event was not in the requested range, n
 funded status is `landed`; an address with no code is `pending` until the signed `validUntil` and `expired` from it.
 The contract answer and the block timestamp are read at the same finality tag. With `network`, the default is the
 SDK's own table for that network (Arbitrum: `safe`); a caller can name `latest`, `safe` or `finalized` explicitly.
+A depth network without a named finality is refused: its tags are formal and calling one final would overstate it.
 
 The recovery search start is one rule for every client. `recoverySearchStart` returns the shared 360,000-block day
 grid line below a key made at `madeBlock`, never below the factory deployment. `recoveryStartBlock` applies the whole

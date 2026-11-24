@@ -39,6 +39,12 @@ export async function orderHistory(request = {}) {
   let escrows = request.escrows;
   let found = null;
   let fromBlock = request.fromBlock;
+  const explicit = escrows !== undefined && escrows !== null;
+  if (explicit && (fromBlock === undefined || fromBlock === null)) {
+    // AN EXPLICIT LIST HAS NO SEARCH START OF ITS OWN. Starting at genesis would turn one call into a full-chain
+    // read and would be a default the caller never chose; the range must be named.
+    throw bad("fromBlock");
+  }
   if (escrows === undefined || escrows === null) {
     if (typeof request.mnemonic !== "string") throw bad("escrows");
     found = await findSwaps({ ...request, evmLogs });
@@ -98,8 +104,12 @@ export async function orderFunding(request = {}) {
   // THE SDK'S OWN FINALITY TABLE NAMES THE TAG. On Arbitrum that is `safe`, not `finalized`; a caller can still name
   // `finalized` explicitly when its screen already waited for that level.
   const policy = typeof request.network === "string" && request.network ? finalityFor(request.network) : null;
-  const finality = request.finality === undefined || request.finality === null
-    ? (policy && policy.mode === "tag" ? policy.tag : "safe") : request.finality;
+  const named = request.finality !== undefined && request.finality !== null;
+  // A DEPTH NETWORK HAS NO HONEST TAG. bsc, monad, hyperevm and an unknown network answer `safe`/`finalized` at
+  // practically the same block as `latest`; calling that final would be the protection the table warns about. The
+  // caller must name a finality explicitly (or use a network whose table names a meaningful tag).
+  if (!named && policy && policy.mode === "depth") throw bad("finality", "depth-not-tag");
+  const finality = named ? request.finality : (policy && policy.mode === "tag" ? policy.tag : "safe");
   if (!["latest", "safe", "finalized"].includes(finality)) throw bad("finality");
   const call = request.call || engine.evm.readContract;
   const readBlock = request.block || request.evmBlock;
