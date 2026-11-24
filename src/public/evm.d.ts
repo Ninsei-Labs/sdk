@@ -188,10 +188,10 @@ export declare function claimGasGiftWei(request?: ClaimGasGiftRequest): bigint |
 /** The contract's fee ceiling: 200 basis points (2%). */
 export declare const MAX_FEE_BPS: number;
 
-/** `floor(amount * bps / 10000)`, the contract's fee formula. A rate is a whole number from 0 to 200; an invalid or missing rate is refused. */
+/** `floor(amount * bps / 10000)`, the contract's fee formula. The amount must be a non-negative whole number; a missing, empty, fractional or negative amount is refused, as is an invalid rate. */
 export declare function feeWeiFor(amountWei: string | number | bigint, feeBps: string | number | bigint): bigint;
 
-/** The largest principal whose principal plus fee fits a buy's total. A rate is a whole number from 0 to 200; an invalid or missing rate is refused. */
+/** The largest principal whose principal plus fee fits a buy's total. The total must be a non-negative whole number; a missing, empty, fractional or negative total is refused, as is an invalid rate. */
 export declare function principalForTotal(totalWei: string | number | bigint, feeBps: string | number | bigint): bigint;
 
 export interface FeeTerms {

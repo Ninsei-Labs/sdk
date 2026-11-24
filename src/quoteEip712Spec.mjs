@@ -217,8 +217,12 @@ export function recoverQuoteKey({ crypto, quote }) {
     if (v >= 27) v -= 27;
     if (v !== 0 && v !== 1) return null;
     const digest = quoteDigest({ crypto, quote });
-    const pub = crypto.secp256k1.Signature.fromBytes(concat(sig.slice(0, 32), sig.slice(32, 64)))
-      .addRecoveryBit(v).recoverPublicKey(digest);
+    const signature = crypto.secp256k1.Signature.fromBytes(concat(sig.slice(0, 32), sig.slice(32, 64)));
+    // THE CONTRACT REJECTS A HIGH-S SIGNATURE. ecrecover alone accepts it with the flipped recovery bit, so a
+    // quote that the router would refuse could otherwise pass recovery here. Low-s is part of the same signature
+    // rule, not an optional normalisation.
+    if (signature.hasHighS()) return null;
+    const pub = signature.addRecoveryBit(v).recoverPublicKey(digest);
     const raw = pub.toBytes(false);
     return bytesToHex(crypto.keccak256(raw.slice(1)).slice(12));
   } catch {

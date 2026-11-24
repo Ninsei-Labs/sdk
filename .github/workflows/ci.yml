@@ -47,9 +47,9 @@ jobs:
       # SHA-256 before anything from it runs.
       - name: Install the pinned Foundry release
         env:
-          FOUNDRY_VERSION: v1.9.0
-          FOUNDRY_ASSET_ID: 703110190
-          FOUNDRY_SHA256: 8d17599b42e3139f1a9c171be3798c4ed8e743ae17b84cc3435e57bf2a51ae99
+          FOUNDRY_VERSION: v1.10.0
+          FOUNDRY_ASSET_ID: 768285824
+          FOUNDRY_SHA256: 90729233bd9a683b872783ae2e3217fb56876fa2a3c37185f13e39dca8525041
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
@@ -296,9 +296,9 @@ jobs:
 
       - name: Install the pinned Foundry release
         env:
-          FOUNDRY_VERSION: v1.9.0
-          FOUNDRY_ASSET_ID: 703110190
-          FOUNDRY_SHA256: 8d17599b42e3139f1a9c171be3798c4ed8e743ae17b84cc3435e57bf2a51ae99
+          FOUNDRY_VERSION: v1.10.0
+          FOUNDRY_ASSET_ID: 768285824
+          FOUNDRY_SHA256: 90729233bd9a683b872783ae2e3217fb56876fa2a3c37185f13e39dca8525041
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu

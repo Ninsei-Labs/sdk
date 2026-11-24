@@ -34,12 +34,24 @@ const feeBpsOf = (feeBps) => {
   return bps;
 };
 
+// ONE STRICT AMOUNT PARSER. A missing, empty, fractional or negative amount is NOT zero: reading it as zero
+// would hide a missing signed figure behind a zero fee or a zero principal. Decimal strings and safe integers are
+// accepted; BigInt is accepted because callers may already carry the amount that way.
+const amountWeiOf = (value, what) => {
+  let amount;
+  if (typeof value === "bigint") amount = value;
+  else if (typeof value === "number" && Number.isSafeInteger(value)) amount = BigInt(value);
+  else if (typeof value === "string" && /^\d+$/.test(value)) amount = BigInt(value);
+  else throw new Error(what + " must be a non-negative integer");
+  if (amount < 0n) throw new Error(what + " must be a non-negative integer");
+  return amount;
+};
+
 // THE MIRROR OF THE CONTRACT FORMULA. One place for the whole page: a second copy would diverge from the first
 // exactly where it is most expensive - on the amount the escrow requires.
 export function feeWeiFor(amountWei, feeBps) {
-  const amount = BigInt(amountWei === null || amountWei === undefined || amountWei === "" ? 0 : amountWei);
+  const amount = amountWeiOf(amountWei, "fee amount");
   const bps = feeBpsOf(feeBps);
-  if (amount < 0n) throw new Error("fee: negative amount");
   return (amount * bps) / 10000n;   // DOWN, as in Solidity: amount * feeBps / 10000
 }
 
@@ -47,9 +59,8 @@ export function feeWeiFor(amountWei, feeBps) {
 // largest principal that still fits. The inequality is solved exactly, so a total that does not divide evenly keeps
 // the rounding down of the fee formula instead of gaining a wei.
 export function principalForTotal(totalWei, feeBps) {
-  const total = BigInt(totalWei);
+  const total = amountWeiOf(totalWei, "principal total");
   const bps = feeBpsOf(feeBps);
-  if (total < 0n) throw new Error("principal: invalid total");
   return ((total + 1n) * 10000n - 1n) / (10000n + bps);
 }
 

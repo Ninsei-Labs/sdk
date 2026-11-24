@@ -71,6 +71,21 @@ const PROVIDER_STRING_CODES = new Set([
   "REPLACEMENT_UNDERPRICED",
   "UNSUPPORTED_OPERATION",
   "BAD_DATA",
+  // Node/undici socket codes. They are transport failures, not a caller's decision inside its own `send` wrapper;
+  // classifying them as `caller-refused` made a dropped RPC look like a deliberate refusal.
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ECONNABORTED",
+  "ETIMEDOUT",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "EPIPE",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_SOCKET",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
   // The remaining ethers v6 error codes. They describe a provider/tooling failure, not a caller's own refusal.
   "INVALID_ARGUMENT",
   "MISSING_ARGUMENT",
