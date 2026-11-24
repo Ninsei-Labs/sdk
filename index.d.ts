@@ -947,6 +947,8 @@ export interface XmrRecoveryRequest {
   readonly fetch?: FetchLike;
   /** Key images from `sweep.keyImages`; without them spends and the available remainder are unknown. */
   readonly keyImages?: readonly (string | XmrRecoveryKeyImage)[];
+  /** Ask the selected primary node for `/is_key_image_spent`; default true when key images are supplied. */
+  readonly spentStatus?: boolean;
 }
 
 /** The caller-owned checkpoint of the primary or witness recovery read. */
@@ -1004,6 +1006,8 @@ export interface XmrRecoveryReadRequest {
   readonly timeoutMs?: number;
   readonly fetch?: FetchLike;
   readonly keyImages?: readonly (string | XmrRecoveryKeyImage)[];
+  /** Ask the node for `/is_key_image_spent`; default true when key images are supplied. */
+  readonly spentStatus?: boolean;
   /** The signed withdrawal hash to note if this walk meets it in a block or in the pool. */
   readonly txid?: string;
   readonly checkpoint?: XmrRecoveryCheckpointStore;
@@ -1012,13 +1016,13 @@ export interface XmrRecoveryReadRequest {
 }
 
 export interface XmrRecoveryTarget {
-  readonly txid: string;
+  readonly txid: string | null;
   readonly height: number | null;
   readonly blockHash: string | null;
   readonly pool: boolean;
 }
 
-export interface XmrRecoveryReadVerdict {
+export interface XmrRecoveryReadVerdict extends XmrRecoveryTotals {
   readonly transfers: readonly XmrRecoveryTransfer[];
   readonly tip: number | null;
   readonly fromHeight: number;
@@ -1065,13 +1069,14 @@ export interface XmrRecoveryWitnessRequest {
   readonly idleTimeoutMs?: number;
   readonly timeoutMs?: number;
   readonly fetch?: FetchLike;
+  /** Refused: a third-party witness never receives linkable key images. */
   readonly keyImages?: readonly (string | XmrRecoveryKeyImage)[];
   readonly checkpoint?: XmrRecoveryCheckpointStore;
   readonly onProgress?: (event: XmrRecoveryWitnessProgress) => void;
   readonly signal?: AbortSignal;
 }
 
-export interface XmrRecoveryWitnessVerdict {
+export interface XmrRecoveryWitnessVerdict extends XmrRecoveryTotals {
   readonly transfers: readonly XmrRecoveryTransfer[];
   readonly tip: number | null;
   readonly fromHeight: number;
@@ -1098,10 +1103,20 @@ export interface XmrRecoveryKeyImage {
 export interface XmrRecoverySpend {
   readonly keyImage: string;
   readonly outputKey: string | null;
-  readonly txid: string;
+  readonly txid: string | null;
   readonly height: number | null;
   readonly blockHash: string | null;
   readonly pool: boolean;
+  /** `spent-status` when the selected trusted node supplied this spend; absent for a spend found in block inputs. */
+  readonly source?: "spent-status";
+}
+
+/** The window's money: verified outputs inside it, and how many of them the trusted node reports spent. */
+export interface XmrRecoveryTotals {
+  readonly receivedAtomic: string | null;
+  readonly spentAtomic: string | null;
+  readonly unspentAtomic: string | null;
+  readonly withdrawalState: "empty" | "unspent" | "partly-withdrawn" | "withdrawn" | "unknown";
 }
 
 /** One verified transfer returned by the recovery read. */
@@ -1125,7 +1140,7 @@ export interface XmrRecoveryTransfer {
 }
 
 /** The recovery read's answer. `ready` means at least one agreed, confirmed, unlocked transfer exists. */
-export interface XmrRecoveryVerdict {
+export interface XmrRecoveryVerdict extends XmrRecoveryTotals {
   readonly state: "ready" | "pending" | "one-node" | "none";
   readonly transfers: readonly XmrRecoveryTransfer[];
   readonly tip: number;

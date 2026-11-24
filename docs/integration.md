@@ -180,7 +180,9 @@ change. Recovery uses `swaps.verifyRecovery`, which has no quoted amount: it ret
 start height with its verified outputs, confirmations, unlock state and agreeing operators. Short, overpaid and
 split payments are data there, not refusals. Pass `toHeight` (the first block past the order's `t1`) to stop a
 closed window at that block; without it the read goes to the head. A checkpoint carries the window end and the
-key-image set, so changing either replays from the start.
+key-image set, so changing either replays from the start. The primary read asks its trusted node for the spent
+status of the key images; a witness never receives them. The answer carries `receivedAtomic`, `spentAtomic`,
+`unspentAtomic` and `withdrawalState` (`empty`, `unspent`, `partly-withdrawn`, `withdrawn`, `unknown`).
 Before slice-only verification is enabled, `swaps.verifyArrivalShadow` runs that exact check and a
 `witness-v1` slice check side by side:
 

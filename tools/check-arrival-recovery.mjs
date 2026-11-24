@@ -98,6 +98,10 @@ function rpc({ blockTxids = [], poolHashes = [], poolFails = false, txs = {}, fa
       if (poolFails) return { ok: false, status: 503 };
       return { ok: true, json: async () => ({ tx_hashes: poolHashes }) };
     }
+    if (url.endsWith("/is_key_image_spent")) {
+      const images = body.key_images || [];
+      return { ok: true, json: async () => ({ status: "OK", spent_status: images.map(() => 0) }) };
+    }
     const hashes = body.txs_hashes || [];
     const inPool = !hashes.some((hash) => blockTxids.includes(hash));
     return { ok: true, json: async () => ({
@@ -195,7 +199,9 @@ console.log("=== 1c) A SPENT FUNDING OUTPUT IS EXCLUDED FROM THE AVAILABLE REMAI
     keyImages: [{ keyImage: spendImage, outputKey }],
   });
   if (verdict.complete === true && verdict.spends.length === 1 && verdict.spends[0].keyImage === spendImage
-    && verdict.availableAtomic === "0") {
+    && verdict.availableAtomic === "0" && verdict.receivedAtomic === ATOMIC_SHORT.toString()
+    && verdict.spentAtomic === ATOMIC_SHORT.toString() && verdict.unspentAtomic === "0"
+    && verdict.withdrawalState === "withdrawn") {
     ok("a spend is reported and removed from the available remainder");
   } else bad("spend/available recovery: " + JSON.stringify({ spends: verdict.spends, availableAtomic: verdict.availableAtomic }));
 }

@@ -589,6 +589,65 @@ function recoveryObservation(tx, hit, node, { height, blockHash, confirmations, 
   };
 }
 
+// THE TRUSTED NODE'S SPENT ANSWER. Key images are linkable, so only the selected primary node gets them; a witness
+// never does. A short, long or non-integer list is unreadable, not "unspent". Status 1 is a confirmed spend,
+// status 2 is a spend still in the pool.
+async function readSpentStatus(node, tracked, fetchImpl, timeoutMs, options = {}) {
+  if (!tracked.provided || tracked.byImage.size === 0) return { spends: [], complete: true, failed: [] };
+  const images = [...tracked.byImage.values()].map((record) => record.keyImage);
+  try {
+    const body = await call(node, "/is_key_image_spent", { key_images: images }, fetchImpl, timeoutMs,
+      { ...options, contentType: "application/json" });
+    if (!body || body.status !== "OK") throw new SdkError("xmr-no-nodes", { node: node.url, why: "rpc-status" });
+    const statuses = body && Array.isArray(body.spent_status) ? body.spent_status : null;
+    if (!statuses || statuses.length !== images.length
+        || !statuses.every((value) => Number.isInteger(value) && value >= 0 && value <= 2)) {
+      throw new SdkError("xmr-no-nodes", { node: node.url, why: "spent-status" });
+    }
+    const spends = [];
+    statuses.forEach((status, index) => {
+      if (status !== 1 && status !== 2) return;
+      const record = tracked.byImage.get(images[index]);
+      spends.push({ keyImage: images[index], outputKey: record ? record.outputKey : null,
+        txid: null, height: null, blockHash: null, pool: status === 2, source: "spent-status" });
+    });
+    return { spends, complete: true, failed: [] };
+  } catch (error) {
+    return { spends: [], complete: false, failed: [{ ...failureOf(error, node), why: "spent-status" }] };
+  }
+}
+
+const UNKNOWN_TOTALS = { receivedAtomic: null, spentAtomic: null, unspentAtomic: null, withdrawalState: "unknown" };
+
+// THE WINDOW'S MONEY, IN ONE PLACE. A window whose received amount is known is "empty", "unspent", "withdrawn" or
+// "partly-withdrawn"; an output whose amount is unverified makes every total unknown, never a partial sum.
+function recoveryTotals(transfers, tracked, spends) {
+  if (!tracked.provided) return { receivedAtomic: null, spentAtomic: null, unspentAtomic: null, withdrawalState: "unknown" };
+  const spent = new Set(spends.map((spend) => spend.keyImage));
+  let received = 0n;
+  let spentTotal = 0n;
+  let complete = true;
+  for (const transfer of transfers) {
+    for (const output of transfer.outputs || []) {
+      if (!output.amountVerified || output.amountAtomic === null || output.amountAtomic === undefined) {
+        complete = false;
+        continue;
+      }
+      const keyImage = tracked.byOutput.get(String(output.key || "").toLowerCase());
+      if (!keyImage) { complete = false; continue; }
+      received += BigInt(output.amountAtomic);
+      if (spent.has(keyImage)) spentTotal += BigInt(output.amountAtomic);
+    }
+  }
+  if (!complete) return { receivedAtomic: null, spentAtomic: null, unspentAtomic: null, withdrawalState: "unknown" };
+  const unspent = received - spentTotal;
+  const withdrawalState = received === 0n ? "empty"
+    : spentTotal === 0n ? "unspent"
+      : spentTotal === received ? "withdrawn" : "partly-withdrawn";
+  return { receivedAtomic: received.toString(), spentAtomic: spentTotal.toString(),
+    unspentAtomic: unspent.toString(), withdrawalState };
+}
+
 // A TRANSFER'S CONFIRMATIONS AND LOCK ARE FACTS ABOUT THE TIP, NOT ABOUT THE READ THAT FOUND IT. A checkpoint
 // stores the observation, but resuming at a later tip must not keep the old counts or the old lock state.
 function refreshTransferState(transfers, { tipHeight, nowSec }) {
@@ -926,13 +985,14 @@ export async function readRecovery(request) {
   }
   const watched = { address: request.address, viewSecret: bound.viewSecret, spendPub: bound.spendPub };
   const tracked = normalizeKeyImages(request.keyImages);
+  const spentStatus = request.spentStatus !== false;
   const targetTxid = request.txid === undefined || request.txid === null ? null : normalizedHash(request.txid);
   if (targetTxid !== null && !hash64(targetTxid)) throw new SdkError("bad-input", { field: "txid" });
   let target = null;
   let info;
   try { info = await getInfo(node, fetchImpl, timeoutMs, { signal }); }
   catch (error) {
-    return { transfers: [], tip: null, fromHeight, toHeight, minConfirmations,
+    return { transfers: [], tip: null, fromHeight, toHeight, minConfirmations, ...UNKNOWN_TOTALS,
       target, complete: false, through: null, checkpoint: null, blocked: false, failed: [failureOf(error, node)] };
   }
   const network = isStr(request.network) ? request.network : info.nettype;
@@ -941,7 +1001,7 @@ export async function readRecovery(request) {
     throw new SdkError("bad-input", { field: "node", why: "node-network-mismatch" });
   }
   if (!info.synced) {
-    return { transfers: [], tip: info.height, fromHeight, toHeight, minConfirmations,
+    return { transfers: [], tip: info.height, fromHeight, toHeight, minConfirmations, ...UNKNOWN_TOTALS,
       target, complete: false, through: null, checkpoint: null, blocked: true,
       failed: [{ url: node.url, operator: node.operator, code: "stale", why: "not-synchronized" }] };
   }
@@ -963,8 +1023,20 @@ export async function readRecovery(request) {
     } catch (error) {
       poolFailure = { ...failureOf(error, node), why: "pool-read" };
     }
+    if (spentStatus && tracked.provided && tracked.byImage.size) {
+      const status = await readSpentStatus(node, tracked, fetchImpl, timeoutMs, { signal });
+      if (status.spends.length) {
+        const merged = new Map(spends.map((spend) => [spend.keyImage, spend]));
+        addSpends(merged, status.spends);
+        spends = [...merged.values()];
+      }
+      if (!status.complete) poolFailure = status.failed[0] || poolFailure;
+    }
+    const totals = poolFailure
+      ? { receivedAtomic: null, spentAtomic: null, unspentAtomic: null, withdrawalState: "unknown" }
+      : recoveryTotals(transfers, tracked, spends);
     return { transfers, tip: info.height, fromHeight, toHeight, minConfirmations, target,
-      complete: poolFailure === null, through: null, spends, checkpoint: null, blocked: false,
+      complete: poolFailure === null, through: null, spends, ...totals, checkpoint: null, blocked: false,
       ...(poolFailure
         ? { failed: [poolFailure] }
         : { availableAtomic: availableAtomicOf(transfers, tracked, spends, minConfirmations),
@@ -1007,7 +1079,7 @@ export async function readRecovery(request) {
       } catch (error) {
         const failure = failureOf(error, node);
         failure.height = through.height;
-        return { transfers, tip: info.height, fromHeight, toHeight, minConfirmations, complete: false, through,
+        return { transfers, tip: info.height, fromHeight, toHeight, minConfirmations, ...UNKNOWN_TOTALS, complete: false, through,
           target, spends: [...spendMap.values()],
           checkpoint: checkpointRecord({ ...identity, through, transfers, spends: [...spendMap.values()] }), blocked: false, failed: [failure] };
       }
@@ -1038,7 +1110,7 @@ export async function readRecovery(request) {
         if (String(error && error.message) === "reorg") throw error;
         const failure = failureOf(error, node);
         failure.height = height;
-        return { transfers, tip: info.height, fromHeight, toHeight, minConfirmations, complete: false, through,
+        return { transfers, tip: info.height, fromHeight, toHeight, minConfirmations, ...UNKNOWN_TOTALS, complete: false, through,
           target, spends: [...spendMap.values()],
           checkpoint: through ? checkpointRecord({ ...identity, through, transfers, spends: [...spendMap.values()] }) : null, blocked: false, failed: [failure] };
       }
@@ -1082,18 +1154,26 @@ export async function readRecovery(request) {
         poolFailure = { ...failureOf(error, node), why: "pool-read" };
       }
     }
+    if (spentStatus && tracked.provided && tracked.byImage.size) {
+      const status = await readSpentStatus(node, tracked, fetchImpl, timeoutMs, { signal });
+      addSpends(spendMap, status.spends);
+      if (!status.complete) poolFailure = status.failed[0] || poolFailure;
+    }
     spends = [...spendMap.values()];
     refreshTransferState(transfers, { tipHeight: tipTop, nowSec: request.nowSec ?? Math.floor(Date.now() / 1000) });
+    const totals = poolFailure
+      ? { receivedAtomic: null, spentAtomic: null, unspentAtomic: null, withdrawalState: "unknown" }
+      : recoveryTotals(transfers, tracked, spends);
     const confirmedSpends = spends.filter((spend) => spend.pool !== true);
     const confirmedTransfers = transfers.filter((transfer) => transfer.pool !== true);
     if (poolFailure) {
-      return { transfers, tip: info.height, fromHeight, toHeight, minConfirmations, complete: false, through,
-        target, spends,
+      return { transfers, tip: info.height, fromHeight, toHeight, minConfirmations, ...UNKNOWN_TOTALS, complete: false, through,
+        target, spends, ...totals,
         checkpoint: through ? checkpointRecord({ ...identity, through, transfers: confirmedTransfers, spends: confirmedSpends }) : null,
         blocked: false, failed: [poolFailure] };
     }
     return { transfers, tip: info.height, fromHeight, toHeight, minConfirmations, complete: true, through,
-      target, spends, availableAtomic: availableAtomicOf(transfers, tracked, spends, minConfirmations),
+      target, spends, ...totals, availableAtomic: availableAtomicOf(transfers, tracked, spends, minConfirmations),
       availableSource: { url: node.url, operator: node.operator },
       checkpoint: through ? checkpointRecord({ ...identity, through, transfers: confirmedTransfers, spends: confirmedSpends }) : null,
       blocked: false, failed: [] };
@@ -1113,7 +1193,7 @@ export async function readRecovery(request) {
         continue;
       }
       const failure = failureOf(error, node);
-      return { transfers: [], tip: info.height, fromHeight, toHeight, minConfirmations, complete: false, through: null,
+      return { transfers: [], tip: info.height, fromHeight, toHeight, minConfirmations, ...UNKNOWN_TOTALS, complete: false, through: null,
         target, checkpoint: null, blocked: false, failed: [failure] };
     }
   }
@@ -1142,6 +1222,11 @@ export async function readRecoveryWitness(request) {
   const toHeight = request.toHeight === null || request.toHeight === undefined ? null : intOf(request.toHeight);
   if (request.toHeight !== null && request.toHeight !== undefined && (toHeight === null || toHeight < fromHeight)) {
     throw new SdkError("bad-input", { field: "toHeight" });
+  }
+  // KEY IMAGES ARE LINKABLE. The witness is a third party and never receives them; spent status belongs to the
+  // selected trusted primary node.
+  if (request.keyImages !== undefined && request.keyImages !== null) {
+    throw new SdkError("bad-input", { field: "keyImages", why: "witness-key-images" });
   }
   const tipHeightRaw = request.tipHeight === null || request.tipHeight === undefined ? null : intOf(request.tipHeight);
   if (request.tipHeight !== null && request.tipHeight !== undefined && (tipHeightRaw === null || tipHeightRaw < 0)) {
@@ -1175,7 +1260,7 @@ export async function readRecoveryWitness(request) {
   let info;
   try { info = await getInfo(node, fetchImpl, timeoutMs, { signal }); }
   catch (error) {
-    return { transfers: [], tip: null, fromHeight, toHeight, through: null, complete: false, checkpoint: null, blocked: false, failed: [failureOf(error, node)] };
+    return { transfers: [], tip: null, fromHeight, toHeight, ...UNKNOWN_TOTALS, through: null, complete: false, checkpoint: null, blocked: false, failed: [failureOf(error, node)] };
   }
   const network = isStr(request.network) ? request.network : info.nettype;
   if (!isStr(network)) throw new SdkError("bad-input", { field: "network" });
@@ -1183,19 +1268,19 @@ export async function readRecoveryWitness(request) {
     throw new SdkError("bad-input", { field: "node", why: "node-network-mismatch" });
   }
   if (!info.synced) {
-    return { transfers: [], tip: info.height, fromHeight, toHeight, through: null, complete: false, checkpoint: null, blocked: true,
+    return { transfers: [], tip: info.height, fromHeight, toHeight, ...UNKNOWN_TOTALS, through: null, complete: false, checkpoint: null, blocked: true,
       failed: [{ url: node.url, operator: node.operator, code: "stale", why: "not-synchronized" }] };
   }
   const top = Math.max(0, info.height - 1);
   const wantedTop = toHeight === null ? tipHeightRaw : (tipHeightRaw === null ? toHeight : Math.min(tipHeightRaw, toHeight));
   if (wantedTop !== null && wantedTop > top) {
-    return { transfers: [], tip: info.height, fromHeight, toHeight, through: null, complete: false, checkpoint: null, blocked: false,
+    return { transfers: [], tip: info.height, fromHeight, toHeight, ...UNKNOWN_TOTALS, through: null, complete: false, checkpoint: null, blocked: false,
       failed: [{ url: node.url, operator: node.operator, code: "stale", why: "witness-behind", height: top, wanted: wantedTop }] };
   }
   const targetTop = wantedTop === null ? top : Math.min(wantedTop, top);
   const observedTip = tipHeightRaw === null ? top : tipHeightRaw;
   if (targetTop < fromHeight) {
-    return { transfers: [], tip: info.height, fromHeight, toHeight, through: null, complete: true, checkpoint: null, blocked: false, failed: [] };
+    return { transfers: [], tip: info.height, fromHeight, toHeight, ...UNKNOWN_TOTALS, through: null, complete: true, checkpoint: null, blocked: false, failed: [] };
   }
   const identity = { network, address: request.address, fromHeight, toHeight, keyImages: [] };
   let prior = null;
@@ -1212,7 +1297,7 @@ export async function readRecoveryWitness(request) {
   const lastWindow = witnessSliceIndex(targetTop);
   if (startWindow > lastWindow) {
     if (prior) refreshTransferState(prior.transfers, { tipHeight: observedTip, nowSec: request.nowSec ?? Math.floor(Date.now() / 1000) });
-    return { transfers: prior ? prior.transfers : [], tip: info.height, fromHeight, toHeight, through: prior ? prior.through : null,
+    return { transfers: prior ? prior.transfers : [], tip: info.height, fromHeight, toHeight, ...UNKNOWN_TOTALS, through: prior ? prior.through : null,
       complete: true, checkpoint: prior ? checkpointRecord({ ...identity, through: prior.through, transfers: prior.transfers, spends: prior.spends, kind: "witness" }) : null,
       blocked: false, failed: [] };
   }
@@ -1262,7 +1347,7 @@ export async function readRecoveryWitness(request) {
           const keptThrough = through || (startRecord ? startRecord.through : null);
           const keptTransfers = through ? transfers : (startRecord ? startRecord.transfers : transfers);
           const keptSpends = through ? [...spendMap.values()] : (startRecord ? startRecord.spends : []);
-          return { transfers: keptTransfers, tip: info.height, fromHeight, toHeight, complete: false, through: keptThrough,
+          return { transfers: keptTransfers, tip: info.height, fromHeight, toHeight, ...UNKNOWN_TOTALS, complete: false, through: keptThrough,
             spends: keptSpends,
             checkpoint: keptThrough ? checkpointRecord({ ...identity, through: keptThrough, transfers: keptTransfers, spends: keptSpends, kind: "witness" }) : null,
             blocked: false, failed: [failure] };
@@ -1288,6 +1373,7 @@ export async function readRecoveryWitness(request) {
     spends = [...spendMap.values()];
     refreshTransferState(transfers, { tipHeight: observedTip, nowSec: request.nowSec ?? Math.floor(Date.now() / 1000) });
     return { transfers, tip: info.height, fromHeight, toHeight, complete: true, through, spends,
+      ...recoveryTotals(transfers, tracked, spends),
       availableAtomic: availableAtomicOf(transfers, tracked, spends, minConfirmations),
       checkpoint: through ? checkpointRecord({ ...identity, through, transfers, spends, kind: "witness" }) : null,
       blocked: false, failed: [] };
@@ -1307,7 +1393,7 @@ export async function readRecoveryWitness(request) {
         continue;
       }
       const failure = failureOf(error, node);
-      return { transfers: [], tip: info.height, fromHeight, toHeight, complete: false, through: null, checkpoint: null, blocked: false, failed: [failure] };
+      return { transfers: [], tip: info.height, fromHeight, toHeight, ...UNKNOWN_TOTALS, complete: false, through: null, checkpoint: null, blocked: false, failed: [failure] };
     }
   }
 }
@@ -1553,6 +1639,12 @@ export async function verifyRecovery(request) {
   const spends = [...spendMap.values()];
   const primarySpendSet = new Set(primarySpends.map((spend) => spend.keyImage));
   const spendsDisagreements = spends.filter((spend) => !primarySpendSet.has(spend.keyImage));
+  const completeVerdict = complete && spendsDisagreements.length === 0;
+  // A SPEND ONLY A WITNESS SAW IS NOT A SETTLED FIGURE. The same conservatism that withholds `availableAtomic`
+  // makes the window totals unknown rather than including a disputed spend.
+  const totals = completeVerdict
+    ? recoveryTotals(transfers, tracked, spends)
+    : { receivedAtomic: null, spentAtomic: null, unspentAtomic: null, withdrawalState: "unknown" };
   const availableForVerdict = spendsDisagreements.length ? null : availableAtomic;
   const ready = transfers.some((transfer) => transfer.agreed && transfer.confirmed && !transfer.locked);
   const agreed = transfers.some((transfer) => transfer.agreed);
@@ -1563,10 +1655,11 @@ export async function verifyRecovery(request) {
     fromHeight,
     toHeight,
     minConfirmations,
-    complete: spendsDisagreements.length ? false : complete,
+    complete: completeVerdict,
     completedOperators: [...completedOperators],
     spends,
     spendsDisagreements,
+    ...totals,
     availableAtomic: availableForVerdict,
     availableSource: live.length ? { url: live[0].node.url, operator: live[0].node.operator } : null,
     checked,
