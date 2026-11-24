@@ -1,6 +1,6 @@
 // Synthetic OrderQuote examples; expected wei are worked from the contract's integer fee rule.
 import assert from "node:assert/strict";
-import { feeTermsFromQuote, feeWeiFor, MAX_FEE_BPS, resetFeeCache } from "../engine/evm/fees.js";
+import { feeTermsFromQuote, feeWeiFor, MAX_FEE_BPS, principalForTotal, resetFeeCache } from "../engine/evm/fees.js";
 import { fundOrder } from "../engine/evm/funding.js";
 import { ORDER_CREATED_TOPIC } from "../engine/evm/factory.js";
 
@@ -25,6 +25,14 @@ export async function feesCheck() {
   assert.throws(() => feeTermsFromQuote({ ...base, fee: "1000" }), /diverges from the formula/, "rounded-up signed fee");
   for (const feeRecipient of [address("00"), null]) {
     assert.throws(() => feeTermsFromQuote({ ...base, feeRecipient }), /recipient must be named/);
+  }
+  // A MISSING OR EMPTY AMOUNT IS NOT ZERO. The fee and the inverse principal both read a signed figure; a missing
+  // one must stop the calculation rather than silently produce a zero fee or a zero deposit.
+  assert.equal(feeWeiFor(0n, 30), 0n, "an explicit zero amount is valid");
+  assert.equal(principalForTotal("0", 0), 0n, "an explicit zero total is valid");
+  for (const amount of [undefined, null, "", -1, 1.5, NaN, Infinity, true, false]) {
+    assert.throws(() => feeWeiFor(amount, 30), /must be a non-negative integer/, `fee amount ${String(amount)}`);
+    assert.throws(() => principalForTotal(amount, 30), /must be a non-negative integer/, `principal total ${String(amount)}`);
   }
   // Drive the real funding entry with the same non-zero fee. The fake chain supplies only prediction/status/receipt.
   const factory = address("44"), escrow = address("55"), hash = "0x" + "66".repeat(32);

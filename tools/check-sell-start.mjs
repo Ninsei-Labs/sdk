@@ -75,6 +75,12 @@ try {
   check(first.xmrAmount === quote.xmrAmount && first.next === "send-xmr", "the amount and the next step are named");
   const again = await swaps.startSell({ offer, recoveryKey: mnemonic, onRecoveryKey: accept });
   check(again.resumed === true && again.id === first.id, "the same offer resumes the same record");
+  // A QUOTE ID IS NOT THE ORDER IDENTITY. A different escrow with the same maker-chosen id must be a new record,
+  // not a resume of the first one.
+  const sameIdOtherEscrow = { ...offer, escrow: "0x" + "ee".repeat(20), jointAddress: "5" + "A".repeat(94) };
+  const third = await swaps.startSell({ offer: sameIdOtherEscrow, recoveryKey: mnemonic, onRecoveryKey: accept });
+  check(third.resumed !== true && third.id !== first.id && third.escrow === sameIdOtherEscrow.escrow,
+    "the same quote id with another escrow is a new record");
 } catch (error) {
   check(false, "startSell failed: " + JSON.stringify(error && (error.code || error.message)) + " " + JSON.stringify(error && error.params));
 }
@@ -89,7 +95,7 @@ try {
 
 try {
   const other = { ...offer, quote: { ...quote, id: "oq_sell_other", commitHalfClaimer: "0x" + "00".repeat(32) },
-    escrow: "0x" + "ee".repeat(20), jointAddress: "5" + "A".repeat(94) };
+    escrow: "0x" + "e0".repeat(20), jointAddress: "5" + "A".repeat(94) };
   await swaps.startSell({ offer: other, recoveryKey: mnemonic, onRecoveryKey: accept });
   check(false, "a foreign commitment passed");
 } catch (error) {

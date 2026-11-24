@@ -158,10 +158,15 @@ function recoverAddress(digest, signature) {
   if (v >= 27) v -= 27;
   if (v !== 0 && v !== 1) return null;
   try {
-    const publicKey = secp256k1.Signature.fromBytes(concat(
+    const signature = secp256k1.Signature.fromBytes(concat(
       hexBytes(sig.slice(0, 64), "signature", 32),
       hexBytes(sig.slice(64, 128), "signature", 32),
-    )).addRecoveryBit(v).recoverPublicKey(digest);
+    ));
+    // LOW-S IS THE CONTRACT'S RULE FOR EVERY RECOVERED SIGNATURE. A high-s twin recovers the same key only with
+    // the flipped recovery bit, and the router rejects it; the relay frame must not admit a signature the order
+    // path would refuse.
+    if (signature.hasHighS()) return null;
+    const publicKey = signature.addRecoveryBit(v).recoverPublicKey(digest);
     return hex(keccak256(publicKey.toBytes(false).slice(1)).slice(12));
   } catch {
     return null;
