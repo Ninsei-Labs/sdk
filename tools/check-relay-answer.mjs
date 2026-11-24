@@ -36,6 +36,14 @@ const fails = [];
 const ok = (message) => { pass += 1; console.log("  ok    " + message); };
 const bad = (message) => { fails.push(message); console.log("  FAIL  " + message); };
 const hex = (bytes) => "0x" + Buffer.from(bytes).toString("hex");
+const highSSignature = (signature) => {
+  const body = String(signature).replace(/^0x/, "");
+  if (body.length !== 130) return null;
+  const s = BigInt("0x" + body.slice(64, 128));
+  const high = (secp256k1.Point.Fn.ORDER - s).toString(16).padStart(64, "0");
+  const v = parseInt(body.slice(128, 130), 16) === 27 ? "1c" : "1b";
+  return "0x" + body.slice(0, 64) + high + v;
+};
 
 console.log("=== 0) THE COMMITTED VECTOR IS REPRODUCIBLE ===");
 const committed = readFileSync(fixturePath, "utf8").replace(/\r\n/g, "\n");
@@ -64,6 +72,17 @@ try {
   verifyRelayQuoteFrame(answer, quoteKey);
   ok("the outer signature recovers the quote key");
 } catch (error) { bad("outer signature: " + JSON.stringify(error && (error.code || error.message))); }
+{
+  const high = highSSignature(answer.signature);
+  try {
+    verifyRelayQuoteFrame({ ...answer, signature: high }, quoteKey);
+    bad("a high-s outer signature passed");
+  } catch (error) {
+    if (error?.code === "quote-refused" && error.params?.why === "signature") {
+      ok("a high-s outer signature is refused by the low-s rule");
+    } else bad("high-s outer signature: " + JSON.stringify(error?.params));
+  }
+}
 
 console.log("=== 2) THE ANSWER BINDS THE REQUEST ===");
 try {

@@ -6,7 +6,7 @@
 // time: every mutation must change the digest, and deleting it must put its name in `quoteMissingFields`.
 //
 // Run: node tools/check-quote-binding.mjs
-import { ORDER_QUOTE_FIELDS, quoteDigest, quoteMissingFields } from "../src/quoteEip712Spec.mjs";
+import { ORDER_QUOTE_FIELDS, quoteDigest, quoteMissingFields, recoverQuoteKey, signQuoteDigest } from "../src/quoteEip712Spec.mjs";
 import { keccak256, secp256k1 } from "../src/primitives.mjs";
 
 const crypto = { secp256k1, keccak256 };
@@ -67,6 +67,29 @@ if (original) {
   const signed = digestOf({ ...base, signature: "0x" + "ff".repeat(65) });
   if (signed === original) ok("changing the signature bytes does not change the signed digest");
   else bad("the signature bytes entered the digest");
+
+  console.log("=== 4) LOW-S IS PART OF RECOVERY ===");
+  {
+    const privateKey = "0x" + "11".repeat(32);
+    const signature = signQuoteDigest({ crypto, digest: quoteDigest({ crypto, quote: base }), privateKey });
+    const quote = { ...base, signature };
+    const publicKey = secp256k1.getPublicKey(Buffer.from(privateKey.slice(2), "hex"), false);
+    const expected = "0x" + Buffer.from(keccak256(publicKey.slice(1)).slice(12)).toString("hex");
+    const recovered = recoverQuoteKey({ crypto, quote });
+    if (recovered === expected) ok("a low-s quote signature recovers its key");
+    else bad("low-s recovery: got " + recovered + ", want " + expected);
+
+    // The high-s twin recovers the same key only after flipping v. ecrecover accepts it; the router does not.
+    const body = signature.slice(2);
+    const r = body.slice(0, 64);
+    const s = BigInt("0x" + body.slice(64, 128));
+    const highS = (secp256k1.Point.Fn.ORDER - s).toString(16).padStart(64, "0");
+    const v = parseInt(body.slice(128, 130), 16) === 27 ? "1c" : "1b";
+    const high = "0x" + r + highS + v;
+    if (recoverQuoteKey({ crypto, quote: { ...base, signature: high } }) === null) {
+      ok("a high-s quote signature is refused");
+    } else bad("a high-s quote signature recovered a key");
+  }
 }
 
 console.log("");

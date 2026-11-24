@@ -1,5 +1,13 @@
 ## Unreleased — 2026-11-23
 
+- `feeWeiFor` and `principalForTotal` require a non-negative whole amount: a missing, empty, fractional or negative amount is refused instead of being read as zero. The same strict rule already applied to the fee rate.
+- Quote and relay signature recovery rejects a high-s signature before ecrecover; the router rejects it too, so a signature the contract would refuse cannot pass the SDK check first.
+- A sale record is selected by chain and escrow, not by a maker-chosen quote id or nonce. The id is still stored for diagnostics, but it no longer decides which record is resumed.
+- Node/undici socket codes (`ECONNRESET`, `ETIMEDOUT`, `UND_ERR_SOCKET`, ...) are transport failures (`wallet-not-connected`), not `caller-refused`.
+- `keccak256` is a development dependency: only test tools import it; the package runtime uses `@noble/hashes`.
+- The pending funding status split has a mutation check: the `empty answer status` matcher is load-bearing, and a nonempty wrong-length answer is not treated as an empty escrow.
+- CI pins Foundry `v1.10.0` by release asset id and SHA-256.
+- The package manager moves to pnpm `12.22.0`.
 - `quotes.firmRelay` checks a sale recipient before the firm request with a named, value-only `evmCall` (`data: "0x"`, one wei, `from` the maker). A recipient whose receive/fallback refuses the transfer is `quote-recipient-unreceivable`; no half is built and no relay request is sent.
 - A nonempty `status()` answer of the wrong length is no longer read as an empty escrow. Empty is `empty answer status()` and means no contract; a malformed nonempty answer is `invalid answer status()` and blocks the signature or leaves a pending funding record pending.
 - `salePayoutAfterClaim` accepts a direct claim's transaction `{ to, from }` plus `escrow`; `from` is the actual `msg.sender` only when `to` is the escrow, while a claim routed through another contract stays unknown. An explicit `sender` still wins.

@@ -2595,6 +2595,7 @@ const quoteFiguresCheck = () => runScriptCheck("check-quote-figures.mjs", "quote
 const recoveryWitnessCheck = () => runScriptCheck("check-recovery-witness.mjs", "recovery witness");
 const recoveryWitnessTeethCheck = () => runScriptCheck("check-recovery-witness-teeth.mjs", "recovery witness teeth");
 const pendingTeethCheck = () => runScriptCheck("check-pending-teeth.mjs", "pending funding teeth");
+const statusTeethCheck = () => runScriptCheck("check-status-teeth.mjs", "status answer teeth");
 const relayViewCheck = () => runScriptCheck("check-relay-view.mjs", "relay view");
 const relayTermsCheck = () => runScriptCheck("check-relay-terms.mjs", "relay terms");
 const factoryPolicyCheck = () => runScriptCheck("check-factory-policy.mjs", "factory policy");
@@ -2704,6 +2705,7 @@ const CHECKS = {
   "key-image": keyImageCheck,
   "key-image-teeth": keyImageTeethCheck,
   "pending-teeth": pendingTeethCheck,
+  "status-teeth": statusTeethCheck,
   "relay-view": relayViewCheck,
   "relay-terms": relayTermsCheck,
   "factory-policy": factoryPolicyCheck,

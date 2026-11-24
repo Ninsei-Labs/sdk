@@ -302,6 +302,10 @@ export function sellWatchTimeoutMs({ configuredMs = 1_200_000, readyBySec = null
   return Math.max(configured, (readyAt - now + SELL_WATCH_MARGIN_SEC) * 1000);
 }
 
+export function statusAnswerIsEmpty(error) {
+  return /empty answer status\(\)/.test(String((error && error.message) || error));
+}
+
 // A PENDING FUNDING IS RESUMED ONLY FOR THE SAME ORDER, NOT MERELY THE SAME NONCE. The quote nonce is the maker's
 // value and a second offer can reuse it. The identity is the client's salt together with the chain, the factory and
 // the predicted escrow: those four values are the order the record was built for. A record that names no predicted
@@ -546,7 +550,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         // AN EMPTY status() ANSWER IS A SUCCESSFUL READ OF AN ADDRESS WITH NO CONTRACT, not an unreadable chain.
         // A NONEMPTY ANSWER OF THE WRONG LENGTH IS NOT THE SAME: something answered, and its state is unknown.
         // Treating both as "not funded" is what cleared a pending record and authorised a second send.
-        if (/empty answer status\(\)/.test(String((error && error.message) || error))) onChain = { isFunded: false, absent: true };
+        if (statusAnswerIsEmpty(error)) onChain = { isFunded: false, absent: true };
         else onChain = null;
       }
     }
@@ -1604,11 +1608,13 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         if (!claimSenders.includes(sender)) claimSenders.push(sender);
       }
       // THE RECORD IS FOUND BEFORE A SECOND ONE IS MADE. The same offer retried after a reload yields the same
-      // one-time address and escrow; a second record would be a second promise about one deal.
+      // one-time address and escrow; a second record would be a second promise about one deal. THE ESCROW IS THE
+      // IDENTITY, together with the chain: a quote id or nonce is maker-chosen and can be reused by another offer,
+      // so neither is used to select a record.
       const quoteId = quote.id || quote.nonce || null;
       const existing = records().find((swap) => swap.side === "sell" &&
-        ((swap.escrow && String(swap.escrow.address || "").toLowerCase() === String(offer.escrow).toLowerCase()) ||
-          (quoteId !== null && String(swap.orderQuoteId || "") === String(quoteId))));
+        String(swap.network || "") === String(order.chainId) &&
+        swap.escrow && String(swap.escrow.address || "").toLowerCase() === String(offer.escrow).toLowerCase());
       if (existing) {
         // A RETRY IS THE SAME OFFER, NOT A NEW ONE THAT HAPPENS TO NAME THE SAME ESCROW. The stored fields are
         // the commitment the first call verified; a changed point or commitment is refused before it is resumed.

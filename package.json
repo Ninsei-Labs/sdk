@@ -5,7 +5,7 @@
     "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
-  "packageManager": "pnpm@12.21.0",
+  "packageManager": "pnpm@12.22.0",
   "description": "XMR <-> EVM swap engine: quotes, guards, order steps, recovery (no DOM, no user-facing strings)",
   "license": "(MIT AND LGPL-3.0-only)",
   "type": "module",
@@ -192,12 +192,12 @@
     "@hpke/dhkem-x25519": "1.8.1",
     "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.4.0",
-    "@scure/bip39": "2.4.0",
-    "keccak256": "^1.0.6"
+    "@scure/bip39": "2.4.0"
   },
   "sideEffects": false,
   "devDependencies": {
     "esbuild": "0.28.2",
+    "keccak256": "^1.0.6",
     "monero-ts": "0.11.22",
     "typescript": "7.0.2"
   },

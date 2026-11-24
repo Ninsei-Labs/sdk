@@ -81,6 +81,9 @@ const cases = [
   ["caller wallet-unsupported-testnet", Object.assign(new Error("the wallet cannot sign on this testnet"), { code: "wallet-unsupported-testnet" }), "caller-refused", undefined, "wallet-unsupported-testnet"],
   ["provider NETWORK_ERROR", Object.assign(new Error("network error"), { code: "NETWORK_ERROR" }), "wallet-not-connected", "transport"],
   ["provider INVALID_ARGUMENT", Object.assign(new Error("invalid argument"), { code: "INVALID_ARGUMENT" }), "wallet-not-connected", "transport"],
+  ["provider ECONNRESET", Object.assign(new Error("socket hang up"), { code: "ECONNRESET" }), "wallet-not-connected", "transport"],
+  ["provider ETIMEDOUT", Object.assign(new Error("connect timed out"), { code: "ETIMEDOUT" }), "wallet-not-connected", "transport"],
+  ["provider UND_ERR_SOCKET", Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }), "wallet-not-connected", "transport"],
   ["ambiguous request rejected", new Error("Request rejected"), "unknown", "unclassified"],
   ["unclassified", new Error("boom"), "unknown", "unclassified"],
 ];
