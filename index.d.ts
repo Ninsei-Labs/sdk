@@ -97,12 +97,13 @@ export interface NinseiOptions {
   /**
    * READING THE CHAIN FROM OUTSIDE - a seam for whoever runs the SDK outside a browser. By default the chain is read
    * by the page's wallet (the engine's readContract), and in Node there is no such wallet: predict, the order state
-   * and the fee cannot be read, so a live run from Node was impossible. Your own function ({ to, data }) -> hex goes
-   * both into the lock step and into the swap start. THIS IS A READ, NOT A NODE SUBSTITUTION: the addresses and the
+   * and the fee cannot be read, so a live run from Node was impossible. Your own function ({ to, data, value, from })
+   * -> hex goes both into the lock step and into the swap start; `value` and `from` are present only for the
+   * value-only sale-recipient preflight. THIS IS A READ, NOT A NODE SUBSTITUTION: the addresses and the
    * network are still taken from the registry and the options, and the pre-signature guards stay enabled under any
    * configuration.
    */
-  evmCall?: (request: { readonly to: string; readonly data: string }) => Promise<string>;
+  evmCall?: (request: { readonly to: string; readonly data: string; readonly value?: string; readonly from?: string }) => Promise<string>;
   /**
    * READING THE CONTRACT CODE FROM OUTSIDE (issue #103): (address) -> hex code. Needed for the factory-code
    * check - `extcodehash` is keccak256 of this code, and the factory a provider names in its registry record is
@@ -2348,6 +2349,8 @@ export type ErrorCode =
   | "quote-expired"
   /** The quote arrived with less than the start margin left; ask again before showing a confirmation. */
   | "quote-too-short"
+  /** The sale's claimer cannot receive ETH: the payout would revert after the XMR moved. Use another address. */
+  | "quote-recipient-unreceivable"
   /** There was no chain read to ask the registry whose key it is: the claim stays unproven. */
   | "quote-registry-unchecked"
   /** The registry has no provider for this key: nobody owns it. */

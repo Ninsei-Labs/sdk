@@ -290,9 +290,14 @@ export async function fundOrder({ factory, locker, claimer, commitHalfLocker, co
   try {
     const raw = await call({ to: escrow, data: encodeStatus() });
     const body = String(raw || "").replace(/^0x/, "");
-    // The escrow answer must be four status() words: shorter means no contract executing status() at this
-    // address, so there is no order there and cannot be one.
-    stateRead = body.length >= 256 ? { status: decodeStatus(raw) } : { status: null };
+    // AN EMPTY ANSWER IS NO ORDER; A NONEMPTY ANSWER OF THE WRONG LENGTH IS NOT. The first is an address with
+    // no contract executing status(). The second means something answered, but not with four words: the state is
+    // unknown and must block the signature instead of being read as "nothing is there".
+    stateRead = body.length === 0
+      ? { status: null }
+      : body.length === 256
+        ? { status: decodeStatus(raw) }
+        : { error: "invalid answer status(): expected 128 bytes, got " + (body.length / 2) };
   } catch (e) {
     stateRead = { error: String((e && e.message) || e) };
   }

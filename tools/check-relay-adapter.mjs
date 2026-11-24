@@ -194,14 +194,14 @@ function relayFetch({ tamperProof = false, cashierAddress = cashier, validUntil 
   };
 }
 
-function makeQuotes({ providerWord = provider, factoryWord = factory, cashierPin = cashier, registryPin = null, denylist = null, now = null, chunkOptions = null, blockTimestamp = null } = {}) {
+function makeQuotes({ providerWord = provider, factoryWord = factory, cashierPin = cashier, registryPin = null, denylist = null, now = null, chunkOptions = null, blockTimestamp = null, recipientRefuses = false } = {}) {
   const clock = now || (() => nowSec * 1000);
   return createQuotes({
     denylist,
     chunkOptions,
     config: { settlement: { chain: { escrow: { ...(cashierPin ? { cashier: cashierPin } : {}), ...(registryPin ? { registry: registryPin } : {}) } } } },
     now: clock,
-    evmCall: chainReads({ providerWord, factoryWord }),
+    evmCall: chainReads({ providerWord, factoryWord, recipientRefuses }),
     // THE DECLARED BLOCK SHAPE CARRIES THE CHAIN CLOCK. The adapter's injected `now` and the block timestamp are
     // the same instant here, so a case that changes the clock changes both clocks.
     evmBlock: async () => ({ number: 1, timestamp: blockTimestamp ?? Math.floor(clock() / 1000), baseFeePerGas: "0" }),
@@ -209,8 +209,16 @@ function makeQuotes({ providerWord = provider, factoryWord = factory, cashierPin
 }
 
 // The registry and the factory entry point a real chain would answer, reduced to the three reads this path makes.
-function chainReads({ providerWord = provider, factoryWord = factory } = {}) {
-  return async ({ data }) => {
+// The bid side adds the value-only sale-recipient probe: empty calldata, one wei, and the maker as the funded
+// sender. An EOA answers it with 0x; a non-payable fallback must throw.
+function chainReads({ providerWord = provider, factoryWord = factory, recipientRefuses = false } = {}) {
+  return async ({ data, value, from }) => {
+    if (data === "0x") {
+      if (value !== "0x1") throw new Error("unexpected sale-recipient probe value");
+      if (from !== provider) throw new Error("unexpected sale-recipient probe sender");
+      if (recipientRefuses) throw new Error("execution reverted: sale recipient refused the transfer");
+      return "0x";
+    }
     if (data.startsWith(providerSelector)) return word(providerWord);
     if (data.startsWith(factorySelector)) return word(factoryWord);
     if (data.startsWith(engine.evm.FACTORY_METHODS.predict)) return word(predictedEscrow);
@@ -374,6 +382,32 @@ try {
   else bad("a short sell quote was accepted without its life: " + JSON.stringify({ remainingSec: result.remainingSec }));
 } catch (error) {
   bad("a short sell quote was refused by the buy margin: " + JSON.stringify(error && (error.code || error.message)) + " " + JSON.stringify(error && error.params));
+}
+
+console.log("=== 2c) A SALE RECIPIENT THAT REFUSES ETH IS REFUSED BEFORE THE RELAY ===");
+{
+  const refused = relayFetch();
+  let error = null;
+  try {
+    await call(makeQuotes({ recipientRefuses: true }), { order: bidOrder, side: "bid", fetchImpl: refused.fetchImpl });
+  } catch (caught) { error = caught; }
+  if (error && error.code === "quote-recipient-unreceivable" && error.params
+    && error.params.recipient === user && error.params.why === "transfer-reverted" && refused.bodies.length === 0) {
+    ok("a bid recipient that refuses value is refused with no relay request and no half");
+  } else {
+    bad("recipient refusal: " + JSON.stringify({ code: error && error.code, params: error && error.params,
+      relayRequests: refused.bodies.length }));
+  }
+  // The ask pays the maker, so the client's own address is not the recipient under test: the same refusing chain
+  // answer must not block a buy.
+  const asked = relayFetch();
+  try {
+    const result = await call(makeQuotes({ recipientRefuses: true }), { fetchImpl: asked.fetchImpl });
+    if (result.quote && asked.bodies.length === 1) ok("an ask does not probe the client as the sale recipient");
+    else bad("ask recipient probe changed the request: " + JSON.stringify({ quote: !!result.quote, requests: asked.bodies.length }));
+  } catch (caught) {
+    bad("an ask was refused by the sale-recipient probe: " + JSON.stringify(caught && (caught.code || caught.message)));
+  }
 }
 
 console.log("=== 2a) THE DENYLIST CHECKS THE CLIENT ON BOTH SIDES ===");

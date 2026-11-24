@@ -143,7 +143,10 @@ const strictWord = (returnedHex, what, words) => {
     throw new Error("invalid " + what + ": " + returnedHex);
   }
   const hex = returnedHex.slice(2);
-  if (hex.length !== words * 64) throw new Error("short answer " + what + ": " + returnedHex);
+  if (hex.length === 0) throw new Error("empty answer " + what);
+  if (hex.length !== words * 64) {
+    throw new Error("invalid answer " + what + ": expected " + (words * 32) + " bytes, got " + (hex.length / 2));
+  }
   return hex.toLowerCase();
 };
 

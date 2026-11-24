@@ -60,6 +60,20 @@ export async function feesCheck() {
   } catch (error) { expiredError = error; }
   assert.equal(expiredError && expiredError.code, "quote-expired", "an expired quote is refused at the funding boundary");
   assert.equal(expiredSent.length, 0, "the expired quote sends nothing");
+  // A NONEMPTY WRONG-LENGTH STATUS IS NOT "NO ORDER". The successful call above answers `0x` (no code) and is
+  // allowed; one short word means something answered and cannot be read, so signing must stop.
+  const shortSent = [];
+  let shortError = null;
+  try {
+    await fundOrder({ ...quote, amountWei: quote.amount, quote, nowSec: 1999996400,
+      call: async (request) => request.to === factory ? "0x" + escrow.slice(2).padStart(64, "0") : "0x" + "11".repeat(32),
+      send: async (request) => { shortSent.push(request); return hash; },
+      receipt: async () => ({ status: "0x1", transactionHash: hash, logs: [] }),
+    });
+  } catch (error) { shortError = error; }
+  assert.match(String(shortError && shortError.message), /invalid answer status\(\)/,
+    "a nonempty wrong-length status blocks the signature as unknown");
+  assert.equal(shortSent.length, 0, "the unreadable status sends nothing");
   resetFeeCache();
   return { note: "non-zero buy/sell fees, rounding, ceiling and funding value", problems: [] };
 }

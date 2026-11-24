@@ -53,6 +53,20 @@ for (const [label, call] of [
   else bad(label + " was accepted or threw an unhelpful value");
 }
 
+console.log("=== 3) EMPTY AND NONEMPTY WRONG-LENGTH STATUS ANSWERS ARE DIFFERENT ===");
+{
+  let empty = null;
+  try { decodeStatus("0x"); } catch (error) { empty = error; }
+  if (empty && /empty answer status\(\)/.test(String(empty.message))) ok("an empty status is named as an empty answer");
+  else bad("an empty status was not named: " + String(empty && empty.message));
+
+  let invalid = null;
+  try { decodeStatus(status.slice(0, -2)); } catch (error) { invalid = error; }
+  if (invalid && /invalid answer status\(\)/.test(String(invalid.message))) {
+    ok("a nonempty wrong-length status is named as invalid, not empty");
+  } else bad("a nonempty wrong-length status was not named: " + String(invalid && invalid.message));
+}
+
 if (fails.length) {
   console.log("FAILED: " + fails.length + " problem(s)");
   process.exit(1);

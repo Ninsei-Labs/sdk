@@ -41,6 +41,29 @@ const addressFromWord = (raw) => {
   return h.length >= 40 ? "0x" + h.slice(-40).toLowerCase() : null;
 };
 
+// A SALE PAYS THE CLAIMER, SO THE CLAIMER MUST BE ABLE TO RECEIVE ETH. The check is a value-only call: empty
+// calldata reaches receive()/fallback, and one wei with a funded `from` executes the payable path. Zero value was
+// not enough: a non-payable fallback accepts 0 and rejects the real payout. The maker is the funded sender here
+// because a bid cannot be funded without ETH; no half, proof or signed material is built for this probe.
+const SALE_RECIPIENT_PROBE_WEI = "0x1";
+async function requireReceivableSaleRecipient(recipient, sender, call) {
+  const address = String(recipient || "").toLowerCase();
+  const from = String(sender || "").toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(address) || address === ZERO_ADDRESS) {
+    fail("bad-input", { field: "order.claimer" });
+  }
+  if (!/^0x[0-9a-f]{40}$/.test(from) || from === ZERO_ADDRESS) {
+    fail("bad-input", { field: "order.locker" });
+  }
+  try {
+    await call({ to: address, data: "0x", value: SALE_RECIPIENT_PROBE_WEI, from });
+  } catch (error) {
+    const why = /revert|rejected|CALL_EXCEPTION|returned no data/i.test(String(error && error.message || error))
+      ? "transfer-reverted" : "read-failed";
+    fail("quote-recipient-unreceivable", { step: "order", recipient: address, why });
+  }
+}
+
 // THE CASHIER IS THE NETWORK'S VAULT, NOT A FIELD THE MAKER MAY CHOOSE. The escrow binds it at birth, but the
 // client must refuse an answer before it funds or sends XMR: a look-alike vault with the canonical runtime and
 // crafted storage would pass the escrow's code check and make every claim revert after the payout.
@@ -247,6 +270,10 @@ export function createQuotes({ config, now = () => Date.now(), evmCall = null, e
         try { orderSalt = recoverySaltOf(order.salt); } catch { fail("bad-input", { field: "recoverySalt", why: "order-salt" }); }
         if (salt !== orderSalt) fail("bad-input", { field: "recoverySalt", why: "order-salt" });
       }
+      // THE SALE'S PAYOUT ADDRESS IS CHECKED BEFORE THE FIRM REQUEST. On a bid the client is the claimer, and a
+      // recipient contract without a payable receive/fallback would make the claim revert after the XMR moved.
+      // On an ask the client is the locker: the maker receives, and the client cannot check another wallet for it.
+      if (side === "bid") await requireReceivableSaleRecipient(order.claimer, order.locker, evmCall);
       const derived = takerHalvesV2({ mnemonic, chainId, factory: order.factory, salt });
       const derivation = { kind: "salt-v2", salt };
       const own = await buildOwnSideFromHalvesChunked(order, { spendHalf: derived.spendHalf, viewHalf: derived.viewHalf },
