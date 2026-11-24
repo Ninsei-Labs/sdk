@@ -325,6 +325,15 @@ check(badRead.complete === true && badDaemon.calls.some((c) => c.method === "get
     "an unreadable spent answer was accepted as unspent");
 }
 
+// A FAILED READ STILL NAMES EVERY TOTAL AS UNKNOWN. A consumer must not receive `undefined` for a window it could
+// not read.
+{
+  const failed = await readRecovery(request(daemon({ failAt: 6 }).fetch));
+  check(failed.complete === false && failed.receivedAtomic === null && failed.spentAtomic === null
+    && failed.unspentAtomic === null && failed.withdrawalState === "unknown",
+    "a failed read did not return the unknown totals");
+}
+
 // A missing confirmation count is not a mined transfer with zero confirmations.
 {
   const nullRead = await readRecovery(request(daemon({ nullConfirmations: true }).fetch));

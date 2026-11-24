@@ -617,6 +617,8 @@ async function readSpentStatus(node, tracked, fetchImpl, timeoutMs, options = {}
   }
 }
 
+const UNKNOWN_TOTALS = { receivedAtomic: null, spentAtomic: null, unspentAtomic: null, withdrawalState: "unknown" };
+
 // THE WINDOW'S MONEY, IN ONE PLACE. A window whose received amount is known is "empty", "unspent", "withdrawn" or
 // "partly-withdrawn"; an output whose amount is unverified makes every total unknown, never a partial sum.
 function recoveryTotals(transfers, tracked, spends) {
@@ -990,7 +992,7 @@ export async function readRecovery(request) {
   let info;
   try { info = await getInfo(node, fetchImpl, timeoutMs, { signal }); }
   catch (error) {
-    return { transfers: [], tip: null, fromHeight, toHeight, minConfirmations,
+    return { transfers: [], tip: null, fromHeight, toHeight, minConfirmations, ...UNKNOWN_TOTALS,
       target, complete: false, through: null, checkpoint: null, blocked: false, failed: [failureOf(error, node)] };
   }
   const network = isStr(request.network) ? request.network : info.nettype;
@@ -999,7 +1001,7 @@ export async function readRecovery(request) {
     throw new SdkError("bad-input", { field: "node", why: "node-network-mismatch" });
   }
   if (!info.synced) {
-    return { transfers: [], tip: info.height, fromHeight, toHeight, minConfirmations,
+    return { transfers: [], tip: info.height, fromHeight, toHeight, minConfirmations, ...UNKNOWN_TOTALS,
       target, complete: false, through: null, checkpoint: null, blocked: true,
       failed: [{ url: node.url, operator: node.operator, code: "stale", why: "not-synchronized" }] };
   }
@@ -1077,7 +1079,7 @@ export async function readRecovery(request) {
       } catch (error) {
         const failure = failureOf(error, node);
         failure.height = through.height;
-        return { transfers, tip: info.height, fromHeight, toHeight, minConfirmations, complete: false, through,
+        return { transfers, tip: info.height, fromHeight, toHeight, minConfirmations, ...UNKNOWN_TOTALS, complete: false, through,
           target, spends: [...spendMap.values()],
           checkpoint: checkpointRecord({ ...identity, through, transfers, spends: [...spendMap.values()] }), blocked: false, failed: [failure] };
       }
@@ -1108,7 +1110,7 @@ export async function readRecovery(request) {
         if (String(error && error.message) === "reorg") throw error;
         const failure = failureOf(error, node);
         failure.height = height;
-        return { transfers, tip: info.height, fromHeight, toHeight, minConfirmations, complete: false, through,
+        return { transfers, tip: info.height, fromHeight, toHeight, minConfirmations, ...UNKNOWN_TOTALS, complete: false, through,
           target, spends: [...spendMap.values()],
           checkpoint: through ? checkpointRecord({ ...identity, through, transfers, spends: [...spendMap.values()] }) : null, blocked: false, failed: [failure] };
       }
@@ -1165,7 +1167,7 @@ export async function readRecovery(request) {
     const confirmedSpends = spends.filter((spend) => spend.pool !== true);
     const confirmedTransfers = transfers.filter((transfer) => transfer.pool !== true);
     if (poolFailure) {
-      return { transfers, tip: info.height, fromHeight, toHeight, minConfirmations, complete: false, through,
+      return { transfers, tip: info.height, fromHeight, toHeight, minConfirmations, ...UNKNOWN_TOTALS, complete: false, through,
         target, spends, ...totals,
         checkpoint: through ? checkpointRecord({ ...identity, through, transfers: confirmedTransfers, spends: confirmedSpends }) : null,
         blocked: false, failed: [poolFailure] };
@@ -1191,7 +1193,7 @@ export async function readRecovery(request) {
         continue;
       }
       const failure = failureOf(error, node);
-      return { transfers: [], tip: info.height, fromHeight, toHeight, minConfirmations, complete: false, through: null,
+      return { transfers: [], tip: info.height, fromHeight, toHeight, minConfirmations, ...UNKNOWN_TOTALS, complete: false, through: null,
         target, checkpoint: null, blocked: false, failed: [failure] };
     }
   }
@@ -1258,7 +1260,7 @@ export async function readRecoveryWitness(request) {
   let info;
   try { info = await getInfo(node, fetchImpl, timeoutMs, { signal }); }
   catch (error) {
-    return { transfers: [], tip: null, fromHeight, toHeight, through: null, complete: false, checkpoint: null, blocked: false, failed: [failureOf(error, node)] };
+    return { transfers: [], tip: null, fromHeight, toHeight, ...UNKNOWN_TOTALS, through: null, complete: false, checkpoint: null, blocked: false, failed: [failureOf(error, node)] };
   }
   const network = isStr(request.network) ? request.network : info.nettype;
   if (!isStr(network)) throw new SdkError("bad-input", { field: "network" });
@@ -1266,19 +1268,19 @@ export async function readRecoveryWitness(request) {
     throw new SdkError("bad-input", { field: "node", why: "node-network-mismatch" });
   }
   if (!info.synced) {
-    return { transfers: [], tip: info.height, fromHeight, toHeight, through: null, complete: false, checkpoint: null, blocked: true,
+    return { transfers: [], tip: info.height, fromHeight, toHeight, ...UNKNOWN_TOTALS, through: null, complete: false, checkpoint: null, blocked: true,
       failed: [{ url: node.url, operator: node.operator, code: "stale", why: "not-synchronized" }] };
   }
   const top = Math.max(0, info.height - 1);
   const wantedTop = toHeight === null ? tipHeightRaw : (tipHeightRaw === null ? toHeight : Math.min(tipHeightRaw, toHeight));
   if (wantedTop !== null && wantedTop > top) {
-    return { transfers: [], tip: info.height, fromHeight, toHeight, through: null, complete: false, checkpoint: null, blocked: false,
+    return { transfers: [], tip: info.height, fromHeight, toHeight, ...UNKNOWN_TOTALS, through: null, complete: false, checkpoint: null, blocked: false,
       failed: [{ url: node.url, operator: node.operator, code: "stale", why: "witness-behind", height: top, wanted: wantedTop }] };
   }
   const targetTop = wantedTop === null ? top : Math.min(wantedTop, top);
   const observedTip = tipHeightRaw === null ? top : tipHeightRaw;
   if (targetTop < fromHeight) {
-    return { transfers: [], tip: info.height, fromHeight, toHeight, through: null, complete: true, checkpoint: null, blocked: false, failed: [] };
+    return { transfers: [], tip: info.height, fromHeight, toHeight, ...UNKNOWN_TOTALS, through: null, complete: true, checkpoint: null, blocked: false, failed: [] };
   }
   const identity = { network, address: request.address, fromHeight, toHeight, keyImages: [] };
   let prior = null;
@@ -1295,7 +1297,7 @@ export async function readRecoveryWitness(request) {
   const lastWindow = witnessSliceIndex(targetTop);
   if (startWindow > lastWindow) {
     if (prior) refreshTransferState(prior.transfers, { tipHeight: observedTip, nowSec: request.nowSec ?? Math.floor(Date.now() / 1000) });
-    return { transfers: prior ? prior.transfers : [], tip: info.height, fromHeight, toHeight, through: prior ? prior.through : null,
+    return { transfers: prior ? prior.transfers : [], tip: info.height, fromHeight, toHeight, ...UNKNOWN_TOTALS, through: prior ? prior.through : null,
       complete: true, checkpoint: prior ? checkpointRecord({ ...identity, through: prior.through, transfers: prior.transfers, spends: prior.spends, kind: "witness" }) : null,
       blocked: false, failed: [] };
   }
@@ -1345,7 +1347,7 @@ export async function readRecoveryWitness(request) {
           const keptThrough = through || (startRecord ? startRecord.through : null);
           const keptTransfers = through ? transfers : (startRecord ? startRecord.transfers : transfers);
           const keptSpends = through ? [...spendMap.values()] : (startRecord ? startRecord.spends : []);
-          return { transfers: keptTransfers, tip: info.height, fromHeight, toHeight, complete: false, through: keptThrough,
+          return { transfers: keptTransfers, tip: info.height, fromHeight, toHeight, ...UNKNOWN_TOTALS, complete: false, through: keptThrough,
             spends: keptSpends,
             checkpoint: keptThrough ? checkpointRecord({ ...identity, through: keptThrough, transfers: keptTransfers, spends: keptSpends, kind: "witness" }) : null,
             blocked: false, failed: [failure] };
@@ -1391,7 +1393,7 @@ export async function readRecoveryWitness(request) {
         continue;
       }
       const failure = failureOf(error, node);
-      return { transfers: [], tip: info.height, fromHeight, toHeight, complete: false, through: null, checkpoint: null, blocked: false, failed: [failure] };
+      return { transfers: [], tip: info.height, fromHeight, toHeight, ...UNKNOWN_TOTALS, complete: false, through: null, checkpoint: null, blocked: false, failed: [failure] };
     }
   }
 }
@@ -1635,11 +1637,14 @@ export async function verifyRecovery(request) {
     || String(a.txid).localeCompare(String(b.txid)));
 
   const spends = [...spendMap.values()];
-  const totals = complete
-    ? recoveryTotals(transfers, tracked, spends)
-    : { receivedAtomic: null, spentAtomic: null, unspentAtomic: null, withdrawalState: "unknown" };
   const primarySpendSet = new Set(primarySpends.map((spend) => spend.keyImage));
   const spendsDisagreements = spends.filter((spend) => !primarySpendSet.has(spend.keyImage));
+  const completeVerdict = complete && spendsDisagreements.length === 0;
+  // A SPEND ONLY A WITNESS SAW IS NOT A SETTLED FIGURE. The same conservatism that withholds `availableAtomic`
+  // makes the window totals unknown rather than including a disputed spend.
+  const totals = completeVerdict
+    ? recoveryTotals(transfers, tracked, spends)
+    : { receivedAtomic: null, spentAtomic: null, unspentAtomic: null, withdrawalState: "unknown" };
   const availableForVerdict = spendsDisagreements.length ? null : availableAtomic;
   const ready = transfers.some((transfer) => transfer.agreed && transfer.confirmed && !transfer.locked);
   const agreed = transfers.some((transfer) => transfer.agreed);
@@ -1650,7 +1655,7 @@ export async function verifyRecovery(request) {
     fromHeight,
     toHeight,
     minConfirmations,
-    complete: spendsDisagreements.length ? false : complete,
+    complete: completeVerdict,
     completedOperators: [...completedOperators],
     spends,
     spendsDisagreements,
