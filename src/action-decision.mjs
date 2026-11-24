@@ -50,6 +50,7 @@ function arrivalKindOf(arrival, arrivalError) {
   if (code === "xmr-locked") return "locked";
   if (code) return "unknown";
   if (!arrival || typeof arrival !== "object") return "unknown";
+  if (arrival.absent === true) return "absent";
   const state = String(arrival.state || "");
   if (state === "arrived") return "arrived";
   // `over` is an at-least payment that passed the signed amount; a buy may mark it ready. An exact sale claim still
