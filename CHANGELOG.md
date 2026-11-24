@@ -1,3 +1,8 @@
+## Unreleased — 2026-11-24
+
+- `sweep.restore` treats a withdrawal window with a valid trusted-node spent answer as complete even when a block landed after the wallet's sync; the same window with an unreadable answer stays incomplete with `spent-status-unavailable`.
+- `sweep.reconcile` asks the selected trusted node for the signed hash and the spent status of the verified inputs instead of walking blocks to the head. The outcomes and the resend rule are unchanged: only `absent` with every input unspent, from a complete answer, permits the same bytes again. A partial, malformed or substituted answer is `unknown`, and so is an answer whose `status` is not `OK`. A start height is no longer required. `present` keeps the block hash when the trusted node can serve the header.
+
 ## Unreleased — 2026-11-23
 
 - `feeWeiFor` and `principalForTotal` require a non-negative whole amount: a missing, empty, fractional or negative amount is refused instead of being read as zero. The same strict rule already applied to the fee rate.

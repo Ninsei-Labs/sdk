@@ -1,58 +1,62 @@
 #!/usr/bin/env node
-// RECONCILE AFTER A LOST SESSION TOKEN. The fake daemon is the only way to put the signed hash in a block, in the
-// pool, in neither, and to break the walk at a named height without a live chain.
+// RECONCILE AFTER A LOST SESSION TOKEN. The node is asked two direct questions: does this signed hash exist,
+// and has each verified input moved? No block range is walked; a partial, malformed or substituted answer is
+// unknown and never authorises a resend.
 import { createSweep } from "../src/sweep.mjs";
-import { ed25519, keccak256 } from "../src/primitives.mjs";
-import { addressFromKeys } from "../engine/monero/address.js";
 
-const G = ed25519.Point.BASE;
-const VIEW = 11n;
-const SPEND = 13n;
-const SPEND_PUB = G.multiply(SPEND).toHex();
-const VIEW_PUB = G.multiply(VIEW).toHex();
-const ADDRESS = addressFromKeys({ network: "stagenet", kind: "primary", spendPub: SPEND_PUB, viewPub: VIEW_PUB }, { keccak256 });
-const H = (height) => (height < 0 ? "00" : height.toString(16).padStart(2, "0")).repeat(32);
 const TARGET = "a1".repeat(32);
-const SPEND_TX = "b2".repeat(32);
 const INPUT = "cd".repeat(32);
 const OUTPUT_KEY = "ef".repeat(32);
-const TARGET_TX = { version: 2, unlock_time: 0, extra: [], vin: [{ key: { k_image: INPUT } }], vout: [], rct_signatures: { type: 6, ecdhInfo: [], outPk: [] } };
-const SPENT_TX = { version: 2, unlock_time: 0, extra: [], vin: [{ key: { k_image: INPUT } }], vout: [], rct_signatures: { type: 6, ecdhInfo: [], outPk: [] } };
+const H = (height) => (height < 0 ? "00" : height.toString(16).padStart(2, "0")).repeat(32);
 
 function daemon(mode = "absent") {
   const calls = [];
-  const blockTxs = mode === "block" || mode === "block-fail" || mode === "present" ? { [TARGET]: TARGET_TX }
-    : mode === "spent" || mode === "spent-fail" ? { [SPEND_TX]: SPENT_TX } : {};
-  const poolMode = mode === "pool" || mode === "pool-beyond";
-  const poolHashes = poolMode ? [TARGET] : [];
-  const poolTxs = poolMode ? { [TARGET]: TARGET_TX } : {};
-  const failAt = mode === "fail" || mode === "block-fail" || mode === "spent-fail" ? 9 : null;
-  const allTxs = { ...blockTxs, ...poolTxs };
   const fetch = async (url, init) => {
+    const path = new URL(url).pathname;
+    calls.push([path, init && init.headers ? init.headers["Content-Type"] : null]);
     const body = JSON.parse(init.body);
-    calls.push(body.method);
-    if (body.method === "get_info") {
-      return { ok: true, json: async () => ({ result: { height: 12, synchronized: true, nettype: "stagenet" } }) };
-    }
-    if (body.method === "get_block") {
+    if (path.endsWith("/json_rpc")) {
+      if (mode === "header-fail") return { ok: false, status: 503 };
       const height = Number(body.params.height);
-      if (failAt === height) return { ok: false, status: 503 };
-      const hashes = Object.entries(blockTxs).filter(() => height === 7).map(([id]) => id);
-      return { ok: true, json: async () => ({ result: {
-        block_header: { height, hash: H(height), prev_hash: H(height - 1), num_txes: hashes.length },
-        tx_hashes: hashes,
-      } }) };
+      return { ok: true, json: async () => ({ result: { block_header: { height, hash: H(height) }, status: "OK" } }) };
     }
-    if (String(url).endsWith("/get_transaction_pool_hashes")) {
-      if (mode === "pool-fail") return { ok: false, status: 503 };
-      return { ok: true, json: async () => ({ tx_hashes: poolHashes }) };
+    if (path.endsWith("/get_transactions")) {
+      if (mode === "tx-fail") return { ok: false, status: 503 };
+      if (mode === "tx-status") return { ok: true, json: async () => ({ status: "Failed", txs: [], txs_as_json: [] }) };
+      if (mode === "tx-malformed") return { ok: true, json: async () => ({ status: "OK" }) };
+      if (mode === "tx-partial") {
+        return { ok: true, json: async () => ({
+          status: "OK",
+          txs: [{ tx_hash: TARGET, block_height: 7, in_pool: false }],
+          txs_as_json: [],
+        }) };
+      }
+      if (mode === "tx-wrong") {
+        return { ok: true, json: async () => ({
+          status: "OK",
+          txs: [{ tx_hash: "ff".repeat(32), block_height: 7, in_pool: false }],
+          txs_as_json: ["{}"],
+        }) };
+      }
+      if (mode === "block" || mode === "pool") {
+        const pool = mode === "pool";
+        return { ok: true, json: async () => ({
+          status: "OK",
+          txs: [{ tx_hash: body.txs_hashes[0], block_height: pool ? 18446744073709551615 : 7,
+            confirmations: pool ? 0 : 3, in_pool: pool }],
+          txs_as_json: ["{}"],
+        }) };
+      }
+      return { ok: true, json: async () => ({ status: "OK", txs: [], txs_as_json: [], missed_tx: [body.txs_hashes[0]] }) };
     }
-    if (String(url).endsWith("/get_transactions")) {
-      const hashes = body.txs_hashes || [];
-      return { ok: true, json: async () => ({
-        txs: hashes.map((hash) => ({ tx_hash: hash, block_height: poolHashes.includes(hash) ? null : 7, confirmations: poolHashes.includes(hash) ? 0 : 3, in_pool: poolHashes.includes(hash) })),
-        txs_as_json: hashes.map((hash) => JSON.stringify(allTxs[hash] || {})),
-      }) };
+    if (path.endsWith("/is_key_image_spent")) {
+      if (mode === "spent-fail") return { ok: false, status: 503 };
+      if (mode === "spent-status") return { ok: true, json: async () => ({ status: "Failed", spent_status: [0] }) };
+      if (mode === "spent-partial") return { ok: true, json: async () => ({ status: "OK", spent_status: [] }) };
+      if (mode === "spent-weird") return { ok: true, json: async () => ({ status: "OK", spent_status: [3] }) };
+      if (mode === "spent") return { ok: true, json: async () => ({ status: "OK", spent_status: [1] }) };
+      if (mode === "pool-spent") return { ok: true, json: async () => ({ status: "OK", spent_status: [2] }) };
+      return { ok: true, json: async () => ({ status: "OK", spent_status: [0] }) };
     }
     return { ok: false, status: 404 };
   };
@@ -61,10 +65,6 @@ function daemon(mode = "absent") {
 
 const call = (mode, options = {}) => createSweep().reconcile({
   node: { url: "https://one.example", operator: "one" },
-  address: ADDRESS,
-  viewSecret: VIEW,
-  spendPub: SPEND_PUB,
-  fromHeight: 5,
   txid: TARGET,
   keyImages: [{ keyImage: INPUT, outputKey: OUTPUT_KEY }],
   fetch: daemon(mode).fetch,
@@ -76,9 +76,22 @@ let checks = 0;
 const check = (condition, message) => { checks += 1; if (condition) console.log("  ok    " + message); else problems.push(message); };
 
 {
-  const result = await call("block");
-  check(result.outcome === "present" && result.resend === false && result.height === 7 && result.blockHash === H(7),
+  const node = daemon("block");
+  const result = await createSweep().reconcile({
+    node: { url: "https://one.example", operator: "one" },
+    txid: TARGET,
+    keyImages: [{ keyImage: INPUT, outputKey: OUTPUT_KEY }],
+    fetch: node.fetch,
+  });
+  check(result.outcome === "present" && result.resend === false && result.height === 7 && result.complete === true,
     "a hash in a block is present and never resent");
+  check(result.blockHash === H(7), `a present hash must keep its block hash: ${result.blockHash}`);
+  check(node.calls.some(([path]) => path.endsWith("/get_transactions")),
+    "a present hash is read by hash");
+  check(node.calls.some(([path]) => path.endsWith("/json_rpc")),
+    "a present hash reads its block header");
+  check(!node.calls.some(([path]) => path.endsWith("/get_block") || path.endsWith("/get_info")),
+    "reconcile does not read blocks or the chain tip");
 }
 {
   const result = await call("pool");
@@ -86,51 +99,89 @@ const check = (condition, message) => { checks += 1; if (condition) console.log(
     "a hash in the pool is present and never resent");
 }
 {
-  const result = await call("absent");
+  const node = daemon("absent");
+  const result = await createSweep().reconcile({
+    node: { url: "https://one.example", operator: "one" },
+    txid: TARGET,
+    keyImages: [{ keyImage: INPUT, outputKey: OUTPUT_KEY }],
+    fromHeight: 20,
+    fetch: node.fetch,
+  });
   check(result.outcome === "absent" && result.resend === true && result.complete === true && result.height === null,
-    "an absent hash with unspent inputs permits the same bytes");
+    "an absent hash with unspent inputs permits the same bytes, without a start height");
+  check(node.calls.some(([path, type]) => path.endsWith("/is_key_image_spent") && type === "application/json"),
+    "the spent check uses the JSON endpoint");
 }
 {
   const result = await call("spent");
-  check(result.outcome === "inputs-spent" && result.resend === false,
+  check(result.outcome === "inputs-spent" && result.resend === false && result.pool === false,
     "an absent hash with a spent input never resends");
 }
 {
-  const result = await call("fail");
+  const result = await call("pool-spent");
+  check(result.outcome === "inputs-spent" && result.resend === false && result.pool === true,
+    "a pool spend is named as a pool input and never resends");
+}
+{
+  const result = await call("tx-fail");
   check(result.outcome === "unknown" && result.resend === false && result.complete === false
-    && result.failed.some((failure) => failure.height === 9),
-    "a broken walk keeps the bytes and signs nothing");
+    && result.failed.some((failure) => failure.status === 503),
+    "an unreadable transaction answer keeps the bytes and signs nothing");
 }
 {
-  const result = await call("pool-fail");
+  const result = await call("tx-malformed");
   check(result.outcome === "unknown" && result.resend === false,
-    "a broken pool read keeps the bytes and signs nothing");
+    "a malformed transaction answer keeps the bytes and signs nothing");
 }
 {
-  const result = await call("block-fail");
-  check(result.outcome === "present" && result.resend === false && result.complete === false,
-    "a target found before a later walk break is still present");
+  const result = await call("tx-status");
+  check(result.outcome === "unknown" && result.resend === false
+    && result.failed.some((failure) => failure.why === "rpc-status"),
+    "a transaction answer with a failed status is unknown, never an absence");
+}
+{
+  const result = await call("tx-partial");
+  check(result.outcome === "unknown" && result.resend === false,
+    "a partial transaction answer is unknown, never an absence");
+}
+{
+  const result = await call("tx-wrong");
+  check(result.outcome === "unknown" && result.resend === false,
+    "a substituted transaction hash is unknown, never a presence");
 }
 {
   const result = await call("spent-fail");
-  check(result.outcome === "inputs-spent" && result.resend === false && result.complete === false,
-    "a spend seen before a later walk break still never resends");
+  check(result.outcome === "unknown" && result.resend === false && result.complete === false
+    && result.failed.some((failure) => failure.status === 503),
+    "an unreadable spent status keeps the bytes and signs nothing");
 }
 {
-  const result = await call("pool-beyond", { fromHeight: 20 });
-  check(result.outcome === "present" && result.resend === false && result.pool === true,
-    "a pool hash above the block range is still present");
-}
-{
-  const result = await call("absent", { fromHeight: 20 });
+  const result = await call("spent-partial");
   check(result.outcome === "unknown" && result.resend === false,
-    "a start above the tip cannot authorize a resend from an empty block range");
+    "a short spent-status list is unknown, never unspent");
+}
+{
+  const result = await call("spent-status");
+  check(result.outcome === "unknown" && result.resend === false
+    && result.failed.some((failure) => failure.why === "rpc-status"),
+    "a spent answer with a failed status is unknown, never unspent");
+}
+{
+  const result = await call("spent-weird");
+  check(result.outcome === "unknown" && result.resend === false,
+    "an unknown spent status is unknown, never unspent");
 }
 {
   let error = null;
   try { await call("absent", { txid: "not-a-hash" }); } catch (caught) { error = caught; }
   check(error && error.code === "bad-input" && error.params && error.params.field === "txid",
     "a malformed saved hash is refused before any read");
+}
+{
+  let error = null;
+  try { await call("absent", { keyImages: [] }); } catch (caught) { error = caught; }
+  check(error && error.code === "bad-input" && error.params && error.params.field === "keyImages",
+    "an empty key-image list is refused before any read");
 }
 
 if (problems.length) {

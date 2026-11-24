@@ -66,6 +66,32 @@ export const sweepWindowCheck = async () => {
     `a window with spent status was reported incomplete: ${JSON.stringify({ complete: spent.scanComplete, reason: spent.scanIncompleteReason })}`);
   notes.push("an explicitly trusted node may receive key images for the spent check");
 
+  // A BLOCK THAT LANDS AFTER THE WINDOW'S SYNC IS NOT A GAP. The window is the scope, and the trusted node's
+  // spent answer covers it; the wallet height may legitimately be below the node's when the return arrives.
+  const behind = fake({ balance: 5n });
+  behind.wallet.driver().getHeight = async () => 995;
+  behind.wallet.driver().getDaemonHeight = async () => 1000;
+  behind.wallet.driver().getKeyImages = async () => [{ getHex: () => "aa" }, { getHex: () => "bb" }];
+  const ahead = await restoreWallet({ wallet: behind.wallet, fromHeight: 100,
+    window: { txHashes: ["a"], toHeight: 110, tipHeight: 1000, nodeUrl: "https://node.example", trustedNode: true },
+    fetchImpl: async () => ({ ok: true, json: async () => ({ spent_status: [0, 0] }) }),
+  });
+  check(ahead.scanComplete === true && ahead.scanIncompleteReason === undefined,
+    `a window behind a landed block was reported incomplete: ${JSON.stringify({ complete: ahead.scanComplete, reason: ahead.scanIncompleteReason })}`);
+
+  // THE UNREADABLE ANSWER STILL REFUSES, even when the heights alone would have looked complete.
+  const unreadable = fake({ balance: 5n });
+  unreadable.wallet.driver().getHeight = async () => 995;
+  unreadable.wallet.driver().getDaemonHeight = async () => 1000;
+  unreadable.wallet.driver().getKeyImages = async () => [{ getHex: () => "aa" }, { getHex: () => "bb" }];
+  const noAnswer = await restoreWallet({ wallet: unreadable.wallet, fromHeight: 100,
+    window: { txHashes: ["a"], toHeight: 110, tipHeight: 1000, nodeUrl: "https://node.example", trustedNode: true },
+    fetchImpl: async () => ({ ok: true, json: async () => ({ spent_status: [0] }) }),
+  });
+  check(noAnswer.scanComplete === false && noAnswer.scanIncompleteReason === "spent-status-unavailable",
+    `an unreadable trusted answer was not refused: ${JSON.stringify({ complete: noAnswer.scanComplete, reason: noAnswer.scanIncompleteReason })}`);
+  notes.push("a window behind a landed block is complete only with a valid trusted spent answer");
+
   // KEY IMAGES ARE LINKABLE. Without an explicit trusted-node opt-in the SDK must not send them at all, even when
   // the wallet exposes them and the caller supplied a node URL; the missing spent check is named, not guessed.
   const untrusted = fake({ balance: 5n });

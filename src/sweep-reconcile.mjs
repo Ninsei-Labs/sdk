@@ -1,6 +1,6 @@
 // A LATER LOOK AT A SIGNED WITHDRAWAL. The session token is gone; only the signed bytes, their hash and the inputs
-// that were verified before signing remain. This is a decision over ONE read of the swap address, never a relay:
-// a present hash sends nothing, an incomplete read keeps the bytes and signs nothing, and only a complete read that
+// that were verified before signing remain. This is a decision over the trusted node's direct answer, never a relay:
+// a present hash sends nothing, an incomplete read keeps the bytes and signs nothing, and only a complete answer that
 // shows both the hash absent and every input unspent permits the very same bytes to be sent again.
 import { SdkError } from "./errors.mjs";
 
@@ -9,8 +9,8 @@ const HASH64 = /^[0-9a-f]{64}$/;
 const normalizedTxid = (value) => String(value == null ? "" : value).replace(/^0x/i, "").toLowerCase();
 
 /**
- * Turn one recovery read into the reconcile answer. `read.target` is filled by `readRecovery` when the signed hash
- * was found in a block or in the pool; `read.spends` names the key images the same read saw spent.
+ * Turn one trusted-node answer into the reconcile verdict. `read.target` is filled when the signed hash was found in
+ * a block or in the pool; `read.spends` names the key images the node reported spent.
  */
 export function reconcileVerdict({ read, txid, keyImages }) {
   const hash = normalizedTxid(txid);
@@ -42,11 +42,9 @@ export function reconcileVerdict({ read, txid, keyImages }) {
       failed: read.failed || [],
     };
   }
-  // A START ABOVE THE TIP READ NO BLOCKS. The pool is read by readRecovery, but an absent hash there is not proof
-  // that the hash is absent from the chain: the caller named a range that never reached a block.
-  const noBlockRange = read.through === null && Number.isFinite(read.fromHeight) && Number.isFinite(read.tip)
-    && read.fromHeight > Math.max(0, read.tip - 1);
-  if (read.complete !== true || noBlockRange) {
+  // The node itself answered the two facts this verdict needs. A partial, unreadable or substituted answer is
+  // incomplete; an empty block range is no longer part of the question.
+  if (read.complete !== true) {
     return {
       outcome: "unknown",
       resend: false,
@@ -54,7 +52,7 @@ export function reconcileVerdict({ read, txid, keyImages }) {
       height: null,
       blockHash: null,
       pool: false,
-      complete: read.complete === true && !noBlockRange,
+      complete: false,
       failed: read.failed || [],
     };
   }

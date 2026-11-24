@@ -1764,8 +1764,8 @@ export interface SweepApi {
    */
   run(request: SweepRunRequest): Promise<SweepRunResult>;
   /**
-   * A LATER LOOK AFTER THE TOKEN IS GONE. Reads the swap address through the same recovery read and decides whether
-   * the saved signed bytes may be sent again. `present` and `inputs-spent` never resend; `unknown` keeps the bytes and
+   * A LATER LOOK AFTER THE TOKEN IS GONE. Asks the trusted node for the saved hash and the spent status of the
+   * verified inputs, without walking blocks. `present` and `inputs-spent` never resend; `unknown` keeps the bytes and
    * signs nothing; only `absent` with `resend: true` permits the same bytes, with the same hash, to be sent once.
    */
   reconcile(request: SweepReconcileRequest): Promise<SweepReconcileResult>;
@@ -2125,21 +2125,29 @@ export interface SweepRunResult {
 
 /** The saved signed withdrawal, read later without a session token. */
 export interface SweepReconcileRequest {
+  /** The trusted node that answers for this withdrawal. */
   readonly node: XmrNode | string;
-  readonly address: string;
-  readonly viewSecret: string | bigint;
-  readonly spendPub: string;
-  readonly fromHeight: number;
   /** The hash the signed bytes already have. */
   readonly txid: string;
   /** The same verified unspent set that was used for signing. */
   readonly keyImages: readonly (string | SweepKeyImage)[];
-  readonly minConfirmations?: number;
-  readonly network?: string;
-  readonly nowSec?: number;
   readonly timeoutMs?: number;
   readonly fetch?: FetchLike;
   readonly signal?: AbortSignal;
+  /** @deprecated No block walk is read; kept for callers that still pass the old request. */
+  readonly address?: string;
+  /** @deprecated No block walk is read; kept for callers that still pass the old request. */
+  readonly viewSecret?: string | bigint;
+  /** @deprecated No block walk is read; kept for callers that still pass the old request. */
+  readonly spendPub?: string;
+  /** @deprecated No block walk is read; kept for callers that still pass the old request. */
+  readonly fromHeight?: number;
+  /** @deprecated No block walk is read; kept for callers that still pass the old request. */
+  readonly minConfirmations?: number;
+  /** @deprecated No block walk is read; kept for callers that still pass the old request. */
+  readonly network?: string;
+  /** @deprecated No block walk is read; kept for callers that still pass the old request. */
+  readonly nowSec?: number;
 }
 
 export interface SweepReconcileResult {
@@ -2154,7 +2162,7 @@ export interface SweepReconcileResult {
   readonly height: number | null;
   readonly blockHash: string | null;
   readonly pool: boolean;
-  /** Whether the underlying recovery read covered every block and the pool. */
+  /** Whether the node answered both the hash question and, when the hash was absent, every input's status. */
   readonly complete: boolean;
   readonly failed: readonly { readonly url: string; readonly operator: string; readonly code?: string; readonly why?: string; readonly height?: number; readonly status?: number }[];
 }
