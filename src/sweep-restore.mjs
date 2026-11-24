@@ -64,8 +64,9 @@ const heightOf = async (driver, name) => {
 
 // AN INCOMPLETE SCAN IS A NAMED OUTCOME, NOT A ZERO BALANCE. The wallet library's sync is best-effort: a node
 // that refuses block downloads leaves a wallet at height 0, and a caller that only reads `unlocked` shows "no
-// XMR". The heights and the sync error decide the verdict here, so the page does not have to guess.
-const scanCompleteness = async (driver, { syncError = null, rescanError = null, spentChecked = true } = {}) => {
+// XMR". For a full scan the heights and the sync error decide the verdict here, so the page does not have to guess;
+// a bounded window uses its trusted spent answer instead, as the branch below explains.
+const scanCompleteness = async (driver, { syncError = null, rescanError = null, spentChecked = true, window = false } = {}) => {
   const walletHeight = await heightOf(driver, "getHeight");
   const nodeHeight = await heightOf(driver, "getDaemonHeight");
   let reason = null;
@@ -74,10 +75,12 @@ const scanCompleteness = async (driver, { syncError = null, rescanError = null, 
   // old range unscanned. It outranks the sync error because it names why the sync was a no-op.
   if (rescanError) reason = "rescan-failed";
   else if (syncError) reason = "sync-failed";
-  else if (walletHeight === null || nodeHeight === null) reason = "no-heights";
-  else if (walletHeight < nodeHeight) reason = "behind-node";
-  // A BALANCE FROM A WINDOW IS NOT A COMPLETE SCAN WHEN SPENT STATUS WAS NEVER READ. An output spent just after
-  // `t1` would still look withdrawable; naming the gap is safer than reporting a complete pass over it.
+  // A WINDOW IS A BOUNDED SCAN, so a height that moved after the sync is not a gap in it. When the trusted node
+  // answered for every key image, the window plus that answer is complete: a block landing during or after the
+  // sync does not unscan the lock's blocks. The spent answer still has to be valid; without it the window is
+  // incomplete, and an unreadable answer never becomes a complete scan.
+  else if (!window && (walletHeight === null || nodeHeight === null)) reason = "no-heights";
+  else if (!window && walletHeight < nodeHeight) reason = "behind-node";
   else if (!spentChecked) reason = "spent-status-unavailable";
   return { scanComplete: reason === null, ...(reason === null ? {} : { scanIncompleteReason: reason }), walletHeight, nodeHeight };
 };
@@ -296,7 +299,7 @@ export async function restoreWallet(request = {}) {
       // explicitly turned the fallback off.
       if (windowReport.used && (windowTotal > 0n || windowUnlocked > 0n || requestWindow.fallback === false)) {
         const completeness = await scanCompleteness(driver, { syncError: windowSyncError,
-          spentChecked: windowReport.spent !== null && windowReport.spent !== undefined });
+          spentChecked: windowReport.spent !== null && windowReport.spent !== undefined, window: true });
         return {
           total: windowTotal.toString(), unlocked: windowUnlocked.toString(), scanHeight,
           ...completeness, passes: 1, lockedPass: false, window: windowReport,

@@ -13,7 +13,7 @@ import * as engine from "./engine.mjs";
 import { restoreWallet } from "./sweep-restore.mjs";
 import { moneroWalletAdapter } from "./adapters/monero-wallet.mjs";
 import { checkDestination } from "./destination.mjs";
-import { readRecovery } from "./xmr-arrival.mjs";
+import { readWithdrawalState } from "./xmr-arrival.mjs";
 import { reconcileVerdict } from "./sweep-reconcile.mjs";
 import { revealedHalfWord } from "./sweep-half.mjs";
 import { takerHalvesV2 } from "./recovery-key.mjs";
@@ -591,14 +591,22 @@ export function createSweep({ call = null, fetchImpl = null } = {}) {
       const txid = String(request.txid == null ? "" : request.txid).replace(/^0x/i, "").toLowerCase();
       if (!/^[0-9a-f]{64}$/.test(txid)) throw new SdkError("bad-input", { field: "txid" });
       if (request.node === undefined || request.node === null) throw new SdkError("bad-input", { field: "node" });
-      if (!Number.isSafeInteger(request.fromHeight) || request.fromHeight < 0) {
-        throw new SdkError("bad-input", { field: "fromHeight" });
-      }
       if (!Array.isArray(request.keyImages) || !request.keyImages.length) {
         throw new SdkError("bad-input", { field: "keyImages", why: "empty" });
       }
       const keyImages = request.keyImages;
-      const read = await readRecovery({ ...request, txid, keyImages, checkpoint: undefined });
+      // THE NODE ANSWERS TWO FACTS, NOT THE WHOLE CHAIN. `readWithdrawalState` asks for this exact hash and for the
+      // spent status of these inputs. A start height is no longer part of the call: the block walk was the cost
+      // that kept a returning client from getting an answer.
+      const read = await readWithdrawalState({
+        node: request.node,
+        txid,
+        keyImages,
+        fetch: typeof request.fetch === "function" ? request.fetch
+          : (typeof fetchImpl === "function" ? fetchImpl : undefined),
+        timeoutMs: request.timeoutMs,
+        signal: request.signal,
+      });
       return reconcileVerdict({ read, txid, keyImages });
     },
 

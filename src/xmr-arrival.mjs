@@ -49,7 +49,9 @@ const failureOf = (error, node) => {
   const name = String(params.name || (error && error.name) || "");
   if (params.status !== undefined && params.status !== null) code = "http";
   else if (/^(TimeoutError|AbortError)$/.test(name) || /timeout|abort/i.test(why) || /timeout|abort/i.test(name)) code = "timeout";
-  else if (why === "bad-json" || why === "no-height" || why === "no-block" || why === "busy" || why === "partial-transactions") code = "bad-answer";
+  else if (why === "bad-json" || why === "no-height" || why === "no-block" || why === "busy"
+    || why === "partial-transactions" || why === "partial-answer" || why === "target-mismatch"
+    || why === "spent-status" || why === "rpc-status") code = "bad-answer";
   const out = { url: node.url, operator: node.operator, code };
   if (params.status !== undefined && params.status !== null) out.status = params.status;
   if (why) out.why = why;
@@ -108,7 +110,7 @@ async function call(node, path, body, fetchImpl, timeoutMs, options = {}) {
   try {
     res = await fetchImpl(node.url + path, {
       method: "POST",
-      headers: { "Content-Type": "text/plain" },
+      headers: { "Content-Type": options.contentType || "text/plain" },
       body: JSON.stringify(body),
       signal: signal || undefined,
     });
@@ -760,6 +762,100 @@ function validWitnessCheckpoint(record, identity) {
   if (record.through.height < identity.fromHeight) return null;
   if (record.digest !== checkpointDigest(record)) return null;
   return record;
+}
+
+// THE BLOCK HASH OF A PRESENT HASH IS A SMALL EXTRA READ, NOT A WALK. A trusted node that already answered for the
+// transaction usually has the header; a header read that fails leaves the hash null but does not turn a present
+// transaction into an absence.
+async function getBlockHashAt(node, height, fetchImpl, timeoutMs, options = {}) {
+  const body = await call(node, "/json_rpc", {
+    jsonrpc: "2.0", id: "header", method: "get_block_header_by_height", params: { height },
+  }, fetchImpl, timeoutMs, options);
+  const result = body && body.result;
+  const hash = result && result.block_header && result.block_header.hash;
+  return hash64(hash) ? normalizedHash(hash) : null;
+}
+
+// THE LATER CHECK OF A SIGNED WITHDRAWAL, WITHOUT A BLOCK WALK. The token is gone and the caller still has the
+// transaction id and the key images that were verified before signing. A trusted node can answer both facts
+// directly: `/get_transactions` says whether this exact hash is in a block or in the pool, and
+// `/is_key_image_spent` says whether each input moved. This is deliberately narrower than `readRecovery`: no block
+// range is read, so a start height and a chain walk are not part of the answer. Every partial, malformed or
+// substituted answer is incomplete, never an absence.
+export async function readWithdrawalState(request = {}) {
+  if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
+  const node = normalizeNodes([request.node])[0];
+  const targetTxid = normalizedHash(request.txid);
+  if (!hash64(targetTxid)) throw new SdkError("bad-input", { field: "txid" });
+  const tracked = normalizeKeyImages(request.keyImages);
+  if (!tracked.provided || tracked.byImage.size === 0) {
+    throw new SdkError("bad-input", { field: "keyImages", why: "empty" });
+  }
+  const fetchImpl = typeof request.fetch === "function" ? request.fetch : globalThis.fetch;
+  if (typeof fetchImpl !== "function") throw new SdkError("bad-input", { field: "fetch" });
+  const timeoutMs = Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0
+    ? Number(request.timeoutMs) : 20000;
+  const signal = request.signal && typeof request.signal.addEventListener === "function" ? request.signal : null;
+  const images = [...tracked.byImage.values()].map((record) => record.keyImage);
+
+  // The hash first. One request names exactly one transaction; a node that answers with another hash, more than one
+  // transaction or a partial wrapper has not answered this question.
+  let target = null;
+  try {
+    const body = await call(node, "/get_transactions", { txs_hashes: [targetTxid], decode_as_json: true },
+      fetchImpl, timeoutMs, { signal });
+    if (!body || body.status !== "OK") throw new SdkError("xmr-no-nodes", { node: node.url, why: "rpc-status" });
+    const wrappers = body && Array.isArray(body.txs) ? body.txs : null;
+    const bodies = body && Array.isArray(body.txs_as_json) ? body.txs_as_json : null;
+    if (!wrappers || !bodies) throw new SdkError("xmr-no-nodes", { node: node.url, why: "partial-answer" });
+    if (wrappers.length > 1 || bodies.length > 1 || wrappers.length !== bodies.length) {
+      throw new SdkError("xmr-no-nodes", { node: node.url, why: "partial-answer" });
+    }
+    if (wrappers.length === 1) {
+      const wrapper = wrappers[0] || {};
+      if (normalizedHash(wrapper.tx_hash) !== targetTxid) {
+        throw new SdkError("xmr-no-nodes", { node: node.url, why: "target-mismatch" });
+      }
+      const rawHeight = wrapper.block_height;
+      const height = rawHeight === null || rawHeight === undefined || rawHeight === "" ? null : Number(rawHeight);
+      // A POOL TRANSACTION HAS NO BLOCK. `in_pool` is the explicit marker; an absent or zero height is the same
+      // fact on daemons that omit it.
+      const pool = wrapper.in_pool === true || height === null || height === 0;
+      if (!pool && (!Number.isSafeInteger(height) || height < 0)) {
+        throw new SdkError("xmr-no-nodes", { node: node.url, why: "partial-answer" });
+      }
+      target = { txid: targetTxid, height: pool ? null : height, blockHash: null, pool };
+      if (!pool) {
+        try { target.blockHash = await getBlockHashAt(node, height, fetchImpl, timeoutMs, { signal }); }
+        catch { target.blockHash = null; }
+      }
+    }
+  } catch (error) {
+    return { target: null, spends: [], complete: false, failed: [failureOf(error, node)] };
+  }
+  // A PRESENT HASH IS THE WHOLE ANSWER. It never permits a resend, so the inputs do not need to be sent to the
+  // node for this verdict.
+  if (target) return { target, spends: [], complete: true, failed: [] };
+
+  // The hash is absent. The only way absence may permit a resend is a complete key-image answer: every requested
+  // image must come back with a known status. A short, long or non-integer list is unreadable, not "unspent".
+  try {
+    const body = await call(node, "/is_key_image_spent", { key_images: images }, fetchImpl, timeoutMs,
+      { signal, contentType: "application/json" });
+    if (!body || body.status !== "OK") throw new SdkError("xmr-no-nodes", { node: node.url, why: "rpc-status" });
+    const statuses = body && Array.isArray(body.spent_status) ? body.spent_status : null;
+    if (!statuses || statuses.length !== images.length
+        || !statuses.every((value) => Number.isInteger(value) && value >= 0 && value <= 2)) {
+      throw new SdkError("xmr-no-nodes", { node: node.url, why: "spent-status" });
+    }
+    const spends = [];
+    statuses.forEach((status, index) => {
+      if (status === 1 || status === 2) spends.push({ keyImage: images[index], pool: status === 2 });
+    });
+    return { target: null, spends, complete: true, failed: [] };
+  } catch (error) {
+    return { target: null, spends: [], complete: false, failed: [failureOf(error, node)] };
+  }
 }
 
 /**

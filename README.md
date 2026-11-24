@@ -314,11 +314,13 @@ privacy-preserving path for a recovery page, because the RPC does not learn whic
 the answer is `sweep-relay-unknown`: the session token, the signed set and any known txids stay in the open session.
 The same token never relays that set again. Check the chain before signing a new withdrawal.
 
-`sweep.reconcile` is the later answer when the token is gone and only the signed bytes remain. It reads the swap
-address through `swaps.readRecovery`, with the signed hash and the verified `keyImages`, and never signs or relays:
-`present` means the hash is in a block or in the pool; `inputs-spent` means the hash is absent but an input moved;
-`unknown` means the read could not decide and the bytes stay; only `absent` with `resend: true` permits the same
-bytes, with the same hash, to be sent once.
+`sweep.reconcile` is the later answer when the token is gone and only the signed bytes remain. It asks the chosen
+trusted node two direct questions, with no block walk: `/get_transactions` for the signed hash and
+`/is_key_image_spent` for its verified inputs. `present` means the hash is in a block or in the pool; `inputs-spent`
+means the hash is absent but an input moved; `unknown` means the node could not answer completely and the bytes stay;
+only `absent` with `resend: true` permits the same bytes, with the same hash, to be sent once. A partial, malformed
+or substituted answer is `unknown`, never an absence. A present hash is answered without sending the key images.
+On the absent branch those inputs go to that node; key images are linkable, so the node must be one the caller trusts.
 
 `sweep.sign` refuses with `sweep-scan-incomplete` unless `sweep.restore` first completed a full scan on that same
 wallet adapter; a behind-node, failed rescan or missing spent status is not a zero balance. A public node that refuses
@@ -335,6 +337,8 @@ nothing. `sweep.run` passes the same list it used for signing, so a fresh post-s
 
 A window spent check counts status `2` as spent in the pool. A short, long or non-integer `spent_status` list is not a
 spent count: `spent` is null and `scanComplete` is false with `scanIncompleteReason: "spent-status-unavailable"`.
+A window with a valid trusted-node answer is complete even when the wallet's height is below the node's: a block that
+landed after the sync does not unscan the lock's blocks. Without that valid answer the window stays incomplete.
 
 - `amount` — the escrow's **native** amount in wei;
 - `settlementToken: "native"` — what the escrow receives;
@@ -411,9 +415,11 @@ The wallet adapter accepts the standard Monero network names (`mainnet`, `stagen
 still checks the address shape, so a mainnet withdrawal is not refused because the demo registry lists only
 stagenet. The withdrawal window retries a `429`, a timeout or a `5xx` before it gives up. If the window still cannot be read,
 `restoreWallet` falls back to the full scan and reports `window.fallback: true` with `fallbackWhy: "window-read"` and
-the node's status; a withdrawal is not refused because the node was busy. When the wallet cannot reach the node's
-height, the result says `scanComplete: false` with `scanIncompleteReason: "sync-failed"`, `"rescan-failed"`, `"behind-node"`,
-`"no-heights"` or `"spent-status-unavailable"`; a zero balance in that state is not an empty wallet.
+the node's status; a withdrawal is not refused because the node was busy. In a full scan, when the wallet cannot reach
+the node's height, the result says `scanComplete: false` with `scanIncompleteReason: "sync-failed"`,
+`"rescan-failed"`, `"behind-node"`, `"no-heights"` or `"spent-status-unavailable"`; a zero balance in that state is not
+an empty wallet. A window uses its bounded scope instead: a valid trusted-node answer makes it complete even after a
+later block, while an unreadable answer stays `spent-status-unavailable`.
 
 ## Extending to other networks (Tron, Solana and beyond)
 
