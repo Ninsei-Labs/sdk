@@ -354,6 +354,18 @@ console.log("=== 1d) A RECEIPT WITHOUT THE EVENT IS NOT xmr-incoming ===");
   } else bad("pending funding: " + JSON.stringify({ step: result && result.step, txHash: result && result.txHash, sent }));
 }
 
+console.log("=== 1d0) THE PENDING RECORD KEEPS THE SIGNED EXPIRY ===");
+{
+  const { result } = await startPending();
+  const record = Object.values((loadState() && loadState().swaps) || {})[0];
+  const pendingEscrow = record && record.escrow;
+  if (result && result.step === "funding-pending" && pendingEscrow && pendingEscrow.validUntil === quote.validUntil) {
+    ok("the signed expiry is saved on the pending record");
+  } else {
+    bad("signed expiry: " + JSON.stringify({ step: result && result.step, validUntil: pendingEscrow && pendingEscrow.validUntil, expected: quote.validUntil }));
+  }
+}
+
 console.log("=== 1d1) THE PENDING RECORD IS WRITTEN BEFORE THE SEND ===");
 {
   const { result, sent, atSend } = await startWith(derived.makerViewHalf, order.salt);

@@ -1,3 +1,9 @@
+// THE TERMS EVENT. `OrderTerms` is emitted with the deposit and is the only event that carries the fee and the
+// claim tip; the three addresses are indexed, the remaining fifteen fields are data words.
+//   cast keccak "OrderTerms(address,address,address,bytes32,bytes32,bytes32,bytes32,bytes32,uint256,uint64,uint64,address,address,address,uint16,uint256,address,uint256)"
+export const ORDER_TERMS_TOPIC =
+  "0x968d16f7aa0670aadba259292b76e013a5c6de0188362017569f55852e90ec72";
+
 // Calls to the NinseiSwap escrow contract (one instance = one order).
 //
 // There is no EVM library here: the escrow has three state-moving functions (markReady, claim, refund) and a few

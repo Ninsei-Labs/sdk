@@ -18,6 +18,7 @@ import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { createHalves } from "../engine/atomic/halves.js";
 import { halfCommitmentHex } from "../engine/atomic/orderHalfCommit.js";
 import { ORDER_CREATED_TOPIC, ORDER_CREATED_TOPICS } from "../engine/evm/factory.js";
+import { ORDER_TERMS_TOPIC } from "../engine/evm/escrow.js";
 import { SdkError } from "./errors.mjs";
 import { probeMoneroNode } from "./probes.mjs";
 import { ed25519, keccak256, randomBytes, secp256k1 } from "./primitives.mjs";
@@ -531,6 +532,205 @@ function decodeEscrowEvents(logs, allowedEscrows = null) {
   return events.sort((a, b) => Number(a.blockNumber || 0) - Number(b.blockNumber || 0) || Number(a.logIndex || 0) - Number(b.logIndex || 0));
 }
 
+const ORDER_TERMS_WORDS = 15;
+const searchStartBlock = (madeBlock, deploymentBlock) => {
+  const made = Number(madeBlock);
+  const deployment = Number(deploymentBlock);
+  if (!Number.isSafeInteger(made) || made < 0) return Number.isSafeInteger(deployment) && deployment > 0 ? deployment : 0;
+  // THE DAY GRID IS A PRIVACY BOUNDARY, NOT AN OPTIMISATION. Every key made in one window starts at the same
+  // line, so the RPC cannot infer the key's creation block from the range a client asks for. The margin below the
+  // line covers a reorganisation that moved the creation block.
+  const grid = 360_000;
+  const margin = 15_000;
+  return Math.max(Number.isSafeInteger(deployment) && deployment > 0 ? deployment : 0,
+    Math.floor(Math.max(0, made - margin) / grid) * grid);
+};
+
+/** The day-grid line for a key made at `madeBlock`; never below the deployment. */
+export function recoverySearchStart({ madeBlock = null, deploymentBlock = 0 } = {}) {
+  return searchStartBlock(madeBlock, deploymentBlock);
+}
+
+/**
+ * THE ONE SEARCH-START RULE, INCLUDING THE MONTH FALLBACK. A key made here starts at its day-grid line when the
+ * node's head has reached that line. A node below it, or a key with no block of its own, starts at the first block
+ * at or after `startAt` (the UTC month's first instant less one day, in seconds), never below the deployment. With
+ * neither, the factory deployment is the floor. `blockAt` is the caller's block-by-time reader; its failure is a
+ * deployment floor, not a made-up block.
+ */
+export async function recoveryStartBlock({ madeBlock = null, deploymentBlock = 0, startAt = null, head = null,
+  blockAt = null } = {}) {
+  const deployment = Number.isSafeInteger(Number(deploymentBlock)) && Number(deploymentBlock) > 0 ? Number(deploymentBlock) : 0;
+  const made = madeBlock !== null && madeBlock !== undefined
+    && Number.isSafeInteger(Number(madeBlock)) && Number(madeBlock) >= 0 ? Number(madeBlock) : null;
+  const hasHead = head !== null && head !== undefined && Number.isSafeInteger(Number(head));
+  if (made !== null) {
+    const floor = searchStartBlock(made, deployment);
+    // A key's own line is used only when the node has reached it. Without a head the line is the best available
+    // answer, unless the caller also supplied a start date: then the site's month rule is the safer floor.
+    if (hasHead ? floor <= Number(head) : startAt === null || startAt === undefined) return { block: floor, source: "made" };
+  }
+  if (startAt !== null && startAt !== undefined && typeof blockAt === "function") {
+    try {
+      const at = Number(await blockAt(Number(startAt), hasHead ? Number(head) : null));
+      if (Number.isSafeInteger(at) && at >= 0) return { block: Math.max(deployment, at), source: "month" };
+    } catch { /* the deployment is the floor when the time cannot be placed */ }
+  }
+  return { block: deployment, source: "deployment" };
+}
+
+function decodeOrderTerms(log) {
+  if (!log || typeof log !== "object" || log.removed === true) return null;
+  const topics = Array.isArray(log.topics) ? log.topics : [];
+  if (topics.length < 4 || String(topics[0] || "").toLowerCase() !== ORDER_TERMS_TOPIC) return null;
+  if (typeof log.data !== "string" || !/^0x[0-9a-fA-F]*$/.test(log.data)) return null;
+  const data = log.data.slice(2);
+  if (data.length < ORDER_TERMS_WORDS * 64 || data.length % 64 !== 0) return null;
+  const word = (i) => "0x" + data.slice(i * 64, (i + 1) * 64).toLowerCase();
+  const escrow = addressTopic(topics[1]);
+  if (!escrow) return null;
+  let amount, fee, claimTip;
+  try {
+    amount = BigInt(word(5)).toString();
+    fee = BigInt(word(12)).toString();
+    claimTip = BigInt(word(14)).toString();
+  } catch { return null; }
+  return {
+    escrow, locker: addressTopic(topics[2]), claimer: addressTopic(topics[3]),
+    commitHalfLocker: word(0), commitHalfClaimer: word(1), edPointLocker: word(2),
+    edPointClaimer: word(3), edViewPointLocker: word(4), amount,
+    readyBy: Number(BigInt(word(6))), t1: Number(BigInt(word(7))),
+    registry: addressTopic(word(8)), provider: addressTopic(word(9)), quoteKey: addressTopic(word(10)),
+    feeBps: Number(BigInt(word(11))), fee, feeRecipient: addressTopic(word(13)), claimTip,
+    blockNumber: log.blockNumber == null ? null : Number(log.blockNumber),
+    blockHash: typeof log.blockHash === "string" ? log.blockHash.toLowerCase() : null,
+    transactionHash: typeof log.transactionHash === "string" ? log.transactionHash : null,
+    logIndex: log.logIndex == null ? null : Number(log.logIndex),
+  };
+}
+
+/**
+ * ONE HISTORY READ FOR A SET OF ESCROWS. The terms and the settlement events come from logs, so a caller does not
+ * ask the RPC about each escrow separately. Removed logs are dropped. `checkpoint` is `{ number, hash }`; when the
+ * anchored block has changed, the read starts again from `fromBlock` instead of continuing from a moved chain.
+ */
+export async function readEscrowHistory({ escrows, evmLogs, fromBlock = 0, toBlock = "latest", checkpoint = null,
+  previous = null, evmBlock = null } = {}) {
+  if (!Array.isArray(escrows)) throw bad("escrows");
+  const addresses = [...new Set(escrows.map((escrow) => {
+    if (typeof escrow !== "string" || !ADDRESS_RE.test(escrow)) throw bad("escrows");
+    return escrow.toLowerCase();
+  }))];
+  let effectiveFrom = fromBlock;
+  let replayed = false;
+  let endBlock = null;
+  if (typeof evmBlock === "function") {
+    try {
+      endBlock = await evmBlock(toBlock);
+      if (endBlock && endBlock.number !== undefined) toBlock = Number(endBlock.number);
+    } catch { endBlock = null; }
+    if (checkpoint && Number.isSafeInteger(Number(checkpoint.number)) && typeof checkpoint.hash === "string") {
+      try {
+        const anchored = await evmBlock(Number(checkpoint.number));
+        const expected = String(checkpoint.hash).replace(/^0x/i, "").toLowerCase();
+        const got = String(anchored && anchored.hash || "").replace(/^0x/i, "").toLowerCase();
+        if (anchored && got && got === expected) effectiveFrom = Number(checkpoint.number) + 1;
+        else replayed = true;
+      } catch { replayed = true; }
+    }
+  } else if (checkpoint) replayed = true;
+  // An empty set is a valid history: a key with no orders must get an empty answer, not a refusal. It still resolves
+  // and returns a block checkpoint so the caller can resume the next read.
+  const logs = addresses.length ? await readLogs(evmLogs, {
+    address: addresses,
+    topics: [[ORDER_TERMS_TOPIC, ESCROW_EVENT_TOPICS.halfRevealed, ESCROW_EVENT_TOPICS.ready, ESCROW_EVENT_TOPICS.declined]],
+    fromBlock: effectiveFrom,
+    toBlock,
+  }) : [];
+  const terms = new Map();
+  for (const log of logs) {
+    const decoded = decodeOrderTerms(log);
+    if (decoded && !terms.has(decoded.escrow)) terms.set(decoded.escrow, decoded);
+  }
+  // A VALID CHECKPOINT WITH THE CALLER'S PREVIOUS RESULT IS A RESUME, NOT A FRESH PARTIAL READ. The previous row is
+  // the state below the checkpoint; this range adds the events above it. A moved checkpoint discards `previous`, so
+  // the answer is the full range rather than a mixture of two chains.
+  const resumed = !replayed && Array.isArray(previous);
+  const previousRows = new Map();
+  if (resumed) {
+    for (const row of previous) {
+      if (!row || typeof row !== "object" || typeof row.escrow !== "string") continue;
+      const escrow = row.escrow.toLowerCase();
+      if (!addresses.includes(escrow)) continue;
+      previousRows.set(escrow, {
+        escrow, terms: row.terms && typeof row.terms === "object" ? { ...row.terms } : null,
+        status: { isFunded: false, isClaimed: false, isRefunded: false, ready: false, declined: false,
+          ...(row.status && typeof row.status === "object" ? row.status : {}) },
+        events: Array.isArray(row.events) ? row.events.filter((event) => event && typeof event === "object").map((event) => ({ ...event })) : [],
+      });
+    }
+  }
+  const byEscrow = new Map(addresses.map((escrow) => {
+    const old = previousRows.get(escrow);
+    if (old) return [escrow, old];
+    return [escrow, {
+      escrow, terms: terms.get(escrow) || null,
+      status: { isFunded: terms.has(escrow), isClaimed: false, isRefunded: false, ready: false, declined: false },
+      events: [],
+    }];
+  }));
+  for (const [escrow, row] of byEscrow) {
+    if (row.terms) continue;
+    const decoded = terms.get(escrow);
+    if (decoded) { row.terms = decoded; row.status.isFunded = true; }
+  }
+  const settlement = decodeEscrowEvents(logs, new Set(addresses));
+  const seen = new Map([...byEscrow].map(([escrow, row]) => [escrow, new Set(row.events.map((event) =>
+    `${String(event.transactionHash || "").toLowerCase()}|${String(event.logIndex ?? "")}`))]));
+  for (const event of settlement) {
+    const row = byEscrow.get(event.escrow);
+    if (!row) continue;
+    const key = `${String(event.transactionHash || "").toLowerCase()}|${String(event.logIndex ?? "")}`;
+    if (seen.get(event.escrow).has(key)) continue;
+    seen.get(event.escrow).add(key);
+    row.events.push(event);
+    if (event.event === "HalfRevealed") {
+      if (event.byClaimer) row.status.isClaimed = true;
+      else row.status.isRefunded = true;
+    } else if (event.event === "Ready") row.status.ready = true;
+    else if (event.event === "Declined") { row.status.isRefunded = true; row.status.declined = true; }
+  }
+  for (const row of byEscrow.values()) {
+    row.events.sort((a, b) => Number(a.blockNumber || 0) - Number(b.blockNumber || 0) || Number(a.logIndex || 0) - Number(b.logIndex || 0));
+  }
+  let checkpointOut = null;
+  if (endBlock && Number.isSafeInteger(Number(endBlock.number)) && /^[0-9a-f]{64}$/i.test(String(endBlock.hash || "").replace(/^0x/i, ""))) {
+    checkpointOut = { number: Number(endBlock.number), hash: "0x" + String(endBlock.hash).replace(/^0x/i, "").toLowerCase() };
+  } else {
+    const last = logs.filter((log) => log && log.removed !== true && Number.isSafeInteger(Number(log.blockNumber)) && typeof log.blockHash === "string")
+      .sort((a, b) => Number(a.blockNumber) - Number(b.blockNumber)) .at(-1);
+    if (last) checkpointOut = { number: Number(last.blockNumber), hash: "0x" + last.blockHash.replace(/^0x/i, "").toLowerCase() };
+  }
+  return { escrows: [...byEscrow.values()], checkpoint: checkpointOut, replayed, fromBlock: effectiveFrom, toBlock };
+}
+
+/** One escrow's creation event, for a lookup that starts from the escrow address rather than a key. */
+export async function findOrderByEscrow({ escrow, factory, deploymentBlock = 0, evmLogs, toBlock = "latest" } = {}) {
+  if (typeof escrow !== "string" || !ADDRESS_RE.test(escrow)) throw bad("escrow");
+  if (typeof factory !== "string" || !ADDRESS_RE.test(factory)) throw bad("factory");
+  const logs = await readLogs(evmLogs, {
+    address: factory, topics: [ORDER_CREATED_TOPICS, pad32(escrow)], fromBlock: deploymentBlock, toBlock,
+  });
+  for (const log of logs) {
+    if (!log || typeof log !== "object" || log.removed === true) continue;
+    const order = decodeOrderLog(log);
+    if (order && order.escrow.toLowerCase() === escrow.toLowerCase()) {
+      return { order, creationBlock: order.blockNumber, creationBlockHash: typeof log.blockHash === "string" ? log.blockHash : null };
+    }
+  }
+  return null;
+}
+
 // THE MONERO HEIGHT A RECOVERED ORDER STARTED AT. With one key there is no per-swap file to carry it, so it is
 // derived from the settlement chain: the timestamp of the block that holds OrderCreated, then the last Monero
 // block at or before it. A Monero block's timestamp may run ahead of wall time, hence the safety margin.
@@ -660,7 +860,7 @@ async function recoveredStartHeight(order, { evmBlockTime, moneroTip, moneroBloc
  * positions) and merges the answers. Without one, every OrderCreated of the factory is read and matched locally.
  */
 export async function findSwaps({ mnemonic, chainId, factory = null, factories = null, address = null, evmLogs,
-  fromBlock = null, deploymentBlock = null, toBlock = "latest",
+  fromBlock = null, deploymentBlock = null, madeBlock = null, startAt = null, head = null, blockAt = null, toBlock = "latest",
   evmBlockTime = null, evmBlockTimes = null, evmCode = null, moneroTip = null, moneroBlockTimestamp = null,
   xmrNodes = null, moneroNetwork = null, fetchImpl = globalThis.fetch } = {}) {
   // FACTORY HISTORY IS PART OF THE SEARCH. A chain can have more than one factory after a contract change;
@@ -689,7 +889,8 @@ export async function findSwaps({ mnemonic, chainId, factory = null, factories =
     // THE CHAIN SAYS WHERE ITS ORDERS CAN START. An explicit fromBlock wins; otherwise the factory's own
     // deployment block is used. Zero remains the last resort for a caller that knows the factory existed at genesis.
     const startBlock = fromBlock === null || fromBlock === undefined
-      ? (target.deploymentBlock === null ? 0 : target.deploymentBlock)
+      ? (await recoveryStartBlock({ madeBlock, deploymentBlock: target.deploymentBlock === null ? 0 : target.deploymentBlock,
+        startAt, head, blockAt })).block
       : fromBlock;
     const base = { address: target.factory, fromBlock: startBlock, toBlock };
     let logs = [];
@@ -705,6 +906,9 @@ export async function findSwaps({ mnemonic, chainId, factory = null, factories =
     }
     for (const log of logs) {
       if (!log || typeof log !== "object") continue;
+      // A REMOVED CREATION LOG IS NOT AN ORDER. The site already drops removed settlement logs; the creation
+      // search must do the same, or a reorged OrderCreated can resurrect an escrow that never existed.
+      if (log.removed === true) continue;
       const logAddress = typeof log.address === "string" ? log.address : "";
       const logTx = typeof log.transactionHash === "string" ? log.transactionHash : "";
       const logIndex = typeof log.logIndex === "number" || typeof log.logIndex === "string" ? log.logIndex : "";

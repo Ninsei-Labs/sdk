@@ -158,7 +158,17 @@ analytics, crash reports or a backend.
 
 `recovery.open` parses the file with a passphrase. `recovery.restoreHeight` reports the height and where it came
 from; a missing height is a named state, not zero. The host may use the public log search from the recovery
-subpath, but only public order data leaves the client.
+subpath, but only public order data leaves the client. `recoverySearchStart` is the shared day-grid line for a
+key made at `madeBlock`; pass the same block to `findSwaps` so every client starts from the same range. When the node
+is behind that line, or the key has no creation block, `recoveryStartBlock` falls back to the block at the UTC month
+start less one day, then to the deployment; pass `startAt`, `head` and `blockAt` to `findSwaps` for the same rule.
+
+`order.history` returns each escrow's `OrderTerms` and settlement state from one address-filtered log request. An
+explicit `escrows` list needs `fromBlock`; a key search derives the shared start. The result carries a
+`{ number, hash }` checkpoint. Pass the previous `escrows` as `previous` to merge above it; resume only when that block
+still has the same hash, otherwise the read drops `previous`, replays from `fromBlock` and reports `replayed: true`. `order.lookup` starts from an escrow address and returns its
+creation block and terms. `order.read` answers at one block; `order.funding` answers `pending`, `landed` or
+`expired` at a named finality.
 
 ## 7a. The arrival shadow
 

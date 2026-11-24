@@ -2586,6 +2586,7 @@ const coverageMergeCheck = () => {
 };
 const backupConfirmationCheck = () => runScriptCheck("check-backup-confirmation.mjs", "backup confirmation");
 const keyViewCheck = () => runScriptCheck("check-key-view.mjs", "key view");
+const orderReadCheck = () => runScriptCheck("check-order-read.mjs", "order read");
 const keyImageCheck = () => runScriptCheck("check-key-image.mjs", "key image");
 const keyImageTeethCheck = () => runScriptCheck("check-key-image-teeth.mjs", "key image teeth");
 const recoveryReadCheck = () => runScriptCheck("check-recovery-read.mjs", "recovery read");
@@ -2702,6 +2703,7 @@ const CHECKS = {
   "coverage-merge": coverageMergeCheck,
   "backup-confirmation": backupConfirmationCheck,
   "key-view": keyViewCheck,
+  "order-read": orderReadCheck,
   "key-image": keyImageCheck,
   "key-image-teeth": keyImageTeethCheck,
   "pending-teeth": pendingTeethCheck,

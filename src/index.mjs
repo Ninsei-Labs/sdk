@@ -17,6 +17,7 @@ import { contextOf, verifyCounterparty, jointAddress } from "./order.mjs";
 // out of www/js. It is declared here so the facade carries the order READS the page needs (state and deadlines)
 // on the same chain-read seam as the actions.
 import * as orderFlow from "./swap-flow.mjs";
+import { orderHistory, orderLookup, orderFunding } from "./order-read.mjs";
 import { createSweep } from "./sweep.mjs";
 import { SdkError, fail } from "./errors.mjs";
 import { ERROR_CODES, ERROR_META, ERROR_SIDES, STEP_CODES, CHECK_CODES } from "./codes.mjs";
@@ -209,7 +210,10 @@ export function createNinsei(options) {
   const actions = createActions({ call: o.evmCall });
   // THE SAME CHAIN-READ SEAM FOR THE ORDER READS: state and deadlines must be read by the wallet that will sign,
   // not by a second provider. Without a caller reader the module keeps its engine default.
-  const orderDeps = typeof o.evmCall === "function" ? { call: o.evmCall } : {};
+  const orderDeps = {
+    ...(typeof o.evmCall === "function" ? { call: o.evmCall } : {}),
+    ...(typeof o.evmBlock === "function" ? { block: o.evmBlock } : {}),
+  };
   // THE LOG SEAM GOES WITH THE ORDER READS: the decline is read by the same caller-brought reader as the state,
   // for the same reason (the wallet that reads must be the wallet that signs), and it is the READER that is
   // substituted - the addresses and the topic stay the core's.
@@ -237,6 +241,19 @@ export function createNinsei(options) {
       // ORDER STATE FROM THE CHAIN (escrow slot 3): which of the four states the order is in. Read, not guessed
       // from logs - the very call the engine used to make from www/js/core/swap-flow.js.
       status: (escrow) => orderFlow.orderStatus(escrow, orderDeps),
+      // ONE BLOCK: state, ready mark and both deadlines together with the block's identity.
+      read: (escrow, deps = {}) => orderFlow.orderRead(escrow, { ...orderDeps, ...(deps || {}) }),
+      // THE HISTORY AND THE LOOKUP read terms and settlement events from logs; funding is a verdict at one finality.
+      history: (request = {}) => orderHistory({ ...request,
+        evmLogs: typeof request.evmLogs === "function" ? request.evmLogs : (o.evmLogs || undefined),
+        evmBlock: typeof request.evmBlock === "function" ? request.evmBlock : (o.evmBlock || undefined) }),
+      lookup: (escrow, request = {}) => orderLookup(escrow, { ...request,
+        evmLogs: typeof request.evmLogs === "function" ? request.evmLogs : (o.evmLogs || undefined),
+        evmBlock: typeof request.evmBlock === "function" ? request.evmBlock : (o.evmBlock || undefined) }),
+      funding: (request = {}) => orderFunding({ ...request,
+        network: request.network || config.settlement.chain,
+        call: typeof request.call === "function" ? request.call : (o.evmCall || undefined),
+        block: typeof request.block === "function" ? request.block : (o.evmBlock || undefined) }),
       // THE ORDER DEADLINES (t1, readyBy, termsHash) from the chain: the screen needs them to say whether the
       // person is in the dead zone.
       deadlines: (escrow) => orderFlow.orderDeadlines(escrow, orderDeps),
