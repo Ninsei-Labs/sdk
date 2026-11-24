@@ -3,6 +3,7 @@
 // a refusal or a named unknown, never a zero or an absence.
 import { SdkError } from "./errors.mjs";
 import * as engine from "./engine.mjs";
+import { finalityFor } from "../engine/core/finality.js";
 import { findOrderByEscrow, findSwaps, readEscrowHistory } from "./recovery-key.mjs";
 
 const bad = (field, why = null) => new SdkError("bad-input", why ? { field, why } : { field });
@@ -46,7 +47,7 @@ export async function orderHistory(request = {}) {
   const history = await readEscrowHistory({
     escrows, evmLogs, fromBlock: request.fromBlock === undefined ? 0 : request.fromBlock,
     toBlock: request.toBlock === undefined ? "latest" : request.toBlock,
-    checkpoint: request.checkpoint || null, evmBlock: request.evmBlock || null,
+    checkpoint: request.checkpoint || null, previous: request.previous || null, evmBlock: request.evmBlock || null,
   });
   return { ...history, ...(found ? { swaps: found.swaps } : {}) };
 }
@@ -85,7 +86,11 @@ export async function orderFunding(request = {}) {
   const escrow = address(request.escrow);
   const validUntil = number(request.validUntil, "validUntil");
   if (validUntil <= 0) throw bad("validUntil");
-  const finality = request.finality === undefined || request.finality === null ? "finalized" : request.finality;
+  // THE SDK'S OWN FINALITY TABLE NAMES THE TAG. On Arbitrum that is `safe`, not `finalized`; a caller can still name
+  // `finalized` explicitly when its screen already waited for that level.
+  const policy = typeof request.network === "string" && request.network ? finalityFor(request.network) : null;
+  const finality = request.finality === undefined || request.finality === null
+    ? (policy && policy.mode === "tag" ? policy.tag : "safe") : request.finality;
   if (!["latest", "safe", "finalized"].includes(finality)) throw bad("finality");
   const call = request.call || engine.evm.readContract;
   const readBlock = request.block || request.evmBlock;

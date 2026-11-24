@@ -2340,6 +2340,8 @@ export interface OrderHistoryRequest {
   readonly deploymentBlock?: number | null;
   readonly madeBlock?: number | null;
   readonly checkpoint?: { readonly number: number; readonly hash: string } | null;
+  /** The previous result's `escrows`; applied only when the checkpoint's block hash still matches. */
+  readonly previous?: readonly OrderHistoryEntry[] | null;
   readonly evmBlock?: (tag?: string | number) => Promise<OrderBlock | null>;
 }
 
@@ -2373,6 +2375,8 @@ export interface OrderLookupResult {
 export interface OrderFundingRequest {
   readonly escrow: string;
   readonly validUntil: number;
+  /** The settlement network slug; its `finalityFor` policy names the default tag (Arbitrum: `safe`). */
+  readonly network?: string;
   readonly finality?: "latest" | "safe" | "finalized";
   readonly blockTag?: string | number;
   readonly call?: (request: { readonly to: string; readonly data: string; readonly block?: string | number }) => Promise<string>;

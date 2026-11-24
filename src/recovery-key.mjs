@@ -614,7 +614,8 @@ function decodeOrderTerms(log) {
  * ask the RPC about each escrow separately. Removed logs are dropped. `checkpoint` is `{ number, hash }`; when the
  * anchored block has changed, the read starts again from `fromBlock` instead of continuing from a moved chain.
  */
-export async function readEscrowHistory({ escrows, evmLogs, fromBlock = 0, toBlock = "latest", checkpoint = null, evmBlock = null } = {}) {
+export async function readEscrowHistory({ escrows, evmLogs, fromBlock = 0, toBlock = "latest", checkpoint = null,
+  previous = null, evmBlock = null } = {}) {
   if (!Array.isArray(escrows) || !escrows.length) throw bad("escrows");
   const addresses = [...new Set(escrows.map((escrow) => {
     if (typeof escrow !== "string" || !ADDRESS_RE.test(escrow)) throw bad("escrows");
@@ -649,21 +650,56 @@ export async function readEscrowHistory({ escrows, evmLogs, fromBlock = 0, toBlo
     const decoded = decodeOrderTerms(log);
     if (decoded && !terms.has(decoded.escrow)) terms.set(decoded.escrow, decoded);
   }
+  // A VALID CHECKPOINT WITH THE CALLER'S PREVIOUS RESULT IS A RESUME, NOT A FRESH PARTIAL READ. The previous row is
+  // the state below the checkpoint; this range adds the events above it. A moved checkpoint discards `previous`, so
+  // the answer is the full range rather than a mixture of two chains.
+  const resumed = !replayed && Array.isArray(previous);
+  const previousRows = new Map();
+  if (resumed) {
+    for (const row of previous) {
+      if (!row || typeof row !== "object" || typeof row.escrow !== "string") continue;
+      const escrow = row.escrow.toLowerCase();
+      if (!addresses.includes(escrow)) continue;
+      previousRows.set(escrow, {
+        escrow, terms: row.terms && typeof row.terms === "object" ? { ...row.terms } : null,
+        status: { isFunded: false, isClaimed: false, isRefunded: false, ready: false, declined: false,
+          ...(row.status && typeof row.status === "object" ? row.status : {}) },
+        events: Array.isArray(row.events) ? row.events.filter((event) => event && typeof event === "object").map((event) => ({ ...event })) : [],
+      });
+    }
+  }
+  const byEscrow = new Map(addresses.map((escrow) => {
+    const old = previousRows.get(escrow);
+    if (old) return [escrow, old];
+    return [escrow, {
+      escrow, terms: terms.get(escrow) || null,
+      status: { isFunded: terms.has(escrow), isClaimed: false, isRefunded: false, ready: false, declined: false },
+      events: [],
+    }];
+  }));
+  for (const [escrow, row] of byEscrow) {
+    if (row.terms) continue;
+    const decoded = terms.get(escrow);
+    if (decoded) { row.terms = decoded; row.status.isFunded = true; }
+  }
   const settlement = decodeEscrowEvents(logs, new Set(addresses));
-  const byEscrow = new Map(addresses.map((escrow) => [escrow, {
-    escrow, terms: terms.get(escrow) || null,
-    status: { isFunded: terms.has(escrow), isClaimed: false, isRefunded: false, ready: false, declined: false },
-    events: [],
-  }]));
+  const seen = new Map([...byEscrow].map(([escrow, row]) => [escrow, new Set(row.events.map((event) =>
+    `${String(event.transactionHash || "").toLowerCase()}|${String(event.logIndex ?? "")}`))]));
   for (const event of settlement) {
     const row = byEscrow.get(event.escrow);
     if (!row) continue;
+    const key = `${String(event.transactionHash || "").toLowerCase()}|${String(event.logIndex ?? "")}`;
+    if (seen.get(event.escrow).has(key)) continue;
+    seen.get(event.escrow).add(key);
     row.events.push(event);
     if (event.event === "HalfRevealed") {
       if (event.byClaimer) row.status.isClaimed = true;
       else row.status.isRefunded = true;
     } else if (event.event === "Ready") row.status.ready = true;
     else if (event.event === "Declined") { row.status.isRefunded = true; row.status.declined = true; }
+  }
+  for (const row of byEscrow.values()) {
+    row.events.sort((a, b) => Number(a.blockNumber || 0) - Number(b.blockNumber || 0) || Number(a.logIndex || 0) - Number(b.logIndex || 0));
   }
   let checkpointOut = null;
   if (endBlock && Number.isSafeInteger(Number(endBlock.number)) && /^[0-9a-f]{64}$/i.test(String(endBlock.hash || "").replace(/^0x/i, ""))) {

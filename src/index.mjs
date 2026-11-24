@@ -251,6 +251,7 @@ export function createNinsei(options) {
         evmLogs: typeof request.evmLogs === "function" ? request.evmLogs : (o.evmLogs || undefined),
         evmBlock: typeof request.evmBlock === "function" ? request.evmBlock : (o.evmBlock || undefined) }),
       funding: (request = {}) => orderFunding({ ...request,
+        network: request.network || config.settlement.chain,
         call: typeof request.call === "function" ? request.call : (o.evmCall || undefined),
         block: typeof request.block === "function" ? request.block : (o.evmBlock || undefined) }),
       // THE ORDER DEADLINES (t1, readyBy, termsHash) from the chain: the screen needs them to say whether the

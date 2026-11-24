@@ -529,6 +529,8 @@ export declare function readEscrowHistory(request: {
   fromBlock?: number | string;
   toBlock?: number | string;
   checkpoint?: { readonly number: number; readonly hash: string } | null;
+  /** The previous result's `escrows`; ignored when the checkpoint hash no longer matches. */
+  previous?: readonly EscrowHistoryEntry[] | null;
   evmBlock?: (tag?: string | number) => Promise<{ readonly number?: number | string; readonly hash?: string; readonly timestamp?: number | string } | null>;
 }): Promise<{ escrows: EscrowHistoryEntry[]; checkpoint: { number: number; hash: string } | null; replayed: boolean; fromBlock: number | string; toBlock: number | string }>;
 

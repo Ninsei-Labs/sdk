@@ -175,6 +175,32 @@ const createdLog = ({ removed = false, blockNumber = 100, salt = "0x" + "ab".rep
   check(replayed.replayed === true && replayFrom === 0, "a moved checkpoint did not replay from the range start");
 }
 
+// --- a resumed history is the same as a full history, and a moved checkpoint is not mixed ---
+{
+  const all = [
+    termsLog({ blockNumber: 7 }),
+    settlementLog(ESCROW_EVENT_TOPICS.ready, 8, "0x", [ESCROW_EVENT_TOPICS.ready, pad(LOCKER)]),
+    settlementLog(ESCROW_EVENT_TOPICS.halfRevealed, 9, words("0x" + "11".repeat(32), 1)),
+    settlementLog(ESCROW_EVENT_TOPICS.ready, 12, "0x", [ESCROW_EVENT_TOPICS.ready, pad(LOCKER)]),
+    settlementLog(ESCROW_EVENT_TOPICS.halfRevealed, 13, words("0x" + "12".repeat(32), 0)),
+  ];
+  const read = async (logs, extra = {}) => orderHistory({
+    escrows: [ESCROW], fromBlock: 0, toBlock: 20, evmLogs: async () => logs,
+    evmBlock: async (tag) => ({ number: Number(tag), hash: H(Number(tag)), timestamp: 1000 }), ...extra,
+  });
+  const full = await read(all);
+  const first = await read(all.slice(0, 3), { toBlock: 10 });
+  const resumed = await read(all.slice(3), { checkpoint: first.checkpoint, previous: first.escrows });
+  const shape = (result) => ({ terms: result.escrows[0].terms && { amount: result.escrows[0].terms.amount, fee: result.escrows[0].terms.fee },
+    status: result.escrows[0].status, events: result.escrows[0].events.length });
+  check(JSON.stringify(shape(resumed)) === JSON.stringify(shape(full)), "a resumed history was not the full history");
+  let replayLogs = null;
+  const moved = await read([], { checkpoint: { number: 10, hash: H(99) }, previous: first.escrows,
+    evmLogs: async (request) => { replayLogs = request.fromBlock; return all; } });
+  check(replayLogs === 0 && JSON.stringify(shape(moved)) === JSON.stringify(shape(full)),
+    "a moved checkpoint did not replay and match the full history");
+}
+
 // --- lookup: creation block and the terms event ---
 {
   const lookup = await orderLookup(ESCROW, {
@@ -199,6 +225,8 @@ const createdLog = ({ removed = false, blockNumber = 100, salt = "0x" + "ab".rep
   const blockTags = [];
   const call = async ({ block: tag }) => { callTags.push(tag); return ""; };
   const block = async (tag) => { blockTags.push(tag); return { number: 1, hash: H(1), timestamp: 99 }; };
+  const defaulted = await orderFunding({ escrow: ESCROW, validUntil: 100, network: "arbitrum-sepolia", call, block });
+  check(defaulted.finality === "safe", "the network finality table did not name the default tag");
   const pending = await orderFunding({ escrow: ESCROW, validUntil: 100, finality: "safe", call, block });
   check(pending.state === "pending" && pending.finality === "safe", "an address without code was pending before expiry");
   check(callTags[0] === "safe" && blockTags[0] === "safe", "the contract and the block were not read at the same finality");

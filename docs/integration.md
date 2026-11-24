@@ -164,8 +164,8 @@ is behind that line, or the key has no creation block, `recoveryStartBlock` fall
 start less one day, then to the deployment; pass `startAt`, `head` and `blockAt` to `findSwaps` for the same rule.
 
 `order.history` returns each escrow's `OrderTerms` and settlement state from one address-filtered log request, with a
-`{ number, hash }` checkpoint. Resume from it only when that block still has the same hash; otherwise the read
-replays from `fromBlock` and reports `replayed: true`. `order.lookup` starts from an escrow address and returns its
+`{ number, hash }` checkpoint. Pass the previous `escrows` as `previous` to merge above it; resume only when that block
+still has the same hash, otherwise the read drops `previous`, replays from `fromBlock` and reports `replayed: true`. `order.lookup` starts from an escrow address and returns its
 creation block and terms. `order.read` answers at one block; `order.funding` answers `pending`, `landed` or
 `expired` at a named finality.
 

@@ -306,15 +306,17 @@ another height, or a missing one, is `bad-input`; the result never mixes a lates
 `order.history` reads terms and settlement events from logs in one address-filtered request. Supply `escrows`, or a
 recovery key and let `findSwaps` name them first. Terms come from `OrderTerms`, so `amount`, `feeBps`, `fee`,
 `feeRecipient` and `claimTip` are present; state comes from `HalfRevealed`, `Ready` and `Declined`. Removed logs are
-dropped. The result carries a `checkpoint` of `{ number, hash }`; a later call resumes after it only when that block
-still has the same hash, otherwise it replays from `fromBlock` and says `replayed: true`.
+dropped. The result carries a `checkpoint` of `{ number, hash }`; pass the previous result's `escrows` as
+`previous` to resume, and the read merges the events above the checkpoint. It resumes only when that block still has
+the same hash; otherwise it drops `previous`, replays from `fromBlock` and says `replayed: true`.
 
 `order.lookup(escrow, request)` starts from the escrow address, returns its creation block and hash, and joins the
 terms. `found: false` means the creation event was not in the requested range, not that the escrow is unknown.
 
 `order.funding({ escrow, validUntil, finality })` returns `pending`, `landed` or `expired`. An address with code and a
 funded status is `landed`; an address with no code is `pending` until the signed `validUntil` and `expired` from it.
-The contract answer and the block timestamp are read at the same finality tag (`latest`, `safe` or `finalized`).
+The contract answer and the block timestamp are read at the same finality tag. With `network`, the default is the
+SDK's own table for that network (Arbitrum: `safe`); a caller can name `latest`, `safe` or `finalized` explicitly.
 
 The recovery search start is one rule for every client. `recoverySearchStart` returns the shared 360,000-block day
 grid line below a key made at `madeBlock`, never below the factory deployment. `recoveryStartBlock` applies the whole
