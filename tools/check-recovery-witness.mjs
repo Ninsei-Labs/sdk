@@ -85,6 +85,15 @@ check(txBatches.some((call) => call.hashes.includes(PAYOUT) && call.hashes.inclu
   "the transaction request carries every hash of the block, not only the payout");
 check(witness.calls.every((call) => call.path !== "/v1/witness/slice"), "the plain daemon is never asked for a slice route");
 
+{
+  const closed = daemon();
+  const verdict = await readRecoveryWitness(request(closed.fetch, null, { toHeight: 7 }));
+  const requested = closed.calls.filter((call) => call.method === "get_block").map((call) => call.height);
+  check(verdict.complete === true && verdict.toHeight === 7 && verdict.transfers.length === 1,
+    "a closed witness window returns the transfer and completes");
+  check(requested.join(",") === "0,1,2,3,4,5,6,7", `a closed witness window read past its end: ${requested.join(",")}`);
+}
+
 const sameWindow = daemon();
 const inside = await readRecoveryWitness(request(sameWindow.fetch, null, { fromHeight: 6 }));
 check(inside.complete === true && inside.transfers.length === 1, "a start inside the same window is read from the same window");

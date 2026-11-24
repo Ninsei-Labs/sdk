@@ -97,6 +97,23 @@ const problems = [];
 let checks = 0;
 const check = (condition, message) => { checks += 1; if (condition) console.log("  ok    " + message); else problems.push(message); };
 
+// A CLOSED WINDOW STOPS AT ITS END. The read does not walk to the tip and does not ask the pool after the window.
+{
+  const d = daemon({ topHeight: 11, poolHashes: [LATE], nullConfirmations: true });
+  const windowed = await readRecovery(request(d.fetch, null, { toHeight: 7 }));
+  const heights = d.calls.filter((entry) => entry.method === "get_block").map((entry) => Number(entry.height));
+  check(windowed.complete === true && windowed.toHeight === 7 && windowed.through && windowed.through.height === 7,
+    "a closed window did not stop at its end");
+  check(heights.length === 3 && heights[0] === 5 && heights[1] === 6 && heights[2] === 7,
+    `a closed window walked beyond its end: ${heights.join(",")}`);
+  check(!d.calls.some((entry) => entry.path.endsWith("/get_transaction_pool_hashes")),
+    "a closed window read the pool after its end");
+  check(windowed.transfers.length === 1 && windowed.transfers[0].height === 6,
+    "a closed window did not return the transfer inside it");
+  check(windowed.transfers[0].confirmations === 5,
+    `a closed window counted confirmations from its own end: ${windowed.transfers[0].confirmations}`);
+}
+
 // A THROWING CALLER CALLBACK IS NOT A NODE FAILURE. It rejects the read and names the callback; it must not be
 // returned as a daemon failure in `failed`.
 {
@@ -263,6 +280,26 @@ const badDaemon = daemon();
 const badRead = await readRecovery(request(badDaemon.fetch, badCheckpoint));
 check(badRead.complete === true && badDaemon.calls.some((c) => c.method === "get_block" && c.height === 5),
   "a bad digest forces a replay");
+
+// A RESUME AT A LATER TIP RECOMPUTES CONFIRMATIONS; A DIFFERENT KEY-IMAGE SET REPLAYS FROM THE START.
+{
+  const d = daemon({ topHeight: 11, nullConfirmations: true });
+  const c = memoryCheckpoint();
+  const firstRead = await readRecovery(request(d.fetch, c));
+  d.setTopHeight(21);
+  const later = await readRecovery(request(d.fetch, c));
+  const transfer = later.transfers.find((entry) => entry.height === 6);
+  check(firstRead.complete && later.complete && transfer && transfer.confirmations === 15,
+    `a resumed read kept the old confirmation count: ${transfer && transfer.confirmations}`);
+  const images = [{ keyImage: SPENT_IMAGE, outputKey: FUNDING_6_KEY }];
+  const withImages = memoryCheckpoint();
+  await readRecovery(request(d.fetch, withImages));
+  const before = d.calls.filter((entry) => entry.method === "get_block").map((entry) => Number(entry.height));
+  const changed = await readRecovery(request(d.fetch, withImages, { keyImages: images }));
+  const after = d.calls.filter((entry) => entry.method === "get_block").map((entry) => Number(entry.height)).slice(before.length);
+  check(changed.complete === true && after.includes(5) && after.includes(20),
+    "a different key-image set reused a checkpoint written without it");
+}
 
 // A missing confirmation count is not a mined transfer with zero confirmations.
 {

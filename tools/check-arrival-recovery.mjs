@@ -200,6 +200,24 @@ console.log("=== 1c) A SPENT FUNDING OUTPUT IS EXCLUDED FROM THE AVAILABLE REMAI
   } else bad("spend/available recovery: " + JSON.stringify({ spends: verdict.spends, availableAtomic: verdict.availableAtomic }));
 }
 
+console.log("=== 1d) A CLOSED WINDOW USES THE PRIMARY TIP FOR CONFIRMATIONS AND SKIPS THE WITNESS POOL ===");
+{
+  const txs = { [T1]: fixture(ATOMIC_QUOTE) };
+  const verdict = await verifyRecovery(request(rpc({ blockTxids: [T1], txs }), undefined, { toHeight: 105 }));
+  const transfer = verdict.transfers && verdict.transfers[0];
+  if (verdict.complete === true && verdict.state === "ready" && transfer && transfer.agreed
+    && transfer.confirmations === 16) {
+    ok("a closed window keeps the primary tip for confirmations");
+  } else bad("closed-window confirmations: " + JSON.stringify({ state: verdict.state, transfer }));
+}
+{
+  const txs = { [T4]: fixture(ATOMIC_SHORT) };
+  const verdict = await verifyRecovery(request(rpc({ poolHashes: [T4], txs }), undefined, { toHeight: 105 }));
+  if (verdict.complete === true && verdict.transfers.length === 0) {
+    ok("a closed window does not read a witness pool");
+  } else bad("closed-window witness pool: " + JSON.stringify(verdict.transfers));
+}
+
 console.log("=== 2) A TRANSFER SEEN BY ONE OPERATOR IS NOT AN AGREED TRANSFER ===");
 {
   const verdict = await verifyRecovery(request(
@@ -236,7 +254,7 @@ console.log("=== 5) BREAKING RUN: AN AMOUNT FILTER DROPS THE SHORT TRANSFER ==="
   const sourceFile = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "xmr-arrival.mjs");
   const mutantFile = join(dirname(sourceFile), ".recovery-mutant-" + process.pid + ".mjs");
   const source = readFileSync(sourceFile, "utf8").replace(/\r\n/g, "\n");
-  const from = "if (!hit.length) continue;\n        const confirmations = confirmationsOf(tx, height, top);";
+  const from = "if (!hit.length) continue;\n        const confirmations = confirmationsOf(tx, height, tipTop);";
   if (!source.includes(from)) {
     bad("the breaking-run mutation did not apply");
   } else {
