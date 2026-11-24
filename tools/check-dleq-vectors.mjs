@@ -149,6 +149,44 @@ if (BigInt("0x" + boundary.x) !== (1n << 252n)) problems.push("kat-05 does not c
   }
 }
 
+// THE eB COMPARISON IS LOAD-BEARING. This proof is forged from the secp256k1 witness alone: XA = 1*G_A is honest,
+// XB = 2*G_B is not bound to it, and every secp256k1 ring closes. The real verifier must refuse it at bit 0; a copy
+// with only the eB comparison removed must accept it. The knowledge guard is disabled in both calls because the
+// forged prover has no ed25519 witness and therefore cannot create pokB.
+{
+  const vector = read("neg-forged-no-ed-witness");
+  const real = dleq.verify(vector.proof, vector.context, { requireKnowledge: false });
+  if (real.ok || !/bit 0: challenges did not match/.test(real.reason)) {
+    fail("forged-no-ed-witness", "the real verifier did not refuse at the eB challenge: " + (real.reason || "accepted"));
+  }
+  const source = readFileSync(join(ROOT, "engine", "atomic", "dleq2.js"), "utf8");
+  const anchor = "if (eA0 !== sig.eA || eB0 !== sig.eB)";
+  if (!source.includes(anchor)) {
+    fail("forged-no-ed-witness", "the eB comparison anchor is missing; the mutation cannot be attempted");
+  } else {
+    const dir = mkdtempSync(join(tmpdir(), "sdk-dleq-eb-"));
+    const copy = join(dir, "dleq2.mjs");
+    try {
+      writeFileSync(copy, source.replace(anchor, "if (eA0 !== sig.eA || false)"));
+      const broken = await import(pathToFileURL(copy).href + "?eb=" + Date.now());
+      const verdict = broken.createDleq2(primitives).verify(vector.proof, vector.context, { requireKnowledge: false });
+      if (!verdict.ok) fail("forged-no-ed-witness", "without the eB comparison the proof was still refused: " + verdict.reason);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+}
+
+// XB IS BOUND TO THE COMMITMENTS BY THE ED25519 SUM, not by the rings. A valid prime-order XB that is not the sum
+// must still be refused before the per-bit loop.
+{
+  const vector = read("neg-xb-not-commitment-sum");
+  const verdict = dleq.verify(vector.proof, vector.context, { requireKnowledge: false });
+  if (verdict.ok || !/the commitment sum does not give X on ed25519/.test(verdict.reason)) {
+    fail("xb-not-commitment-sum", "the ed25519 sum did not refuse the unbound XB: " + (verdict.reason || "accepted"));
+  }
+}
+
 // BREAKING RUN. Remove the knowledge check from a copy and require the pure-multiple vector to pass the old
 // statement under the copy. A guard that cannot be shown red is not evidence that the check runs.
 {
