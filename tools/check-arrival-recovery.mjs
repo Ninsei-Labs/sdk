@@ -236,7 +236,7 @@ console.log("=== 5) BREAKING RUN: AN AMOUNT FILTER DROPS THE SHORT TRANSFER ==="
   const sourceFile = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "xmr-arrival.mjs");
   const mutantFile = join(dirname(sourceFile), ".recovery-mutant-" + process.pid + ".mjs");
   const source = readFileSync(sourceFile, "utf8").replace(/\r\n/g, "\n");
-  const from = "if (!hit.length) continue;\n        const confirmations = confirmationsOf(tx, height, top);";
+  const from = "if (!hit.length) continue;\n        const confirmations = confirmationsOf(tx, height, tipTop);";
   if (!source.includes(from)) {
     bad("the breaking-run mutation did not apply");
   } else {

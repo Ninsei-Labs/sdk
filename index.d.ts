@@ -921,6 +921,8 @@ export interface XmrArrivalRequest {
   readonly minConfirmations?: number;
   readonly txid?: string | null;
   readonly fromHeight?: number | null;
+  /** The first block past the order's `t1` (inclusive); omitted reads to the head. */
+  readonly toHeight?: number | null;
   readonly nowSec?: number;
   readonly timeoutMs?: number;
   readonly keyImages?: readonly (string | XmrRecoveryKeyImage)[];
@@ -936,6 +938,8 @@ export interface XmrRecoveryRequest {
   /** Optional: the public spend key is read from the address; a supplied key is checked. */
   readonly spendPub?: string;
   readonly fromHeight: number;
+  /** The first block past the order's `t1` (inclusive); omitted reads to the head. */
+  readonly toHeight?: number | null;
   readonly minConfirmations?: number;
   readonly nowSec?: number;
   readonly idleTimeoutMs?: number;
@@ -954,6 +958,10 @@ export interface XmrRecoveryCheckpoint {
   readonly network: string;
   readonly address: string;
   readonly fromHeight: number;
+  /** The window end this checkpoint was written for, or null for an open read. */
+  readonly toHeight?: number | null;
+  /** The key images (and their output keys) this checkpoint was written with; a different set replays. */
+  readonly keyImages?: readonly { readonly keyImage: string; readonly outputKey: string | null }[];
   readonly through: { readonly height: number; readonly hash: string } | null;
   readonly transfers: readonly XmrRecoveryTransfer[];
   readonly outputs: readonly Record<string, unknown>[];
@@ -987,6 +995,8 @@ export interface XmrRecoveryReadRequest {
   readonly viewSecret: string | bigint;
   readonly spendPub: string;
   readonly fromHeight: number;
+  /** The first block past the order's `t1` (inclusive); omitted reads to the head. */
+  readonly toHeight?: number | null;
   readonly minConfirmations?: number;
   readonly network?: string;
   readonly nowSec?: number;
@@ -1012,6 +1022,7 @@ export interface XmrRecoveryReadVerdict {
   readonly transfers: readonly XmrRecoveryTransfer[];
   readonly tip: number | null;
   readonly fromHeight: number;
+  readonly toHeight: number | null;
   readonly minConfirmations: number;
   readonly complete: boolean;
   readonly through: { readonly height: number; readonly hash: string } | null;
@@ -1044,6 +1055,8 @@ export interface XmrRecoveryWitnessRequest {
   readonly viewSecret: string | bigint;
   readonly spendPub: string;
   readonly fromHeight: number;
+  /** The first block past the order's `t1` (inclusive); omitted reads to the primary top. */
+  readonly toHeight?: number | null;
   /** The top the primary read reached. A witness below it returns `complete: false`. */
   readonly tipHeight?: number;
   readonly minConfirmations?: number;
@@ -1062,6 +1075,7 @@ export interface XmrRecoveryWitnessVerdict {
   readonly transfers: readonly XmrRecoveryTransfer[];
   readonly tip: number | null;
   readonly fromHeight: number;
+  readonly toHeight: number | null;
   readonly complete: boolean;
   readonly through: { readonly height: number; readonly hash: string } | null;
   readonly spends?: readonly XmrRecoverySpend[];
@@ -1116,6 +1130,7 @@ export interface XmrRecoveryVerdict {
   readonly transfers: readonly XmrRecoveryTransfer[];
   readonly tip: number;
   readonly fromHeight: number;
+  readonly toHeight: number | null;
   readonly minConfirmations: number;
   /** False when any read failed; a caller must not treat the list as exhaustive. */
   readonly complete: boolean;

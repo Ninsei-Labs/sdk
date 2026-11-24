@@ -178,7 +178,9 @@ but a node's pool does, the verdict is `state: "pool"` with the txid, amount, `c
 It is information for the screen, not an arrival: `seen` stays false and the two-operator/confirmation rules do not
 change. Recovery uses `swaps.verifyRecovery`, which has no quoted amount: it returns every transfer from the order's
 start height with its verified outputs, confirmations, unlock state and agreeing operators. Short, overpaid and
-split payments are data there, not refusals.
+split payments are data there, not refusals. Pass `toHeight` (the first block past the order's `t1`) to stop a
+closed window at that block; without it the read goes to the head. A checkpoint carries the window end and the
+key-image set, so changing either replays from the start.
 Before slice-only verification is enabled, `swaps.verifyArrivalShadow` runs that exact check and a
 `witness-v1` slice check side by side:
 

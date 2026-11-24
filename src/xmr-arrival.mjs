@@ -589,6 +589,23 @@ function recoveryObservation(tx, hit, node, { height, blockHash, confirmations, 
   };
 }
 
+// A TRANSFER'S CONFIRMATIONS AND LOCK ARE FACTS ABOUT THE TIP, NOT ABOUT THE READ THAT FOUND IT. A checkpoint
+// stores the observation, but resuming at a later tip must not keep the old counts or the old lock state.
+function refreshTransferState(transfers, { tipHeight, nowSec }) {
+  for (const transfer of transfers) {
+    if (transfer.pool || !Number.isSafeInteger(Number(transfer.height))) continue;
+    transfer.confirmations = Math.max(0, Number(tipHeight) - Number(transfer.height) + 1);
+    if (transfer.unlock && typeof transfer.unlock === "object") {
+      const untilHeight = Number(transfer.unlock.untilHeight);
+      const untilTime = Number(transfer.unlock.untilTime);
+      transfer.locked = Number.isFinite(untilTime) && untilTime > 0
+        ? Number(nowSec) < untilTime
+        : (Number.isFinite(untilHeight) && untilHeight > 0 ? Number(tipHeight) < untilHeight : false);
+    }
+  }
+  return transfers;
+}
+
 // KEY IMAGES OF THE FUNDING OUTPUTS, SUPPLIED BY THE CALLER. A recovery read carries the view key and the public
 // spend key, not the private spend key: it must not derive key images itself. `sweep.keyImages` returns these from
 // an arrival; mapping them back to output keys is what makes a spend local instead of a `is_key_image_spent` call.
@@ -722,14 +739,15 @@ const normalizedHash = (value) => String(value || "").replace(/^0x/, "").toLower
 function checkpointDigest(record) {
   const text = JSON.stringify({
     version: record.version, network: record.network, address: record.address, fromHeight: record.fromHeight,
-    through: record.through, transfers: record.transfers, outputs: record.outputs, spends: record.spends,
+    toHeight: record.toHeight ?? null, keyImages: record.keyImages ?? [], through: record.through,
+    transfers: record.transfers, outputs: record.outputs, spends: record.spends,
   });
   return engine.xmrScan.bytesToHex(engine.xmrScan.keccak(new TextEncoder().encode(text)));
 }
 
-function checkpointRecord({ network, address, fromHeight, through, transfers, spends = [], kind = null }) {
+function checkpointRecord({ network, address, fromHeight, toHeight = null, keyImages = [], through, transfers, spends = [], kind = null }) {
   const record = {
-    version: CHECKPOINT_VERSION, network, address, fromHeight, through,
+    version: CHECKPOINT_VERSION, network, address, fromHeight, toHeight, keyImages, through,
     transfers,
     outputs: transfers.flatMap((transfer) => transfer.outputs.map((output) => ({
       txid: transfer.txid, height: transfer.height, blockHash: transfer.blockHash, ...output,
@@ -746,6 +764,8 @@ function validCheckpoint(record, identity) {
   if (!record || typeof record !== "object" || record.version !== CHECKPOINT_VERSION) return null;
   if (record.kind && record.kind !== "primary") return null;
   if (record.network !== identity.network || record.address !== identity.address || record.fromHeight !== identity.fromHeight) return null;
+  if ((record.toHeight ?? null) !== (identity.toHeight ?? null)) return null;
+  if (JSON.stringify(record.keyImages ?? []) !== JSON.stringify(identity.keyImages ?? [])) return null;
   if (!Array.isArray(record.transfers) || !Array.isArray(record.outputs) || !Array.isArray(record.spends)) return null;
   if (!record.through || !Number.isSafeInteger(record.through.height) || !hash64(record.through.hash)) return null;
   if (record.through.height < identity.fromHeight) return null;
@@ -757,6 +777,8 @@ function validWitnessCheckpoint(record, identity) {
   if (!record || typeof record !== "object" || record.version !== CHECKPOINT_VERSION) return null;
   if (record.kind !== "witness" || record.grid !== WITNESS_SLICE_BLOCKS) return null;
   if (record.network !== identity.network || record.address !== identity.address || record.fromHeight !== identity.fromHeight) return null;
+  if ((record.toHeight ?? null) !== (identity.toHeight ?? null)) return null;
+  if (JSON.stringify(record.keyImages ?? []) !== JSON.stringify(identity.keyImages ?? [])) return null;
   if (!Array.isArray(record.transfers) || !Array.isArray(record.outputs) || !Array.isArray(record.spends)) return null;
   if (!record.through || !Number.isSafeInteger(record.through.height) || !hash64(record.through.hash)) return null;
   if (record.through.height < identity.fromHeight) return null;
@@ -875,6 +897,10 @@ export async function readRecovery(request) {
   if (!isStr(request.spendPub)) throw new SdkError("bad-input", { field: "spendPub" });
   const fromHeight = request.fromHeight === null || request.fromHeight === undefined ? 0 : intOf(request.fromHeight);
   if (fromHeight === null || fromHeight < 0) throw new SdkError("bad-input", { field: "fromHeight" });
+  const toHeight = request.toHeight === null || request.toHeight === undefined ? null : intOf(request.toHeight);
+  if (request.toHeight !== null && request.toHeight !== undefined && (toHeight === null || toHeight < fromHeight)) {
+    throw new SdkError("bad-input", { field: "toHeight" });
+  }
   const fetchImpl = typeof request.fetch === "function" ? request.fetch : globalThis.fetch;
   if (typeof fetchImpl !== "function") throw new SdkError("bad-input", { field: "fetch" });
   const idleRaw = request.idleTimeoutMs === null || request.idleTimeoutMs === undefined ? null : Number(request.idleTimeoutMs);
@@ -906,7 +932,7 @@ export async function readRecovery(request) {
   let info;
   try { info = await getInfo(node, fetchImpl, timeoutMs, { signal }); }
   catch (error) {
-    return { transfers: [], tip: null, fromHeight, minConfirmations,
+    return { transfers: [], tip: null, fromHeight, toHeight, minConfirmations,
       target, complete: false, through: null, checkpoint: null, blocked: false, failed: [failureOf(error, node)] };
   }
   const network = isStr(request.network) ? request.network : info.nettype;
@@ -915,11 +941,12 @@ export async function readRecovery(request) {
     throw new SdkError("bad-input", { field: "node", why: "node-network-mismatch" });
   }
   if (!info.synced) {
-    return { transfers: [], tip: info.height, fromHeight, minConfirmations,
+    return { transfers: [], tip: info.height, fromHeight, toHeight, minConfirmations,
       target, complete: false, through: null, checkpoint: null, blocked: true,
       failed: [{ url: node.url, operator: node.operator, code: "stale", why: "not-synchronized" }] };
   }
-  const top = Math.max(0, info.height - 1);
+  const tipTop = Math.max(0, info.height - 1);
+  const top = toHeight === null ? tipTop : Math.min(tipTop, toHeight);
   if (top < fromHeight) {
     // A RANGE ABOVE THE TIP HAS NO BLOCKS, BUT THE POOL IS STILL READ. The old early return called an empty
     // block range complete without asking the pool, so a withdrawal already waiting there looked absent.
@@ -928,7 +955,7 @@ export async function readRecovery(request) {
     let poolFailure = null;
     try {
       const pool = await scanRecoveryPoolState(node, {
-        watched, tracked, tip: top, nowSec: request.nowSec, fetchImpl, timeoutMs, txid: targetTxid,
+        watched, tracked, tip: tipTop, nowSec: request.nowSec, fetchImpl, timeoutMs, txid: targetTxid,
       });
       if (pool.target) target = pool.target;
       transfers = pool.transfers;
@@ -936,14 +963,16 @@ export async function readRecovery(request) {
     } catch (error) {
       poolFailure = { ...failureOf(error, node), why: "pool-read" };
     }
-    return { transfers, tip: info.height, fromHeight, minConfirmations, target,
+    return { transfers, tip: info.height, fromHeight, toHeight, minConfirmations, target,
       complete: poolFailure === null, through: null, spends, checkpoint: null, blocked: false,
       ...(poolFailure
         ? { failed: [poolFailure] }
         : { availableAtomic: availableAtomicOf(transfers, tracked, spends, minConfirmations),
           availableSource: { url: node.url, operator: node.operator }, failed: [] }) };
   }
-  const identity = { network, address: request.address, fromHeight };
+  const keyImages = [...tracked.byImage.values()].sort((a, b) => a.keyImage.localeCompare(b.keyImage))
+    .map((entry) => ({ keyImage: entry.keyImage, outputKey: entry.outputKey }));
+  const identity = { network, address: request.address, fromHeight, toHeight, keyImages };
   let bytes = 0;
   const countBytes = (n) => { if (Number.isFinite(n) && n > 0) bytes += n; };
   let prior = null;
@@ -978,7 +1007,7 @@ export async function readRecovery(request) {
       } catch (error) {
         const failure = failureOf(error, node);
         failure.height = through.height;
-        return { transfers, tip: info.height, fromHeight, minConfirmations, complete: false, through,
+        return { transfers, tip: info.height, fromHeight, toHeight, minConfirmations, complete: false, through,
           target, spends: [...spendMap.values()],
           checkpoint: checkpointRecord({ ...identity, through, transfers, spends: [...spendMap.values()] }), blocked: false, failed: [failure] };
       }
@@ -1009,7 +1038,7 @@ export async function readRecovery(request) {
         if (String(error && error.message) === "reorg") throw error;
         const failure = failureOf(error, node);
         failure.height = height;
-        return { transfers, tip: info.height, fromHeight, minConfirmations, complete: false, through,
+        return { transfers, tip: info.height, fromHeight, toHeight, minConfirmations, complete: false, through,
           target, spends: [...spendMap.values()],
           checkpoint: through ? checkpointRecord({ ...identity, through, transfers, spends: [...spendMap.values()] }) : null, blocked: false, failed: [failure] };
       }
@@ -1018,9 +1047,9 @@ export async function readRecovery(request) {
           target = { txid: targetTxid, height, blockHash: normalizedHash(block.hash), pool: false };
         }
         addSpends(spendMap, spendsOfTx(tx, tracked, node, { height, blockHash: block.hash }));
-        const hit = engine.xmrScan.matchTransaction(tx, [watched], { height, tipHeight: top, nowSec: request.nowSec });
+        const hit = engine.xmrScan.matchTransaction(tx, [watched], { height, tipHeight: tipTop, nowSec: request.nowSec });
         if (!hit.length) continue;
-        const confirmations = confirmationsOf(tx, height, top);
+        const confirmations = confirmationsOf(tx, height, tipTop);
         transfers.push(recoveryObservation(tx, hit, node, { height, blockHash: block.hash, confirmations }));
       }
       through = { height, hash: normalizedHash(block.hash) };
@@ -1033,31 +1062,37 @@ export async function readRecovery(request) {
       emit();
     }
     let poolFailure = null;
-    try {
-      const pool = await scanRecoveryPoolState(node, {
-        watched, tracked, tip: top, nowSec: request.nowSec, fetchImpl, timeoutMs, txid: targetTxid,
-      });
-      if (target === null && pool.target) target = pool.target;
-      const known = new Set(transfers.map((transfer) => transfer.txid));
-      for (const transfer of pool.transfers) {
-        if (known.has(transfer.txid)) continue;
-        known.add(transfer.txid);
-        transfers.push(transfer);
+    // A CLOSED WINDOW DOES NOT READ THE POOL. A pool transaction has no height; after `t1` it may be a late transfer
+    // that the swap window excludes. The open window still reads it as before.
+    const windowClosed = toHeight !== null && top < tipTop;
+    if (!windowClosed) {
+      try {
+        const pool = await scanRecoveryPoolState(node, {
+          watched, tracked, tip: tipTop, nowSec: request.nowSec, fetchImpl, timeoutMs, txid: targetTxid,
+        });
+        if (target === null && pool.target) target = pool.target;
+        const known = new Set(transfers.map((transfer) => transfer.txid));
+        for (const transfer of pool.transfers) {
+          if (known.has(transfer.txid)) continue;
+          known.add(transfer.txid);
+          transfers.push(transfer);
+        }
+        addSpends(spendMap, pool.spends);
+      } catch (error) {
+        poolFailure = { ...failureOf(error, node), why: "pool-read" };
       }
-      addSpends(spendMap, pool.spends);
-    } catch (error) {
-      poolFailure = { ...failureOf(error, node), why: "pool-read" };
     }
     spends = [...spendMap.values()];
+    refreshTransferState(transfers, { tipHeight: tipTop, nowSec: request.nowSec ?? Math.floor(Date.now() / 1000) });
     const confirmedSpends = spends.filter((spend) => spend.pool !== true);
     const confirmedTransfers = transfers.filter((transfer) => transfer.pool !== true);
     if (poolFailure) {
-      return { transfers, tip: info.height, fromHeight, minConfirmations, complete: false, through,
+      return { transfers, tip: info.height, fromHeight, toHeight, minConfirmations, complete: false, through,
         target, spends,
         checkpoint: through ? checkpointRecord({ ...identity, through, transfers: confirmedTransfers, spends: confirmedSpends }) : null,
         blocked: false, failed: [poolFailure] };
     }
-    return { transfers, tip: info.height, fromHeight, minConfirmations, complete: true, through,
+    return { transfers, tip: info.height, fromHeight, toHeight, minConfirmations, complete: true, through,
       target, spends, availableAtomic: availableAtomicOf(transfers, tracked, spends, minConfirmations),
       availableSource: { url: node.url, operator: node.operator },
       checkpoint: through ? checkpointRecord({ ...identity, through, transfers: confirmedTransfers, spends: confirmedSpends }) : null,
@@ -1078,7 +1113,7 @@ export async function readRecovery(request) {
         continue;
       }
       const failure = failureOf(error, node);
-      return { transfers: [], tip: info.height, fromHeight, minConfirmations, complete: false, through: null,
+      return { transfers: [], tip: info.height, fromHeight, toHeight, minConfirmations, complete: false, through: null,
         target, checkpoint: null, blocked: false, failed: [failure] };
     }
   }
@@ -1104,6 +1139,10 @@ export async function readRecoveryWitness(request) {
   if (!isStr(request.spendPub)) throw new SdkError("bad-input", { field: "spendPub" });
   const fromHeight = request.fromHeight === null || request.fromHeight === undefined ? null : intOf(request.fromHeight);
   if (fromHeight === null || fromHeight < 0) throw new SdkError("bad-input", { field: "fromHeight" });
+  const toHeight = request.toHeight === null || request.toHeight === undefined ? null : intOf(request.toHeight);
+  if (request.toHeight !== null && request.toHeight !== undefined && (toHeight === null || toHeight < fromHeight)) {
+    throw new SdkError("bad-input", { field: "toHeight" });
+  }
   const tipHeightRaw = request.tipHeight === null || request.tipHeight === undefined ? null : intOf(request.tipHeight);
   if (request.tipHeight !== null && request.tipHeight !== undefined && (tipHeightRaw === null || tipHeightRaw < 0)) {
     throw new SdkError("bad-input", { field: "tipHeight" });
@@ -1136,7 +1175,7 @@ export async function readRecoveryWitness(request) {
   let info;
   try { info = await getInfo(node, fetchImpl, timeoutMs, { signal }); }
   catch (error) {
-    return { transfers: [], tip: null, fromHeight, through: null, complete: false, checkpoint: null, blocked: false, failed: [failureOf(error, node)] };
+    return { transfers: [], tip: null, fromHeight, toHeight, through: null, complete: false, checkpoint: null, blocked: false, failed: [failureOf(error, node)] };
   }
   const network = isStr(request.network) ? request.network : info.nettype;
   if (!isStr(network)) throw new SdkError("bad-input", { field: "network" });
@@ -1144,19 +1183,21 @@ export async function readRecoveryWitness(request) {
     throw new SdkError("bad-input", { field: "node", why: "node-network-mismatch" });
   }
   if (!info.synced) {
-    return { transfers: [], tip: info.height, fromHeight, through: null, complete: false, checkpoint: null, blocked: true,
+    return { transfers: [], tip: info.height, fromHeight, toHeight, through: null, complete: false, checkpoint: null, blocked: true,
       failed: [{ url: node.url, operator: node.operator, code: "stale", why: "not-synchronized" }] };
   }
   const top = Math.max(0, info.height - 1);
-  if (tipHeightRaw !== null && tipHeightRaw > top) {
-    return { transfers: [], tip: info.height, fromHeight, through: null, complete: false, checkpoint: null, blocked: false,
-      failed: [{ url: node.url, operator: node.operator, code: "stale", why: "witness-behind", height: top, wanted: tipHeightRaw }] };
+  const wantedTop = toHeight === null ? tipHeightRaw : (tipHeightRaw === null ? toHeight : Math.min(tipHeightRaw, toHeight));
+  if ((tipHeightRaw !== null && tipHeightRaw > top) || (toHeight !== null && toHeight > top)) {
+    return { transfers: [], tip: info.height, fromHeight, toHeight, through: null, complete: false, checkpoint: null, blocked: false,
+      failed: [{ url: node.url, operator: node.operator, code: "stale", why: "witness-behind", height: top, wanted: wantedTop }] };
   }
-  const targetTop = tipHeightRaw === null ? top : Math.min(tipHeightRaw, top);
+  const targetTop = wantedTop === null ? top : Math.min(wantedTop, top);
+  const observedTip = tipHeightRaw === null ? top : tipHeightRaw;
   if (targetTop < fromHeight) {
-    return { transfers: [], tip: info.height, fromHeight, through: null, complete: true, checkpoint: null, blocked: false, failed: [] };
+    return { transfers: [], tip: info.height, fromHeight, toHeight, through: null, complete: true, checkpoint: null, blocked: false, failed: [] };
   }
-  const identity = { network, address: request.address, fromHeight };
+  const identity = { network, address: request.address, fromHeight, toHeight, keyImages: [] };
   let prior = null;
   if (checkpoint && typeof checkpoint.read === "function") {
     try { prior = validWitnessCheckpoint(checkpoint.read(), identity); }
@@ -1170,7 +1211,7 @@ export async function readRecoveryWitness(request) {
   const startWindow = prior ? witnessSliceIndex(prior.through.height) : firstWindow;
   const lastWindow = witnessSliceIndex(targetTop);
   if (startWindow > lastWindow) {
-    return { transfers: prior ? prior.transfers : [], tip: info.height, fromHeight, through: prior ? prior.through : null,
+    return { transfers: prior ? prior.transfers : [], tip: info.height, fromHeight, toHeight, through: prior ? prior.through : null,
       complete: true, checkpoint: prior ? checkpointRecord({ ...identity, through: prior.through, transfers: prior.transfers, spends: prior.spends, kind: "witness" }) : null,
       blocked: false, failed: [] };
   }
@@ -1220,7 +1261,7 @@ export async function readRecoveryWitness(request) {
           const keptThrough = through || (startRecord ? startRecord.through : null);
           const keptTransfers = through ? transfers : (startRecord ? startRecord.transfers : transfers);
           const keptSpends = through ? [...spendMap.values()] : (startRecord ? startRecord.spends : []);
-          return { transfers: keptTransfers, tip: info.height, fromHeight, complete: false, through: keptThrough,
+          return { transfers: keptTransfers, tip: info.height, fromHeight, toHeight, complete: false, through: keptThrough,
             spends: keptSpends,
             checkpoint: keptThrough ? checkpointRecord({ ...identity, through: keptThrough, transfers: keptTransfers, spends: keptSpends, kind: "witness" }) : null,
             blocked: false, failed: [failure] };
@@ -1228,9 +1269,9 @@ export async function readRecoveryWitness(request) {
         if (priorThrough && height === priorThrough.height && normalizedHash(block.hash) !== priorThrough.hash) throw new Error("reorg");
         for (const tx of txs) {
           addSpends(spendMap, spendsOfTx(tx, tracked, node, { height, blockHash: block.hash }));
-          const hit = engine.xmrScan.matchTransaction(tx, [watched], { height, tipHeight: targetTop, nowSec: request.nowSec });
+          const hit = engine.xmrScan.matchTransaction(tx, [watched], { height, tipHeight: observedTip, nowSec: request.nowSec });
           if (!hit.length || height < fromHeight) continue;
-          const confirmations = confirmationsOf(tx, height, targetTop);
+          const confirmations = confirmationsOf(tx, height, observedTip);
           transfers.push(recoveryObservation(tx, hit, node, { height, blockHash: block.hash, confirmations }));
         }
         through = { height, hash: normalizedHash(block.hash) };
@@ -1244,7 +1285,8 @@ export async function readRecoveryWitness(request) {
       }
     }
     spends = [...spendMap.values()];
-    return { transfers, tip: info.height, fromHeight, complete: true, through, spends,
+    refreshTransferState(transfers, { tipHeight: observedTip, nowSec: request.nowSec ?? Math.floor(Date.now() / 1000) });
+    return { transfers, tip: info.height, fromHeight, toHeight, complete: true, through, spends,
       availableAtomic: availableAtomicOf(transfers, tracked, spends, minConfirmations),
       checkpoint: through ? checkpointRecord({ ...identity, through, transfers, spends, kind: "witness" }) : null,
       blocked: false, failed: [] };
@@ -1264,7 +1306,7 @@ export async function readRecoveryWitness(request) {
         continue;
       }
       const failure = failureOf(error, node);
-      return { transfers: [], tip: info.height, fromHeight, complete: false, through: null, checkpoint: null, blocked: false, failed: [failure] };
+      return { transfers: [], tip: info.height, fromHeight, toHeight, complete: false, through: null, checkpoint: null, blocked: false, failed: [failure] };
     }
   }
 }
@@ -1287,8 +1329,8 @@ export async function verifyArrivalFromRead(request) {
   if (fromHeight === null || fromHeight < 0) throw new SdkError("bad-input", { field: "fromHeight" });
   const recovery = await verifyRecovery({
     nodes: request.nodes, address: request.address, viewSecret: request.viewSecret, spendPub: request.spendPub,
-    fromHeight, minConfirmations: request.minConfirmations, nowSec: request.nowSec, timeoutMs: request.timeoutMs,
-    fetch: request.fetch, keyImages: request.keyImages,
+    fromHeight, toHeight: request.toHeight, minConfirmations: request.minConfirmations, nowSec: request.nowSec,
+    timeoutMs: request.timeoutMs, fetch: request.fetch, keyImages: request.keyImages,
   });
   const usable = recovery.transfers.filter((transfer) => transfer.agreed && transfer.confirmed
     && !transfer.pool && !transfer.locked);
@@ -1368,6 +1410,10 @@ export async function verifyRecovery(request) {
   if (request.spendPub !== undefined && request.spendPub !== null && !isStr(request.spendPub)) throw new SdkError("bad-input", { field: "spendPub" });
   const fromHeight = intOf(request.fromHeight);
   if (fromHeight === null || fromHeight < 0) throw new SdkError("bad-input", { field: "fromHeight" });
+  const toHeight = request.toHeight === null || request.toHeight === undefined ? null : intOf(request.toHeight);
+  if (request.toHeight !== null && request.toHeight !== undefined && (toHeight === null || toHeight < fromHeight)) {
+    throw new SdkError("bad-input", { field: "toHeight" });
+  }
   const minConfirmations = Math.max(1, intOf(request.minConfirmations) ?? 1);
   const fetchImpl = typeof request.fetch === "function" ? request.fetch : globalThis.fetch;
   if (typeof fetchImpl !== "function") throw new SdkError("bad-input", { field: "fetch" });
@@ -1409,17 +1455,19 @@ export async function verifyRecovery(request) {
       complete = false;
       continue;
     }
-    const nodeTop = Math.max(0, Math.min(top, info.height - 1));
+    const nodeTop = Math.max(0, Math.min(toHeight === null ? top : Math.min(top, toHeight), info.height - 1));
     let read;
     let poolComplete = true;
     try {
       const common = {
         address: request.address, viewSecret: request.viewSecret, spendPub,
-        fromHeight, minConfirmations, network: request.network, keyImages: request.keyImages,
+        fromHeight, toHeight, minConfirmations, network: request.network,
         nowSec, timeoutMs, idleTimeoutMs: request.idleTimeoutMs ?? request.timeoutMs, fetch: fetchImpl,
       };
+      // THE WITNESS NEVER GETS KEY IMAGES. Its job is agreement on the block data; spent status belongs to the
+      // trusted primary node.
       read = index === 0
-        ? await readRecovery({ ...common, node })
+        ? await readRecovery({ ...common, node, keyImages: request.keyImages })
         : await readRecoveryWitness({ ...common, node, tipHeight: nodeTop });
     } catch (error) {
       failed.push(failureOf(error, node));
@@ -1510,6 +1558,7 @@ export async function verifyRecovery(request) {
     transfers,
     tip,
     fromHeight,
+    toHeight,
     minConfirmations,
     complete: spendsDisagreements.length ? false : complete,
     completedOperators: [...completedOperators],
