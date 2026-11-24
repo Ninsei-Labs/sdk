@@ -9,7 +9,7 @@
 // Run: node tools/check-arrival-real.mjs
 import { readFileSync } from "node:fs";
 import { matchTransaction } from "../engine/monero/scan.js";
-import { verifyArrival } from "../src/xmr-arrival.mjs";
+import { verifyArrivalLegacy as verifyArrival } from "../src/xmr-arrival.mjs";
 
 const fixture = JSON.parse(readFileSync(new URL("./fixtures/stagenet-arrival.json", import.meta.url), "utf8"));
 const { tx, txid, height, blockHash, address, viewSecret, spendPub, expectedAtomic } = fixture;

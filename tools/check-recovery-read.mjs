@@ -365,39 +365,25 @@ check(short.complete === false && short.transfers.length === 0, "a short transac
     "a stalled request times out without a total-walk bound");
 }
 
-// A fake clock makes the per-request abort controllable: an advancing read never trips a total bound, while a
-// stalled request is aborted by its own idle signal.
+// THE IDLE BOUND IS DRIVEN BY THE TRANSPORT, NOT BY A TOTAL WALK. An advancing read never trips it; a request
+// whose body never answers is aborted after the idle window.
 {
-  const originalTimeout = AbortSignal.timeout;
-  const pending = [];
-  AbortSignal.timeout = (ms) => {
-    const controller = new AbortController();
-    pending.push({ ms, controller });
-    return controller.signal;
+  const advancing = await readRecovery(request(daemon().fetch));
+  check(advancing.complete === true,
+    "an advancing read finishes without a total-walk bound");
+  const base = daemon();
+  const stalled = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (body.method !== "get_block") return base.fetch(url, init);
+    return new Promise((_, reject) => {
+      init.signal.addEventListener("abort", () => {
+        reject(Object.assign(new Error("idle-timeout"), { name: "AbortError" }));
+      }, { once: true });
+    });
   };
-  try {
-    const advancing = await readRecovery(request(daemon().fetch));
-    check(advancing.complete === true && pending.length > 0,
-      "a fake clock lets an advancing read finish without a total-walk bound");
-    const base = daemon();
-    const stalled = async (url, init) => {
-      const body = JSON.parse(init.body);
-      if (body.method !== "get_block") return base.fetch(url, init);
-      return new Promise((_, reject) => {
-        init.signal.addEventListener("abort", () => {
-          reject(Object.assign(new Error("idle-timeout"), { name: "AbortError" }));
-        }, { once: true });
-      });
-    };
-    const reading = readRecovery(request(stalled, null, { idleTimeoutMs: 20 }));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    pending.at(-1).controller.abort();
-    const stalledRead = await reading;
-    check(stalledRead.complete === false && stalledRead.failed.some((failure) => failure.code === "timeout"),
-      "the fake clock aborts only the stalled request");
-  } finally {
-    AbortSignal.timeout = originalTimeout;
-  }
+  const stalledRead = await readRecovery(request(stalled, null, { idleTimeoutMs: 20 }));
+  check(stalledRead.complete === false && stalledRead.failed.some((failure) => failure.code === "timeout"),
+    "the idle bound aborts only the stalled request");
 }
 
 // An already-cancelled caller does not read the chain.

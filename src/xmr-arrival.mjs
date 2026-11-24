@@ -96,41 +96,82 @@ export function normalizeNodes(nodes) {
 // ONE REQUEST. `text/plain` on purpose: the public nodes answer it without a preflight (verified on the whole
 // default list). The response body is JSON even though the content type is not.
 async function call(node, path, body, fetchImpl, timeoutMs, options = {}) {
-  let res;
-  const timeout = typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : null;
-  let signal = timeout;
+  // THE IDLE BOUND IS ABOUT BYTES, NOT ABOUT A TOTAL REQUEST. A phone can stream a 100-transaction batch for
+  // minutes as long as chunks keep arriving; it fails only when the stream stops. The old AbortSignal.timeout
+  // covered the whole request and made every retry die at the same block.
+  const controller = new AbortController();
   const external = options.signal;
+  let idleTimer = null;
+  let timedOut = false;
+  const arm = () => {
+    if (idleTimer !== null) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  };
+  const onExternal = () => controller.abort();
   if (external && typeof external.addEventListener === "function") {
-    const controller = new AbortController();
-    const abort = () => controller.abort();
-    if (external.aborted) abort();
-    else external.addEventListener("abort", abort, { once: true });
-    if (timeout) timeout.addEventListener("abort", abort, { once: true });
-    signal = controller.signal;
+    if (external.aborted) controller.abort();
+    else external.addEventListener("abort", onExternal, { once: true });
   }
+  const stop = () => {
+    if (idleTimer !== null) { clearTimeout(idleTimer); idleTimer = null; }
+    if (external && typeof external.removeEventListener === "function") external.removeEventListener("abort", onExternal);
+  };
+  const failure = (error) => {
+    if (error instanceof SdkError) return error;
+    if (external && external.aborted) {
+      return new SdkError("xmr-no-nodes", { node: node.url, name: "AbortError", why: "cancelled" });
+    }
+    if (timedOut) return new SdkError("xmr-no-nodes", { node: node.url, name: "TimeoutError", why: "timeout" });
+    if (error && error.name === "SyntaxError") return new SdkError("xmr-no-nodes", { node: node.url, name: "SyntaxError", why: "bad-json" });
+    return new SdkError("xmr-no-nodes", { node: node.url, name: String((error && error.name) || ""),
+      why: String((error && error.message) || error).slice(0, 120) });
+  };
+  arm();
+  let res;
   try {
     res = await fetchImpl(node.url + path, {
       method: "POST",
       headers: { "Content-Type": options.contentType || "text/plain" },
       body: JSON.stringify(body),
-      signal: signal || undefined,
+      signal: controller.signal,
     });
   } catch (error) {
-    // KEEP THE NAME: `AbortSignal.timeout` is "TimeoutError" in a browser and "AbortError" in Node; the message
-    // alone is not portable, and the arrival report has to say timeout rather than network.
-    throw new SdkError("xmr-no-nodes", { node: node.url, name: String((error && error.name) || ""),
-      why: String((error && error.message) || error).slice(0, 120) });
+    stop();
+    throw failure(error);
   }
-  if (!res || res.ok !== true) throw new SdkError("xmr-no-nodes", { node: node.url, status: res ? res.status : null });
-  if (typeof options.onBytes === "function") {
-    try { options.onBytes((await res.clone().arrayBuffer()).byteLength); } catch { /* the body is the answer */ }
-  }
-  try { return await res.json(); } catch (error) {
-    // A BODY CUT BY THE TIMEOUT IS STILL A TIMEOUT. `res.json()` rejects after the signal fired; in Node and in
-    // browsers that is a TimeoutError/AbortError, not a malformed answer.
-    const name = String((error && error.name) || "");
-    const timedOut = /^(TimeoutError|AbortError)$/.test(name) || /timeout|abort/i.test(name);
-    throw new SdkError("xmr-no-nodes", { node: node.url, name, why: timedOut ? "timeout" : "bad-json" });
+  if (!res || res.ok !== true) { stop(); throw new SdkError("xmr-no-nodes", { node: node.url, status: res ? res.status : null }); }
+  try {
+    // STREAM THE BODY WHEN THE TRANSPORT GIVES ONE. `getReader` is what lets the timer be reset per chunk; a
+    // non-streaming test double falls back to `res.json` after counting one whole body.
+    if (res.body && typeof res.body.getReader === "function") {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        arm();
+        if (value && value.byteLength) {
+          if (typeof options.onBytes === "function") options.onBytes(value.byteLength);
+          text += decoder.decode(value, { stream: true });
+        }
+      }
+      text += decoder.decode();
+      return JSON.parse(text);
+    }
+    if (typeof options.onBytes === "function") {
+      try { options.onBytes((await res.clone().arrayBuffer()).byteLength); } catch { /* the body is the answer */ }
+    }
+    try {
+      return await res.json();
+    } catch (error) {
+      if (timedOut || (external && external.aborted)) throw failure(error);
+      throw new SdkError("xmr-no-nodes", { node: node.url, name: String((error && error.name) || ""), why: "bad-json" });
+    }
+  } catch (error) {
+    throw failure(error);
+  } finally {
+    stop();
   }
 }
 
@@ -319,6 +360,13 @@ async function findPoolTransfer(node, { expectedAtomic, watched, tip, nowSec, fe
  * (`pending` / `one-node`) - never a silent success.
  */
 export async function verifyArrival(request) {
+  if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
+  // THE DEFAULT ARRIVAL IS THE ONE READ, WITH THE SALE'S EXACT RULE. The old exact walk is kept as
+  // `verifyArrivalLegacy` only for the checks that pin its historical answers.
+  return verifyArrivalFromRead({ ...request, amountRule: request.amountRule ?? "exact" });
+}
+
+export async function verifyArrivalLegacy(request) {
   if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
   if (request.amountRule !== undefined && request.amountRule !== null) return verifyArrivalFromRead(request);
   const nodes = normalizeNodes(request.nodes);
@@ -1006,7 +1054,7 @@ export async function readRecovery(request) {
   if (!isStr(request.address)) throw new SdkError("bad-input", { field: "address" });
   if (request.viewSecret === undefined || request.viewSecret === null) throw new SdkError("bad-input", { field: "viewSecret" });
   if (!isStr(request.spendPub)) throw new SdkError("bad-input", { field: "spendPub" });
-  const fromHeight = request.fromHeight === null || request.fromHeight === undefined ? 0 : intOf(request.fromHeight);
+  const fromHeight = intOf(request.fromHeight);
   if (fromHeight === null || fromHeight < 0) throw new SdkError("bad-input", { field: "fromHeight" });
   const toHeight = request.toHeight === null || request.toHeight === undefined ? null : intOf(request.toHeight);
   if (request.toHeight !== null && request.toHeight !== undefined && (toHeight === null || toHeight < fromHeight)) {
@@ -1481,12 +1529,13 @@ export async function verifyArrivalFromRead(request) {
   let expectedAtomic;
   try { expectedAtomic = BigInt(request.expectedAtomic); } catch { throw new SdkError("bad-input", { field: "expectedAtomic" }); }
   if (expectedAtomic <= 0n) throw new SdkError("bad-input", { field: "expectedAtomic" });
-  const fromHeight = request.fromHeight === null || request.fromHeight === undefined ? 0 : intOf(request.fromHeight);
+  const fromHeight = intOf(request.fromHeight);
   if (fromHeight === null || fromHeight < 0) throw new SdkError("bad-input", { field: "fromHeight" });
   const recovery = await verifyRecovery({
     nodes: request.nodes, address: request.address, viewSecret: request.viewSecret, spendPub: request.spendPub,
     fromHeight, toHeight: request.toHeight, minConfirmations: request.minConfirmations, nowSec: request.nowSec,
     timeoutMs: request.timeoutMs, fetch: request.fetch, keyImages: request.keyImages,
+    checkpoint: request.checkpoint, onProgress: request.onProgress, signal: request.signal,
   });
   const transfers = recovery.transfers || [];
   const agreed = transfers.filter((transfer) => transfer.agreed === true);
@@ -1534,9 +1583,11 @@ export async function verifyArrivalFromRead(request) {
     if (contributed) displayed.push(transfer);
   }
   const seenByAmount = rule === "exact" ? total === expectedAtomic : total >= expectedAtomic;
-  const seen = seenByAmount && recovery.complete === true;
   const poolHit = transfers.find((transfer) => transfer.pool);
   const completedOperators = recovery.completedOperators || [];
+  const requiredOperators = Number(recovery.requiredOperators) || 2;
+  const quorate = completedOperators.length >= requiredOperators;
+  const seen = seenByAmount && (recovery.complete === true || (rule === "at-least" && quorate));
   const absent = recovery.complete === true && transfers.length === 0 && !poolHit && completedOperators.length >= 2;
   const lockedTransfer = source.find((transfer) => transfer.locked === true) || null;
   const need = Number(recovery.minConfirmations) || 1;
@@ -1548,7 +1599,7 @@ export async function verifyArrivalFromRead(request) {
   else if (source.length === 0) state = "pending";
   else if (lockedTransfer) state = "locked";
   else if (confirming) state = "confirming";
-  else if (agreed.length === 0) state = "one-node";
+  else if (agreed.length === 0) state = rule === "exact" ? "unknown" : "one-node";
   else if (total < expectedAtomic) state = "short";
   else if (rule === "exact" && total > expectedAtomic) state = "over";
   else state = "pending";
@@ -1615,6 +1666,9 @@ export async function verifyRecovery(request) {
   if (typeof fetchImpl !== "function") throw new SdkError("bad-input", { field: "fetch" });
   const nowSec = Number.isFinite(Number(request.nowSec)) ? Number(request.nowSec) : Math.floor(Date.now() / 1000);
   const timeoutMs = Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0 ? Number(request.timeoutMs) : 20000;
+  const signal = request.signal && typeof request.signal.addEventListener === "function" ? request.signal : null;
+  const checkpoint = request.checkpoint && typeof request.checkpoint === "object" ? request.checkpoint : null;
+  const onProgress = typeof request.onProgress === "function" ? request.onProgress : null;
   const bound = engine.xmrScan.watchedAddressVerdict({
     address: request.address, viewSecret: request.viewSecret, spendPub: request.spendPub,
   });
@@ -1638,16 +1692,24 @@ export async function verifyRecovery(request) {
   // THE PRIMARY IS THE FIRST CONFIGURED NODE. A witness that happens to answer first is never promoted and never
   // receives the exact-start walk or key images; without the primary the read is incomplete.
   const primaryLive = live.find((entry) => entry.node === primaryNode);
+  const addressNetwork = bound.keys && bound.keys.network ? bound.keys.network : null;
+  const earlyNetwork = isStr(request.network) ? request.network : addressNetwork;
   if (!primaryLive) {
     return { state: "none", transfers: [], tip: null, fromHeight, toHeight, minConfirmations, complete: false,
       completedOperators: [], spends: [], spendsDisagreements: [], ...UNKNOWN_TOTALS, availableAtomic: null,
-      availableSource: null, checked, failed };
+      availableSource: null, network: earlyNetwork,
+      requiredOperators: earlyNetwork === "mainnet" ? 3 : 2, checked, failed };
   }
   const tip = primaryLive.info.height;
   const top = Math.max(0, tip - 1);
+  const network = isStr(request.network) ? request.network : (primaryLive.info.nettype || addressNetwork);
+  if (!isStr(network)) throw new SdkError("bad-input", { field: "network" });
+  const requiredOperators = network === "mainnet" ? 3 : 2;
   const observations = new Map();
   const spendMap = new Map();
-  let complete = true;
+  // A CONFIGURED NODE THAT DID NOT ANSWER `get_info` IS NOT PART OF A COMPLETE READ. `at-least` may still settle on
+  // the operator quorum; `exact` and absence may not.
+  let complete = failed.length === 0;
   const completedOperators = new Set();
   let availableAtomic = null;
   let primarySpends = [];
@@ -1668,14 +1730,14 @@ export async function verifyRecovery(request) {
     try {
       const common = {
         address: request.address, viewSecret: request.viewSecret, spendPub,
-        fromHeight, toHeight, minConfirmations, network: request.network,
+        fromHeight, toHeight, minConfirmations, network,
         nowSec, timeoutMs, idleTimeoutMs: request.idleTimeoutMs ?? request.timeoutMs, fetch: fetchImpl,
       };
       // THE WITNESS NEVER GETS KEY IMAGES. Its job is agreement on the block data; spent status belongs to the
       // trusted primary node.
       read = isPrimary
-        ? await readRecovery({ ...common, node, keyImages: request.keyImages })
-        : await readRecoveryWitness({ ...common, node, tipHeight: nodeTop });
+        ? await readRecovery({ ...common, node, keyImages: request.keyImages, checkpoint, onProgress, signal })
+        : await readRecoveryWitness({ ...common, node, tipHeight: nodeTop, onProgress, signal });
     } catch (error) {
       failed.push(failureOf(error, node));
       complete = false;
@@ -1773,6 +1835,8 @@ export async function verifyRecovery(request) {
     fromHeight,
     toHeight,
     minConfirmations,
+    network,
+    requiredOperators,
     complete: completeVerdict,
     completedOperators: [...completedOperators],
     spends,

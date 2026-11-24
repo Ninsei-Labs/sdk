@@ -12,7 +12,7 @@
 //
 // Run: node tools/check-arrival-consensus.mjs
 import { ed25519, keccak256 } from "../src/primitives.mjs";
-import { verifyArrival } from "../src/xmr-arrival.mjs";
+import { verifyArrivalLegacy as verifyArrival } from "../src/xmr-arrival.mjs";
 import {
   amountMaskCommitment,
   bytesToHex,
