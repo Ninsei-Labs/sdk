@@ -40,6 +40,7 @@ export {
   readEscrowEventsByTopic,
   readEscrowHistory,
   recoverySearchStart,
+  recoveryStartBlock,
   ESCROW_EVENT_TOPICS,
   fingerprintOf,
   importRecoveryKey,

@@ -4,7 +4,7 @@
 import { createNinsei } from "../src/index.mjs";
 import { orderRead } from "../src/swap-flow.mjs";
 import { orderHistory, orderLookup, orderFunding } from "../src/order-read.mjs";
-import { findSwaps, recoverySearchStart, takerHalvesV2 } from "../src/recovery-key.mjs";
+import { findSwaps, recoverySearchStart, recoveryStartBlock, takerHalvesV2 } from "../src/recovery-key.mjs";
 import { ESCROW_METHODS, ORDER_TERMS_TOPIC } from "../engine/evm/escrow.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { ORDER_CREATED_TOPIC } from "../engine/evm/factory.js";
@@ -219,6 +219,20 @@ const createdLog = ({ removed = false, blockNumber = 100, salt = "0x" + "ab".rep
 {
   check(recoverySearchStart({ madeBlock: 720_000, deploymentBlock: 1 }) === 360_000, "the day-grid search start changed");
   check(recoverySearchStart({ madeBlock: 100, deploymentBlock: 50 }) === 50, "the search start went below deployment");
+  const startAt = Date.UTC(2026, 9, 1) / 1000 - 86_400;
+  const behind = await recoveryStartBlock({
+    madeBlock: 720_000, deploymentBlock: 1, head: 100_000, startAt,
+    blockAt: async () => 5_000,
+  });
+  check(behind.block === 5_000 && behind.source === "month", "a node behind the day line did not fall back to the month block");
+  const noHead = await recoveryStartBlock({ madeBlock: 720_000, deploymentBlock: 1, startAt,
+    blockAt: async () => 5_000 });
+  check(noHead.block === 5_000 && noHead.source === "month", "a key with no head did not use its month date");
+  const ahead = await recoveryStartBlock({ madeBlock: 720_000, deploymentBlock: 1, head: 900_000, startAt,
+    blockAt: async () => 5_000 });
+  check(ahead.block === 360_000 && ahead.source === "made", "a readable day line did not win over the month block");
+  const bare = await recoveryStartBlock({ deploymentBlock: 77 });
+  check(bare.block === 77 && bare.source === "deployment", "no key block and no start date did not fall back to deployment");
   const starts = [];
   const live = createdLog({ blockNumber: 100 });
   const removed = createdLog({ blockNumber: 90, removed: true });

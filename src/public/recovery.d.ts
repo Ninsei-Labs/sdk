@@ -448,6 +448,12 @@ export declare function findSwaps(request: {
   deploymentBlock?: number | null;
   /** The block where this key was made; the shared day-grid search start is derived from it. */
   madeBlock?: number | null;
+  /** The UTC month's first instant less one day, for the month fallback. */
+  startAt?: number | null;
+  /** The current head, used to decide whether the day-grid line is readable. */
+  head?: number | null;
+  /** (startAt, head) -> the first block at or after the time, or null. */
+  blockAt?: ((startAt: number, head: number | null) => Promise<number | null>) | null;
   toBlock?: number | string;
   /** Reads the settlement block timestamp, in seconds: (blockNumber) -> seconds. */
   evmBlockTime?: (blockNumber: number) => Promise<number>;
@@ -475,8 +481,20 @@ export declare function findSwaps(request: {
 }>;
 
 
-/** The one search-start rule: a key made at `madeBlock` starts on the shared day grid, never below deployment. */
+/** The day-grid line for a key made at `madeBlock`; never below deployment. */
 export declare function recoverySearchStart(request?: { madeBlock?: number | null; deploymentBlock?: number }): number;
+
+/** The full start rule: the day grid when the node reached it, otherwise the month's block, otherwise deployment. */
+export declare function recoveryStartBlock(request: {
+  madeBlock?: number | null;
+  deploymentBlock?: number;
+  /** The UTC month's first instant less one day, in seconds. */
+  startAt?: number | null;
+  /** The current head, used to decide whether the day-grid line is readable. */
+  head?: number | null;
+  /** (startAt, head) -> the first block at or after the time, or null. */
+  blockAt?: ((startAt: number, head: number | null) => Promise<number | null>) | null;
+}): Promise<{ block: number; source: "made" | "month" | "deployment" }>;
 
 /** Terms decoded from an OrderTerms event. */
 export interface EscrowHistoryTerms {

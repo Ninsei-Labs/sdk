@@ -546,9 +546,37 @@ const searchStartBlock = (madeBlock, deploymentBlock) => {
     Math.floor(Math.max(0, made - margin) / grid) * grid);
 };
 
-/** The one search-start rule every client uses for a key made at `madeBlock`. */
+/** The day-grid line for a key made at `madeBlock`; never below the deployment. */
 export function recoverySearchStart({ madeBlock = null, deploymentBlock = 0 } = {}) {
   return searchStartBlock(madeBlock, deploymentBlock);
+}
+
+/**
+ * THE ONE SEARCH-START RULE, INCLUDING THE MONTH FALLBACK. A key made here starts at its day-grid line when the
+ * node's head has reached that line. A node below it, or a key with no block of its own, starts at the first block
+ * at or after `startAt` (the UTC month's first instant less one day, in seconds), never below the deployment. With
+ * neither, the factory deployment is the floor. `blockAt` is the caller's block-by-time reader; its failure is a
+ * deployment floor, not a made-up block.
+ */
+export async function recoveryStartBlock({ madeBlock = null, deploymentBlock = 0, startAt = null, head = null,
+  blockAt = null } = {}) {
+  const deployment = Number.isSafeInteger(Number(deploymentBlock)) && Number(deploymentBlock) > 0 ? Number(deploymentBlock) : 0;
+  const made = madeBlock !== null && madeBlock !== undefined
+    && Number.isSafeInteger(Number(madeBlock)) && Number(madeBlock) >= 0 ? Number(madeBlock) : null;
+  const hasHead = head !== null && head !== undefined && Number.isSafeInteger(Number(head));
+  if (made !== null) {
+    const floor = searchStartBlock(made, deployment);
+    // A key's own line is used only when the node has reached it. Without a head the line is the best available
+    // answer, unless the caller also supplied a start date: then the site's month rule is the safer floor.
+    if (hasHead ? floor <= Number(head) : startAt === null || startAt === undefined) return { block: floor, source: "made" };
+  }
+  if (startAt !== null && startAt !== undefined && typeof blockAt === "function") {
+    try {
+      const at = Number(await blockAt(Number(startAt), hasHead ? Number(head) : null));
+      if (Number.isSafeInteger(at) && at >= 0) return { block: Math.max(deployment, at), source: "month" };
+    } catch { /* the deployment is the floor when the time cannot be placed */ }
+  }
+  return { block: deployment, source: "deployment" };
 }
 
 function decodeOrderTerms(log) {
@@ -794,7 +822,7 @@ async function recoveredStartHeight(order, { evmBlockTime, moneroTip, moneroBloc
  * positions) and merges the answers. Without one, every OrderCreated of the factory is read and matched locally.
  */
 export async function findSwaps({ mnemonic, chainId, factory = null, factories = null, address = null, evmLogs,
-  fromBlock = null, deploymentBlock = null, madeBlock = null, toBlock = "latest",
+  fromBlock = null, deploymentBlock = null, madeBlock = null, startAt = null, head = null, blockAt = null, toBlock = "latest",
   evmBlockTime = null, evmBlockTimes = null, evmCode = null, moneroTip = null, moneroBlockTimestamp = null,
   xmrNodes = null, moneroNetwork = null, fetchImpl = globalThis.fetch } = {}) {
   // FACTORY HISTORY IS PART OF THE SEARCH. A chain can have more than one factory after a contract change;
@@ -823,7 +851,8 @@ export async function findSwaps({ mnemonic, chainId, factory = null, factories =
     // THE CHAIN SAYS WHERE ITS ORDERS CAN START. An explicit fromBlock wins; otherwise the factory's own
     // deployment block is used. Zero remains the last resort for a caller that knows the factory existed at genesis.
     const startBlock = fromBlock === null || fromBlock === undefined
-      ? recoverySearchStart({ madeBlock, deploymentBlock: target.deploymentBlock === null ? 0 : target.deploymentBlock })
+      ? (await recoveryStartBlock({ madeBlock, deploymentBlock: target.deploymentBlock === null ? 0 : target.deploymentBlock,
+        startAt, head, blockAt })).block
       : fromBlock;
     const base = { address: target.factory, fromBlock: startBlock, toBlock };
     let logs = [];

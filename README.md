@@ -316,9 +316,12 @@ terms. `found: false` means the creation event was not in the requested range, n
 funded status is `landed`; an address with no code is `pending` until the signed `validUntil` and `expired` from it.
 The contract answer and the block timestamp are read at the same finality tag (`latest`, `safe` or `finalized`).
 
-The recovery search start is one rule for every client: `recoverySearchStart` returns the shared 360,000-block day
-grid line below the key's creation block, never below the factory deployment. `findSwaps` accepts `madeBlock` and
-uses it, so the RPC does not learn which escrow range belongs to a key.
+The recovery search start is one rule for every client. `recoverySearchStart` returns the shared 360,000-block day
+grid line below a key made at `madeBlock`, never below the factory deployment. `recoveryStartBlock` applies the whole
+rule: that day line when the node's head has reached it, otherwise the block at the key's UTC month start less one
+day (`startAt` and the caller's `blockAt`), otherwise the deployment. `findSwaps` accepts `madeBlock`, `startAt`,
+`head` and `blockAt`, so the RPC sees the same range every client would use. `findSwaps` also accepts `madeBlock`
+alone for the common day-grid case.
 
 ## Found orders and the paying token
 
