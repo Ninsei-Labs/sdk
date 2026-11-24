@@ -74,6 +74,10 @@ export const ERROR_CODES = [
   // THE QUOTE ARRIVED WITH LESS THAN THE START MARGIN LEFT. The lock would refuse it seconds later, after the proof
   // and the record work, so the answer is refused as soon as it arrives and the caller can ask again.
   "quote-too-short",
+  // THE SALE'S CLAIMER CANNOT RECEIVE THE PAYOUT. A value-only read executes receive()/fallback before the firm
+  // request; a refusal here means the claim would revert after the XMR moved. It is its own code because the advice
+  // is "use another address", not "retry the quote".
+  "quote-recipient-unreceivable",
   // WHO OWNS THE KEY - ASKED OF THE CHAIN (maker registry, providerOf). The signature alone proves only that
   // SOME key signed; these four name what the registry (and the interface's policy) said:
   //   quote-registry-unchecked  - there was no way to ask the chain, so the claim stays unproven;
@@ -195,6 +199,7 @@ export const ERROR_META = Object.freeze({
   "quote-field-unbound": { retryable: false, side: "provider" },
   "quote-expired": { retryable: true, side: "provider" },
   "quote-too-short": { retryable: true, side: "provider" },
+  "quote-recipient-unreceivable": { retryable: false, side: "caller" },
   "quote-registry-unchecked": { retryable: true, side: "chain" },
   "quote-key-unknown": { retryable: false, side: "chain" },
   "quote-provider-mismatch": { retryable: false, side: "chain" },

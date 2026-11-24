@@ -544,8 +544,9 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       try { onChain = await flow.orderStatus(escrowRecord.address, { call: reader }); }
       catch (error) {
         // AN EMPTY status() ANSWER IS A SUCCESSFUL READ OF AN ADDRESS WITH NO CONTRACT, not an unreadable chain.
-        // Anything else leaves `onChain` null and the record pending: a failed read must never authorise a resend.
-        if (/short .*status\(\)/.test(String((error && error.message) || error))) onChain = { isFunded: false, absent: true };
+        // A NONEMPTY ANSWER OF THE WRONG LENGTH IS NOT THE SAME: something answered, and its state is unknown.
+        // Treating both as "not funded" is what cleared a pending record and authorised a second send.
+        if (/empty answer status\(\)/.test(String((error && error.message) || error))) onChain = { isFunded: false, absent: true };
         else onChain = null;
       }
     }

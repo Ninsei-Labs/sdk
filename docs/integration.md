@@ -227,7 +227,7 @@ bytes on an idempotent retry where the SDK provides one, and never turn a timeou
 Every refusal carries a stable code and parameters; the host maps codes to its own copy. Never display a raw
 exception or a code as a user-facing sentence. Important groups include quote refusals, `wrong-chain`,
 `wrong-account`, `storage-unavailable`, `claim-unknown`, `xmr-timeout`, `xmr-locked`, `xmr-address-mismatch`,
-`quote-too-short`, `contract-reverted`, `wallet-rejected` and `not-implemented`.
+`quote-too-short`, `quote-recipient-unreceivable`, `contract-reverted`, `wallet-rejected` and `not-implemented`.
 
 See `src/codes.mjs` and `index.d.ts` for the current unions. Code values are part of the integration contract; a
 new code is a compatibility event and should be called out in the release notes.

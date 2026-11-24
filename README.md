@@ -168,7 +168,7 @@ interface's: this package holds no user-facing string.
 ### Errors (`error.code`, `SdkError.code`)
 
 `not-implemented`, `bad-input`, `wallet-not-connected`, `wallet-rejected`, `caller-refused`, `wrong-chain`, `quote-unavailable`,
-`quote-refused`, `quote-too-short`, `quote-expired`, `address-denied`, `quote-stale`, `recovery-declined`,
+`quote-refused`, `quote-too-short`, `quote-recipient-unreceivable`, `quote-expired`, `address-denied`, `quote-stale`, `recovery-declined`,
 `recovery-failed`, `storage-unavailable`, `xmr-address-mismatch`, `server-unavailable`, `server-refused`,
 `claim-unknown`, `xmr-timeout`, `xmr-locked`, `contract-reverted`, `insufficient-funds`, `unknown`.
 

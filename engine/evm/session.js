@@ -419,11 +419,17 @@ export async function switchChain(chainSlugOrId) {
 //
 // Needed to learn the escrow address BEFORE it is created (factory.predict) and to read state
 // (escrow.status) while polling. Requires no keys, asks the wallet nothing - only the provider.
-export async function readContract({ to, data, block = "latest" } = {}) {
+export async function readContract({ to, data, block = "latest", value, from } = {}) {
   if (!provider) throw new Error("wallet not connected: nothing to read the contract with");
   if (!to) throw new Error("no contract address given");
   if (!data) throw new Error("no call data given");
-  const result = await provider.request({ method: "eth_call", params: [{ to, data }, block || "latest"] });
+  const tx = { to, data };
+  // A VALUE-ONLY CALL IS STILL A CALL: the empty calldata reaches receive()/fallback, and the value makes the
+  // answer prove that the address accepts native ETH rather than only that it has code. `from` only supplies the
+  // balance the call is charged against; it is not used as a signature.
+  if (value !== undefined && value !== null) tx.value = typeof value === "bigint" ? "0x" + value.toString(16) : value;
+  if (from !== undefined && from !== null) tx.from = from;
+  const result = await provider.request({ method: "eth_call", params: [tx, block || "latest"] });
   if (typeof result !== "string" || !result.startsWith("0x")) {
     throw new Error("unexpected answer to a contract call: " + String(result).slice(0, 60));
   }

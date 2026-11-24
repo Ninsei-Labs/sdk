@@ -192,7 +192,7 @@ console.log("=== 1c1) A MALFORMED SALT IS REFUSED BY NAME, NOT IGNORED ===");
   } else bad("malformed salt: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
 }
 
-async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 }, funded = false, withId = true, withQuote = true, withSignature = true, escrow = null, recoverySalt = order.salt, orderSalt = order.salt, predictThrows = false, predictFromData = false, quotePatch = {}, orderPatch = {} } = {}) {
+async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 }, funded = false, statusData = null, withId = true, withQuote = true, withSignature = true, escrow = null, recoverySalt = order.salt, orderSalt = order.salt, predictThrows = false, predictFromData = false, quotePatch = {}, orderPatch = {} } = {}) {
   if (fresh) setStorage(memoryStorage());
   let sent = 0;
   const wallet = { chainId: async () => order.chainId, address: async () => order.locker,
@@ -209,7 +209,7 @@ async function startPending({ fresh = true, receipt = { status: "0x1", logs: [],
   const result = await createSwaps({ mode: "live", xmrNetwork: "stagenet", logs: async () => [],
     call: async ({ data }) => {
       if (predictThrows && data.startsWith(FACTORY_METHODS.predict)) throw new Error("factory read failed");
-      if (data === encodeStatus()) return funded ? fundedStatus : "0x";
+      if (data === encodeStatus()) return statusData !== null ? statusData : funded ? fundedStatus : "0x";
       if (data.startsWith(FACTORY_METHODS.predict)) {
         if (predictFromData) return "0x" + "0".repeat(24) + createHash("sha256").update(String(data)).digest("hex").slice(-40);
         return "0x" + "0".repeat(24) + "88".repeat(20);
@@ -427,6 +427,30 @@ console.log("=== 1d2c) A STALE not-sent RECORD IS CLEARED WHEN THE ESCROW IS NOT
     if (second.result && second.result.step === "xmr-incoming" && second.result.escrow === predicted && second.sent === 1) {
       ok("a not-sent record with an unfunded escrow is cleared and the retry sends once");
     } else bad("stale not-sent retry: " + JSON.stringify({ step: second.result && second.result.step, escrow: second.result && second.result.escrow, predicted, sent: second.sent, code: second.result && second.result.code }));
+  }
+}
+
+console.log("=== 1d2c1) A NONEMPTY WRONG-LENGTH STATUS IS UNKNOWN, NOT AN EMPTY ESCROW ===");
+{
+  const first = await startPending();
+  const state = loadState();
+  const record = Object.values((state && state.swaps) || {})[0];
+  const predicted = record && record.escrow && record.escrow.address;
+  if (!record || !predicted) bad("short-status fixture: " + JSON.stringify({ code: first.result && first.result.code }));
+  else {
+    record.fundingPending = true;
+    record.escrow = { ...record.escrow, fundingPending: true, fundingReason: "not-sent" };
+    delete record.escrow.fundTx;
+    delete record.fundTx;
+    saveState(state);
+    // One nonempty word is neither four status words nor an empty answer from an address with no code. It must
+    // leave the record pending: a caller that reads it as "not funded" would clear the not-sent mark and send again.
+    const second = await startPending({ fresh: false, statusData: "0x" + "11".repeat(32),
+      receipt: { status: "0x1", logs: [], blockNumber: 11 } });
+    if (second.result && second.result.step === "funding-pending" && second.sent === 0) {
+      ok("a nonempty wrong-length status leaves the pending record and sends nothing");
+    } else bad("short nonempty status: " + JSON.stringify({ step: second.result && second.result.step,
+      code: second.result && second.result.code, sent: second.sent }));
   }
 }
 
