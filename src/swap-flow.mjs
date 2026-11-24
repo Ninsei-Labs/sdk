@@ -385,6 +385,46 @@ export async function orderDecline(escrow, deps = {}) {
 // is read from the contract: it is immutable and exists only on-chain. It is needed for live deals created
 // before we started storing the deadlines ourselves: without reading, the counter would show the time invented by
 // the simulator. The contract no longer has t0() (decision 2026-09-16, doc 26).
+// ONE CUT OF AN ESCROW. Every action decision needs the state, the ready mark and both deadlines from the SAME
+// block; reading them separately lets a claim judge one block and its deadline another. `order.read` takes the
+// caller's chain reader and block reader, asks every field at one tag, and returns that block's number, hash and
+// timestamp with the decoded values. A block that cannot be identified is a refusal, never a fabricated latest.
+export async function orderRead(escrow, deps = {}) {
+  if (!escrow) throw new SdkError("bad-input", { field: "escrow" });
+  const call = deps.call || readContract;
+  const readBlock = deps.block || deps.evmBlock;
+  if (typeof readBlock !== "function") throw new SdkError("bad-input", { field: "block" });
+  const blockTag = deps.blockTag === undefined || deps.blockTag === null ? "latest" : deps.blockTag;
+  const [rawStatus, rawReady, rawT1, rawReadyBy] = await Promise.all([
+    call({ to: escrow, data: encodeStatus(), block: blockTag }),
+    call({ to: escrow, data: encodeRead("ready"), block: blockTag }),
+    call({ to: escrow, data: encodeT1(), block: blockTag }),
+    call({ to: escrow, data: encodeRead("readyBy"), block: blockTag }),
+  ]);
+  let block;
+  try { block = await readBlock(blockTag); }
+  catch { throw new SdkError("bad-input", { field: "block", why: "unreadable" }); }
+  const number = Number(block && block.number);
+  const timestamp = Number(block && block.timestamp);
+  const hash = String((block && block.hash) || "").replace(/^0x/i, "").toLowerCase();
+  if (!Number.isSafeInteger(number) || number < 0 || !Number.isSafeInteger(timestamp) || timestamp <= 0
+      || !/^[0-9a-f]{64}$/.test(hash)) {
+    throw new SdkError("bad-input", { field: "block", why: "incomplete" });
+  }
+  // A NUMERIC TAG IS A CLAIM ABOUT THE BLOCK. When the caller named a concrete height, the reader must return that
+  // height; a provider that answered another block has not answered this read.
+  const tagged = typeof blockTag === "number" ? blockTag
+    : (typeof blockTag === "string" && /^0x[0-9a-f]+$/i.test(blockTag) ? Number.parseInt(blockTag, 16) : null);
+  if (tagged !== null && tagged !== number) throw new SdkError("bad-input", { field: "block", why: "wrong-height" });
+  return {
+    status: decodeStatus(rawStatus),
+    ready: BigInt(rawReady) !== 0n,
+    readyBy: decodeUint64(rawReadyBy, "readyBy()"),
+    t1: decodeUint64(rawT1, "t1()"),
+    block: { number, hash: "0x" + hash, timestamp },
+  };
+}
+
 export async function orderDeadlines(escrow, deps = {}) {
   if (!escrow) throw new SdkError("bad-input", { field: "escrow" });
   // THE SAME READER SEAM AS orderStatus: the deadline must be read by the wallet that will sign, not by a second

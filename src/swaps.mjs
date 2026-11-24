@@ -1249,6 +1249,10 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       const validUntil = request.orderQuote && request.orderQuote.validUntil !== undefined
         ? request.orderQuote.validUntil
         : undefined;
+      // THE EXPIRY IS PART OF THE PENDING RECORD. A predicted escrow without it cannot be dated after a reload,
+      // and a funding verdict would have to guess; keep the signed number with the address from the start.
+      const signedValidUntil = Number.isSafeInteger(Number(validUntil)) && Number(validUntil) > 0
+        ? Number(validUntil) : null;
       if (validUntil !== undefined && validUntil !== null) {
         const until = Number(validUntil);
         // AN UNREADABLE BLOCK IS A NAMED REFUSAL, NOT AN UNCODED ERROR. The sell gate already maps this failure to
@@ -1288,6 +1292,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         const escrowRecord = record.swap.escrow && typeof record.swap.escrow === "object" ? record.swap.escrow : {};
         record.swap.fundingPending = true;
         record.swap.escrow = { ...escrowRecord, address: predicted, salt: salt || escrowRecord.salt || null,
+          validUntil: signedValidUntil ?? escrowRecord.validUntil ?? null,
           fundingPending: true, fundingReason: "not-sent" };
         try { engine.swap.saveSwap(record.swap, store); }
         catch { throw new SdkError("storage-unavailable", { step: "save-pending" }); }
@@ -1319,7 +1324,8 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         const escrowRecord = record.swap.escrow && typeof record.swap.escrow === "object" ? record.swap.escrow : {};
         record.swap.fundingPending = true;
         record.swap.escrow = { ...escrowRecord, address: predicted || escrowRecord.address || null,
-          fundTx: pendingTx || escrowRecord.fundTx || null, fundingPending: true,
+          fundTx: pendingTx || escrowRecord.fundTx || null,
+          validUntil: signedValidUntil ?? escrowRecord.validUntil ?? null, fundingPending: true,
           fundingReason: funded.pendingReason || "no-receipt" };
         try { engine.swap.saveSwap(record.swap, store); } catch { throw new SdkError("storage-unavailable", { step: "save-pending" }); }
         return { id: record.swap.id || null, escrow: record.swap.escrow.address || null,
@@ -1335,6 +1341,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       if (escrowAddress) {
         const escrowRecord = record.swap.escrow && typeof record.swap.escrow === "object" ? record.swap.escrow : {};
         record.swap.escrow = { ...escrowRecord, address: escrowAddress,
+          validUntil: signedValidUntil ?? escrowRecord.validUntil ?? null,
           // THE SETTLEMENT-CHAIN HEIGHT, NAMED AS SUCH. It is for the OrderCreated/Declined log search; the XMR
           // watch and the recovery file take the Monero height measured above. The old name `birthHeight` stays
           // readable on records written before this split.

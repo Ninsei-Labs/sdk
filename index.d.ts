@@ -2196,6 +2196,20 @@ export interface OrderApi {
    */
   status(escrow: string): Promise<OrderStatus>;
   /**
+   * ONE BLOCK: state, the ready mark and both deadlines, read at the same tag, plus that block's number, hash
+   * and timestamp. A caller that cannot identify the block is refused instead of given a latest block.
+   */
+  read(escrow: string, deps?: OrderReadDeps): Promise<OrderRead>;
+  /**
+   * Every escrow's terms and settlement state, from logs. Supply `escrows`, or a recovery key to find them first.
+   * Removed logs are dropped and `checkpoint` resumes from an anchored block only when its hash still matches.
+   */
+  history(request: OrderHistoryRequest): Promise<OrderHistoryResult>;
+  /** The creation block and terms for one escrow; `found: false` when the creation event is outside the range. */
+  lookup(escrow: string, request: OrderLookupRequest): Promise<OrderLookupResult>;
+  /** `pending`, `landed` or `expired` for a predicted escrow at a named finality. */
+  funding(request: OrderFundingRequest): Promise<OrderFundingResult>;
+  /**
    * The order deadlines from the chain: t1 (the settlement boundary), readyBy (the ready-mark boundary) and the
    * terms hash the recovery file is bound to. The screen uses them to say whether the person is in the dead zone.
    */
@@ -2235,6 +2249,144 @@ export interface OrderDeclineDeps {
   readonly logs?: EvmLogReader;
   /** The first block to scan (the escrow's birth height when it is known). Default: the whole chain. */
   readonly fromBlock?: string | number;
+}
+
+/** The block a read was made at: number, hash and timestamp, all from the same tag. */
+export interface OrderBlock {
+  readonly number: number;
+  readonly hash: string;
+  readonly timestamp: number;
+}
+
+export interface OrderReadDeps {
+  readonly call?: (request: { readonly to: string; readonly data: string; readonly block?: string | number }) => Promise<string>;
+  readonly blockTag?: string | number;
+  /** (tag) -> block. The SDK also accepts `evmBlock`; one of the two is required. */
+  readonly block?: (tag?: string | number) => Promise<OrderBlock | null>;
+  readonly evmBlock?: (tag?: string | number) => Promise<OrderBlock | null>;
+}
+
+export interface OrderRead {
+  readonly status: OrderStatus;
+  readonly ready: boolean;
+  readonly readyBy: number;
+  readonly t1: number;
+  readonly block: OrderBlock;
+}
+
+/** Terms are the on-chain OrderTerms event: the fee and claim tip are not in OrderCreated. */
+export interface OrderTerms {
+  readonly escrow: string;
+  readonly locker: string | null;
+  readonly claimer: string | null;
+  readonly commitHalfLocker: string;
+  readonly commitHalfClaimer: string;
+  readonly edPointLocker: string;
+  readonly edPointClaimer: string;
+  readonly edViewPointLocker: string;
+  readonly amount: string;
+  readonly readyBy: number;
+  readonly t1: number;
+  readonly registry: string | null;
+  readonly provider: string | null;
+  readonly quoteKey: string | null;
+  readonly feeBps: number;
+  readonly fee: string;
+  readonly feeRecipient: string | null;
+  readonly claimTip: string;
+  readonly blockNumber: number | null;
+  readonly blockHash: string | null;
+  readonly transactionHash: string | null;
+  readonly logIndex: number | null;
+}
+
+export interface OrderHistoryStatus {
+  readonly isFunded: boolean;
+  readonly isClaimed: boolean;
+  readonly isRefunded: boolean;
+  readonly ready: boolean;
+  readonly declined: boolean;
+}
+
+export interface OrderHistoryEntry {
+  readonly escrow: string;
+  readonly terms: OrderTerms | null;
+  readonly status: OrderHistoryStatus;
+  readonly events: readonly OrderHistoryEvent[];
+}
+
+export interface OrderHistoryEvent {
+  readonly escrow: string;
+  readonly event: "HalfRevealed" | "Ready" | "Declined";
+  readonly blockNumber: number | string | null;
+  readonly transactionHash: string | null;
+  readonly logIndex: number | string | null;
+  readonly half?: string;
+  readonly byClaimer?: boolean;
+  readonly by?: string;
+}
+
+export interface OrderHistoryRequest {
+  /** Either an explicit list, or a key with `mnemonic` and `chainId`/factories. */
+  readonly escrows?: readonly string[];
+  readonly mnemonic?: string;
+  readonly chainId?: number;
+  readonly factory?: string | null;
+  readonly factories?: readonly (string | { readonly address?: string; readonly factory?: string; readonly deploymentBlock?: number | null })[] | null;
+  readonly address?: string | null;
+  readonly evmLogs: (request: { address: readonly string[]; topics: (string | null)[][]; fromBlock: number | string; toBlock: number | string }) => Promise<unknown[]>;
+  readonly fromBlock?: number | string;
+  readonly toBlock?: number | string;
+  readonly deploymentBlock?: number | null;
+  readonly madeBlock?: number | null;
+  readonly checkpoint?: { readonly number: number; readonly hash: string } | null;
+  readonly evmBlock?: (tag?: string | number) => Promise<OrderBlock | null>;
+}
+
+export interface OrderHistoryResult {
+  readonly escrows: readonly OrderHistoryEntry[];
+  readonly checkpoint: { readonly number: number; readonly hash: string } | null;
+  readonly replayed: boolean;
+  readonly fromBlock: number | string;
+  readonly toBlock: number | string;
+  readonly swaps?: readonly Readonly<Record<string, unknown>>[];
+}
+
+export interface OrderLookupRequest {
+  readonly factory: string;
+  readonly deploymentBlock?: number;
+  readonly evmLogs: (request: { address: string; topics: (string | null)[]; fromBlock: number | string; toBlock: number | string }) => Promise<unknown[]>;
+  readonly toBlock?: number | string;
+  readonly evmBlock?: (tag?: string | number) => Promise<OrderBlock | null>;
+}
+
+export interface OrderLookupResult {
+  readonly escrow: string;
+  readonly found: boolean;
+  readonly creationBlock: number | null;
+  readonly creationBlockHash: string | null;
+  readonly order?: Readonly<Record<string, unknown>>;
+  readonly terms: OrderTerms | null;
+  readonly status: OrderHistoryStatus | null;
+}
+
+export interface OrderFundingRequest {
+  readonly escrow: string;
+  readonly validUntil: number;
+  readonly finality?: "latest" | "safe" | "finalized";
+  readonly blockTag?: string | number;
+  readonly call?: (request: { readonly to: string; readonly data: string; readonly block?: string | number }) => Promise<string>;
+  readonly block?: (tag?: string | number) => Promise<OrderBlock | null>;
+  readonly evmBlock?: (tag?: string | number) => Promise<OrderBlock | null>;
+}
+
+export interface OrderFundingResult {
+  readonly state: "pending" | "landed" | "expired";
+  readonly escrow: string;
+  readonly validUntil: number;
+  readonly finality: "latest" | "safe" | "finalized";
+  readonly block: OrderBlock;
+  readonly status?: OrderStatus;
 }
 
 /** THE ORDER STATE, READ FROM THE CHAIN (escrow status()): three flags and the remainder. */

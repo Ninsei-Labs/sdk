@@ -297,13 +297,37 @@ leaves; it does not fall back to `Date.now()`. `secondsLeft` is derived from tha
 `actions.claim` is unchanged: it still sends only from the claimer's own wallet, because the half is revealed by
 whoever sends the claim.
 
+## Order reads: one block, terms, lookup and funding
+
+`order.read(escrow, deps)` asks four questions at one block tag: `status()`, the ready mark and both deadlines.
+It returns the decoded values plus `{ number, hash, timestamp }` from that same tag. A block reader that answers
+another height, or a missing one, is `bad-input`; the result never mixes a latest value with a newer block header.
+
+`order.history` reads terms and settlement events from logs in one address-filtered request. Supply `escrows`, or a
+recovery key and let `findSwaps` name them first. Terms come from `OrderTerms`, so `amount`, `feeBps`, `fee`,
+`feeRecipient` and `claimTip` are present; state comes from `HalfRevealed`, `Ready` and `Declined`. Removed logs are
+dropped. The result carries a `checkpoint` of `{ number, hash }`; a later call resumes after it only when that block
+still has the same hash, otherwise it replays from `fromBlock` and says `replayed: true`.
+
+`order.lookup(escrow, request)` starts from the escrow address, returns its creation block and hash, and joins the
+terms. `found: false` means the creation event was not in the requested range, not that the escrow is unknown.
+
+`order.funding({ escrow, validUntil, finality })` returns `pending`, `landed` or `expired`. An address with code and a
+funded status is `landed`; an address with no code is `pending` until the signed `validUntil` and `expired` from it.
+The contract answer and the block timestamp are read at the same finality tag (`latest`, `safe` or `finalized`).
+
+The recovery search start is one rule for every client: `recoverySearchStart` returns the shared 360,000-block day
+grid line below the key's creation block, never below the factory deployment. `findSwaps` accepts `madeBlock` and
+uses it, so the RPC does not learn which escrow range belongs to a key.
+
 ## Found orders and the paying token
 
 `findSwaps` returns the orders whose commitment came from the recovery key. An order is found from the public `salt`
 in its own `OrderCreated`: the binding is `ninsei-taker-v2|<chain>|<factory>|taker|<salt>`, so the same words on
 another device or at another factory produce a different half and no number is reserved. The result says
-`derivation: "salt-v2"` and has no index. There is no range scan and no `max-index` result: every order in the logs is
-read once, and an unreadable log request is a refusal, not a partial answer.
+`derivation: "salt-v2"` and has no index. There is no index range scan and no `max-index` result: every order in the logs is
+read once, and an unreadable log request is a refusal, not a partial answer. `madeBlock` moves the shared
+`recoverySearchStart` line, not a per-key range.
 
 `readEscrowEventsByTopic` reads the same three settlement events (`HalfRevealed`, `Ready` and `Declined`) without
 an address filter: the caller receives every event in the block range and filters by `escrow`. This is the

@@ -18,6 +18,7 @@ import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { createHalves } from "../engine/atomic/halves.js";
 import { halfCommitmentHex } from "../engine/atomic/orderHalfCommit.js";
 import { ORDER_CREATED_TOPIC, ORDER_CREATED_TOPICS } from "../engine/evm/factory.js";
+import { ORDER_TERMS_TOPIC } from "../engine/evm/escrow.js";
 import { SdkError } from "./errors.mjs";
 import { probeMoneroNode } from "./probes.mjs";
 import { ed25519, keccak256, randomBytes, secp256k1 } from "./primitives.mjs";
@@ -531,6 +532,139 @@ function decodeEscrowEvents(logs, allowedEscrows = null) {
   return events.sort((a, b) => Number(a.blockNumber || 0) - Number(b.blockNumber || 0) || Number(a.logIndex || 0) - Number(b.logIndex || 0));
 }
 
+const ORDER_TERMS_WORDS = 15;
+const searchStartBlock = (madeBlock, deploymentBlock) => {
+  const made = Number(madeBlock);
+  const deployment = Number(deploymentBlock);
+  if (!Number.isSafeInteger(made) || made < 0) return Number.isSafeInteger(deployment) && deployment > 0 ? deployment : 0;
+  // THE DAY GRID IS A PRIVACY BOUNDARY, NOT AN OPTIMISATION. Every key made in one window starts at the same
+  // line, so the RPC cannot infer the key's creation block from the range a client asks for. The margin below the
+  // line covers a reorganisation that moved the creation block.
+  const grid = 360_000;
+  const margin = 15_000;
+  return Math.max(Number.isSafeInteger(deployment) && deployment > 0 ? deployment : 0,
+    Math.floor(Math.max(0, made - margin) / grid) * grid);
+};
+
+/** The one search-start rule every client uses for a key made at `madeBlock`. */
+export function recoverySearchStart({ madeBlock = null, deploymentBlock = 0 } = {}) {
+  return searchStartBlock(madeBlock, deploymentBlock);
+}
+
+function decodeOrderTerms(log) {
+  if (!log || typeof log !== "object" || log.removed === true) return null;
+  const topics = Array.isArray(log.topics) ? log.topics : [];
+  if (topics.length < 4 || String(topics[0] || "").toLowerCase() !== ORDER_TERMS_TOPIC) return null;
+  if (typeof log.data !== "string" || !/^0x[0-9a-fA-F]*$/.test(log.data)) return null;
+  const data = log.data.slice(2);
+  if (data.length < ORDER_TERMS_WORDS * 64 || data.length % 64 !== 0) return null;
+  const word = (i) => "0x" + data.slice(i * 64, (i + 1) * 64).toLowerCase();
+  const escrow = addressTopic(topics[1]);
+  if (!escrow) return null;
+  let amount, fee, claimTip;
+  try {
+    amount = BigInt(word(5)).toString();
+    fee = BigInt(word(12)).toString();
+    claimTip = BigInt(word(14)).toString();
+  } catch { return null; }
+  return {
+    escrow, locker: addressTopic(topics[2]), claimer: addressTopic(topics[3]),
+    commitHalfLocker: word(0), commitHalfClaimer: word(1), edPointLocker: word(2),
+    edPointClaimer: word(3), edViewPointLocker: word(4), amount,
+    readyBy: Number(BigInt(word(6))), t1: Number(BigInt(word(7))),
+    registry: addressTopic(word(8)), provider: addressTopic(word(9)), quoteKey: addressTopic(word(10)),
+    feeBps: Number(BigInt(word(11))), fee, feeRecipient: addressTopic(word(13)), claimTip,
+    blockNumber: log.blockNumber == null ? null : Number(log.blockNumber),
+    blockHash: typeof log.blockHash === "string" ? log.blockHash.toLowerCase() : null,
+    transactionHash: typeof log.transactionHash === "string" ? log.transactionHash : null,
+    logIndex: log.logIndex == null ? null : Number(log.logIndex),
+  };
+}
+
+/**
+ * ONE HISTORY READ FOR A SET OF ESCROWS. The terms and the settlement events come from logs, so a caller does not
+ * ask the RPC about each escrow separately. Removed logs are dropped. `checkpoint` is `{ number, hash }`; when the
+ * anchored block has changed, the read starts again from `fromBlock` instead of continuing from a moved chain.
+ */
+export async function readEscrowHistory({ escrows, evmLogs, fromBlock = 0, toBlock = "latest", checkpoint = null, evmBlock = null } = {}) {
+  if (!Array.isArray(escrows) || !escrows.length) throw bad("escrows");
+  const addresses = [...new Set(escrows.map((escrow) => {
+    if (typeof escrow !== "string" || !ADDRESS_RE.test(escrow)) throw bad("escrows");
+    return escrow.toLowerCase();
+  }))];
+  let effectiveFrom = fromBlock;
+  let replayed = false;
+  let endBlock = null;
+  if (typeof evmBlock === "function") {
+    try {
+      endBlock = await evmBlock(toBlock);
+      if (endBlock && endBlock.number !== undefined) toBlock = Number(endBlock.number);
+    } catch { endBlock = null; }
+    if (checkpoint && Number.isSafeInteger(Number(checkpoint.number)) && typeof checkpoint.hash === "string") {
+      try {
+        const anchored = await evmBlock(Number(checkpoint.number));
+        const expected = String(checkpoint.hash).replace(/^0x/i, "").toLowerCase();
+        const got = String(anchored && anchored.hash || "").replace(/^0x/i, "").toLowerCase();
+        if (anchored && got && got === expected) effectiveFrom = Number(checkpoint.number) + 1;
+        else replayed = true;
+      } catch { replayed = true; }
+    }
+  } else if (checkpoint) replayed = true;
+  const logs = await readLogs(evmLogs, {
+    address: addresses,
+    topics: [[ORDER_TERMS_TOPIC, ESCROW_EVENT_TOPICS.halfRevealed, ESCROW_EVENT_TOPICS.ready, ESCROW_EVENT_TOPICS.declined]],
+    fromBlock: effectiveFrom,
+    toBlock,
+  });
+  const terms = new Map();
+  for (const log of logs) {
+    const decoded = decodeOrderTerms(log);
+    if (decoded && !terms.has(decoded.escrow)) terms.set(decoded.escrow, decoded);
+  }
+  const settlement = decodeEscrowEvents(logs, new Set(addresses));
+  const byEscrow = new Map(addresses.map((escrow) => [escrow, {
+    escrow, terms: terms.get(escrow) || null,
+    status: { isFunded: terms.has(escrow), isClaimed: false, isRefunded: false, ready: false, declined: false },
+    events: [],
+  }]));
+  for (const event of settlement) {
+    const row = byEscrow.get(event.escrow);
+    if (!row) continue;
+    row.events.push(event);
+    if (event.event === "HalfRevealed") {
+      if (event.byClaimer) row.status.isClaimed = true;
+      else row.status.isRefunded = true;
+    } else if (event.event === "Ready") row.status.ready = true;
+    else if (event.event === "Declined") { row.status.isRefunded = true; row.status.declined = true; }
+  }
+  let checkpointOut = null;
+  if (endBlock && Number.isSafeInteger(Number(endBlock.number)) && /^[0-9a-f]{64}$/i.test(String(endBlock.hash || "").replace(/^0x/i, ""))) {
+    checkpointOut = { number: Number(endBlock.number), hash: "0x" + String(endBlock.hash).replace(/^0x/i, "").toLowerCase() };
+  } else {
+    const last = logs.filter((log) => log && log.removed !== true && Number.isSafeInteger(Number(log.blockNumber)) && typeof log.blockHash === "string")
+      .sort((a, b) => Number(a.blockNumber) - Number(b.blockNumber)) .at(-1);
+    if (last) checkpointOut = { number: Number(last.blockNumber), hash: "0x" + last.blockHash.replace(/^0x/i, "").toLowerCase() };
+  }
+  return { escrows: [...byEscrow.values()], checkpoint: checkpointOut, replayed, fromBlock: effectiveFrom, toBlock };
+}
+
+/** One escrow's creation event, for a lookup that starts from the escrow address rather than a key. */
+export async function findOrderByEscrow({ escrow, factory, deploymentBlock = 0, evmLogs, toBlock = "latest" } = {}) {
+  if (typeof escrow !== "string" || !ADDRESS_RE.test(escrow)) throw bad("escrow");
+  if (typeof factory !== "string" || !ADDRESS_RE.test(factory)) throw bad("factory");
+  const logs = await readLogs(evmLogs, {
+    address: factory, topics: [ORDER_CREATED_TOPICS, pad32(escrow)], fromBlock: deploymentBlock, toBlock,
+  });
+  for (const log of logs) {
+    if (!log || typeof log !== "object" || log.removed === true) continue;
+    const order = decodeOrderLog(log);
+    if (order && order.escrow.toLowerCase() === escrow.toLowerCase()) {
+      return { order, creationBlock: order.blockNumber, creationBlockHash: typeof log.blockHash === "string" ? log.blockHash : null };
+    }
+  }
+  return null;
+}
+
 // THE MONERO HEIGHT A RECOVERED ORDER STARTED AT. With one key there is no per-swap file to carry it, so it is
 // derived from the settlement chain: the timestamp of the block that holds OrderCreated, then the last Monero
 // block at or before it. A Monero block's timestamp may run ahead of wall time, hence the safety margin.
@@ -660,7 +794,7 @@ async function recoveredStartHeight(order, { evmBlockTime, moneroTip, moneroBloc
  * positions) and merges the answers. Without one, every OrderCreated of the factory is read and matched locally.
  */
 export async function findSwaps({ mnemonic, chainId, factory = null, factories = null, address = null, evmLogs,
-  fromBlock = null, deploymentBlock = null, toBlock = "latest",
+  fromBlock = null, deploymentBlock = null, madeBlock = null, toBlock = "latest",
   evmBlockTime = null, evmBlockTimes = null, evmCode = null, moneroTip = null, moneroBlockTimestamp = null,
   xmrNodes = null, moneroNetwork = null, fetchImpl = globalThis.fetch } = {}) {
   // FACTORY HISTORY IS PART OF THE SEARCH. A chain can have more than one factory after a contract change;
@@ -689,7 +823,7 @@ export async function findSwaps({ mnemonic, chainId, factory = null, factories =
     // THE CHAIN SAYS WHERE ITS ORDERS CAN START. An explicit fromBlock wins; otherwise the factory's own
     // deployment block is used. Zero remains the last resort for a caller that knows the factory existed at genesis.
     const startBlock = fromBlock === null || fromBlock === undefined
-      ? (target.deploymentBlock === null ? 0 : target.deploymentBlock)
+      ? recoverySearchStart({ madeBlock, deploymentBlock: target.deploymentBlock === null ? 0 : target.deploymentBlock })
       : fromBlock;
     const base = { address: target.factory, fromBlock: startBlock, toBlock };
     let logs = [];
@@ -705,6 +839,9 @@ export async function findSwaps({ mnemonic, chainId, factory = null, factories =
     }
     for (const log of logs) {
       if (!log || typeof log !== "object") continue;
+      // A REMOVED CREATION LOG IS NOT AN ORDER. The site already drops removed settlement logs; the creation
+      // search must do the same, or a reorged OrderCreated can resurrect an escrow that never existed.
+      if (log.removed === true) continue;
       const logAddress = typeof log.address === "string" ? log.address : "";
       const logTx = typeof log.transactionHash === "string" ? log.transactionHash : "";
       const logIndex = typeof log.logIndex === "number" || typeof log.logIndex === "string" ? log.logIndex : "";

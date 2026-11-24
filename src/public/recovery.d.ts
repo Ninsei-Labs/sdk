@@ -446,6 +446,8 @@ export declare function findSwaps(request: {
   fromBlock?: number | string;
   /** The factory's deployment block from the chain registry; used when `fromBlock` is omitted. */
   deploymentBlock?: number | null;
+  /** The block where this key was made; the shared day-grid search start is derived from it. */
+  madeBlock?: number | null;
   toBlock?: number | string;
   /** Reads the settlement block timestamp, in seconds: (blockNumber) -> seconds. */
   evmBlockTime?: (blockNumber: number) => Promise<number>;
@@ -472,3 +474,51 @@ export declare function findSwaps(request: {
   complete: boolean;
 }>;
 
+
+/** The one search-start rule: a key made at `madeBlock` starts on the shared day grid, never below deployment. */
+export declare function recoverySearchStart(request?: { madeBlock?: number | null; deploymentBlock?: number }): number;
+
+/** Terms decoded from an OrderTerms event. */
+export interface EscrowHistoryTerms {
+  readonly escrow: string;
+  readonly locker: string | null;
+  readonly claimer: string | null;
+  readonly amount: string;
+  readonly readyBy: number;
+  readonly t1: number;
+  readonly feeBps: number;
+  readonly fee: string;
+  readonly feeRecipient: string | null;
+  readonly claimTip: string;
+  readonly blockNumber: number | null;
+  readonly blockHash: string | null;
+  readonly transactionHash: string | null;
+  readonly logIndex: number | null;
+  readonly [field: string]: unknown;
+}
+
+export interface EscrowHistoryEntry {
+  readonly escrow: string;
+  readonly terms: EscrowHistoryTerms | null;
+  readonly status: { readonly isFunded: boolean; readonly isClaimed: boolean; readonly isRefunded: boolean; readonly ready: boolean; readonly declined: boolean };
+  readonly events: readonly EscrowEvent[];
+}
+
+/** Terms and settlement state for a set of escrows, with a resumable block checkpoint. */
+export declare function readEscrowHistory(request: {
+  escrows: readonly string[];
+  evmLogs: (request: { address: readonly string[]; topics: (string | null)[][]; fromBlock: number | string; toBlock: number | string }) => Promise<unknown[]>;
+  fromBlock?: number | string;
+  toBlock?: number | string;
+  checkpoint?: { readonly number: number; readonly hash: string } | null;
+  evmBlock?: (tag?: string | number) => Promise<{ readonly number?: number | string; readonly hash?: string; readonly timestamp?: number | string } | null>;
+}): Promise<{ escrows: EscrowHistoryEntry[]; checkpoint: { number: number; hash: string } | null; replayed: boolean; fromBlock: number | string; toBlock: number | string }>;
+
+/** The creation event and block for one escrow, or null when it is outside the range. */
+export declare function findOrderByEscrow(request: {
+  escrow: string;
+  factory: string;
+  deploymentBlock?: number;
+  evmLogs: (request: { address: string; topics: (string | null)[]; fromBlock: number | string; toBlock: number | string }) => Promise<unknown[]>;
+  toBlock?: number | string;
+}): Promise<{ order: FoundSwap; creationBlock: number | null; creationBlockHash: string | null } | null>;

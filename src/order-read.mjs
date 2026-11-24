@@ -1,0 +1,111 @@
+// ORDER READS THAT NEED ONE CONSISTENT CUT. `order.read` lives beside the escrow calls in swap-flow; this module
+// holds the bulk history, the lookup by escrow and the funding verdict. They share one rule: an incomplete read is
+// a refusal or a named unknown, never a zero or an absence.
+import { SdkError } from "./errors.mjs";
+import * as engine from "./engine.mjs";
+import { findOrderByEscrow, findSwaps, readEscrowHistory } from "./recovery-key.mjs";
+
+const bad = (field, why = null) => new SdkError("bad-input", why ? { field, why } : { field });
+const address = (value, field = "escrow") => {
+  if (typeof value !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(value)) throw bad(field);
+  return value.toLowerCase();
+};
+const number = (value, field) => {
+  const n = Number(value);
+  if (!Number.isSafeInteger(n) || n < 0) throw bad(field);
+  return n;
+};
+const blockOf = async (readBlock, tag) => {
+  let block;
+  try { block = await readBlock(tag); }
+  catch { throw bad("block", "unreadable"); }
+  const height = Number(block && block.number);
+  const timestamp = Number(block && block.timestamp);
+  const hash = String((block && block.hash) || "").replace(/^0x/i, "").toLowerCase();
+  if (!Number.isSafeInteger(height) || height < 0 || !Number.isSafeInteger(timestamp) || timestamp <= 0
+      || !/^[0-9a-f]{64}$/.test(hash)) throw bad("block", "incomplete");
+  return { number: height, hash: "0x" + hash, timestamp };
+};
+
+/**
+ * Read the state and terms of a list of escrows, or of every order made with a key, from logs. A key search first
+ * finds the escrows with `findSwaps`, then reads the same terms and settlement events as an explicit list would.
+ */
+export async function orderHistory(request = {}) {
+  if (!request || typeof request !== "object") throw bad("request");
+  const evmLogs = request.evmLogs;
+  if (typeof evmLogs !== "function") throw bad("evmLogs");
+  let escrows = request.escrows;
+  let found = null;
+  if (escrows === undefined || escrows === null) {
+    if (typeof request.mnemonic !== "string") throw bad("escrows");
+    found = await findSwaps({ ...request, evmLogs });
+    escrows = found.swaps.map((order) => order.escrow);
+  }
+  if (!Array.isArray(escrows) || !escrows.length) throw bad("escrows");
+  const history = await readEscrowHistory({
+    escrows, evmLogs, fromBlock: request.fromBlock === undefined ? 0 : request.fromBlock,
+    toBlock: request.toBlock === undefined ? "latest" : request.toBlock,
+    checkpoint: request.checkpoint || null, evmBlock: request.evmBlock || null,
+  });
+  return { ...history, ...(found ? { swaps: found.swaps } : {}) };
+}
+
+/** The creation block, the order and its terms for one escrow; null when the creation event is not in the range. */
+export async function orderLookup(escrow, request = {}) {
+  const target = address(escrow);
+  if (typeof request.factory !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(request.factory)) throw bad("factory");
+  if (typeof request.evmLogs !== "function") throw bad("evmLogs");
+  const found = await findOrderByEscrow({
+    escrow: target, factory: request.factory, deploymentBlock: number(request.deploymentBlock || 0, "deploymentBlock"),
+    evmLogs: request.evmLogs, toBlock: request.toBlock === undefined ? "latest" : request.toBlock,
+  });
+  if (!found) return { escrow: target, found: false, creationBlock: null, creationBlockHash: null, terms: null };
+  const history = await readEscrowHistory({
+    escrows: [target], evmLogs: request.evmLogs,
+    fromBlock: found.creationBlock === null || found.creationBlock === undefined ? 0 : found.creationBlock,
+    toBlock: request.toBlock === undefined ? "latest" : request.toBlock,
+    evmBlock: request.evmBlock || null,
+  });
+  const row = history.escrows.find((entry) => entry.escrow === target) || null;
+  return {
+    escrow: target, found: true, creationBlock: found.creationBlock,
+    creationBlockHash: found.creationBlockHash, order: found.order,
+    terms: row ? row.terms : null, status: row ? row.status : null,
+  };
+}
+
+/**
+ * The funding verdict for a predicted escrow at a named finality. An existing escrow is `landed`; an address with
+ * no code is `pending` until the signed `validUntil` and `expired` from it. The block timestamp and the contract
+ * answer come from the same tag.
+ */
+export async function orderFunding(request = {}) {
+  if (!request || typeof request !== "object") throw bad("request");
+  const escrow = address(request.escrow);
+  const validUntil = number(request.validUntil, "validUntil");
+  if (validUntil <= 0) throw bad("validUntil");
+  const finality = request.finality === undefined || request.finality === null ? "finalized" : request.finality;
+  if (!["latest", "safe", "finalized"].includes(finality)) throw bad("finality");
+  const call = request.call || engine.evm.readContract;
+  const readBlock = request.block || request.evmBlock;
+  if (typeof call !== "function") throw bad("call");
+  if (typeof readBlock !== "function") throw bad("block");
+  const tag = request.blockTag === undefined || request.blockTag === null ? finality : request.blockTag;
+  const [raw, block] = await Promise.all([
+    call({ to: escrow, data: engine.escrow.encodeStatus(), block: tag }),
+    blockOf(readBlock, tag),
+  ]);
+  const body = String(raw || "").replace(/^0x/, "");
+  if (body.length === 0) {
+    return { state: block.timestamp >= validUntil ? "expired" : "pending", escrow,
+      validUntil, finality, block };
+  }
+  let status;
+  try { status = engine.escrow.decodeStatus(raw); }
+  catch { throw bad("status", "unreadable"); }
+  if (status.isFunded !== true) {
+    return { state: "pending", escrow, validUntil, finality, block, status };
+  }
+  return { state: "landed", escrow, validUntil, finality, block, status };
+}
