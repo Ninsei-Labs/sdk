@@ -616,7 +616,7 @@ function decodeOrderTerms(log) {
  */
 export async function readEscrowHistory({ escrows, evmLogs, fromBlock = 0, toBlock = "latest", checkpoint = null,
   previous = null, evmBlock = null } = {}) {
-  if (!Array.isArray(escrows) || !escrows.length) throw bad("escrows");
+  if (!Array.isArray(escrows)) throw bad("escrows");
   const addresses = [...new Set(escrows.map((escrow) => {
     if (typeof escrow !== "string" || !ADDRESS_RE.test(escrow)) throw bad("escrows");
     return escrow.toLowerCase();
@@ -639,12 +639,14 @@ export async function readEscrowHistory({ escrows, evmLogs, fromBlock = 0, toBlo
       } catch { replayed = true; }
     }
   } else if (checkpoint) replayed = true;
-  const logs = await readLogs(evmLogs, {
+  // An empty set is a valid history: a key with no orders must get an empty answer, not a refusal. It still resolves
+  // and returns a block checkpoint so the caller can resume the next read.
+  const logs = addresses.length ? await readLogs(evmLogs, {
     address: addresses,
     topics: [[ORDER_TERMS_TOPIC, ESCROW_EVENT_TOPICS.halfRevealed, ESCROW_EVENT_TOPICS.ready, ESCROW_EVENT_TOPICS.declined]],
     fromBlock: effectiveFrom,
     toBlock,
-  });
+  }) : [];
   const terms = new Map();
   for (const log of logs) {
     const decoded = decodeOrderTerms(log);

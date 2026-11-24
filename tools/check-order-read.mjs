@@ -175,6 +175,18 @@ const createdLog = ({ removed = false, blockNumber = 100, salt = "0x" + "ab".rep
   check(replayed.replayed === true && replayFrom === 0, "a moved checkpoint did not replay from the range start");
 }
 
+// --- an empty key is an empty history, not a refusal ---
+{
+  const empty = await orderHistory({
+    mnemonic: WORDS, chainId: CHAIN, factory: FACTORY, madeBlock: 100, deploymentBlock: 1, toBlock: 20,
+    evmLogs: async () => [],
+    evmBlock: async (tag) => ({ number: Number(tag), hash: H(Number(tag)), timestamp: 1000 }),
+  });
+  check(Array.isArray(empty.escrows) && empty.escrows.length === 0 && empty.swaps.length === 0,
+    "an empty key did not return an empty history");
+  check(empty.checkpoint && empty.checkpoint.number === 20, "an empty history did not return its checkpoint");
+}
+
 // --- a resumed history is the same as a full history, and a moved checkpoint is not mixed ---
 {
   const all = [

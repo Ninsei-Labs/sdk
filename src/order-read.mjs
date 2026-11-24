@@ -4,7 +4,7 @@
 import { SdkError } from "./errors.mjs";
 import * as engine from "./engine.mjs";
 import { finalityFor } from "../engine/core/finality.js";
-import { findOrderByEscrow, findSwaps, readEscrowHistory } from "./recovery-key.mjs";
+import { findOrderByEscrow, findSwaps, readEscrowHistory, recoveryStartBlock } from "./recovery-key.mjs";
 
 const bad = (field, why = null) => new SdkError("bad-input", why ? { field, why } : { field });
 const address = (value, field = "escrow") => {
@@ -38,14 +38,23 @@ export async function orderHistory(request = {}) {
   if (typeof evmLogs !== "function") throw bad("evmLogs");
   let escrows = request.escrows;
   let found = null;
+  let fromBlock = request.fromBlock;
   if (escrows === undefined || escrows === null) {
     if (typeof request.mnemonic !== "string") throw bad("escrows");
     found = await findSwaps({ ...request, evmLogs });
     escrows = found.swaps.map((order) => order.escrow);
+    // A key history starts where its search started, not at block zero. With orders the earliest creation block is
+    // enough (terms and settlement follow it); an empty key uses the same shared start rule as findSwaps.
+    if (fromBlock === undefined || fromBlock === null) {
+      const blocks = found.swaps.map((order) => Number(order.blockNumber)).filter((value) => Number.isSafeInteger(value) && value >= 0);
+      fromBlock = blocks.length ? Math.min(...blocks)
+        : (await recoveryStartBlock({ madeBlock: request.madeBlock, deploymentBlock: Number(request.deploymentBlock) || 0,
+          startAt: request.startAt, head: request.head, blockAt: request.blockAt })).block;
+    }
   }
-  if (!Array.isArray(escrows) || !escrows.length) throw bad("escrows");
+  if (!Array.isArray(escrows)) throw bad("escrows");
   const history = await readEscrowHistory({
-    escrows, evmLogs, fromBlock: request.fromBlock === undefined ? 0 : request.fromBlock,
+    escrows, evmLogs, fromBlock: fromBlock === undefined || fromBlock === null ? 0 : fromBlock,
     toBlock: request.toBlock === undefined ? "latest" : request.toBlock,
     checkpoint: request.checkpoint || null, previous: request.previous || null, evmBlock: request.evmBlock || null,
   });
