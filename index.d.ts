@@ -775,8 +775,9 @@ export interface SwapsApi {
    * (the block hash matches) with the required confirmations. Refusals come as CODES: `xmr-nodes-disagree` (a synced
    * node has no such transaction there or a different block hash), `xmr-no-nodes` (nothing reachable),
    * `xmr-underpaid`, `xmr-locked`, `xmr-too-late`. A waiting state is RETURNED as `state` (`pending` | `one-node` |
-   * `pool`), never a silent success. `pool` carries the matching txid while the transfer is still in a node's
-   * mempool; it is information only and never counts as seen or arrived.
+   * `pool` | `confirming` | `locked` | `short` | `over` | `unknown`), never a silent success. `pool` carries the
+   * matching txid while the transfer is still in a node's mempool; it is information only and never counts as seen
+   * or arrived.
    */
   verifyArrival(request: XmrArrivalRequest): Promise<XmrArrivalVerdict>;
   /** The same arrival decision over one recovery read with the explicit `at-least` or `exact` amount rule. */
@@ -803,6 +804,12 @@ export interface SwapsApi {
    * The residual privacy leak is the grid bucket that contains the start.
    */
   readRecoveryWitness(request: XmrRecoveryWitnessRequest): Promise<XmrRecoveryWitnessVerdict>;
+  /**
+   * THE FIRST BLOCK PAST `t1`, read from the trusted primary node. Pass the returned height as `toHeight`; a `t1`
+   * beyond the node's tip returns the tip with `beyondTip: true`. The default two-hour margin covers block
+   * timestamps that lag the wall clock.
+   */
+  recoveryEndHeight(request: XmrRecoveryEndHeightRequest): Promise<XmrRecoveryEndHeightResult>;
   /**
    * RUN THE EXACT CHECK AND THE WITNESS-V1 SLICE CHECK SIDE BY SIDE. The exact verdict still decides; this
    * returns both readings and any difference, and changes no swap state. `witnessNodes` must name at least one
@@ -991,6 +998,27 @@ export interface XmrRecoveryProgress {
  * two-operator decision: the caller owns the independent check. The checkpoint is stored by the caller; a moved
  * anchor or a digest that does not describe the record makes the SDK replay from `fromHeight`.
  */
+/** The trusted node and the settlement deadline for `recoveryEndHeight`. */
+export interface XmrRecoveryEndHeightRequest {
+  readonly node: XmrNode | string;
+  /** The order's settlement deadline in Unix seconds, not milliseconds. */
+  readonly t1: number;
+  /** Seconds added to `t1`; default 7200. */
+  readonly marginSeconds?: number;
+  readonly timeoutMs?: number;
+  readonly fetch?: FetchLike;
+}
+
+export interface XmrRecoveryEndHeightResult {
+  /** The first block whose timestamp reaches `t1 + marginSeconds`, or the tip when there is none. */
+  readonly toHeight: number;
+  readonly tip: number;
+  readonly t1: number;
+  readonly marginSeconds: number;
+  readonly block: { readonly height: number; readonly timestamp: number; readonly hash: string | null } | null;
+  readonly beyondTip: boolean;
+}
+
 export interface XmrRecoveryReadRequest {
   readonly node: XmrNode | string;
   readonly address: string;
@@ -1143,7 +1171,8 @@ export interface XmrRecoveryTransfer {
 export interface XmrRecoveryVerdict extends XmrRecoveryTotals {
   readonly state: "ready" | "pending" | "one-node" | "none";
   readonly transfers: readonly XmrRecoveryTransfer[];
-  readonly tip: number;
+  /** Null when the primary did not answer; no witness is promoted and the read is incomplete. */
+  readonly tip: number | null;
   readonly fromHeight: number;
   readonly toHeight: number | null;
   readonly minConfirmations: number;
@@ -1207,16 +1236,20 @@ export interface XmrArrivalShadowResult {
 /** The XMR state the watch hands to the interface: the fact, the waiting state, or a refusal with a code. */
 export interface XmrArrivalVerdict {
   readonly seen: boolean;
-  readonly state: "arrived" | "pending" | "one-node" | "pool";
-  /** True only when a node completed the walk and found no matching transaction. */
+  readonly state: "arrived" | "pending" | "one-node" | "pool" | "confirming" | "locked" | "short" | "over" | "unknown";
+  /** True only when a complete read found no matching transaction, in a block or the pool. */
   readonly absent?: boolean;
-  /** The operators whose completed walk found no matching transaction. */
+  /** The operators whose complete read found no matching transaction. */
   readonly completedOperators?: readonly string[];
   readonly txid: string | null;
   /** A block height; null when the matching transfer is still in a node's pool. */
   readonly height?: number | null;
   readonly blockHash?: string;
   readonly amountAtomic?: string;
+  /** The displayed amount against the signed amount: exact, short or over. */
+  readonly amountComparison?: "exact" | "short" | "over";
+  readonly shortfallAtomic?: string;
+  readonly overageAtomic?: string;
   /** Present on a pool match: every reported output passed its Pedersen amount check. */
   readonly amountVerified?: boolean;
   readonly confirmations?: number;

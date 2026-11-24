@@ -48,6 +48,7 @@ const failureOf = (error, node) => {
   // the answer as a bad one.
   const name = String(params.name || (error && error.name) || "");
   if (params.status !== undefined && params.status !== null) code = "http";
+  else if (why === "cancelled") code = "cancelled";
   else if (/^(TimeoutError|AbortError)$/.test(name) || /timeout|abort/i.test(why) || /timeout|abort/i.test(name)) code = "timeout";
   else if (why === "bad-json" || why === "no-height" || why === "no-block" || why === "busy"
     || why === "partial-transactions" || why === "partial-answer" || why === "target-mismatch"
@@ -613,6 +614,7 @@ async function readSpentStatus(node, tracked, fetchImpl, timeoutMs, options = {}
     });
     return { spends, complete: true, failed: [] };
   } catch (error) {
+    if (options.signal && options.signal.aborted) throw error;
     return { spends: [], complete: false, failed: [{ ...failureOf(error, node), why: "spent-status" }] };
   }
 }
@@ -940,6 +942,56 @@ export async function readWithdrawalState(request = {}) {
 }
 
 /**
+ * THE FIRST BLOCK PAST `t1`, FROM THE TRUSTED NODE. Monero blocks carry a timestamp, not the order's clock; the
+ * margin covers the blocks whose timestamp is behind the wall clock when they are mined. The client passes the
+ * returned height as `toHeight`, so the read stops at the swap window instead of walking to the head. A `t1` beyond
+ * the node's tip returns the tip: there is no later block to read yet.
+ */
+export async function recoveryEndHeight(request = {}) {
+  if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
+  const node = normalizeNodes([request.node])[0];
+  const t1 = Number(request.t1);
+  if (!Number.isSafeInteger(t1) || t1 <= 0 || t1 > 253402300799) {
+    throw new SdkError("bad-input", { field: "t1", why: "seconds" });
+  }
+  const marginSeconds = request.marginSeconds === null || request.marginSeconds === undefined
+    ? 7200 : Number(request.marginSeconds);
+  if (!Number.isSafeInteger(marginSeconds) || marginSeconds < 0) throw new SdkError("bad-input", { field: "marginSeconds" });
+  const fetchImpl = typeof request.fetch === "function" ? request.fetch : globalThis.fetch;
+  if (typeof fetchImpl !== "function") throw new SdkError("bad-input", { field: "fetch" });
+  const timeoutMs = Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0 ? Number(request.timeoutMs) : 20000;
+  const info = await getInfo(node, fetchImpl, timeoutMs);
+  const tip = Number(info.height);
+  if (!Number.isSafeInteger(tip) || tip < 0) throw new SdkError("xmr-no-nodes", { node: node.url, why: "height" });
+  const target = t1 + marginSeconds;
+  const header = async (height) => {
+    const body = await call(node, "/json_rpc", {
+      jsonrpc: "2.0", id: "header", method: "get_block_header_by_height", params: { height },
+    }, fetchImpl, timeoutMs);
+    const result = body && body.result;
+    const raw = result && result.block_header;
+    const stamp = Number(raw && raw.timestamp);
+    if (!raw || !Number.isSafeInteger(Number(raw.height)) || Number(raw.height) !== height
+        || !Number.isSafeInteger(stamp) || stamp <= 0) {
+      throw new SdkError("xmr-no-nodes", { node: node.url, why: "header", height });
+    }
+    return { height, timestamp: stamp, hash: hash64(raw.hash) ? normalizedHash(raw.hash) : null };
+  };
+  let low = 0;
+  let high = tip;
+  const top = await header(tip);
+  if (top.timestamp < target) return { toHeight: tip, tip, t1, marginSeconds, block: top, beyondTip: true };
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    const entry = await header(middle);
+    if (entry.timestamp >= target) high = middle;
+    else low = middle + 1;
+  }
+  const block = low === tip ? top : await header(low);
+  return { toHeight: low, tip, t1, marginSeconds, block, beyondTip: false };
+}
+
+/**
  * READ ONE NODE FROM `fromHeight` TO ITS HEAD.
  *
  * The checkpoint object is `{ read(), save(record), discard() }` or omitted. `onProgress` receives
@@ -992,6 +1044,9 @@ export async function readRecovery(request) {
   let info;
   try { info = await getInfo(node, fetchImpl, timeoutMs, { signal }); }
   catch (error) {
+    if (signal && signal.aborted) {
+      throw new SdkError("xmr-no-nodes", { node: node.url, name: "AbortError", why: "cancelled" });
+    }
     return { transfers: [], tip: null, fromHeight, toHeight, minConfirmations, ...UNKNOWN_TOTALS,
       target, complete: false, through: null, checkpoint: null, blocked: false, failed: [failureOf(error, node)] };
   }
@@ -1013,6 +1068,7 @@ export async function readRecovery(request) {
     let transfers = [];
     let spends = [];
     let poolFailure = null;
+    let failures = [];
     try {
       const pool = await scanRecoveryPoolState(node, {
         watched, tracked, tip: tipTop, nowSec: request.nowSec, fetchImpl, timeoutMs, txid: targetTxid,
@@ -1022,6 +1078,7 @@ export async function readRecovery(request) {
       spends = pool.spends;
     } catch (error) {
       poolFailure = { ...failureOf(error, node), why: "pool-read" };
+      failures = [poolFailure];
     }
     if (spentStatus && tracked.provided && tracked.byImage.size) {
       const status = await readSpentStatus(node, tracked, fetchImpl, timeoutMs, { signal });
@@ -1030,7 +1087,10 @@ export async function readRecovery(request) {
         addSpends(merged, status.spends);
         spends = [...merged.values()];
       }
-      if (!status.complete) poolFailure = status.failed[0] || poolFailure;
+      if (!status.complete) {
+        failures = [...failures, status.failed[0]];
+        if (!poolFailure) poolFailure = status.failed[0];
+      }
     }
     const totals = poolFailure
       ? { receivedAtomic: null, spentAtomic: null, unspentAtomic: null, withdrawalState: "unknown" }
@@ -1038,7 +1098,7 @@ export async function readRecovery(request) {
     return { transfers, tip: info.height, fromHeight, toHeight, minConfirmations, target,
       complete: poolFailure === null, through: null, spends, ...totals, checkpoint: null, blocked: false,
       ...(poolFailure
-        ? { failed: [poolFailure] }
+        ? { failed: failures }
         : { availableAtomic: availableAtomicOf(transfers, tracked, spends, minConfirmations),
           availableSource: { url: node.url, operator: node.operator }, failed: [] }) };
   }
@@ -1108,6 +1168,7 @@ export async function readRecovery(request) {
         if (block.txHashes.length) txs = await getBlockTxs(node, block.txHashes, fetchImpl, timeoutMs, { signal, onBytes: countBytes });
       } catch (error) {
         if (String(error && error.message) === "reorg") throw error;
+        if (signal && signal.aborted) throw error;
         const failure = failureOf(error, node);
         failure.height = height;
         return { transfers, tip: info.height, fromHeight, toHeight, minConfirmations, ...UNKNOWN_TOTALS, complete: false, through,
@@ -1134,6 +1195,7 @@ export async function readRecovery(request) {
       emit();
     }
     let poolFailure = null;
+    let failures = [];
     // A CLOSED WINDOW DOES NOT READ THE POOL. A pool transaction has no height; after `t1` it may be a late transfer
     // that the swap window excludes. The open window still reads it as before.
     const windowClosed = toHeight !== null && top < tipTop;
@@ -1152,12 +1214,16 @@ export async function readRecovery(request) {
         addSpends(spendMap, pool.spends);
       } catch (error) {
         poolFailure = { ...failureOf(error, node), why: "pool-read" };
+        failures = [poolFailure];
       }
     }
     if (spentStatus && tracked.provided && tracked.byImage.size) {
       const status = await readSpentStatus(node, tracked, fetchImpl, timeoutMs, { signal });
       addSpends(spendMap, status.spends);
-      if (!status.complete) poolFailure = status.failed[0] || poolFailure;
+      if (!status.complete) {
+        failures = [...failures, status.failed[0]];
+        if (!poolFailure) poolFailure = status.failed[0];
+      }
     }
     spends = [...spendMap.values()];
     refreshTransferState(transfers, { tipHeight: tipTop, nowSec: request.nowSec ?? Math.floor(Date.now() / 1000) });
@@ -1170,7 +1236,7 @@ export async function readRecovery(request) {
       return { transfers, tip: info.height, fromHeight, toHeight, minConfirmations, ...UNKNOWN_TOTALS, complete: false, through,
         target, spends, ...totals,
         checkpoint: through ? checkpointRecord({ ...identity, through, transfers: confirmedTransfers, spends: confirmedSpends }) : null,
-        blocked: false, failed: [poolFailure] };
+        blocked: false, failed: failures };
     }
     return { transfers, tip: info.height, fromHeight, toHeight, minConfirmations, complete: true, through,
       target, spends, ...totals, availableAtomic: availableAtomicOf(transfers, tracked, spends, minConfirmations),
@@ -1182,6 +1248,7 @@ export async function readRecovery(request) {
     try {
       return await run(prior);
     } catch (error) {
+      if (signal && signal.aborted) throw error;
       if (error && error.caller) throw error;
       if (String(error && error.message) === "reorg" && replay === 0) {
         replay += 1;
@@ -1342,6 +1409,7 @@ export async function readRecoveryWitness(request) {
           if (block.txHashes.length) txs = await getBlockTxs(node, block.txHashes, fetchImpl, timeoutMs, { signal, onBytes: countBytes });
         } catch (error) {
           if (String(error && error.message) === "reorg") throw error;
+          if (signal && signal.aborted) throw error;
           const failure = failureOf(error, node);
           failure.height = height;
           const keptThrough = through || (startRecord ? startRecord.through : null);
@@ -1382,6 +1450,7 @@ export async function readRecoveryWitness(request) {
     try {
       return await run(prior);
     } catch (error) {
+      if (signal && signal.aborted) throw error;
       if (error && error.caller) throw error;
       if (String(error && error.message) === "reorg" && replay === 0) {
         replay += 1;
@@ -1419,8 +1488,9 @@ export async function verifyArrivalFromRead(request) {
     fromHeight, toHeight: request.toHeight, minConfirmations: request.minConfirmations, nowSec: request.nowSec,
     timeoutMs: request.timeoutMs, fetch: request.fetch, keyImages: request.keyImages,
   });
-  const usable = recovery.transfers.filter((transfer) => transfer.agreed && transfer.confirmed
-    && !transfer.pool && !transfer.locked);
+  const transfers = recovery.transfers || [];
+  const agreed = transfers.filter((transfer) => transfer.agreed === true);
+  const usable = agreed.filter((transfer) => transfer.confirmed && !transfer.pool && !transfer.locked);
   const chosen = [];
   const seenOutputs = new Set();
   let total = 0n;
@@ -1443,14 +1513,49 @@ export async function verifyArrivalFromRead(request) {
       if (contributed) chosen.push(transfer);
     }
   }
+  // THE DISPLAYED AMOUNT IS WHAT THE CHAIN SHOWS, EVEN WHEN IT IS NOT ENOUGH. A confirming, locked or short
+  // transfer still has a txid and a verified amount; `total` alone would report zero for a payment that is right
+  // there and would make the screen lose the fact it is waiting for confirmations.
+  const source = agreed.length ? agreed : transfers;
+  const displayed = [];
+  const displayedOutputs = new Set();
+  let displayTotal = 0n;
+  for (const transfer of source) {
+    if (rule === "exact") { displayTotal += BigInt(transfer.amountAtomic); displayed.push(transfer); continue; }
+    let contributed = false;
+    for (const output of transfer.outputs || []) {
+      if (!output.amountVerified || output.amountAtomic === null || output.amountAtomic === undefined) continue;
+      const id = transfer.txid + ":" + output.index;
+      if (displayedOutputs.has(id)) continue;
+      displayedOutputs.add(id);
+      displayTotal += BigInt(output.amountAtomic);
+      contributed = true;
+    }
+    if (contributed) displayed.push(transfer);
+  }
   const seenByAmount = rule === "exact" ? total === expectedAtomic : total >= expectedAtomic;
   const seen = seenByAmount && recovery.complete === true;
-  const poolHit = recovery.transfers.find((transfer) => transfer.pool);
+  const poolHit = transfers.find((transfer) => transfer.pool);
   const completedOperators = recovery.completedOperators || [];
-  const absent = recovery.complete === true && chosen.length === 0 && !poolHit && completedOperators.length >= 2;
+  const absent = recovery.complete === true && transfers.length === 0 && !poolHit && completedOperators.length >= 2;
+  const lockedTransfer = source.find((transfer) => transfer.locked === true) || null;
+  const need = Number(recovery.minConfirmations) || 1;
+  const confirming = source.some((transfer) => !transfer.pool && !transfer.confirmed && Number(transfer.confirmations) < need);
+  let state;
+  if (seen) state = "arrived";
+  else if (poolHit) state = "pool";
+  else if (recovery.complete !== true) state = "unknown";
+  else if (source.length === 0) state = "pending";
+  else if (lockedTransfer) state = "locked";
+  else if (confirming) state = "confirming";
+  else if (agreed.length === 0) state = "one-node";
+  else if (total < expectedAtomic) state = "short";
+  else if (rule === "exact" && total > expectedAtomic) state = "over";
+  else state = "pending";
+  const comparison = displayTotal === expectedAtomic ? "exact" : displayTotal < expectedAtomic ? "short" : "over";
   const outputs = [];
   const outputKeys = new Set();
-  for (const transfer of chosen) {
+  for (const transfer of (chosen.length ? chosen : displayed)) {
     for (const output of transfer.outputs || []) {
       const id = transfer.txid + ":" + output.index;
       if (outputKeys.has(id)) continue;
@@ -1458,28 +1563,31 @@ export async function verifyArrivalFromRead(request) {
       outputs.push({ ...output, txid: transfer.txid, height: transfer.height, blockHash: transfer.blockHash });
     }
   }
-  const first = chosen[0] || poolHit || null;
+  const first = (chosen[0] || displayed[0] || poolHit || null);
   return {
-    seen, state: seen ? "arrived" : (poolHit ? "pool" : "pending"),
+    seen, state,
     absent,
     completedOperators: absent ? completedOperators : undefined,
     txid: first ? first.txid : txidOf(request.txid),
     height: first ? first.height : null,
     blockHash: first ? first.blockHash : null,
-    amountAtomic: total.toString(),
-    amountVerified: outputs.every((output) => output.amountVerified === true),
+    amountAtomic: displayTotal.toString(),
+    amountVerified: displayed.length > 0 && displayed.every((transfer) => transfer.outputs.every((output) => output.amountVerified === true)),
     amountRule: rule,
-    confirmations: chosen.length ? Math.min(...chosen.map((transfer) => Number(transfer.confirmations))) : 0,
+    amountComparison: comparison,
+    shortfallAtomic: displayTotal < expectedAtomic ? (expectedAtomic - displayTotal).toString() : "0",
+    overageAtomic: displayTotal > expectedAtomic ? (displayTotal - expectedAtomic).toString() : "0",
+    confirmations: source.length ? Math.min(...source.map((transfer) => Number(transfer.confirmations))) : 0,
     needConfirmations: recovery.minConfirmations,
     tip: recovery.tip,
-    operators: [...new Set(chosen.flatMap((transfer) => transfer.operators || []))],
+    operators: [...new Set(source.flatMap((transfer) => transfer.operators || []))],
     checked: recovery.checked,
     failed: recovery.failed,
     outputs,
-    transfers: chosen,
-    locked: false,
-    unlock: null,
-    agreedBy: chosen.flatMap((transfer) => transfer.agreedBy || []),
+    transfers: chosen.length ? chosen : displayed,
+    locked: lockedTransfer !== null,
+    unlock: lockedTransfer ? lockedTransfer.unlock : null,
+    agreedBy: source.flatMap((transfer) => transfer.agreedBy || []),
   };
 }
 
@@ -1492,6 +1600,7 @@ export async function verifyArrivalFromRead(request) {
 export async function verifyRecovery(request) {
   if (!request || typeof request !== "object") throw new SdkError("bad-input", { field: "request" });
   const nodes = normalizeNodes(request.nodes);
+  const primaryNode = nodes[0];
   if (!isStr(request.address)) throw new SdkError("bad-input", { field: "address" });
   if (request.viewSecret === undefined || request.viewSecret === null) throw new SdkError("bad-input", { field: "viewSecret" });
   if (request.spendPub !== undefined && request.spendPub !== null && !isStr(request.spendPub)) throw new SdkError("bad-input", { field: "spendPub" });
@@ -1524,11 +1633,20 @@ export async function verifyRecovery(request) {
     catch (error) { failed.push(failureOf(error, node)); }
   }
   if (!live.length) throw new SdkError("xmr-no-nodes", { tried: nodes.map((n) => n.url), nodes: failed });
-  const tip = Math.max(...live.map((entry) => entry.info.height));
+  const checked = live.map((entry) => ({ url: entry.node.url, operator: entry.node.operator,
+    height: entry.info.height, synchronized: entry.info.synced }));
+  // THE PRIMARY IS THE FIRST CONFIGURED NODE. A witness that happens to answer first is never promoted and never
+  // receives the exact-start walk or key images; without the primary the read is incomplete.
+  const primaryLive = live.find((entry) => entry.node === primaryNode);
+  if (!primaryLive) {
+    return { state: "none", transfers: [], tip: null, fromHeight, toHeight, minConfirmations, complete: false,
+      completedOperators: [], spends: [], spendsDisagreements: [], ...UNKNOWN_TOTALS, availableAtomic: null,
+      availableSource: null, checked, failed };
+  }
+  const tip = primaryLive.info.height;
   const top = Math.max(0, tip - 1);
   const observations = new Map();
   const spendMap = new Map();
-  const checked = [];
   let complete = true;
   const completedOperators = new Set();
   let availableAtomic = null;
@@ -1536,15 +1654,15 @@ export async function verifyRecovery(request) {
 
   for (let index = 0; index < live.length; index += 1) {
     const { node, info } = live[index];
-    checked.push({ url: node.url, operator: node.operator, height: info.height, synchronized: info.synced });
+    const isPrimary = node === primaryNode;
     if (!info.synced) {
       failed.push({ url: node.url, operator: node.operator, code: "stale", why: "not-synchronized" });
       complete = false;
       continue;
     }
-    // THE WITNESS'S WALK END IS CLAMPED BY `readRecoveryWitness`; its `tipHeight` is the primary top and is used
-    // for confirmations and lock state. Passing the window end here made a closed window report 1 confirmation.
-    const nodeTop = Math.max(0, Math.min(top, info.height - 1));
+    // EVERY WITNESS IS READ TO THE PRIMARY'S VERIFIED TOP. A witness below it cannot answer the top blocks, so its
+    // read is incomplete; a witness ahead of the primary is clamped, never trusted to widen the range.
+    const nodeTop = top;
     let read;
     let poolComplete = true;
     try {
@@ -1555,7 +1673,7 @@ export async function verifyRecovery(request) {
       };
       // THE WITNESS NEVER GETS KEY IMAGES. Its job is agreement on the block data; spent status belongs to the
       // trusted primary node.
-      read = index === 0
+      read = isPrimary
         ? await readRecovery({ ...common, node, keyImages: request.keyImages })
         : await readRecoveryWitness({ ...common, node, tipHeight: nodeTop });
     } catch (error) {
@@ -1563,7 +1681,7 @@ export async function verifyRecovery(request) {
       complete = false;
       continue;
     }
-    if (index > 0 && !(toHeight !== null && toHeight < top)) {
+    if (!isPrimary && !(toHeight !== null && toHeight < top)) {
       try {
         const pool = await scanRecoveryPoolState(node, {
           watched, tracked, tip: nodeTop, nowSec, fetchImpl, timeoutMs,
@@ -1583,7 +1701,7 @@ export async function verifyRecovery(request) {
       if (!observations.has(transfer.txid)) observations.set(transfer.txid, []);
       observations.get(transfer.txid).push(transfer);
     }
-    if (index === 0) primarySpends = read.spends || [];
+    if (isPrimary) primarySpends = read.spends || [];
     addSpends(spendMap, read.spends || []);
     if (availableAtomic === null && read.availableAtomic !== null && read.availableAtomic !== undefined) {
       availableAtomic = read.availableAtomic;
@@ -1661,7 +1779,7 @@ export async function verifyRecovery(request) {
     spendsDisagreements,
     ...totals,
     availableAtomic: availableForVerdict,
-    availableSource: live.length ? { url: live[0].node.url, operator: live[0].node.operator } : null,
+    availableSource: primaryLive ? { url: primaryLive.node.url, operator: primaryLive.node.operator } : null,
     checked,
     failed,
   };
