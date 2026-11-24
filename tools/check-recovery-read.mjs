@@ -58,7 +58,7 @@ const TXS = {
   9: { [TX[9]]: FUNDING_9 },
 };
 
-function daemon({ failAt: initialFailAt = null, shortAt = null, hashShift: initialHashShift = 0, nullConfirmations = false, poolHashes = [], poolTxs = {}, poolFails = false, topHeight: initialTopHeight = 11 } = {}) {
+function daemon({ failAt: initialFailAt = null, shortAt = null, hashShift: initialHashShift = 0, nullConfirmations = false, poolHashes = [], poolTxs = {}, poolFails = false, topHeight: initialTopHeight = 11, spentStatuses = null } = {}) {
   const calls = [];
   let failAt = initialFailAt, hashShift = initialHashShift, topHeight = initialTopHeight, poolList = [...poolHashes];
   const fetch = async (url, init) => {
@@ -74,6 +74,11 @@ function daemon({ failAt: initialFailAt = null, shortAt = null, hashShift: initi
       }, tx_hashes: TXS[height] ? Object.keys(TXS[height]) : [] } }) };
     }
     if (path.endsWith("/get_transaction_pool_hashes")) return poolFails ? { ok: false, status: 503 } : { ok: true, json: async () => ({ tx_hashes: poolList }) };
+    if (path.endsWith("/is_key_image_spent")) {
+      const images = body.key_images || [];
+      return { ok: true, json: async () => ({ status: "OK", spent_status: images.map((image) =>
+        spentStatuses && Object.prototype.hasOwnProperty.call(spentStatuses, image) ? spentStatuses[image] : (image === SPENT_IMAGE ? 1 : 0)) }) };
+    }
     if (path.endsWith("/get_transactions")) {
       const hashes = body.txs_hashes || [];
       const height = Object.keys(TXS).find((h) => TXS[h][hashes[0]]);
@@ -299,6 +304,25 @@ check(badRead.complete === true && badDaemon.calls.some((c) => c.method === "get
   const after = d.calls.filter((entry) => entry.method === "get_block").map((entry) => Number(entry.height)).slice(before.length);
   check(changed.complete === true && after.includes(5) && after.includes(20),
     "a different key-image set reused a checkpoint written without it");
+}
+
+// THE TRUSTED NODE'S SPENT ANSWER MAKES THE WINDOW TOTALS. A partly spent window is not "withdrawn"; an unreadable
+// answer is unknown, never "unspent".
+{
+  const keyImages = [{ keyImage: SPENT_IMAGE, outputKey: FUNDING_6_KEY }, { keyImage: UNSPENT_IMAGE, outputKey: FUNDING_9_KEY }];
+  const partial = await readRecovery(request(daemon().fetch, null, { keyImages }));
+  check(partial.receivedAtomic === "300000000000" && partial.spentAtomic === "100000000000"
+    && partial.unspentAtomic === "200000000000" && partial.withdrawalState === "partly-withdrawn",
+    "a partly spent window did not report its spent and unspent amounts");
+  const allSpent = await readRecovery(request(daemon({ spentStatuses: { [SPENT_IMAGE]: 1, [UNSPENT_IMAGE]: 1 } }).fetch,
+    null, { keyImages }));
+  check(allSpent.withdrawalState === "withdrawn" && allSpent.unspentAtomic === "0",
+    "a fully spent window was not withdrawn");
+  const broken = await readRecovery(request(daemon({ spentStatuses: { [SPENT_IMAGE]: 9, [UNSPENT_IMAGE]: 0 } }).fetch,
+    null, { keyImages }));
+  check(broken.complete === false && broken.withdrawalState === "unknown" && broken.receivedAtomic === null
+    && broken.failed.some((failure) => failure.why === "spent-status"),
+    "an unreadable spent answer was accepted as unspent");
 }
 
 // A missing confirmation count is not a mined transfer with zero confirmations.

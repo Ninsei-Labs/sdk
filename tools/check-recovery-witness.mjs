@@ -74,6 +74,14 @@ const problems = [];
 let checks = 0;
 const check = (condition, message) => { checks += 1; if (condition) console.log("  ok    " + message); else problems.push(message); };
 
+{
+  let refused = null;
+  try { await readRecoveryWitness(request(daemon().fetch, null, { keyImages: ["ab".repeat(32)] })); }
+  catch (error) { refused = error; }
+  check(refused && refused.code === "bad-input" && refused.params.field === "keyImages",
+    "a witness was allowed to receive key images");
+}
+
 const witness = daemon();
 const cold = await readRecoveryWitness(request(witness.fetch));
 check(cold.complete === true && cold.transfers.length === 1, "the whole fixed window is read and the transfer is returned");
