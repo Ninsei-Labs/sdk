@@ -66,6 +66,8 @@
     "check:relay-http": "node tools/check-relay-http.mjs",
     "check:relay-adapter": "node tools/check-relay-adapter.mjs",
     "check:sell-watch": "node tools/check-sell-watch.mjs",
+    "check:action-decision": "node tools/check-action-decision.mjs",
+    "check:action-decision-teeth": "node tools/run-teeth-isolated.mjs tools/check-action-decision-teeth.mjs",
     "check:sell-start": "node tools/check-sell-start.mjs",
     "check:arrival-consensus": "node tools/check-arrival-consensus.mjs",
     "check:arrival-recovery": "node tools/check-arrival-recovery.mjs",

@@ -226,6 +226,10 @@ console.log("=== 13) THE PAIRED UNKNOWN SALE: READY MARK VERSUS NO MARK ===");
   const unmarked = decide({ side: "sale", escrow: escrow({ block: { ...escrow().block, timestamp: READY_BY + 10 } }), arrival: unknown(), deviceTimeSec: READY_BY + 10 });
   equal(marked.action, "claim", "the same unknown read claims when Ready is set");
   equal(unmarked.action, "unknown", "without Ready after readyBy the unknown read gives no claim");
+  const deviceAtSendDeadline = decide({ side: "sale", escrow: escrow({ block: { ...escrow().block, timestamp: READY_BY - 1_300 } }), arrival: unknown(), deviceTimeSec: READY_BY - 1_200 });
+  equal(deviceAtSendDeadline.action, "later", "a device clock at the send deadline closes the send even when the block is earlier");
+  const markedAtClaimMargin = decide({ side: "sale", escrow: escrow({ ready: true, block: { ...escrow().block, timestamp: READY_BY } }), arrival: unknown(), deviceTimeSec: T1 - 60 });
+  equal(markedAtClaimMargin.action, "none", "a device clock at the claim margin closes a marked claim");
 }
 
 console.log("=== 14) THE TWO BUY STATES THAT MUST STAY APART ===");
@@ -252,6 +256,7 @@ console.log("=== 15) THE BOUNDARIES ARE THE CONTRACT'S, NOT ROUNDED ===");
 }
 
 if (problems.length) {
+  for (const problem of problems) console.log("  FAIL  " + problem);
   console.log("FAILED: " + problems.length + " problem(s)");
   process.exit(1);
 }
