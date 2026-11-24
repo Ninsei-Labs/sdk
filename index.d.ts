@@ -921,7 +921,7 @@ export interface XmrArrivalRequest {
   readonly minConfirmations?: number;
   readonly txid?: string | null;
   readonly fromHeight?: number | null;
-  /** The first block past the order's `t1` (inclusive); omitted reads to the head. */
+  /** The first block past the order's `t1` (inclusive); used by the amount-rule path. The default exact walk ignores it. */
   readonly toHeight?: number | null;
   readonly nowSec?: number;
   readonly timeoutMs?: number;

@@ -1188,7 +1188,7 @@ export async function readRecoveryWitness(request) {
   }
   const top = Math.max(0, info.height - 1);
   const wantedTop = toHeight === null ? tipHeightRaw : (tipHeightRaw === null ? toHeight : Math.min(tipHeightRaw, toHeight));
-  if ((tipHeightRaw !== null && tipHeightRaw > top) || (toHeight !== null && toHeight > top)) {
+  if (wantedTop !== null && wantedTop > top) {
     return { transfers: [], tip: info.height, fromHeight, toHeight, through: null, complete: false, checkpoint: null, blocked: false,
       failed: [{ url: node.url, operator: node.operator, code: "stale", why: "witness-behind", height: top, wanted: wantedTop }] };
   }
@@ -1211,6 +1211,7 @@ export async function readRecoveryWitness(request) {
   const startWindow = prior ? witnessSliceIndex(prior.through.height) : firstWindow;
   const lastWindow = witnessSliceIndex(targetTop);
   if (startWindow > lastWindow) {
+    if (prior) refreshTransferState(prior.transfers, { tipHeight: observedTip, nowSec: request.nowSec ?? Math.floor(Date.now() / 1000) });
     return { transfers: prior ? prior.transfers : [], tip: info.height, fromHeight, toHeight, through: prior ? prior.through : null,
       complete: true, checkpoint: prior ? checkpointRecord({ ...identity, through: prior.through, transfers: prior.transfers, spends: prior.spends, kind: "witness" }) : null,
       blocked: false, failed: [] };
@@ -1455,7 +1456,9 @@ export async function verifyRecovery(request) {
       complete = false;
       continue;
     }
-    const nodeTop = Math.max(0, Math.min(toHeight === null ? top : Math.min(top, toHeight), info.height - 1));
+    // THE WITNESS'S WALK END IS CLAMPED BY `readRecoveryWitness`; its `tipHeight` is the primary top and is used
+    // for confirmations and lock state. Passing the window end here made a closed window report 1 confirmation.
+    const nodeTop = Math.max(0, Math.min(top, info.height - 1));
     let read;
     let poolComplete = true;
     try {
@@ -1474,7 +1477,7 @@ export async function verifyRecovery(request) {
       complete = false;
       continue;
     }
-    if (index > 0) {
+    if (index > 0 && !(toHeight !== null && toHeight < top)) {
       try {
         const pool = await scanRecoveryPoolState(node, {
           watched, tracked, tip: nodeTop, nowSec, fetchImpl, timeoutMs,
