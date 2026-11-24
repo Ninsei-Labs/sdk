@@ -1545,15 +1545,23 @@ export async function verifyArrivalFromRead(request) {
   let total = 0n;
   if (rule === "exact") {
     for (const transfer of usable) {
-      total += BigInt(transfer.amountAtomic);
-      chosen.push(transfer);
+      let contributed = false;
+      for (const output of transfer.outputs || []) {
+        if (!output.amountVerified || output.amountAtomic === null || output.amountAtomic === undefined) continue;
+        const id = output.key ? String(output.key) + ":" + String(output.amountAtomic) : transfer.txid + ":" + output.index;
+        if (seenOutputs.has(id)) continue;
+        seenOutputs.add(id);
+        total += BigInt(output.amountAtomic);
+        contributed = true;
+      }
+      if (contributed) chosen.push(transfer);
     }
   } else {
     for (const transfer of usable) {
       let contributed = false;
       for (const output of transfer.outputs || []) {
         if (!output.amountVerified || output.amountAtomic === null || output.amountAtomic === undefined) continue;
-        const id = transfer.txid + ":" + output.index;
+        const id = output.key ? String(output.key) + ":" + String(output.amountAtomic) : transfer.txid + ":" + output.index;
         if (seenOutputs.has(id)) continue;
         seenOutputs.add(id);
         total += BigInt(output.amountAtomic);
@@ -1570,11 +1578,10 @@ export async function verifyArrivalFromRead(request) {
   const displayedOutputs = new Set();
   let displayTotal = 0n;
   for (const transfer of source) {
-    if (rule === "exact") { displayTotal += BigInt(transfer.amountAtomic); displayed.push(transfer); continue; }
     let contributed = false;
     for (const output of transfer.outputs || []) {
       if (!output.amountVerified || output.amountAtomic === null || output.amountAtomic === undefined) continue;
-      const id = transfer.txid + ":" + output.index;
+      const id = output.key ? String(output.key) + ":" + String(output.amountAtomic) : transfer.txid + ":" + output.index;
       if (displayedOutputs.has(id)) continue;
       displayedOutputs.add(id);
       displayTotal += BigInt(output.amountAtomic);
@@ -1588,7 +1595,7 @@ export async function verifyArrivalFromRead(request) {
   const requiredOperators = Number(recovery.requiredOperators) || 2;
   const quorate = completedOperators.length >= requiredOperators;
   const seen = seenByAmount && (recovery.complete === true || (rule === "at-least" && quorate));
-  const absent = recovery.complete === true && transfers.length === 0 && !poolHit && completedOperators.length >= 2;
+  const absent = transfers.length === 0 && !poolHit && quorate;
   const lockedTransfer = source.find((transfer) => transfer.locked === true) || null;
   const need = Number(recovery.minConfirmations) || 1;
   const confirming = source.some((transfer) => !transfer.pool && !transfer.confirmed && Number(transfer.confirmations) < need);
@@ -1608,7 +1615,7 @@ export async function verifyArrivalFromRead(request) {
   const outputKeys = new Set();
   for (const transfer of (chosen.length ? chosen : displayed)) {
     for (const output of transfer.outputs || []) {
-      const id = transfer.txid + ":" + output.index;
+      const id = output.key ? String(output.key) + ":" + String(output.amountAtomic) : transfer.txid + ":" + output.index;
       if (outputKeys.has(id)) continue;
       outputKeys.add(id);
       outputs.push({ ...output, txid: transfer.txid, height: transfer.height, blockHash: transfer.blockHash });

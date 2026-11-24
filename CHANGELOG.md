@@ -2,9 +2,10 @@
 
 - An HTTP call is bounded by body bytes: the idle timer resets on every streamed chunk, so a long block or transaction batch may run as long as it keeps arriving. A stream that stops is `timeout`; a caller cancel is `cancelled`.
 - A configured node that fails `get_info` makes the recovery read incomplete; `exact` cannot settle on a quorum, while `at-least` still can. A one-node match is `unknown` for `exact` and `one-node` for `at-least`.
+- `verifyArrivalFromRead` deduplicates an output by its key and amount, so two node answers that name the same output do not inflate an exact sale; distinct split outputs still add up. An empty read is `absent` when the required operator quorum completed, even if another configured node is stale or down.
 - `verifyArrival` now uses the one read with the exact rule; `verifyArrivalLegacy` keeps the old exact walk for the regression checks that pin its historical answers.
 - The one-read arrival path requires `fromHeight`; an explicit `0` is still the genesis start. It accepts the same `checkpoint`, `onProgress` and `signal` as `readRecovery`. `verifyRecovery` reports `network` and `requiredOperators` (2 on testnet/stagenet, 3 on mainnet); `at-least` may settle with the required complete operators even when another node failed, while `exact` keeps the whole read and a one-node match is `unknown`.
-- `verifyArrivalFromRead` names `confirming`, `locked`, `short`, `over`, `one-node` and `unknown`, keeps the txid, height, amount and confirmations on a payment that is not settled yet, and marks `absent` only when a complete read found no transfer at all.
+- `verifyArrivalFromRead` names `confirming`, `locked`, `short`, `over`, `one-node` and `unknown`, keeps the txid, height, amount and confirmations on a payment that is not settled yet, and marks `absent` when the required operator quorum completed and found no transfer.
 - `recoveryEndHeight` turns an order's `t1` (Unix seconds, not milliseconds) into the first block past it from the trusted primary node; the client passes that height as `toHeight`.
 - `verifyRecovery` keeps the first configured node as the primary: a witness is never promoted, never receives the exact-start walk, and every witness is read to the primary's verified top.
 
