@@ -4,7 +4,7 @@
 // A fake daemon is the only way to interrupt at every boundary and to move a block hash. The live-node smoke lives
 // in the nightly job; this check is deterministic.
 import { ed25519, keccak256 } from "../src/primitives.mjs";
-import { readRecovery } from "../src/xmr-arrival.mjs";
+import { readRecovery, recoveryEndHeight } from "../src/xmr-arrival.mjs";
 import { addressFromKeys } from "../engine/monero/address.js";
 import {
   amountMaskCommitment, bytesToHex, derivedOutputKey, hashToScalar, hexToBytes, keyDerivation,
@@ -402,8 +402,51 @@ check(short.complete === false && short.transfers.length === 0, "a short transac
 
 // An already-cancelled caller does not read the chain.
 const controller = new AbortController(); controller.abort();
-const cancelled = await readRecovery(request(daemon().fetch, null, { signal: controller.signal }));
-check(cancelled.complete === false && cancelled.transfers.length === 0, "a cancelled read is unknown, not empty");
+let cancelledError = null;
+try { await readRecovery(request(daemon().fetch, null, { signal: controller.signal })); }
+catch (error) { cancelledError = error; }
+check(cancelledError && cancelledError.code === "xmr-no-nodes"
+  && cancelledError.params && cancelledError.params.why === "cancelled",
+  "a cancelled read throws instead of looking like an empty answer");
+
+// A REAL FETCH HONOURS THE SIGNAL ON `get_info` TOO. Cancellation must not look like a node timeout.
+{
+  const controller = new AbortController(); controller.abort();
+  const aborting = async () => { throw Object.assign(new Error("aborted"), { name: "AbortError" }); };
+  let error = null;
+  try { await readRecovery(request(aborting, null, { signal: controller.signal })); }
+  catch (caught) { error = caught; }
+  check(error && error.code === "xmr-no-nodes" && error.params && error.params.why === "cancelled",
+    "an abort during get_info throws a cancellation, not a timeout answer");
+}
+
+// THE WINDOW END IS A BINARY SEARCH OVER HEADERS, NOT A WALK. The client passes the result as `toHeight`.
+{
+  const base = 1_000_000;
+  const headerFetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (body.method === "get_info") return { ok: true, json: async () => ({ result: { height: 200, synchronized: true, nettype: "stagenet" } }) };
+    if (body.method === "get_block_header_by_height") {
+      const height = Number(body.params.height);
+      return { ok: true, json: async () => ({ result: { block_header: {
+        height, timestamp: base + height * 120, hash: H(height),
+      } } }) };
+    }
+    return { ok: false, status: 404 };
+  };
+  const node = { url: "https://one.example", operator: "one" };
+  const found = await recoveryEndHeight({ node, t1: base + 50 * 120, marginSeconds: 0, fetch: headerFetch });
+  check(found.toHeight === 50 && found.beyondTip === false && found.tip === 200,
+    "the window end is the first block whose timestamp reaches t1");
+  const beyond = await recoveryEndHeight({ node, t1: base + 1_000 * 120, marginSeconds: 0, fetch: headerFetch });
+  check(beyond.toHeight === 200 && beyond.beyondTip === true,
+    "a deadline past the tip returns the tip, not a fabricated height");
+  let badT1 = null;
+  try { await recoveryEndHeight({ node, t1: Date.now(), fetch: headerFetch }); }
+  catch (error) { badT1 = error; }
+  check(badT1 && badT1.code === "bad-input" && badT1.params.field === "t1" && badT1.params.why === "seconds",
+    "a millisecond deadline is refused, not read as the far future");
+}
 
 if (problems.length) {
   for (const problem of problems) console.log("  FAIL  " + problem);

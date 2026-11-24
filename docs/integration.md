@@ -182,7 +182,10 @@ split payments are data there, not refusals. Pass `toHeight` (the first block pa
 closed window at that block; without it the read goes to the head. A checkpoint carries the window end and the
 key-image set, so changing either replays from the start. The primary read asks its trusted node for the spent
 status of the key images; a witness never receives them. The answer carries `receivedAtomic`, `spentAtomic`,
-`unspentAtomic` and `withdrawalState` (`empty`, `unspent`, `partly-withdrawn`, `withdrawn`, `unknown`).
+`unspentAtomic` and `withdrawalState` (`empty`, `unspent`, `partly-withdrawn`, `withdrawn`, `unknown`). The totals
+cover the transfers the read returned, including a pool transfer; `availableAtomic` still counts only confirmed,
+unspent outputs. An unverified amount, or an output with no entry in the supplied key-image set, makes every total
+unknown. `recoveryEndHeight` turns the order's `t1` into the first block past it, for `toHeight`.
 Before slice-only verification is enabled, `swaps.verifyArrivalShadow` runs that exact check and a
 `witness-v1` slice check side by side:
 

@@ -155,7 +155,7 @@ console.log("=== 1b) A SPLIT PAYMENT IS TWO TRANSFERS, NOT ONE REFUSAL ===");
   } else bad("split recovery: " + JSON.stringify(verdict));
 }
 
-console.log("=== 1c) A LOWER-TIP NODE DOES NOT FALSIFY THE WALK ===");
+console.log("=== 1c) A WITNESS BELOW THE PRIMARY TOP MAKES THE READ INCOMPLETE ===");
 {
   const txs = { [T2]: fixture(ATOMIC_QUOTE) };
   const baseFetch = rpc({ blockTxids: [T2], txs });
@@ -167,10 +167,31 @@ console.log("=== 1c) A LOWER-TIP NODE DOES NOT FALSIFY THE WALK ===");
     return baseFetch(url, init);
   };
   const verdict = await verifyRecovery(request(mixedFetch));
-  if (verdict.complete === true && verdict.state === "one-node" && verdict.transfers.length === 1
-    && verdict.failed.length === 0) {
-    ok("a node one block behind is clamped to its own top, not failed");
+  if (verdict.complete === false && verdict.state === "one-node" && verdict.transfers.length === 1
+    && verdict.failed.some((failure) => failure.why === "witness-behind")) {
+    ok("a witness below the primary top is incomplete, not silently complete");
   } else bad("lower-tip recovery: " + JSON.stringify(verdict));
+}
+
+console.log("=== 1d) A DOWN PRIMARY IS NOT REPLACED BY A WITNESS ===");
+{
+  const baseFetch = rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) } });
+  let witnessBlocks = 0;
+  const primaryDown = async (url, init) => {
+    const body = JSON.parse(init.body);
+    const host = new URL(url).hostname;
+    if (host === "a.example" && body.method === "get_info") {
+      return { ok: false, status: 503 };
+    }
+    if (host === "b.example" && body.method === "get_block") witnessBlocks += 1;
+    return baseFetch(url, init);
+  };
+  const verdict = await verifyRecovery(request(primaryDown));
+  if (verdict.complete === false && verdict.state === "none" && verdict.transfers.length === 0
+    && verdict.availableSource === null && verdict.failed.some((failure) => failure.why !== "witness-behind")
+    && witnessBlocks === 0) {
+    ok("a down primary leaves the read incomplete; no witness is promoted");
+  } else bad("primary-down recovery: " + JSON.stringify({ verdict, witnessBlocks }));
 }
 
 console.log("=== 1b) THE RECOVERY OUTPUT CARRIES A DERIVATION AND FEEDS keyImages ===");
@@ -290,7 +311,30 @@ console.log("=== 6) THE AMOUNT RULES OVER THE SAME READ ===");
   const over = await verifyArrival({
     ...request(rpc({ blockTxids: [T1], txs: { [T1]: fixture(ATOMIC_OVER) } }), undefined, { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE }),
   });
-  okIf(over.state === "pending" && over.seen === false, "sale exact refuses an overpayment");
+  okIf(over.state === "over" && over.seen === false && over.amountComparison === "over"
+    && over.overageAtomic === (ATOMIC_OVER - ATOMIC_QUOTE).toString(), "sale exact names an overpayment");
+  const short = await verifyArrival({
+    ...request(rpc({ blockTxids: [T1], txs: { [T1]: fixture(ATOMIC_SHORT) } }), undefined,
+      { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE }),
+  });
+  okIf(short.state === "short" && short.absent === false && short.amountComparison === "short"
+    && short.shortfallAtomic === (ATOMIC_QUOTE - ATOMIC_SHORT).toString(),
+    "an underpaid sale is short, not absent");
+  const confirming = await verifyArrival({
+    ...request(rpc({ blockTxids: [T1], txs: { [T1]: fixture(ATOMIC_QUOTE) } }), undefined,
+      { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE, minConfirmations: 20 }),
+  });
+  okIf(confirming.state === "confirming" && confirming.txid === T1 && confirming.confirmations === 16
+    && confirming.amountAtomic === ATOMIC_QUOTE.toString(),
+    "a paid transfer still confirming keeps its txid, amount and confirmations");
+  const lockedTx = fixture(ATOMIC_QUOTE);
+  lockedTx.unlock_time = 5_000_000_000;
+  const locked = await verifyArrival({
+    ...request(rpc({ blockTxids: [T1], txs: { [T1]: lockedTx } }), undefined,
+      { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE }),
+  });
+  okIf(locked.state === "locked" && locked.seen === false && locked.unlock && locked.unlock.untilTime === 5_000_000_000,
+    "a locked payment is named with its unlock time");
   const exact = await verifyArrival({
     ...request(rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) } }), undefined, { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE }),
   });
@@ -307,7 +351,7 @@ console.log("=== 6) THE AMOUNT RULES OVER THE SAME READ ===");
     ...request(rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) }, failAt: 110 }), undefined,
       { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE }),
   });
-  okIf(unread.state === "pending" && unread.seen === false
+  okIf(unread.state === "unknown" && unread.seen === false
     && unread.failed.some((failure) => failure.height === 110),
     "sale exact keeps a read with a later unread part unknown, not arrived");
   const restored = await verifyArrival({
