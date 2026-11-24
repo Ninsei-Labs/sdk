@@ -2337,6 +2337,62 @@ export interface OrderRead {
   readonly block: OrderBlock;
 }
 
+/** The action the one decision allows now. `later` is a waiting state, not an action. */
+export type SwapActionDecisionAction = "refund" | "claim" | "markReady" | "sendXmr" | "later" | "none" | "unknown";
+
+/** What the escrow and arrival reads established. `unknown` keeps an incomplete read visible to the caller. */
+export type SwapActionDecisionRead = "complete" | "unknown";
+
+/**
+ * THE ONE ACTION DECISION. The escrow cut, the arrival read and both clocks are inputs; the function is pure and
+ * never calls `Date.now()`. `deviceTimeSec` may close a window, never open one.
+ */
+export interface ActionDecisionRequest {
+  readonly side: "buy" | "sale";
+  /** The escrow read at one block. `null` means the read failed and the answer is `unknown`. */
+  readonly escrow: OrderRead | null;
+  /** The #388 swap-address read. Absent means it was not read. */
+  readonly arrival?: XmrArrivalVerdict | null;
+  /** A caught arrival refusal (`xmr-underpaid`, `xmr-locked`); it maps to the same kind as a verdict. */
+  readonly arrivalError?: { readonly code?: string } | null;
+  /** The device clock, in epoch seconds. A caller must pass it; the function never reads a clock. */
+  readonly deviceTimeSec: number;
+  /** How long before readyBy the early refund opens. Default 780 s (13 min: the site's 10 min plus the margin). */
+  readonly refundLeadSec?: number;
+  /** The protective margin that closes the early refund. Default 180 s. */
+  readonly refundMarginSec?: number;
+  /** The protective margin that closes a claim. Default 60 s. */
+  readonly claimMarginSec?: number;
+  /** The protective margin that closes the ready mark. Default 60 s. */
+  readonly markReadyMarginSec?: number;
+  /** The lead before readyBy for sending XMR; the node's signed window supplies it. Default 1200 s. */
+  readonly saleLeadSec?: number;
+}
+
+export interface ActionDecision {
+  readonly action: SwapActionDecisionAction;
+  /** A stable token naming why this action is allowed or refused. */
+  readonly reason: string;
+  /** When this action closes or when a `later` action opens; null when there is no such time. */
+  readonly untilSec: number | null;
+  /** The timestamp of the one block the escrow was read at; null when the escrow was unreadable. */
+  readonly blockTimeSec: number | null;
+  /** The device clock the caller supplied. */
+  readonly deviceTimeSec: number;
+  /** Whether both reads were complete enough to prove the arrival. */
+  readonly read: SwapActionDecisionRead;
+}
+
+export declare function actionDecision(request: ActionDecisionRequest): ActionDecision;
+
+export declare const ACTION_DECISION_DEFAULTS: Readonly<{
+  readonly refundLeadSec: number;
+  readonly refundMarginSec: number;
+  readonly claimMarginSec: number;
+  readonly markReadyMarginSec: number;
+  readonly saleLeadSec: number;
+}>;
+
 /** Terms are the on-chain OrderTerms event: the fee and claim tip are not in OrderCreated. */
 export interface OrderTerms {
   readonly escrow: string;

@@ -1,3 +1,7 @@
+## Unreleased — 2026-11-25
+
+- `actionDecision` is the one pure rule for refund, claim, ready mark and the sale's send window. It takes the escrow read at one block, the arrival verdict and both clocks as data, never calls `Date.now()`, and returns the allowed action, its deadline and a stable reason. The early refund closes by the later of the block and device times; a late refund opens only on a block at or after `t1`; an unfinished read never allows a ready mark. The defaults and the exported `ACTION_DECISION_DEFAULTS` keep the 180 s refund margin, the 60 s claim and mark margins and the 1200 s sale lead in one place.
+
 ## Unreleased — 2026-11-24
 
 - `verifyArrivalFromRead` names `confirming`, `locked`, `short`, `over`, `one-node` and `unknown`, keeps the txid, height, amount and confirmations on a payment that is not settled yet, and marks `absent` only when a complete read found no transfer at all.
