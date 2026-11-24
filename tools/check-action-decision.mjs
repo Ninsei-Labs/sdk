@@ -111,6 +111,8 @@ console.log("=== 4) BUY: AN UNKNOWN OR ABSENT READ WAITS FOR THE REFUND WINDOW =
   equal(offered.action, "refund", "an unknown read in the warning window is offered as a refund");
   equal(offered.reason, "refund-window", "the offer names the unknown read");
   equal(offered.read, "unknown", "the offer keeps the read uncertainty visible");
+  const absentFlag = decide({ escrow: escrow({ block: { ...escrow().block, timestamp: near } }), arrival: { ...absent(), state: "unknown" }, deviceTimeSec: near });
+  equal(absentFlag.read, "complete", "an explicit absent flag stays a complete read");
 }
 
 console.log("=== 5) BUY: THE DEVICE CLOCK ONLY NARROWS THE EARLY WINDOW ===");
