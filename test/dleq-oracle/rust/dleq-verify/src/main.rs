@@ -10,7 +10,7 @@ use curve25519_dalek::constants::ED25519_BASEPOINT_POINT;
 use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
 use curve25519_dalek::scalar::Scalar as EdScalar;
 use k256::elliptic_curve::ops::Reduce;
-use k256::elliptic_curve::sec1::ToEncodedPoint;
+use k256::elliptic_curve::sec1::ToSec1Point;
 use k256::{ProjectivePoint, Scalar as SecpScalar, PublicKey};
 use serde::Deserialize;
 use sha3::{Digest, Sha3_512};
@@ -100,7 +100,7 @@ fn secp_scalar(s: &str) -> Result<SecpScalar, String> {
     }
     let mut arr = [0u8; 32];
     arr[32 - b.len()..].copy_from_slice(&b);
-    Ok(SecpScalar::reduce(k256::U256::from_be_slice(&arr)))
+    Ok(SecpScalar::reduce(&k256::U256::from_be_slice(&arr)))
 }
 
 fn ed_scalar(s: &str) -> Result<EdScalar, String> {
@@ -165,8 +165,8 @@ fn sum_commitments_ed(cs: &[EdwardsPoint]) -> EdwardsPoint {
 fn verify_pok_secp(x: ProjectivePoint, pok: &VPok, ctxb: &[u8]) -> Result<(), String> {
     let r = secp_from_hex(&pok.r).map_err(|e| "pokA R: ".to_string() + &e)?;
     let s = secp_scalar(&pok.s).map_err(|e| "pokA s: ".to_string() + &e)?;
-    let xb = x.to_encoded_point(true);
-    let rb = r.to_encoded_point(true);
+    let xb = x.to_sec1_point(true);
+    let rb = r.to_sec1_point(true);
     let e = challenge_secp(&[ctxb, b"ninsei-dleq-pok|A", xb.as_bytes(), rb.as_bytes()]);
     if ProjectivePoint::GENERATOR * s != r + x * e {
         return Err("pokA did not verify".into());
@@ -246,9 +246,9 @@ fn verify(v: &Vector, override_context: Option<&str>) -> Result<(), String> {
         let ecb = cb * eb;
         let t1 = ag - eca;
         let t2 = bh - ecb;
-        let cac = ca.to_encoded_point(true);
+        let cac = ca.to_sec1_point(true);
         let cbc = cb.compress().to_bytes();
-        let t1c = t1.to_encoded_point(true);
+        let t1c = t1.to_sec1_point(true);
         let t2c = t2.compress().to_bytes();
         let ea1 = challenge_secp(&[ctxb, cac.as_bytes(), &cbc, t1c.as_bytes(), &t2c]);
         let eb1 = challenge_ed(&[ctxb, cac.as_bytes(), &cbc, t1c.as_bytes(), &t2c]);
@@ -260,7 +260,7 @@ fn verify(v: &Vector, override_context: Option<&str>) -> Result<(), String> {
         let ecb0 = (cb - ED25519_BASEPOINT_POINT) * eb1;
         let t10 = ag0 - eca0;
         let t20 = bh0 - ecb0;
-        let t10c = t10.to_encoded_point(true);
+        let t10c = t10.to_sec1_point(true);
         let t20c = t20.compress().to_bytes();
         let ea0 = challenge_secp(&[ctxb, cac.as_bytes(), &cbc, t10c.as_bytes(), &t20c]);
         let eb0 = challenge_ed(&[ctxb, cac.as_bytes(), &cbc, t10c.as_bytes(), &t20c]);
