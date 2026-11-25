@@ -70,6 +70,39 @@ function daemon({ failAt: initialFailAt = null, shortAt = null, hashShift: initi
 const request = (fetch, checkpoint = null, extra = {}) => ({ node: { url: "https://witness.example", operator: "witness" },
   address: ADDRESS, viewSecret: VIEW, spendPub: SPEND_PUB, fromHeight: 5, tipHeight: 10, fetch, checkpoint, ...extra });
 const memoryCheckpoint = () => { let saved = null; return { read: () => saved, save: (value) => { saved = structuredClone(value); }, discard: () => { saved = null; }, get value() { return saved; } }; };
+const sliceDaemon = ({ height = 11, headers = true } = {}) => {
+  const calls = [];
+  const blocksFor = (from, to) => Array.from({ length: to - from + 1 }, (_, i) => {
+    const blockHeight = from + i;
+    const txids = TXS[blockHeight] ? Object.keys(TXS[blockHeight]) : [];
+    return { height: blockHeight, hash: H(blockHeight), txids,
+      ...(headers ? { prev_hash: H(blockHeight - 1), num_txes: txids.length } : {}) };
+  });
+  const fetch = async (url, init) => {
+    const body = JSON.parse(String(init.body || "{}"));
+    const path = new URL(url).pathname;
+    calls.push({ path, body });
+    if (path === "/json_rpc" && body.method === "get_info") {
+      return { ok: true, json: async () => ({ result: { height, synchronized: true, nettype: "stagenet" } }) };
+    }
+    if (path === "/v1/witness/slice") {
+      const from = Number(body.slice) * Number(body.grid);
+      const to = Math.min(from + Number(body.grid) - 1, height - 1);
+      return { ok: true, json: async () => ({ version: 1, network: "stagenet", grid: 20, slice: body.slice,
+        from, to, complete: to === from + 19, blocks: blocksFor(from, to),
+        tip: to === from + 19 ? null : { height: to, hash: H(to) } }) };
+    }
+    if (path === "/get_transaction_pool_hashes") return { ok: true, json: async () => ({ tx_hashes: [] }) };
+    if (path === "/get_transactions") {
+      return { ok: true, json: async () => ({
+        txs: body.txs_hashes.map((hash) => ({ tx_hash: hash, block_height: 6, confirmations: 5, in_pool: false })),
+        txs_as_json: body.txs_hashes.map((hash) => JSON.stringify(Object.values(TXS).find((set) => set[hash])[hash])),
+      }) };
+    }
+    return { ok: false, status: 404 };
+  };
+  return { calls, fetch };
+};
 const problems = [];
 let checks = 0;
 const check = (condition, message) => { checks += 1; if (condition) console.log("  ok    " + message); else problems.push(message); };
@@ -181,6 +214,30 @@ check(short.complete === false && short.failed.length === 1, "a short transactio
 const behind = await readRecoveryWitness(request(daemon().fetch, null, { tipHeight: 12 }));
 check(behind.complete === false && behind.failed.some((failure) => failure.why === "witness-behind"),
   "a witness below the primary top is incomplete");
+
+// THE SLICE READER. A witness-v1 node is asked for one fixed slice per window, never for an exact height.
+{
+  const slice = sliceDaemon();
+  const verdict = await readRecoveryWitness({ ...request(slice.fetch), node: {
+    url: "https://witness.example", operator: "witness", protocol: "witness-v1",
+  } });
+  check(verdict.complete === true && verdict.transfers.length === 1 && verdict.transfers[0].txid === PAYOUT,
+    "the slice witness returns the transfer from the fixed window");
+  const sliceCalls = slice.calls.filter((call) => call.path === "/v1/witness/slice");
+  check(sliceCalls.length === 1 && Object.keys(sliceCalls[0].body).sort().join(",") === "grid,network,slice,version",
+    "the slice witness is asked for a slice, not an exact height");
+  check(slice.calls.every((call) => call.path !== "/json_rpc" || call.body.method !== "get_block"),
+    "the slice witness receives no get_block");
+  check(slice.calls.filter((call) => call.path === "/get_transactions").length === 1,
+    "the whole slice's transactions are fetched in one batch");
+
+  const oldShape = sliceDaemon({ headers: false });
+  const refused = await readRecoveryWitness({ ...request(oldShape.fetch), node: {
+    url: "https://witness.example", operator: "witness", protocol: "witness-v1",
+  } });
+  check(refused.complete === false && refused.failed.some((failure) => failure.why === "witness-header-missing"),
+    "a slice without the new header fields is refused by the slice recovery path");
+}
 
 if (problems.length) {
   console.error("recovery witness: FAILED (" + problems.length + ")");

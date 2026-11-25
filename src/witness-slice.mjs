@@ -61,7 +61,27 @@ export function parseWitnessSliceBody(body, { network, index, tipHeight = null }
       if (!value) throw new SdkError("xmr-no-nodes", { why: "witness-txid" });
       return value;
     });
-    return { height: Number(block.height), hash, txids };
+    // THE NEW SLICE HEADER IS OPTIONAL ON THE WIRE, REQUIRED BY THE SLICE RECOVERY PATH. An older witness that
+    // returns only height/hash/txids still serves the arrival shadow; a recovery read refuses to guess a parent
+    // or a transaction count it was not given.
+    const hasParent = block.prev_hash !== undefined && block.prev_hash !== null;
+    const prevHash = hasParent ? witnessHash(block.prev_hash) : null;
+    if (hasParent && !prevHash) throw new SdkError("xmr-no-nodes", { why: "witness-prev-hash" });
+    const hasCount = block.num_txes !== undefined && block.num_txes !== null;
+    const numTxes = hasCount ? Number(block.num_txes) : null;
+    if (hasCount && (!Number.isSafeInteger(numTxes) || numTxes < 0)) {
+      throw new SdkError("xmr-no-nodes", { why: "witness-num-txes" });
+    }
+    if (numTxes !== null && numTxes !== txids.length) {
+      throw new SdkError("xmr-no-nodes", { why: "witness-txid-count" });
+    }
+    if (i > 0 && prevHash) {
+      const previousHash = witnessHash(body.blocks[i - 1] && body.blocks[i - 1].hash);
+      if (!previousHash || previousHash !== prevHash) {
+        throw new SdkError("xmr-no-nodes", { why: "witness-chain" });
+      }
+    }
+    return { height: Number(block.height), hash, prev_hash: prevHash, num_txes: numTxes, txids };
   });
   let tip = null;
   if (body.complete) {

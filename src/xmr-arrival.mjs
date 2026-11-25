@@ -1441,20 +1441,51 @@ export async function readRecoveryWitness(request) {
       } catch (error) { throw callerFailure("onProgress", error); }
     };
     emit();
+    const sliceWitness = node.protocol === "witness-v1";
     for (let window = fromWindow; window <= lastWindow; window += 1) {
       const start = witnessSliceStart(window);
-      const end = Math.min(witnessSliceEnd(window), targetTop);
+      let slice = null;
+      let sliceTxs = null;
+      let sliceError = null;
+      if (sliceWitness) {
+        try {
+          slice = await readWitnessSlice(node, window, { network, fetchImpl, timeoutMs, tipHeight: targetTop });
+          sliceTxs = await readSliceTransactions(node, slice, { fetchImpl, timeoutMs });
+        } catch (error) {
+          sliceError = error;
+        }
+      }
+      const end = slice === null ? Math.min(witnessSliceEnd(window), targetTop) : Math.min(slice.to, targetTop);
       for (let height = start; height <= end; height += 1) {
         if (signal && signal.aborted) throw new SdkError("xmr-no-nodes", { node: node.url, name: "AbortError", why: "cancelled" });
         let block;
         let txs = [];
         try {
-          block = await getBlock(node, height, fetchImpl, timeoutMs, { signal, onBytes: countBytes });
+          if (sliceWitness) {
+            if (sliceError) throw sliceError;
+            const witnessBlock = slice.blocks[height - start];
+            if (!witnessBlock || witnessBlock.height !== height) {
+              throw new SdkError("xmr-no-nodes", { node: node.url, why: "witness-height", height });
+            }
+            if (!witnessBlock.prev_hash || witnessBlock.num_txes === null) {
+              throw new SdkError("xmr-no-nodes", { node: node.url, why: "witness-header-missing", height });
+            }
+            block = { hash: witnessBlock.hash, parent: witnessBlock.prev_hash,
+              numTxes: witnessBlock.num_txes, txHashes: witnessBlock.txids };
+            if (witnessBlock.txids.length) {
+              txs = witnessBlock.txids.map((txid) => sliceTxs.get(txid));
+              if (txs.some((tx) => !tx)) {
+                throw new SdkError("xmr-no-nodes", { node: node.url, why: "partial-transactions", height });
+              }
+            }
+          } else {
+            block = await getBlock(node, height, fetchImpl, timeoutMs, { signal, onBytes: countBytes });
+            if (block.txHashes.length) txs = await getBlockTxs(node, block.txHashes, fetchImpl, timeoutMs, { signal, onBytes: countBytes });
+          }
           if (!hash64(block.hash)) throw new SdkError("xmr-no-nodes", { node: node.url, why: "no-block", height });
           if (block.numTxes !== null && block.txHashes.length !== block.numTxes) throw new SdkError("xmr-no-nodes", { node: node.url, why: "block-incomplete", height });
           if (previousHash && (!block.parent || normalizedHash(block.parent) !== previousHash)) throw new Error("reorg");
           if (!block.txHashes.every((hash) => hash64(hash))) throw new SdkError("xmr-no-nodes", { node: node.url, why: "block-incomplete", height });
-          if (block.txHashes.length) txs = await getBlockTxs(node, block.txHashes, fetchImpl, timeoutMs, { signal, onBytes: countBytes });
         } catch (error) {
           if (String(error && error.message) === "reorg") throw error;
           if (signal && signal.aborted) throw error;
