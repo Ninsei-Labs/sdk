@@ -4,6 +4,7 @@
 
 ## Unreleased — 2026-11-24
 
+- `readRecoveryWitness` accepts a `witness-v1` node: it reads fixed 20-block slices instead of asking for exact heights. Slice blocks carry `prev_hash` and `num_txes`; the reader verifies the chain, the transaction count and the whole slice before it uses the transactions. A witness that omits those fields is refused by the slice path, while the older arrival shadow still accepts the older slice shape.
 - An HTTP call is bounded by body bytes: the idle timer resets on every streamed chunk, so a long block or transaction batch may run as long as it keeps arriving. A stream that stops is `timeout`; a caller cancel is `cancelled`.
 - A configured node that fails `get_info` makes the recovery read incomplete; `exact` cannot settle on a quorum, while `at-least` still can. A one-node match is `unknown` for `exact` and `one-node` for `at-least`.
 - `verifyArrivalFromRead` deduplicates an output by its key and amount, so two node answers that name the same output do not inflate an exact sale; distinct split outputs still add up. An empty read is `absent` when the required operator quorum completed, even if another configured node is stale or down.

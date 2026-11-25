@@ -218,6 +218,13 @@ counts. On absence, `agrees` requires the full slice walk and the same quorum: o
 `witness:no-quorum`, not agreement. A transaction seen by the exact path also requires every witness record to be
 complete; a partial witness makes `agrees` false with `witness:not-completed`. The shadow still changes no swap state.
 
+`swaps.readRecoveryWitness` accepts the same `protocol: "witness-v1"` marker. It reads one fixed 20-block slice per
+window and fetches the whole slice's transactions in one batch; a slice block must carry `prev_hash` and `num_txes`, or
+the slice recovery path refuses it. The witness still never receives a key image or an exact start height. A public
+witness that does not expose the recovery compatibility pool route is only usable for a closed window; a private
+witness can enable `RFQ_WITNESS_ALLOW_GET_BLOCK` for the pool read. A URL without the protocol marker keeps using the
+plain-daemon `get_block` path.
+
 ## 8. Retry and idempotency
 
 | Operation | Retry rule |
