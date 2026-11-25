@@ -305,3 +305,8 @@ export { LOCK_START_MARGIN_SEC, START_PREP_SEC, DEFAULT_ORDER_QUOTE_TTL_SEC } fr
 // copying, and it is exported so a consumer can run the same walk: the set in, the answer out. Answers are values
 // with a `reason` token on refusal, never exceptions.
 export { checkLevels, xmrForAsset, assetForXmr, toBigInt, XMR_ATOMIC_PER_ONE } from "./levelsWalkSpec.mjs";
+
+// ONE PURE DECISION FOR EVERY SWAP ACTION. The site, the recovery page and the signing paths ask this function
+// instead of each carrying its own clock, margin or ready-mark rule. It receives the escrow cut, the arrival read and
+// both times as data, so the answer is reproducible and does not depend on when a screen happened to render.
+export { actionDecision, ACTION_DECISION_DEFAULTS } from "./action-decision.mjs";

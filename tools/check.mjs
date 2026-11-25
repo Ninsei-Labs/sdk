@@ -2608,6 +2608,7 @@ const relayHttpCheck = () => runScriptCheck("check-relay-http.mjs", "relay http"
 const relayAdapterCheck = () => runScriptCheck("check-relay-adapter.mjs", "relay adapter");
 const readyWindows = () => runScriptCheck("check-ready-windows.mjs", "ready windows");
 const sellWatchCheck = () => runScriptCheck("check-sell-watch.mjs", "sell watch");
+const actionDecisionCheck = () => runScriptCheck("check-action-decision.mjs", "action decision");
 const sellStartCheck = () => runScriptCheck("check-sell-start.mjs", "sell start");
 const arrivalConsensusCheck = () => runScriptCheck("check-arrival-consensus.mjs", "arrival consensus");
 const arrivalShadowCheck = () => runScriptCheck("check-arrival-shadow.mjs", "arrival shadow");
@@ -2718,6 +2719,7 @@ const CHECKS = {
   "relay-http": relayHttpCheck,
   "relay-adapter": relayAdapterCheck,
   "sell-watch": sellWatchCheck,
+  "action-decision": actionDecisionCheck,
   "sell-start": sellStartCheck,
   "arrival-consensus": arrivalConsensusCheck,
   "arrival-recovery": arrivalRecoveryCheck,

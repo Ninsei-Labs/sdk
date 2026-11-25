@@ -11,6 +11,14 @@ machine). The wallet arrives as an EIP-1193 provider, storage as an adapter, and
 
 The security-invariant map and the V8 line-coverage command are described in [`docs/coverage.md`](docs/coverage.md).
 
+## Action decision
+
+`actionDecision({ side, escrow, arrival, deviceTimeSec })` is the one pure rule for `refund`, `claim`, `markReady`,
+`sendXmr`, `later`, `none` and `unknown`. The escrow cut, the #388 arrival verdict and both clocks are inputs; the
+function never calls `Date.now()`. It returns the action allowed now, `untilSec` and a stable `reason`. The protective
+margins are exported as `ACTION_DECISION_DEFAULTS`; a sale must pass the node's own send lead. The signing paths, the
+site and the recovery page use this answer rather than carrying their own copies of the rule.
+
 ## Integration
 
 The seam table, buy/sell/claim/recovery flows, retry and idempotency rules, cancellation semantics and the support

@@ -1,3 +1,7 @@
+## Unreleased — 2026-11-25
+
+- `actionDecision` is the one pure rule for refund, claim, ready mark and the sale's send window. It takes the escrow read at one block, the arrival verdict and both clocks as data, never calls `Date.now()`, and returns the allowed action, its deadline and a stable reason. The early refund closes by the later of the block and device times; a late refund opens only on a block at or after `t1`; an unfinished read never allows a ready mark. The defaults and the exported `ACTION_DECISION_DEFAULTS` keep the 180 s refund margin, the 60 s claim and mark margins in one place; a sale must pass the node's own send lead.
+
 ## Unreleased — 2026-11-24
 
 - An HTTP call is bounded by body bytes: the idle timer resets on every streamed chunk, so a long block or transaction batch may run as long as it keeps arriving. A stream that stops is `timeout`; a caller cancel is `cancelled`.
