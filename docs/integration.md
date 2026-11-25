@@ -185,7 +185,11 @@ status of the key images; a witness never receives them. The answer carries `rec
 `unspentAtomic` and `withdrawalState` (`empty`, `unspent`, `partly-withdrawn`, `withdrawn`, `unknown`). The totals
 cover the transfers the read returned, including a pool transfer; `availableAtomic` still counts only confirmed,
 unspent outputs. An unverified amount, or an output with no entry in the supplied key-image set, makes every total
-unknown. `recoveryEndHeight` turns the order's `t1` into the first block past it, for `toHeight`.
+unknown. `verifyArrival` now uses the one read with the exact rule; the old exact walk remains available as `verifyArrivalLegacy` only for regression checks. The one-read arrival path requires `fromHeight` (`0` is an explicit genesis start) and accepts the same
+checkpoint, progress and cancellation signal as `readRecovery`; the checkpoint belongs to the primary read, and
+witnesses are read again from their grid windows. `verifyRecovery` names the network and the operator
+quorum; `at-least` may settle on that quorum when another node failed, while `exact` still needs the whole read and a
+one-node match is `unknown`. `recoveryEndHeight` turns the order's `t1` into the first block past it, for `toHeight`.
 Before slice-only verification is enabled, `swaps.verifyArrivalShadow` runs that exact check and a
 `witness-v1` slice check side by side:
 
@@ -234,7 +238,9 @@ bytes on an idempotent retry where the SDK provides one, and never turn a timeou
 
 ## 9. Timeouts, cancellation and unknown outcomes
 
-- A local timeout or `AbortSignal` stops waiting; it does not cancel an on-chain transaction that was already sent.
+- A local timeout or `AbortSignal` stops waiting; it does not cancel an on-chain transaction that was already sent. The
+  timeout is idle-byte based: a response body that keeps streaming is not cut by a total request clock.
+- A caller cancel is reported as `cancelled`; a stream that stops for the idle window is `timeout`.
 - A missing receipt is `not yet`, not `failed`. Keep the hash and ask again later.
 - A revert is a terminal refusal for that transaction; it does not prove that no earlier transaction was mined.
 - On restart, reconstruct state from the SDK records and the chain, not from a screen-local variable.

@@ -9,7 +9,7 @@
 // failure to check still throws before a signature.
 import { SdkError } from "../src/errors.mjs";
 import { createSwaps, recordInputOf } from "../src/swaps.mjs";
-import { verifyArrival } from "../src/xmr-arrival.mjs";
+import { verifyArrivalLegacy as verifyArrival } from "../src/xmr-arrival.mjs";
 import { ed25519, keccak256 } from "../src/primitives.mjs";
 import { addressFromKeys } from "../engine/monero/address.js";
 

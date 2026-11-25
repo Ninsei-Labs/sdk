@@ -335,6 +335,47 @@ console.log("=== 6) THE AMOUNT RULES OVER THE SAME READ ===");
   });
   okIf(locked.state === "locked" && locked.seen === false && locked.unlock && locked.unlock.untilTime === 5_000_000_000,
     "a locked payment is named with its unlock time");
+  const failInfoB = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (body.method === "get_info" && new URL(url).hostname === "b.example") return { ok: false, status: 503 };
+    return rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) } })(url, init);
+  };
+  const deadWitness = await verifyArrival({
+    ...request(failInfoB, undefined, { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE }),
+  });
+  okIf(deadWitness.state === "unknown" && deadWitness.seen === false,
+    "exact does not settle when a configured witness never answered get_info");
+  const failInfoC = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (body.method === "get_info" && new URL(url).hostname === "c.example") return { ok: false, status: 503 };
+    return rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) } })(url, init);
+  };
+  const quorum = await verifyArrival({
+    ...request(failInfoC, [
+      { url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" },
+      { url: "https://c.example", operator: "C" },
+    ], { amountRule: "at-least", expectedAtomic: ATOMIC_QUOTE }),
+  });
+  okIf(quorum.state === "arrived" && quorum.seen === true,
+    "at-least settles with two complete operators when the third never answered");
+  const oneExact = await verifyArrival({
+    ...request(rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) } }),
+      [{ url: "https://a.example", operator: "A" }], { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE }),
+  });
+  okIf(oneExact.state === "unknown" && oneExact.seen === false,
+    "exact keeps a one-node match unknown");
+  const oneAtLeast = await verifyArrival({
+    ...request(rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) } }),
+      [{ url: "https://a.example", operator: "A" }], { amountRule: "at-least", expectedAtomic: ATOMIC_QUOTE }),
+  });
+  okIf(oneAtLeast.state === "one-node" && oneAtLeast.seen === false,
+    "at-least names a one-node match without settling it");
+  const defaultOneRead = await verifyArrival({
+    ...request(rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) } }), undefined,
+      { expectedAtomic: ATOMIC_QUOTE }),
+  });
+  okIf(defaultOneRead.state === "arrived" && defaultOneRead.seen === true,
+    "the default arrival uses the one read with the exact rule");
   const exact = await verifyArrival({
     ...request(rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) } }), undefined, { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE }),
   });
@@ -344,9 +385,12 @@ console.log("=== 6) THE AMOUNT RULES OVER THE SAME READ ===");
   okIf(viewOnly.state === "arrived", "arrival with the address and view key only reaches the same answer");
   const legacyViewOnly = await verifyArrival({ ...withoutSpend, expectedAtomic: ATOMIC_QUOTE });
   okIf(legacyViewOnly.state === "arrived", "the default arrival path also works without a supplied spend key");
-  const noStart = await verifyArrival({ ...request(rpc()), fromHeight: undefined, amountRule: "at-least", expectedAtomic: ATOMIC_QUOTE });
-  okIf(noStart.state === "pending" && noStart.absent === true,
-    "an omitted fromHeight keeps the old genesis default on the amount path");
+  let noStart = null;
+  try {
+    await verifyArrival({ ...request(rpc()), fromHeight: undefined, amountRule: "at-least", expectedAtomic: ATOMIC_QUOTE });
+  } catch (error) { noStart = error; }
+  okIf(noStart && noStart.code === "bad-input" && noStart.params.field === "fromHeight",
+    "an omitted fromHeight is refused; genesis must be explicit");
   const unread = await verifyArrival({
     ...request(rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) }, failAt: 110 }), undefined,
       { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE }),

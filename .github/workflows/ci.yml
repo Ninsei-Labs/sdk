@@ -264,7 +264,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: Ninsei-Labs/witness-node
-          ref: 83feb7b20c75dd96f02c6950ab3fc6e862fef813 # witness-node#28: fake daemon answers the pool route
+          ref: 0a1fc3738c7e3073646ca455ee804a9e64253234 # witness-node#33: fake daemon returns prev_hash
           path: witness-node
 
       - name: Run the SDK/witness interop check
