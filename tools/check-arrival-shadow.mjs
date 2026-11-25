@@ -77,9 +77,10 @@ const address = addressFromKeys({ network: "stagenet", kind: "primary", spendPub
 const tx = fixture();
 const requests = [];
 
+const blockHashAt = (height) => (height === 105 ? BLOCK_HASH : String(height).padStart(64, "0"));
 function blockFor(height, tie = false) {
-  const hash = height === 105 ? BLOCK_HASH : String(height).padStart(64, "0");
-  return { block_header: { hash }, tx_hashes: height === 105 ? (tie ? [TXID, TXID_TIE] : [TXID]) : [] };
+  const hash = blockHashAt(height);
+  return { block_header: { hash, prev_hash: blockHashAt(height - 1) }, tx_hashes: height === 105 ? (tie ? [TXID, TXID_TIE] : [TXID]) : [] };
 }
 
 function witnessIndex(url) {
@@ -156,7 +157,8 @@ function fetchEmpty() {
     if (isHost(url, "missing.example")) return { ok: false, status: 404, json: async () => ({}) };
     if (body.method === "get_info") return { ok: true, json: async () => ({ result: { height: 121, synchronized: true } }) };
     if (body.method === "get_block") {
-      return { ok: true, json: async () => ({ result: { block_header: { hash: String(body.params.height).padStart(64, "0") }, tx_hashes: [] } }) };
+      const height = Number(body.params.height);
+      return { ok: true, json: async () => ({ result: { block_header: { hash: blockHashAt(height), prev_hash: blockHashAt(height - 1) }, tx_hashes: [] } }) };
     }
     if (String(url).endsWith("/get_transaction_pool_hashes")) {
       return { ok: true, json: async () => ({ tx_hashes: [] }) };

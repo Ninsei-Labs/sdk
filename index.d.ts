@@ -923,16 +923,22 @@ export interface XmrArrivalRequest {
   /** Optional for arrival: the public spend key is read from the address. A supplied key is checked. */
   readonly spendPub?: string;
   readonly expectedAtomic: string | number | bigint;
-  /** `at-least` (buy) or `exact` (sale). Selecting a rule uses the one-read amount path. */
+  /** `at-least` (buy) or `exact` (sale). The default arrival uses `exact`. */
   readonly amountRule?: "at-least" | "exact";
   readonly minConfirmations?: number;
   readonly txid?: string | null;
-  readonly fromHeight?: number | null;
-  /** The first block past the order's `t1` (inclusive); used by the amount-rule path. The default exact walk ignores it. */
+  /** Required: the order's start height. An explicit derived genesis start is still passed as `0`. */
+  readonly fromHeight: number;
+  /** The first block past the order's `t1` (inclusive); omitted reads to the head. */
   readonly toHeight?: number | null;
   readonly nowSec?: number;
   readonly timeoutMs?: number;
+  /** Overrides the network derived from the address; normally left out. */
+  readonly network?: string;
   readonly keyImages?: readonly (string | XmrRecoveryKeyImage)[];
+  readonly checkpoint?: XmrRecoveryCheckpointStore;
+  readonly onProgress?: (event: XmrRecoveryProgress) => void;
+  readonly signal?: AbortSignal;
   /** The transport for node and witness reads; absent - the client's `fetch`, otherwise the global fetch. */
   readonly fetch?: FetchLike;
 }
@@ -952,10 +958,15 @@ export interface XmrRecoveryRequest {
   readonly idleTimeoutMs?: number;
   readonly timeoutMs?: number;
   readonly fetch?: FetchLike;
+  /** Overrides the network derived from the address; normally left out. */
+  readonly network?: string;
   /** Key images from `sweep.keyImages`; without them spends and the available remainder are unknown. */
   readonly keyImages?: readonly (string | XmrRecoveryKeyImage)[];
   /** Ask the selected primary node for `/is_key_image_spent`; default true when key images are supplied. */
   readonly spentStatus?: boolean;
+  readonly checkpoint?: XmrRecoveryCheckpointStore;
+  readonly onProgress?: (event: XmrRecoveryProgress) => void;
+  readonly signal?: AbortSignal;
 }
 
 /** The caller-owned checkpoint of the primary or witness recovery read. */
@@ -1176,6 +1187,10 @@ export interface XmrRecoveryVerdict extends XmrRecoveryTotals {
   readonly fromHeight: number;
   readonly toHeight: number | null;
   readonly minConfirmations: number;
+  /** The network the primary reported; null when the primary did not answer. */
+  readonly network: string | null;
+  /** Complete operators needed for a positive decision: 2 on testnet/stagenet, 3 on mainnet. */
+  readonly requiredOperators: number;
   /** False when any read failed; a caller must not treat the list as exhaustive. */
   readonly complete: boolean;
   readonly completedOperators?: readonly string[];

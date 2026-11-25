@@ -98,28 +98,28 @@ async function mutatedLadder(from, to, name, all = false) {
 
 try {
   const real = await import(pathToFileURL(join(ROOT, "src", "xmr-arrival.mjs")).href);
-  const pending = await real.verifyArrival(request());
+  const pending = await real.verifyArrivalLegacy(request());
   if (pending && pending.state === "pending" && pending.absent === false) ok("the shipped module does not call two stale witnesses absent");
   else bad("shipped unsynchronized verdict", JSON.stringify(pending));
 
   const noSyncCheck = await mutatedLadder("if (!info.synced) {", "if (false) {", "no-sync-check", true);
-  const staleMutant = await noSyncCheck.verifyArrival(request());
+  const staleMutant = await noSyncCheck.verifyArrivalLegacy(request());
   if (staleMutant && staleMutant.absent === true) ok("removing both sync checks makes the stale pair absent (the guard is load-bearing)");
   else bad("sync-check mutation", JSON.stringify(staleMutant));
 
   // EACH CHECK ALONE. Removing only the block-walk guard leaves the pool guard refusing the stale pair; removing
   // only the pool guard leaves the block walk refusing it. The combined mutation above is the positive control.
   const noBlockSync = await mutatedLadder("if (!info.synced) {\n      staleWitnesses", "if (false) {\n      staleWitnesses", "no-block-sync");
-  const blockStale = await noBlockSync.verifyArrival(request());
+  const blockStale = await noBlockSync.verifyArrivalLegacy(request());
   if (blockStale && blockStale.absent === false) ok("the pool guard still refuses a stale block witness");
   else bad("block sync mutation", JSON.stringify(blockStale));
   const noPoolSync = await mutatedLadder("if (!info.synced) { continue; }", "if (false) { continue; }", "no-pool-sync");
-  const poolStale = await noPoolSync.verifyArrival(request());
+  const poolStale = await noPoolSync.verifyArrivalLegacy(request());
   if (poolStale && poolStale.absent === false) ok("the block walk still refuses a stale pool witness");
   else bad("pool sync mutation", JSON.stringify(poolStale));
 
   let originalMismatch = null;
-  try { await real.verifyArrival(request({ spendPub: wrongSpend, fetch: fetchFor({ synchronized: true }) })); }
+  try { await real.verifyArrivalLegacy(request({ spendPub: wrongSpend, fetch: fetchFor({ synchronized: true }) })); }
   catch (error) { originalMismatch = error; }
   if (originalMismatch && originalMismatch.code === "xmr-address-mismatch") ok("the shipped module refuses a key from another address");
   else bad("original key binding", JSON.stringify(originalMismatch && (originalMismatch.code || originalMismatch.message)));
@@ -127,7 +127,7 @@ try {
   const noSpendCheck = await mutatedLadder(
     "if (!bound.ok) {", "if (false) {", "no-spend-check");
   let mutantMismatch = null;
-  try { await noSpendCheck.verifyArrival(request({ spendPub: wrongSpend, fetch: fetchFor({ synchronized: true }) })); }
+  try { await noSpendCheck.verifyArrivalLegacy(request({ spendPub: wrongSpend, fetch: fetchFor({ synchronized: true }) })); }
   catch (error) { mutantMismatch = error; }
   if (!mutantMismatch || mutantMismatch.code !== "xmr-address-mismatch") {
     ok("removing the address binding stops refusing the wrong key (the guard is load-bearing)");
