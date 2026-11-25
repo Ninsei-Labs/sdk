@@ -1,3 +1,7 @@
+## Unreleased — 2026-11-25
+
+- `actionDecision` is the one pure rule for refund, claim, ready mark and the sale's send window. It takes the escrow read at one block, the arrival verdict and both clocks as data, never calls `Date.now()`, and returns the allowed action, its deadline and a stable reason. The early refund closes by the later of the block and device times; a late refund opens only on a block at or after `t1`; an unfinished read never allows a ready mark. The defaults and the exported `ACTION_DECISION_DEFAULTS` keep the 180 s refund margin, the 60 s claim and mark margins in one place; a sale must pass the node's own send lead.
+
 ## Unreleased — 2026-11-24
 
 - `readRecoveryWitness` accepts a `witness-v1` node: it reads fixed 20-block slices instead of asking for exact heights. Slice blocks carry `prev_hash` and `num_txes`; the reader verifies the chain, the transaction count and the whole slice before it uses the transactions. A witness that omits those fields is refused by the slice path, while the older arrival shadow still accepts the older slice shape.
