@@ -138,6 +138,17 @@ export function evmWallet(provider, { id = "evm" } = {}) {
       if (typeof txHash !== "string" || !txHash) throw new SdkError("bad-input", { field: "receipt.txHash" });
       return await provider.request({ method: "eth_getTransactionReceipt", params: [txHash] });
     },
+    // THE ACCOUNT'S NEXT NONCE, when the provider can answer. `pending` sees a transaction still in a node's
+    // mempool; `latest` counts only mined ones. A missing or malformed answer is null, never zero.
+    async nonce(block = "pending") {
+      const accounts = await provider.request({ method: "eth_accounts" }).catch(() => null);
+      const account = Array.isArray(accounts) ? accounts[0] : null;
+      if (typeof account !== "string" || !ADDRESS_RE.test(account)) return null;
+      const tag = block === "latest" ? "latest" : "pending";
+      const raw = await provider.request({ method: "eth_getTransactionCount", params: [account, tag] }).catch(() => null);
+      const value = hexToInt(raw);
+      return Number.isSafeInteger(value) && value >= 0 ? value : null;
+    },
     // SIGNING TYPED DATA (EIP-712) - the same call the page makes (www/js/evm/session.js, signTypedData). This is not
     // a transaction: no gas, no money moves, so a person without their own ETH can give it. What is signed is DECIDED
     // BY THE CALLER (ready typed data arrives here - e.g. a CoWSwap order from src/legs/cow.mjs); the shape is not

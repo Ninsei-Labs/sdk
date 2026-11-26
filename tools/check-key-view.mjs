@@ -192,7 +192,7 @@ console.log("=== 1c1) A MALFORMED SALT IS REFUSED BY NAME, NOT IGNORED ===");
   } else bad("malformed salt: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
 }
 
-async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 }, funded = false, statusData = null, withId = true, withQuote = true, withSignature = true, escrow = null, recoverySalt = order.salt, orderSalt = order.salt, predictThrows = false, predictFromData = false, quotePatch = {}, orderPatch = {}, receiptProbe = null } = {}) {
+async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 }, funded = false, statusData = null, withId = true, withQuote = true, withSignature = true, escrow = null, recoverySalt = order.salt, orderSalt = order.salt, predictThrows = false, predictFromData = false, quotePatch = {}, orderPatch = {}, receiptProbe = null, nonce = null, retryUnknownSend = false } = {}) {
   if (fresh) setStorage(memoryStorage());
   let sent = 0;
   let receiptCalls = 0;
@@ -202,14 +202,16 @@ async function startPending({ fresh = true, receipt = { status: "0x1", logs: [],
       receiptCalls += 1;
       if (receiptCalls === 1 && typeof receiptProbe === "function") receiptProbe(loadState());
       return receipt;
-    } };
+    },
+    ...(nonce === null ? {} : { nonce: async () => nonce }) };
   const counterparty = { proof: maker.side.proof, edPointClaimer: maker.spendPoint,
     commitHalfClaimer: quote.commitHalfClaimer, viewHalfClaimer: derived.makerViewHalf };
   const baseQuote = withSignature ? quote : { ...quote, signature: undefined };
   const activeQuote = { ...baseQuote, ...quotePatch };
   const request = { quote: { ...(withId ? { id: "q" } : {}), chain: "arbitrum-sepolia", asset: "ETH", amount: 1, size: 1 }, order: { ...order, salt: orderSalt, ...orderPatch }, ...(withQuote ? { orderQuote: activeQuote } : {}),
     counterparty, recoveryKey: WORDS, recoverySalt, receiveTo: XMR_TO,
-    restoreHeight: 100, wallet, onRecoveryKey: async () => true, ...(escrow ? { escrow } : {}) };
+    restoreHeight: 100, wallet, onRecoveryKey: async () => true, ...(escrow ? { escrow } : {}),
+    ...(retryUnknownSend ? { retryUnknownSend: true } : {}) };
   const fundedStatus = "0x" + [1, 0, 0, 0].map((value) => BigInt(value).toString(16).padStart(64, "0")).join("");
   const result = await createSwaps({ mode: "live", xmrNetwork: "stagenet", logs: async () => [],
     call: async ({ data }) => {
@@ -570,6 +572,33 @@ console.log("=== 1d2a6) AN AMBIGUOUS SEND ERROR IS NOT A FREE RETRY ===");
     bad("ambiguous send error: " + JSON.stringify({ code: first.result && first.result.code,
       record: record && record.escrow, step: second.result && second.result.step,
       reason: second.result && second.result.reason, sent: second.sent }));
+  }
+}
+
+console.log("=== 1d2a7) AN EXPLICIT RETRY RELEASES ONLY AFTER THE CALLER ASKS ===");
+{
+  const first = await startPending({ receipt: null, nonce: 5 });
+  const predicted = first.result && first.result.escrow;
+  const state = loadState();
+  const record = Object.values((state && state.swaps) || {})[0];
+  if (!record || !record.escrow || record.escrow.sendNonce !== 5) bad("explicit-retry fixture: no pending record or nonce");
+  else {
+    delete record.escrow.fundTx;
+    record.fundingPending = true;
+    record.escrow = { ...record.escrow, fundingPending: true, fundingReason: "not-sent",
+      sendAttempted: true, sendNonce: 5, funded: false };
+    saveState(state);
+    const second = await startPending({ fresh: false, escrow: predicted, receipt: createdReceipt(),
+      nonce: 5, retryUnknownSend: true });
+    const after = second.result && second.result.id ? (loadState().swaps || {})[second.result.id] : null;
+    if (predicted && second.result && second.result.step === "xmr-incoming"
+        && second.sent === 1 && after && after.escrow && after.escrow.fundTx === SENT_HASH
+        && after.escrow.funded === true && after.escrow.sendNonce === 5) {
+      ok("an explicit retry sends once and keeps the recorded nonce");
+    } else {
+      bad("explicit retry: " + JSON.stringify({ step: second.result && second.result.step,
+        sent: second.sent, record: after && after.escrow }));
+    }
   }
 }
 

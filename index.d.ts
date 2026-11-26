@@ -426,6 +426,12 @@ export interface WalletAdapter {
    */
   receipt(txHash: string): Promise<unknown>;
   /**
+   * The account's transaction count, when this wallet can read it. `pending` includes a transaction that is still
+   * in a node's mempool; `latest` counts only mined ones. Optional: a wallet without it still funds, but the
+   * ambiguous-send recovery loses one piece of evidence.
+   */
+  nonce?(block?: "latest" | "pending"): Promise<number | string | null>;
+  /**
    * SIGN TYPED DATA (EIP-712). Not a transaction: no gas, no money moves, so a person without their own coin can
    * give it. What is signed is decided by the CALLER (ready typed data arrives here). Optional - a wallet that
    * cannot sign typed data leaves it out, and a caller sees `not-implemented`, not silence.
@@ -726,6 +732,12 @@ export interface SwapsApi {
    * the swap with if the browser is lost.
    */
   start(request: StartRequest): Promise<SwapStart>;
+  /**
+   * READ THE FUNDING RECORD AFTER AN AMBIGUOUS SEND. It never signs or sends: it reads the recorded hash, the
+   * predicted escrow and `OrderCreated`, and uses an optional wallet nonce as evidence. A funded escrow recovers
+   * the row; an unknown result keeps the pending record for the caller's own decision.
+   */
+  reconcileFunding(request: ReconcileFundingRequest): Promise<ReconcileFundingResult>;
   /**
    * START A SELL from a verified relay offer. It records the one-time address, the escrow, our half and the
    * order expectations; it sends nothing. The same offer retried yields the same record (`resumed: true`).
@@ -1623,6 +1635,33 @@ export interface SwapWatch {
   readonly source?: "client";
 }
 
+export interface ReconcileFundingRequest {
+  readonly id: string;
+  /** Optional wallet seams: receipt for a known hash and nonce for ambiguous sends. */
+  readonly wallet?: WalletAdapter;
+  /** Optional log seam; without it the SDK uses the instance `evmLogs`, then cannot prove OrderCreated. */
+  readonly evmLogs?: EvmLogReader;
+  readonly fromBlock?: string | number;
+  readonly toBlock?: string | number;
+}
+
+/** A read-only funding recovery answer. It never signs or sends. */
+export interface ReconcileFundingResult {
+  readonly id: string;
+  readonly state: "funded" | "pending" | "not-funded" | "unknown";
+  readonly escrow: string | null;
+  readonly fundTx: string | null;
+  readonly blockNumber: number | null;
+  readonly evidence: "receipt" | "order-created" | "escrow-status" | "nonce" | null;
+  /** The recorded pending nonce before the send, when the adapter supplied one. */
+  readonly nonceBefore: number | null;
+  /** The current pending nonce, or null when the adapter cannot read it. */
+  readonly nonceNow: number | null;
+  /** `true`/`false` when both nonces are known; null when the adapter has no nonce or none was recorded. */
+  readonly nonceMoved: boolean | null;
+  readonly reason: string | null;
+}
+
 export interface StartRequest {
   readonly quote: QuoteLike;
   /**
@@ -1666,6 +1705,11 @@ export interface StartRequest {
    * (`bad-input`), rather than going in blind. The recovery key has by now been confirmed by the person.
    */
   readonly wallet?: WalletAdapter;
+  /**
+   * EXPLICITLY RETRY A SEND WHOSE HASH WAS NOT RECORDED. Only the caller may decide this after reconciliation;
+   * without it a `sendAttempted` record stays blocked and `start` returns `hash-unrecorded`.
+   */
+  readonly retryUnknownSend?: boolean;
   /**
    * THE ONE RECOVERY KEY (sdk#76). A BIP39 mnemonic, or a key object from `@ninsei-labs/sdk/recovery`.
    * The swap's spend and view halves are derived from it; the per-swap recovery file path is gone, and the key is

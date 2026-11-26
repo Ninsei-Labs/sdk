@@ -472,6 +472,12 @@ the predicted escrow, and reads the same transaction; it does not build a second
 clears the pending mark so the person can sign again. A transaction that was already mined is stopped by the escrow
 state guard; one still in the mempool can make the resend revert and cost gas, but cannot create a second deposit.
 
+`swaps.reconcileFunding({ id, wallet?, evmLogs? })` is the read-only recovery answer after an ambiguous send. It
+reads a known receipt, the predicted escrow, `OrderCreated` from the expected factory and, when the adapter supplies
+`wallet.nonce(block)`, the pending nonce before and after the attempt. It never signs or sends. A funded escrow is
+saved as locked; an empty or unreadable one stays `unknown`. `nonceMoved` is evidence, not proof. Only the caller may
+pass `retryUnknownSend: true` to `start` after its own decision; without it a `sendAttempted` row remains blocked.
+
 The wallet adapter accepts the standard Monero network names (`mainnet`, `stagenet`, `testnet`, `fakechain`) and
 still checks the address shape, so a mainnet withdrawal is not refused because the demo registry lists only
 stagenet. The withdrawal window retries a `429`, a timeout or a `5xx` before it gives up. If the window still cannot be read,
