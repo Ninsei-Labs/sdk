@@ -579,11 +579,15 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       factory: order.factory || (request.orderQuote && request.orderQuote.factory) || null,
       expectedEscrow: escrowRecord.address || null,
     });
-    if (verdict.status === "reverted") throw new SdkError("contract-reverted", { step: "funding" });
+    if (verdict.status === "reverted" && !(onChain && onChain.isFunded)) {
+      throw new SdkError("contract-reverted", { step: "funding" });
+    }
     if (verdict.status === "funded" || (onChain && onChain.isFunded)) {
       const escrow = verdict.status === "funded" ? verdict.escrow : escrowRecord.address;
       if (!escrow) throw new SdkError("funding-pending", { reason: "no-escrow-address" });
-      swap.escrow = { ...escrowRecord, address: escrow, fundingPending: false,
+      // A REVERTED RECEIPT DOES NOT UNLOCK A FUNDED ESCROW. The escrow read is the stronger fact; the hash stays on
+      // the record as the handle for the next read.
+      swap.escrow = { ...escrowRecord, address: escrow, fundingPending: false, fundingReason: null,
         evmBirthBlock: Number(verdict.birthBlock) > 0 ? Number(verdict.birthBlock) : (escrowRecord.evmBirthBlock ?? null) };
       delete swap.fundingPending;
       try { engine.swap.saveSwap(swap, store); } catch { throw new SdkError("storage-unavailable", { step: "save-escrow" }); }
@@ -1298,8 +1302,19 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         try { engine.swap.saveSwap(record.swap, store); }
         catch { throw new SdkError("storage-unavailable", { step: "save-pending" }); }
       };
+      // THE HASH IS WRITTEN AS SOON AS THE WALLET RETURNS IT, BEFORE THE RECEIPT WAIT. A reload in between then sees
+      // a transaction that may already be on chain, so it reads the receipt instead of asking for a second deposit.
+      const noteSent = async ({ createHash, escrow: predicted }) => {
+        if (!createHash) return;
+        const escrowRecord = record.swap.escrow && typeof record.swap.escrow === "object" ? record.swap.escrow : {};
+        record.swap.fundingPending = true;
+        record.swap.escrow = { ...escrowRecord, address: escrowRecord.address || predicted || null,
+          fundTx: createHash, fundingPending: true, fundingReason: "no-receipt" };
+        try { engine.swap.saveSwap(record.swap, store); }
+        catch { throw new SdkError("storage-unavailable", { step: "save-pending" }); }
+      };
       let funded = null;
-      try { funded = await lock.send(lockRequest, wallet, { call: reader, nowSec: lockNowSec, onPredicted: notePredicted }); }
+      try { funded = await lock.send(lockRequest, wallet, { call: reader, nowSec: lockNowSec, onPredicted: notePredicted, onSent: noteSent }); }
       catch (error) {
         // A REJECTION BEFORE BROADCAST MUST NOT LEAVE THE SWAP STUCK IN funding-pending. The pre-send record exists
         // for a process that dies while the send is in flight; an explicit wallet refusal is the other case, and the
@@ -1342,11 +1357,16 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       if (escrowAddress) {
         const escrowRecord = record.swap.escrow && typeof record.swap.escrow === "object" ? record.swap.escrow : {};
         record.swap.escrow = { ...escrowRecord, address: escrowAddress,
+          // THE HASH IS A RECORD FACT EVEN AFTER THE RECEIPT: it is the handle a reload uses to re-read the escrow.
+          fundTx: (funded && funded.createHash) || escrowRecord.fundTx || null,
           validUntil: signedValidUntil ?? escrowRecord.validUntil ?? null,
+          // A CONFIRMED DEPOSIT IS NOT PENDING. The pre-send `not-sent` mark must not survive a funded receipt.
+          fundingPending: false, fundingReason: null,
           // THE SETTLEMENT-CHAIN HEIGHT, NAMED AS SUCH. It is for the OrderCreated/Declined log search; the XMR
           // watch and the recovery file take the Monero height measured above. The old name `birthHeight` stays
           // readable on records written before this split.
           evmBirthBlock: Number(funded.birthBlock) > 0 ? Number(funded.birthBlock) : (escrowRecord.evmBirthBlock ?? escrowRecord.birthHeight ?? null) };
+        delete record.swap.fundingPending;
         try { engine.swap.saveSwap(record.swap, store); } catch { throw new SdkError("storage-unavailable", { step: "save-escrow" }); }
         // THE SALT IS THE RECOVERY BINDING; there is no index reservation to commit here.
       }

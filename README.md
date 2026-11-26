@@ -454,16 +454,19 @@ Storage is a refusal, not a silent empty state: a failed read, corrupt JSON, a f
 `storage-unavailable` with a step. Every SDK instance gets its own store over the adapter it was given, so two
 clients with different adapters keep separate records and neither takes over the other's.
 
-Funding is reported from the receipt, not from the send. A status-0 receipt is `contract-reverted`; a missing
-receipt, a receipt without `OrderCreated`, or an event from another factory is `funding-pending` with the transaction
-hash, and `swaps.start` does not save an escrow or retire a recovery number in that state.
+Funding is reported from the receipt, not from the send, but the transaction hash is a record fact as soon as the
+wallet returns it. A missing receipt, a receipt without `OrderCreated`, or an event from another factory is
+`funding-pending` with the transaction hash, and `swaps.start` does not save an escrow or retire a recovery number
+in that state. A status-0 receipt is `contract-reverted` only while the escrow is not funded; if the escrow reads
+funded, that stronger fact wins and the row stays locked with its hash.
 
-The predicted escrow and its salt are written to the pending record before the funding transaction is sent. A retry
-after a late receipt or a process restart finds that record by the salt, the chain, the factory and the predicted
-escrow, and reads the same transaction; it does not build a second side or send a second deposit. An explicit wallet
-rejection clears the pending mark so the person can sign again. A transaction that was already mined is stopped by
-the escrow state guard; one still in the mempool can make the resend revert and cost gas, but cannot create a second
-deposit.
+The predicted escrow and its salt are written to the pending record before the funding transaction is sent; the
+hash is written immediately after the send, before the receipt wait. A retry after a late receipt or a process
+restart finds that record by the salt, the chain, the factory and the predicted escrow, and reads the same
+transaction; it does not build a second side or send a second deposit. `not-sent` is used only while no hash is
+known. An explicit wallet rejection clears the pending mark so the person can sign again. A transaction that was
+already mined is stopped by the escrow state guard; one still in the mempool can make the resend revert and cost
+gas, but cannot create a second deposit.
 
 The wallet adapter accepts the standard Monero network names (`mainnet`, `stagenet`, `testnet`, `fakechain`) and
 still checks the address shape, so a mainnet withdrawal is not refused because the demo registry lists only

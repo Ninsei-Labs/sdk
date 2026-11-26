@@ -220,6 +220,17 @@ async function startPending({ fresh = true, receipt = { status: "0x1", logs: [],
   return { result, sent };
 }
 
+const SENT_HASH = "0x" + "99".repeat(32);
+const predictedEscrow = "0x" + "88".repeat(20);
+const createdReceipt = ({ status = "0x1", escrow = predictedEscrow } = {}) => {
+  const pad = (v) => "0x" + String(v).replace(/^0x/, "").toLowerCase().padStart(64, "0");
+  return { status, blockNumber: 11, logs: status === "0x1" ? [{
+    address: order.factory,
+    topics: [ORDER_CREATED_TOPIC, pad(escrow), pad(order.locker), pad(order.claimer)],
+    data: "0x" + "00".repeat(12 * 32),
+  }] : [] };
+};
+
 console.log("=== 1c3) A RELOADED PENDING RETRY FINDS THE SAME ESCROW ===");
 {
   const first = await startPending({ predictFromData: true });
@@ -404,6 +415,77 @@ console.log("=== 1d2) A RETRY READS THE SAME HASH AND DOES NOT SEND AGAIN ===");
   if (predicted && second.result && second.result.step === "xmr-incoming" && second.result.escrow === predicted && second.sent === 0) {
     ok("the retry reads the pending hash, saves the escrow and sends nothing");
   } else bad("pending retry: " + JSON.stringify({ ctor: second.result && second.result.constructor && second.result.constructor.name, code: second.result && second.result.code, params: second.result && second.result.params, msg: second.result && second.result.message, sent: second.sent }));
+}
+
+console.log("=== 1d2a) A CONFIRMED DEPOSIT KEEPS THE HASH, CLEARS PENDING AND LOCKS THE ROW ===");
+{
+  const { result } = await startPending({ receipt: createdReceipt() });
+  const record = Object.values((loadState() && loadState().swaps) || {})[0];
+  const shown = result && result.id ? await createSwaps({}).get(result.id) : null;
+  if (result && result.step === "xmr-incoming" && result.escrow === predictedEscrow
+      && record && record.escrow && record.escrow.fundTx === SENT_HASH
+      && record.escrow.fundingPending !== true && record.escrow.fundingReason !== "not-sent"
+      && record.fundingPending !== true && shown && shown.funds && shown.funds.escrowLocked === true) {
+    ok("a confirmed deposit keeps its hash and reports a locked escrow");
+  } else {
+    bad("confirmed deposit record: " + JSON.stringify({ step: result && result.step, escrow: result && result.escrow,
+      record: record && record.escrow, pending: record && record.fundingPending,
+      locked: shown && shown.funds && shown.funds.escrowLocked }));
+  }
+}
+
+console.log("=== 1d2a1) THE HASH IS SAVED BEFORE THE RECEIPT ARRIVES ===");
+{
+  const { result } = await startPending({ receipt: null });
+  const record = Object.values((loadState() && loadState().swaps) || {})[0];
+  const shown = result && result.id ? await createSwaps({}).get(result.id) : null;
+  if (result && result.step === "funding-pending" && result.txHash === SENT_HASH
+      && record && record.escrow && record.escrow.fundTx === SENT_HASH
+      && record.escrow.fundingReason === "no-receipt"
+      && shown && shown.funds && shown.funds.escrowLocked === true) {
+    ok("a pending receipt still records the hash and locks the escrow");
+  } else {
+    bad("hash before receipt: " + JSON.stringify({ step: result && result.step, txHash: result && result.txHash,
+      record: record && record.escrow, locked: shown && shown.funds && shown.funds.escrowLocked }));
+  }
+}
+
+console.log("=== 1d2a2) A RELOAD AFTER THE HASH READS THE RECEIPT AND DOES NOT SEND AGAIN ===");
+{
+  const first = await startPending({ receipt: null });
+  const second = await startPending({ fresh: false, receipt: null });
+  const record = Object.values((loadState() && loadState().swaps) || {})[0];
+  const shown = second.result && second.result.id ? await createSwaps({}).get(second.result.id) : null;
+  if (first.result && first.result.step === "funding-pending"
+      && second.result && second.result.step === "funding-pending" && second.sent === 0
+      && record && record.escrow && record.escrow.fundTx === SENT_HASH
+      && shown && shown.funds && shown.funds.escrowLocked === true) {
+    ok("a reload keeps the hash and the locked escrow without a second send");
+  } else {
+    bad("reload after hash: " + JSON.stringify({ first: first.result && first.result.step,
+      second: second.result && second.result.step, sent: second.sent, record: record && record.escrow,
+      locked: shown && shown.funds && shown.funds.escrowLocked }));
+  }
+}
+
+console.log("=== 1d2a3) A REVERTED RECEIPT DOES NOT UNLOCK A FUNDED ESCROW ===");
+{
+  const first = await startPending({ receipt: null });
+  const predicted = first.result && first.result.escrow;
+  const second = await startPending({ fresh: false, escrow: predicted, funded: true,
+    receipt: createdReceipt({ status: "0x0" }) });
+  const record = Object.values((loadState() && loadState().swaps) || {})[0];
+  const shown = second.result && second.result.id ? await createSwaps({}).get(second.result.id) : null;
+  if (predicted && second.result && second.result.step === "xmr-incoming"
+      && record && record.escrow && record.escrow.fundTx === SENT_HASH
+      && record.escrow.fundingPending !== true
+      && shown && shown.funds && shown.funds.escrowLocked === true) {
+    ok("a reverted receipt with a funded escrow stays locked and keeps the hash");
+  } else {
+    bad("reverted receipt with funded escrow: " + JSON.stringify({ step: second.result && second.result.step,
+      escrow: second.result && second.result.escrow, record: record && record.escrow,
+      locked: shown && shown.funds && shown.funds.escrowLocked }));
+  }
 }
 
 console.log("=== 1d2b) A RETRY WITHOUT AN ORDER ID FINDS THE SALT-KEYED PENDING RECORD ===");

@@ -220,7 +220,7 @@ async function waitReceipt(receiptReader, hash, { tries = 12, delayMs = 1500 } =
 
 // The full funding path. Steps are returned outward so the interface can show each one: predict is a free call,
 // createOrder and lock are transactions in the user's wallet.
-export async function fundOrder({ factory, locker, claimer, commitHalfLocker, commitHalfClaimer, edPointLocker, edPointClaimer, edViewPointLocker, salt: providedSalt, amountWei, amountLabel, claimWindowSeconds, readyWindowSeconds, readyBy, t1, quote, call, send, receipt, onStep, onPredicted, nowSec = null }) {
+export async function fundOrder({ factory, locker, claimer, commitHalfLocker, commitHalfClaimer, edPointLocker, edPointClaimer, edViewPointLocker, salt: providedSalt, amountWei, amountLabel, claimWindowSeconds, readyWindowSeconds, readyBy, t1, quote, call, send, receipt, onStep, onPredicted, onSent, nowSec = null }) {
   if (!factory) throw new Error("no escrow factory address set for this network");
   if (!locker) throw new Error("no EVM wallet connected: there is nobody to deposit");
   if (!claimer) throw new Error("the order recipient (claimer) is not set");
@@ -334,6 +334,9 @@ export async function fundOrder({ factory, locker, claimer, commitHalfLocker, co
     value: "0x" + totalValueWei.toString(16),
     gas: GAS_CREATE_ORDER_AND_FUND,
   });
+  // THE HASH IS A RECORD FACT BEFORE THE RECEIPT WAIT. A process can die while the receipt is still missing; the
+  // caller's record must already name the transaction so a reload reads it instead of asking for a second deposit.
+  if (typeof onSent === "function") await onSent({ createHash, escrow, salt, terms });
 
   // 2b) The escrow address comes from the receipt, not from the prediction. The prediction is right only when the
   // salt and the factory code match. A divergence is a sign of a real error and must be named.
