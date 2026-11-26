@@ -66,6 +66,7 @@ export function principalForTotal(totalWei, feeBps) {
 
 const payoutBig = (value, { allowZero = true } = {}) => {
   if (value === null || value === undefined || value === "") return null;
+  if (typeof value !== "string" && typeof value !== "number" && typeof value !== "bigint") return null;
   try {
     const n = BigInt(value);
     return n < 0n || (!allowZero && n === 0n) ? null : n;
