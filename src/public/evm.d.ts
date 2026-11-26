@@ -209,20 +209,22 @@ export declare function feeTermsFromQuote(quote: Readonly<Record<string, unknown
 export interface SalePayoutBeforeClaimRequest {
   readonly amountWei: string | number | bigint;
   readonly feeWei: string | number | bigint;
+  /** Left out or null means unknown, not zero. An explicit 0 is the no-tip figure. */
   readonly claimTipWei?: string | number | bigint;
 }
 
 export interface SalePayoutBeforeClaim {
   readonly amountWei: bigint;
   readonly feeWei: bigint;
-  readonly claimTipWei: bigint;
-  /** `amount - fee - claimTip`, when another address sends the claim. */
-  readonly guaranteedMinimumWei: bigint;
-  /** `amount - fee`, when the seller sends the claim. */
+  /** The signed tip, or null when it was left out or unreadable. It is never read as zero. */
+  readonly claimTipWei: bigint | null;
+  /** `amount - fee - claimTip`, when another address sends the claim; null when the tip is unknown. */
+  readonly guaranteedMinimumWei: bigint | null;
+  /** `amount - fee`, when the seller sends the claim. It does not need the tip. */
   readonly sellerClaimWei: bigint;
 }
 
-/** The two labelled figures before the claim; null when the signed amounts do not add up. */
+/** The two labelled figures before the claim; null when the amount or fee is invalid, or a known tip makes them negative. */
 export declare function salePayoutBeforeClaim(request: SalePayoutBeforeClaimRequest): SalePayoutBeforeClaim | null;
 
 export interface SalePayoutAfterClaimRequest extends SalePayoutBeforeClaimRequest {

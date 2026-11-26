@@ -75,18 +75,20 @@ const payoutBig = (value, { allowZero = true } = {}) => {
 /**
  * THE SALE'S TWO FIGURES BEFORE THE CLAIM. The escrow holds `amount`; `fee` and `claimTip` are separate fields. The
  * guaranteed minimum is `amount - fee - claimTip` (a third party sends the claim and takes the tip); the payout when
- * the seller sends it is `amount - fee`.
+ * the seller sends it is `amount - fee`. A tip that is left out or null is UNKNOWN, not zero: the guaranteed minimum
+ * is then null, while the seller's own figure still does not need the tip and stays known.
  */
-export function salePayoutBeforeClaim({ amountWei, feeWei, claimTipWei = 0 } = {}) {
+export function salePayoutBeforeClaim({ amountWei, feeWei, claimTipWei } = {}) {
   const amount = payoutBig(amountWei, { allowZero: false });
   const fee = payoutBig(feeWei);
   const tip = payoutBig(claimTipWei);
-  if (amount === null || fee === null || tip === null || fee > amount || fee + tip > amount) return null;
+  if (amount === null || fee === null || fee > amount) return null;
+  if (tip !== null && fee + tip > amount) return null;
   return {
     amountWei: amount,
     feeWei: fee,
     claimTipWei: tip,
-    guaranteedMinimumWei: amount - fee - tip,
+    guaranteedMinimumWei: tip === null ? null : amount - fee - tip,
     sellerClaimWei: amount - fee,
   };
 }
@@ -95,20 +97,21 @@ export function salePayoutBeforeClaim({ amountWei, feeWei, claimTipWei = 0 } = {
  * THE SELLER'S ACTUAL PAYOUT AFTER A CONFIRMED CLAIM. `sender` is the contract's `msg.sender`, not `tx.from`: a claim
  * routed through another contract has a different caller. A direct claim can supply the transaction's `{ to, from }`
  * together with `escrow`; `from` is trusted only when `to` is that escrow. A tip of zero pays `amount - fee` even when
- * the caller is unknown; a positive tip pays `amount - fee` only when the claimer sent it, otherwise
- * `amount - fee - claimTip`, and is unknown when the actual caller is not known. A promised tip is never reported as
- * the seller's payout.
+ * the caller is unknown; the seller's own claim pays `amount - fee` even when the tip is unknown. A positive tip pays
+ * `amount - fee` only when the claimer sent it, otherwise `amount - fee - claimTip`, and is unknown when the actual
+ * caller is not known. A tip that is left out or null is unknown for a third party, never zero. A promised tip is
+ * never reported as the seller's payout.
  */
-export function salePayoutAfterClaim({ amountWei, feeWei, claimTipWei = 0, claimed = false, claimSucceeded = false,
+export function salePayoutAfterClaim({ amountWei, feeWei, claimTipWei, claimed = false, claimSucceeded = false,
   sender = null, claimer = null, to = null, from = null, escrow = null } = {}) {
   const amount = payoutBig(amountWei, { allowZero: false });
   const fee = payoutBig(feeWei);
   const tip = payoutBig(claimTipWei);
-  if (amount === null || fee === null || tip === null) return { outcome: "unknown", payoutWei: null };
-  if (!claimed || !claimSucceeded || fee > amount || fee + tip > amount) {
+  if (amount === null || fee === null) return { outcome: "unknown", payoutWei: null };
+  if (!claimed || !claimSucceeded || fee > amount) {
     return { outcome: "unknown", payoutWei: null };
   }
-  if (tip === 0n) return { outcome: "claimed", payoutWei: amount - fee };
+  if (tip !== null && fee + tip > amount) return { outcome: "unknown", payoutWei: null };
   // A DIRECT CLAIM'S `from` IS `msg.sender` ONLY WHEN `to` IS THE ESCROW. A claim routed through another contract
   // has a different caller; without the escrow there is no way to check `to`, so the sender stays unknown.
   const text = (value) => typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -116,8 +119,10 @@ export function salePayoutAfterClaim({ amountWei, feeWei, claimTipWei = 0, claim
     : (text(to) && text(from) && text(escrow) && text(to) === text(escrow) ? from : null);
   const senderText = text(actualSender);
   const claimerText = text(claimer);
+  if (tip === 0n) return { outcome: "claimed", payoutWei: amount - fee };
+  if (senderText && claimerText && senderText === claimerText) return { outcome: "claimed", payoutWei: amount - fee };
+  if (tip === null) return { outcome: "unknown", payoutWei: null };
   if (!senderText || !claimerText) return { outcome: "unknown", payoutWei: null };
-  if (senderText === claimerText) return { outcome: "claimed", payoutWei: amount - fee };
   return { outcome: "claimed", payoutWei: amount - fee - tip };
 }
 

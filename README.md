@@ -215,8 +215,9 @@ side and Monero network and places `readyBy` and `t1` inside it on the chain's c
 selection; two windows for one market on different networks are refused unless `xmrNetwork` names the one to use.
 
 The money arithmetic is exported from `@ninsei-labs/sdk/evm`: `feeWeiFor` and `principalForTotal` for a buy,
-`salePayoutBeforeClaim` for the guaranteed minimum and the seller-sent figure, and `salePayoutAfterClaim` for the
-amount actually paid (judged by the contract's `msg.sender`, not `tx.from`). For a direct claim the caller may pass
+`salePayoutBeforeClaim` for the guaranteed minimum (null when the tip was left out or unreadable) and the seller-sent
+figure, and `salePayoutAfterClaim` for the amount actually paid (judged by the contract's `msg.sender`, not `tx.from`).
+For a direct claim the caller may pass
 the transaction's `{ to, from }` and the `escrow`: `from` is used only when `to` is that escrow, while a claim routed
 through another contract stays unknown. A fee rate is a whole number from 0 to
 200; a missing, empty, fractional or out-of-range rate is refused rather than read as zero, while an explicit `0` is
