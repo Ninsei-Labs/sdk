@@ -43,6 +43,7 @@ import { claimTipCheck } from "./check-claim-tip.mjs";
 import { claimSenderCheck } from "./check-claim-sender.mjs";
 import { relayClaimCheck } from "./check-relay-claim.mjs";
 import { chainGuardCheck } from "./check-chain-guard.mjs";
+import { walletBalancesCheck } from "./check-wallet-balances.mjs";
 import { actionsWalletErrorsCheck } from "./check-actions-wallet-errors.mjs";
 import { arrivalRecoveryCheck } from "./check-arrival-recovery.mjs";
 import { settlementProfilesCheck } from "./check-settlement-profiles.mjs";
@@ -2741,6 +2742,7 @@ const CHECKS = {
   "relay-claim": relayClaimCheck,
   "ready-windows": readyWindows,
   "chain-guard": chainGuardCheck,
+  "wallet-balances": walletBalancesCheck,
   "actions-wallet-errors": actionsWalletErrorsCheck,
   "settlement-profiles": settlementProfilesCheck,
   "dleq-vectors": dleqVectorsCheck,

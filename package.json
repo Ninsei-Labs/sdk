@@ -46,6 +46,7 @@
     "sync:version": "node tools/sync-version.mjs",
     "check:restore": "node tools/check-restore.mjs",
     "check:wallet-factory": "node tools/check-wallet-factory.mjs",
+    "check:wallet-balances": "node tools/check.mjs --only=wallet-balances",
     "check:xmr-amount": "node tools/check-xmr-amount.mjs",
     "check:sign-preview": "node tools/check-sign-preview.mjs",
     "check:destination": "node tools/check-destination.mjs",
