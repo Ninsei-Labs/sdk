@@ -164,7 +164,7 @@ export function toState(swap) {
       receivedXmr: (swap.xmrSession !== null && swap.xmrSession !== undefined)
         || (swap.xmr && (swap.xmr.received !== undefined || swap.xmr.arrived !== undefined))
         ? num(d.xmrAmount && d.xmrAmount.seen) : null,
-      escrowLocked: !!(swap.escrow && (swap.escrow.fundTx || swap.escrow.secret)),
+      escrowLocked: !!(swap.escrow && (swap.escrow.fundTx || swap.escrow.secret || swap.escrow.funded === true)),
     },
     pay: { token: swap.payToken || "eth", amount: num(swap.payAmount) },
     get: { xmr: num(swap.xmrAmount) },
@@ -556,10 +556,12 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
     }
     // A PROCESS THAT DIED BETWEEN THE PRE-SEND RECORD AND THE WALLET CALL LEFT "not-sent" BEHIND. The chain was
     // read and the escrow is not funded, so no transaction can be in flight: clear the mark and let the caller
-    // build the same salt/address again. If the read failed, the record stays pending - never resend blind.
-    if (!txHash && onChain && !onChain.isFunded && escrowRecord.fundingReason === "not-sent") {
+    // build the same salt/address again. If the wallet was already asked (`sendAttempted`), a hash may be on its way
+    // without being recorded; fail closed and require a chain read instead of a second send.
+    const sendAttempted = escrowRecord.sendAttempted === true;
+    if (!txHash && onChain && !onChain.isFunded && escrowRecord.fundingReason === "not-sent" && !sendAttempted) {
       delete swap.fundingPending;
-      swap.escrow = { ...escrowRecord, fundingPending: false, fundingReason: "send-not-started" };
+      swap.escrow = { ...escrowRecord, fundingPending: false, fundingReason: "send-not-started", sendAttempted: false };
       try { engine.swap.saveSwap(swap, store); }
       catch { throw new SdkError("storage-unavailable", { step: "save-pending" }); }
       return null;
@@ -567,7 +569,8 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
     if (!txHash && !(onChain && onChain.isFunded)) {
       return { id: swap.id || null, escrow: escrowRecord.address || null,
         address: (record.swapWallet && record.swapWallet.address) || null,
-        step: "funding-pending", txHash: null, reason: "no-transaction-hash", next: "receipt" };
+        step: "funding-pending", txHash: null,
+        reason: sendAttempted ? "hash-unrecorded" : "no-transaction-hash", next: "receipt" };
     }
     const wallet = request.wallet;
     let receipt = null;
@@ -587,7 +590,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       if (!escrow) throw new SdkError("funding-pending", { reason: "no-escrow-address" });
       // A REVERTED RECEIPT DOES NOT UNLOCK A FUNDED ESCROW. The escrow read is the stronger fact; the hash stays on
       // the record as the handle for the next read.
-      swap.escrow = { ...escrowRecord, address: escrow, fundingPending: false, fundingReason: null,
+      swap.escrow = { ...escrowRecord, address: escrow, fundingPending: false, fundingReason: null, funded: true,
         evmBirthBlock: Number(verdict.birthBlock) > 0 ? Number(verdict.birthBlock) : (escrowRecord.evmBirthBlock ?? null) };
       delete swap.fundingPending;
       try { engine.swap.saveSwap(swap, store); } catch { throw new SdkError("storage-unavailable", { step: "save-escrow" }); }
@@ -1298,7 +1301,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         record.swap.fundingPending = true;
         record.swap.escrow = { ...escrowRecord, address: predicted, salt: salt || escrowRecord.salt || null,
           validUntil: signedValidUntil ?? escrowRecord.validUntil ?? null,
-          fundingPending: true, fundingReason: "not-sent" };
+          fundingPending: true, fundingReason: "not-sent", sendAttempted: true, funded: false };
         try { engine.swap.saveSwap(record.swap, store); }
         catch { throw new SdkError("storage-unavailable", { step: "save-pending" }); }
       };
@@ -1309,7 +1312,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         const escrowRecord = record.swap.escrow && typeof record.swap.escrow === "object" ? record.swap.escrow : {};
         record.swap.fundingPending = true;
         record.swap.escrow = { ...escrowRecord, address: escrowRecord.address || predicted || null,
-          fundTx: createHash, fundingPending: true, fundingReason: "no-receipt" };
+          fundTx: createHash, fundingPending: true, fundingReason: "no-receipt", sendAttempted: true, funded: false };
         try { engine.swap.saveSwap(record.swap, store); }
         catch { throw new SdkError("storage-unavailable", { step: "save-pending" }); }
       };
@@ -1322,7 +1325,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         // state guard; one still in the mempool is not, and the resend can revert and cost gas - never a second deposit.
         if (record.swap.escrow && record.swap.escrow.fundingReason === "not-sent") {
           delete record.swap.fundingPending;
-          record.swap.escrow = { ...record.swap.escrow, fundingPending: false, fundingReason: "send-rejected" };
+          record.swap.escrow = { ...record.swap.escrow, fundingPending: false, fundingReason: "send-rejected", sendAttempted: false };
           try { engine.swap.saveSwap(record.swap, store); } catch { /* the pending record stays; never resend blind */ }
         }
         // A NUMERIC WALLET ERROR IS NOT A SERVER FAILURE. Use the same classifier as markReady/claim/refund:
@@ -1361,7 +1364,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
           fundTx: (funded && funded.createHash) || escrowRecord.fundTx || null,
           validUntil: signedValidUntil ?? escrowRecord.validUntil ?? null,
           // A CONFIRMED DEPOSIT IS NOT PENDING. The pre-send `not-sent` mark must not survive a funded receipt.
-          fundingPending: false, fundingReason: null,
+          fundingPending: false, fundingReason: null, funded: true,
           // THE SETTLEMENT-CHAIN HEIGHT, NAMED AS SUCH. It is for the OrderCreated/Declined log search; the XMR
           // watch and the recovery file take the Monero height measured above. The old name `birthHeight` stays
           // readable on records written before this split.

@@ -1754,7 +1754,7 @@ export interface SwapState {
   readonly phaseLabel: string | null;
   /** The swap has a settlement record: the list splits live from settled by THIS flag, not by the phase's text. */
   readonly settled: boolean;
-  /** WHAT HAS ALREADY MOVED: the sum seen at the address and whether the record holds a sent funding hash or a secret. */
+  /** WHAT HAS ALREADY MOVED: the sum seen at the address and whether the record holds a sent funding hash, a secret or a funded escrow read. */
   readonly funds: { readonly receivedXmr: number | null; readonly escrowLocked: boolean };
 }
 

@@ -498,6 +498,61 @@ console.log("=== 1d2a3) A REVERTED RECEIPT DOES NOT UNLOCK A FUNDED ESCROW ===")
   }
 }
 
+console.log("=== 1d2a4) A SEND WITHOUT A SAVED HASH IS NOT RETRIED ===");
+{
+  const first = await startPending({ receipt: null });
+  const predicted = first.result && first.result.escrow;
+  const state = loadState();
+  const record = Object.values((state && state.swaps) || {})[0];
+  if (!record || !record.escrow) bad("send-attempt fixture: no pending record");
+  else {
+    delete record.escrow.fundTx;
+    record.fundingPending = true;
+    record.escrow = { ...record.escrow, fundingPending: true, fundingReason: "not-sent",
+      sendAttempted: true, funded: false };
+    saveState(state);
+    const second = await startPending({ fresh: false, escrow: predicted, receipt: null });
+    const after = Object.values((loadState() && loadState().swaps) || {})[0];
+    if (second.result && second.result.step === "funding-pending"
+        && second.result.txHash === null && second.result.reason === "hash-unrecorded"
+        && second.sent === 0 && after && after.escrow && !after.escrow.fundTx
+        && after.escrow.fundingReason === "not-sent") {
+      ok("a possible in-flight send with no recorded hash is not sent again");
+    } else {
+      bad("send-attempt retry: " + JSON.stringify({ step: second.result && second.result.step,
+        reason: second.result && second.result.reason, sent: second.sent, record: after && after.escrow }));
+    }
+  }
+}
+
+console.log("=== 1d2a5) A FUNDED ESCROW RECOVERS EVEN WITHOUT A RECORDED HASH ===");
+{
+  const first = await startPending({ receipt: null });
+  const predicted = first.result && first.result.escrow;
+  const state = loadState();
+  const record = Object.values((state && state.swaps) || {})[0];
+  if (!record || !record.escrow) bad("funded-without-hash fixture: no pending record");
+  else {
+    delete record.escrow.fundTx;
+    record.fundingPending = true;
+    record.escrow = { ...record.escrow, fundingPending: true, fundingReason: "not-sent",
+      sendAttempted: true, funded: false };
+    saveState(state);
+    const second = await startPending({ fresh: false, escrow: predicted, funded: true, receipt: null });
+    const after = Object.values((loadState() && loadState().swaps) || {})[0];
+    const shown = second.result && second.result.id ? await createSwaps({}).get(second.result.id) : null;
+    if (predicted && second.result && second.result.step === "xmr-incoming"
+        && second.sent === 0 && after && after.escrow && after.escrow.funded === true
+        && shown && shown.funds && shown.funds.escrowLocked === true) {
+      ok("a funded escrow recovers with a locked row and no second send");
+    } else {
+      bad("funded without hash: " + JSON.stringify({ step: second.result && second.result.step,
+        sent: second.sent, record: after && after.escrow,
+        locked: shown && shown.funds && shown.funds.escrowLocked }));
+    }
+  }
+}
+
 console.log("=== 1d2b) A RETRY WITHOUT AN ORDER ID FINDS THE SALT-KEYED PENDING RECORD ===");
 {
   const first = await startPending();
