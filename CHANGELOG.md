@@ -1,6 +1,6 @@
 ## Unreleased — 2026-11-26
 
-- `wallet.balances` is one snapshot: every row comes from the account and chain captured before the native and token reads, and a change during either read is a named `wrong-account` or `wrong-chain` refusal instead of a mixed figure. A provider already on another network refuses before the driver is called.
+- `wallet.balances` is one snapshot: every row comes from the account and chain captured before the native and token reads, and a change during either read is a named `wrong-account` or `wrong-chain` refusal instead of a mixed figure. A provider already on another network refuses before the driver is called; a stable read returns its exact balances, a measured zero included.
 
 ## Unreleased — 2026-11-25
 

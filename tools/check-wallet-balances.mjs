@@ -21,7 +21,7 @@ const settlement = {
 };
 const hexChain = (id) => "0x" + Number(id).toString(16);
 
-function fixture({ account = A, chain = 421614, during = null } = {}) {
+function fixture({ account = A, chain = 421614, during = null, zero = false } = {}) {
   let accounts = [account];
   let chainId = chain;
   const handlers = new Map();
@@ -61,7 +61,7 @@ function fixture({ account = A, chain = 421614, during = null } = {}) {
       calls.push({ address, tokens: tokens.map((t) => t.id) });
       if (typeof during === "function") during(controls);
       return tokens.map((t) => ({ token: t.id, symbol: t.symbol, decimals: t.decimals,
-        amount: t.id === "eth" ? "5" : "101" }));
+        amount: zero ? "0" : (t.id === "eth" ? "5" : "101") }));
     },
   };
   const wallet = createWallet({ settlement, leg });
@@ -91,6 +91,15 @@ export const walletBalancesCheck = async () => {
       "a stable wallet did not return both exact balances: " + JSON.stringify(balances));
     ok(calls.length === 1 && calls[0].address === A && calls[0].tokens.join() === "eth,usdc",
       "the driver was not called once for the captured account");
+  }
+
+  // A measured zero is a number, not a refusal and not an absent row.
+  {
+    const { wallet } = fixture({ zero: true });
+    await wallet.connect({ chainId: 421614 });
+    const balances = await wallet.balances();
+    ok(balances.length === 2 && balances.every((row) => row.amount === "0"),
+      "a stable wallet with zero balances did not return measured zeros");
   }
 
   // A stable read after an earlier wallet event still returns numbers: the event belongs to the state before the
@@ -133,6 +142,23 @@ export const walletBalancesCheck = async () => {
     } });
     await wallet.connect({ chainId: 421614 });
     await refusal(() => wallet.balances(), "wrong-account", "an account change and return during the read");
+  }
+
+  // A mixed change names the chain when both sides moved: either refusal is safe, but the chain is the wider
+  // statement and must not be hidden by the last event.
+  {
+    const { wallet } = fixture({ during: ({ setAccount, setChain, emit }) => {
+      setChain(1);
+      emit("chainChanged");
+      setAccount(B);
+      emit("accountsChanged");
+      setChain(421614);
+      emit("chainChanged");
+      setAccount(A);
+      emit("accountsChanged");
+    } });
+    await wallet.connect({ chainId: 421614 });
+    await refusal(() => wallet.balances(), "wrong-chain", "both sides changed and returned during the read");
   }
 
   // A change made between the native and token replies, without an event, is caught by the final read.

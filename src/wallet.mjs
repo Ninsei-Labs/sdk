@@ -33,10 +33,10 @@ export function createWallet({ settlement, leg }) {
   const listeners = new Set();
   let detach = null;
   // EVENTS ARE PART OF THE SNAPSHOT. A wallet can leave an account or a chain and come back before the final
-  // read; the values alone would then look stable. The counter makes that change a refusal, while `lastChange`
-  // lets the refusal name which side moved.
-  let changes = 0;
-  let lastChange = null;
+  // read; the values alone would then look stable. Per-side counters make that change a refusal and let it name
+  // the side that moved, even when both sides moved during the read.
+  let accountChanges = 0;
+  let chainChanges = 0;
 
   const settle = async (notify = true) => {
     if (!adapter) return cached;
@@ -73,11 +73,11 @@ export function createWallet({ settlement, leg }) {
       if (!acceptedVms.includes(next.vm)) fail("bad-input", { field: "adapter.vm", expected: settlement.vm, accepted: acceptedVms, got: next.vm });
       close();
       adapter = next;
-      changes = 0;
-      lastChange = null;
+      accountChanges = 0;
+      chainChanges = 0;
       detach = adapter.subscribe((event) => {
-        changes += 1;
-        lastChange = typeof event === "string" ? event : null;
+        if (event === "chainChanged") chainChanges += 1;
+        else accountChanges += 1;
         settle().catch(() => {});
       });
       cached = { connected: false, address: null, chainId: null, chainMatches: false };
@@ -164,7 +164,8 @@ export function createWallet({ settlement, leg }) {
       // ONE SNAPSHOT, NOT A ROW OF INDEPENDENT READS. The account and chain are captured before the driver reads
       // any balance and checked again after the last one. An event during the read also counts, because a wallet
       // that switched away and back leaves the same values but still mixed two accounts or networks.
-      const startChanges = changes;
+      const startAccountChanges = accountChanges;
+      const startChainChanges = chainChanges;
       const before = await settle(false);
       if (!before.connected) fail("wallet-not-connected");
       if (!before.chainMatches) fail("wrong-chain", { got: before.chainId, want: leg.walletChainId(settlement) });
@@ -173,15 +174,15 @@ export function createWallet({ settlement, leg }) {
       const result = await leg.balances({ driver: adapter.driver(), address: before.address, tokens: picked });
       const after = await settle(false);
       if (!after.connected) fail("wallet-not-connected");
-      const changed = changes !== startChanges;
       const chainMoved = !after.chainMatches || Number(after.chainId) !== startChain
-        || (changed && lastChange === "chainChanged");
+        || chainChanges !== startChainChanges;
       if (chainMoved) {
         fail("wrong-chain", { vm: settlement.vm, step: "balances", want: leg.walletChainId(settlement),
           got: after.chainId, why: "changed-during-read" });
       }
-      const accountMoved = String(after.address).toLowerCase() !== startAccount;
-      if (accountMoved || (changed && lastChange !== "chainChanged")) {
+      const accountMoved = String(after.address).toLowerCase() !== startAccount
+        || accountChanges !== startAccountChanges;
+      if (accountMoved) {
         fail("wrong-account", { vm: settlement.vm, step: "balances", want: startAccount,
           got: after.address, why: "changed-during-read" });
       }
