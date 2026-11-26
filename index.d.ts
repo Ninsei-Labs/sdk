@@ -1465,7 +1465,10 @@ export interface RelayClaimed {
   /** The txid when an answer carried one; `null` when the claim was found on chain without it. */
   readonly txid: string | null;
   readonly from: string | null;
-  readonly tipWei: string;
+  /** The tip actually paid, or null when more than the escrow status is unknown. A relay answer is not proof. */
+  readonly tipWei: string | null;
+  /** The tip signed in the order, named so a caller can show it without calling it paid. */
+  readonly promisedTipWei: string;
   readonly tried: readonly RelayClaimAttempt[];
 }
 
@@ -1479,7 +1482,9 @@ export interface RelayClaimYourself {
   readonly relayUrl: string;
   readonly txid: null;
   readonly from: null;
-  readonly tipWei: string;
+  readonly tipWei: null;
+  /** The tip signed in the order; no claim was made, so no tip was paid. */
+  readonly promisedTipWei: string;
   readonly t1: number | null;
   readonly secondsLeft: number | null;
   readonly tried: readonly RelayClaimAttempt[];
@@ -1499,7 +1504,9 @@ export interface RelayClaimWindow {
   readonly relayUrl: string;
   readonly txid: null;
   readonly from: null;
-  readonly tipWei: string;
+  readonly tipWei: null;
+  /** The tip signed in the order; no claim was made, so no tip was paid. */
+  readonly promisedTipWei: string;
   readonly t1: number | null;
   readonly secondsLeft: number | null;
   readonly tried: readonly RelayClaimAttempt[];

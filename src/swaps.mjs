@@ -1984,16 +1984,21 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       };
       const windowResult = (reason, tried) => ({
         id, state: "claim-window", reason, provider: null, escrow, relayUrl,
-        txid: null, from: null, tipWei: tip.toString(), t1, secondsLeft: secondsLeft(), tried,
+        txid: null, from: null, tipWei: null, promisedTipWei: tip.toString(),
+        t1, secondsLeft: secondsLeft(), tried,
       });
       const STOP_ESCROW_CODES = new Set([
         "claim-not-ready", "claim-window-closed", "claim-settlement-margin",
         "claim-not-funded", "claim-already-closed", "claim-half-invalid",
       ]);
+      // NO TIP IS PAID WITHOUT PROOF. The escrow status alone does not name the claimer, and a relay answer is not
+      // proof that its transaction is the one that landed. Under the #409 rule the sender is known only from a
+      // confirmed direct claim's `{ to, from }`; this method has neither, so `tipWei` stays null. The signed tip is
+      // still named, for display, as `promisedTipWei`.
       const claimedByEscrow = (sender = null, answer = null, tried = []) => ({
         id, state: "claimed", provider: sender, escrow, relayUrl,
         txid: answer ? answer.txid : null, from: (answer && answer.from) || null,
-        tipWei: (answer && answer.tipWei) || tip.toString(), tried,
+        tipWei: null, promisedTipWei: tip.toString(), tried,
       });
       // A WINDOW STOP AFTER SENDS IS NOT A BLIND STOP. The last sender's claim can land just after its slot; before
       // reporting a closing window, read the escrow once more and let a claimed/refunded/defunded state win.
@@ -2162,8 +2167,8 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       const finalGate = await windowOf();
       if (!finalGate.ok) return windowResult(finalGate.reason, tried);
       return { id, state: "claim-yourself", reason: "senders-exhausted",
-        provider: null, escrow, relayUrl, txid: null, from: null, tipWei: tip.toString(),
-        t1, secondsLeft: secondsLeft(), tried };
+        provider: null, escrow, relayUrl, txid: null, from: null, tipWei: null,
+        promisedTipWei: tip.toString(), t1, secondsLeft: secondsLeft(), tried };
     },
 
     /**

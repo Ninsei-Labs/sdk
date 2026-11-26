@@ -142,6 +142,14 @@ export const relayClaimCheck = async () => {
   const problems = [];
   const notes = [];
   const check = (condition, message) => { if (!condition) problems.push(message); };
+  // THE TIP IS PAID ONLY WITH PROOF. Every result names the signed tip separately; the paid field is null because
+  // this method has no direct-claim `{ to, from }` that would satisfy the #409 rule.
+  const checkTip = (result, label) => {
+    check(result && result.tipWei === null,
+      `${label}: a tip was reported paid without proof: ${JSON.stringify(result && result.tipWei)}`);
+    check(result && result.promisedTipWei === claimTip,
+      `${label}: the signed tip was not named: ${JSON.stringify(result && result.promisedTipWei)}`);
+  };
 
   const record = await seed({ escrow });
   const resetAttempts = () => {
@@ -173,6 +181,7 @@ export const relayClaimCheck = async () => {
     check(claimed && claimed.state === "claimed" && claimed.provider === lower(secondSender)
       && urls.length === 1 && urls[0].includes(lower(secondSender)),
       "claimViaRelay did not use the startSell list: " + JSON.stringify({ claimed, urls }));
+    checkTip(claimed, "the startSell list claim");
   }
 
   // (0c) THE RELAY'S PUBLISHED SENDER FILLS A RECORD THAT HAS NO LIST.
@@ -283,6 +292,7 @@ export const relayClaimCheck = async () => {
     check(claimed && claimed.state === "claimed" && claimed.provider === lower(relaySender)
       && claimed.txid === "0x" + "ab".repeat(32),
       "the first sender did not claim: " + JSON.stringify(claimed));
+    checkTip(claimed, "the first sender's claim");
     check(calls.length === 1 && calls[0].url === "https://relay.example/v1/claims/" + lower(relaySender) + "/" + escrow,
       "the first sender path is not the ordered first entry: " + JSON.stringify(calls.map((entry) => entry.url)));
     if (calls.length === 1) {
@@ -456,6 +466,7 @@ export const relayClaimCheck = async () => {
       "the exhausted result does not carry the time left before t1");
     check(result && result.tried.length === 2 && result.tried.every((entry) => entry.outcome === "refused"),
       "the exhausted result does not name both attempts");
+    checkTip(result, "an exhausted sender list");
   }
 
   // (5a) AN ESCROW THAT IS ALREADY CLAIMED IS NOT A REASON TO SEND THE HALF OR TO SAY CLAIM-YOURSELF.
@@ -467,6 +478,7 @@ export const relayClaimCheck = async () => {
       fetchImpl: async () => { calls += 1; return answer(relaySender, "0x" + "a1".repeat(32)); } });
     check(result && result.state === "claimed" && result.provider === null && result.txid === null && calls === 0,
       "an already claimed escrow was sent again or reported as claim-yourself: " + JSON.stringify({ result, calls }));
+    checkTip(result, "a claim known by the status alone");
   }
 
   // (5b) A CLAIM LANDING WHILE THE NEXT SENDER REFUSES IS STILL CLAIMED, NOT CLAIM-YOURSELF.
@@ -484,6 +496,7 @@ export const relayClaimCheck = async () => {
       claimSenders: [relaySender, secondSender], fetchImpl: transport, slotMs: 15_000, pollMs: 2_000 });
     check(result && result.state === "claimed" && result.provider === null && calls === 2,
       "a late claim was reported as claim-yourself: " + JSON.stringify({ result, calls }));
+    checkTip(result, "a claim that landed during the next sender's slot");
   }
 
   // (5c) A REFUNDED ESCROW IS NAMED, NOT SENT TO SELLCLAIM AS IF IT WERE STILL OPEN.
@@ -495,6 +508,7 @@ export const relayClaimCheck = async () => {
       fetchImpl: async () => { calls += 1; return refusal("claim-tip-too-small"); } });
     check(result && result.state === "claim-window" && result.reason === "escrow-refunded" && calls === 0,
       "a refunded escrow was not named as a closed claim window: " + JSON.stringify({ result, calls }));
+    checkTip(result, "a refunded claim window");
   }
 
   // (5d) EVERY LOST-ANSWER SHAPE ENDS IN CLAIM-YOURSELF AFTER THE SENDER'S SLOT.
