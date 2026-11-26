@@ -23,6 +23,18 @@ export const SETTLEMENT_LOG_TIMEOUT_MS = 8_000;
 const bad = (field) => new SdkError("bad-input", { field });
 const failed = (why) => new SdkError("recovery-failed", { stage: "logs", why });
 
+// A range refusal is an internal signal only. It is deliberately not an `SdkError`: it never crosses the public
+// boundary, so it cannot become an unregistered error code. `readRange` turns it into a split or a named
+// `recovery-failed`.
+class RangeTooWide extends Error {
+  constructor() {
+    super("range-too-wide");
+    this.name = "RangeTooWide";
+  }
+}
+
+const isHexBlock = (value) => typeof value === "string" && HEX_BLOCK_RE.test(value);
+
 const blockTag = (value, fallback, field) => {
   if (value === undefined || value === null || value === "") return fallback;
   if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return "0x" + value.toString(16);
@@ -135,17 +147,23 @@ export function createSettlementLogReader(options = {}) {
       try {
         return await readFromProviders(providerFilter);
       } catch (error) {
-        if (error && error.code === "range-too-wide" && fromBlock !== toBlock) {
-          const start = Number(BigInt(fromBlock));
-          const end = Number(BigInt(toBlock));
-          const middle = Math.floor((start + end) / 2);
-          const left = await readRange(blockTag(start, null, "fromBlock"), blockTag(middle, null, "toBlock"));
-          const right = await readRange(blockTag(middle + 1, null, "fromBlock"), blockTag(end, null, "toBlock"));
-          return [...left, ...right];
+        if (error instanceof RangeTooWide) {
+          // ONLY NUMERIC HEX ENDPOINTS CAN BE SUBDIVIDED. `earliest`/`latest` are tags, not heights: calling
+          // BigInt on them would throw a raw SyntaxError and hide the incomplete read. A tag range is returned as
+          // the named unknown instead.
+          if (!isHexBlock(fromBlock) || !isHexBlock(toBlock)) throw failed("range-too-wide");
+          if (fromBlock !== toBlock) {
+            const start = Number(BigInt(fromBlock));
+            const end = Number(BigInt(toBlock));
+            const middle = Math.floor((start + end) / 2);
+            const left = await readRange(blockTag(start, null, "fromBlock"), blockTag(middle, null, "toBlock"));
+            const right = await readRange(blockTag(middle + 1, null, "fromBlock"), blockTag(end, null, "toBlock"));
+            return [...left, ...right];
+          }
         }
         // A ONE-BLOCK READ THAT STILL FAILS IS THE HARD CASE. The receipts are a second, address-free view of the
         // same block; the caller's filters are applied locally after the provider answers.
-        if (HEX_BLOCK_RE.test(fromBlock) && fromBlock === toBlock) {
+        if (isHexBlock(fromBlock) && fromBlock === toBlock) {
           return readBlockReceipts({ rpcs, fetchImpl, timeoutMs, block: fromBlock, filter });
         }
         throw error;
@@ -183,7 +201,7 @@ export function createSettlementLogReader(options = {}) {
       if (!body || !Array.isArray(body.result)) continue;
       return body.result;
     }
-    throw refusedWidth ? new SdkError("range-too-wide") : failed("providers");
+    throw refusedWidth ? new RangeTooWide() : failed("providers");
   }
 }
 

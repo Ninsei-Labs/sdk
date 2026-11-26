@@ -2698,6 +2698,7 @@ const CHECKS = {
   provider: providerCheck,
   "recovery-key": recoveryKeyCheck,
   "settlement-logs": () => runScriptCheck("check-settlement-logs.mjs", "settlement logs"),
+  "settlement-logs-teeth": () => runScriptCheck("check-settlement-logs-teeth.mjs", "settlement logs teeth"),
   "monero-keys": moneroKeysCheck,
   "action-state": actionStateCheck,
   "vendor-bundles": vendorBundlesCheck,

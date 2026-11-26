@@ -153,6 +153,26 @@ const log = (address, topic, data = "0x") => ({
   ok("the reader feeds the public settlement decoder");
 }
 
+// A refusal of the default tag range cannot be split: `earliest` and `latest` are names, not heights. It must be a
+// named unknown, never a raw BigInt/SyntaxError from the split branch.
+{
+  const reader = createSettlementLogReader({
+    rpcs: [RPCS[0]],
+    fetchImpl: async () => response({ jsonrpc: "2.0", id: 1, error: { code: -32005, message: "query exceeds the range" } }),
+  });
+  await assert.rejects(
+    () => reader({ topics: [[TOPIC]] }),
+    (error) => error instanceof SdkError && error.code === "recovery-failed" && error.params.why === "range-too-wide",
+    "a capped tag range must be recovery-failed, not a raw SyntaxError",
+  );
+  await assert.rejects(
+    () => reader({ topics: [[TOPIC]], fromBlock: 100, toBlock: "latest" }),
+    (error) => error instanceof SdkError && error.code === "recovery-failed" && error.params.why === "range-too-wide",
+    "a capped mixed range must be recovery-failed",
+  );
+  ok("a capped tag range is a named unknown");
+}
+
 // A missing RPC list is a named input error, not a reader that silently has nowhere to go.
 {
   assert.throws(
