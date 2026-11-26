@@ -173,13 +173,15 @@ export function createWallet({ settlement, leg }) {
       const result = await leg.balances({ driver: adapter.driver(), address: before.address, tokens: picked });
       const after = await settle(false);
       if (!after.connected) fail("wallet-not-connected");
-      const chainMoved = !after.chainMatches || Number(after.chainId) !== startChain || lastChange === "chainChanged";
+      const changed = changes !== startChanges;
+      const chainMoved = !after.chainMatches || Number(after.chainId) !== startChain
+        || (changed && lastChange === "chainChanged");
       if (chainMoved) {
         fail("wrong-chain", { vm: settlement.vm, step: "balances", want: leg.walletChainId(settlement),
           got: after.chainId, why: "changed-during-read" });
       }
       const accountMoved = String(after.address).toLowerCase() !== startAccount;
-      if (accountMoved || changes !== startChanges) {
+      if (accountMoved || (changed && lastChange !== "chainChanged")) {
         fail("wrong-account", { vm: settlement.vm, step: "balances", want: startAccount,
           got: after.address, why: "changed-during-read" });
       }

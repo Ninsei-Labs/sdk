@@ -93,6 +93,17 @@ export const walletBalancesCheck = async () => {
       "the driver was not called once for the captured account");
   }
 
+  // A stable read after an earlier wallet event still returns numbers: the event belongs to the state before the
+  // snapshot, not to the read.
+  {
+    const { wallet, provider } = fixture();
+    await wallet.connect({ chainId: 421614 });
+    provider.emit("chainChanged");
+    const balances = await wallet.balances();
+    ok(balances.length === 2 && balances[0].amount === "5" && balances[1].amount === "101",
+      "an earlier chain event turned a stable read into a refusal");
+  }
+
   // A provider that is already on another chain before the first reply is refused, and the driver is not called.
   {
     const { wallet, calls } = fixture({ chain: 1 });

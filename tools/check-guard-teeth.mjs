@@ -215,7 +215,7 @@ const cases = [
   {
     check: "wallet-balances", source: "src/wallet.mjs",
     name: "the balance account snapshot check is removed",
-    from: "if (accountMoved || changes !== startChanges) {", to: "if (false) {",
+    from: "if (accountMoved || (changed && lastChange !== \"chainChanged\")) {", to: "if (false) {",
     wants: "an account change between the native and token replies",
   },
 ];
