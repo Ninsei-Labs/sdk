@@ -203,7 +203,10 @@ async function startPending({ fresh = true, receipt = { status: "0x1", logs: [],
       if (receiptCalls === 1 && typeof receiptProbe === "function") receiptProbe(loadState());
       return receipt;
     },
-    ...(nonce === null ? {} : { nonce: async () => nonce }) };
+    ...(nonce === null ? {} : { nonce: async (_block, account) => {
+      if (account !== order.locker) throw new Error("wrong nonce account");
+      return nonce;
+    } }) };
   const counterparty = { proof: maker.side.proof, edPointClaimer: maker.spendPoint,
     commitHalfClaimer: quote.commitHalfClaimer, viewHalfClaimer: derived.makerViewHalf };
   const baseQuote = withSignature ? quote : { ...quote, signature: undefined };
@@ -585,7 +588,7 @@ console.log("=== 1d2a7) AN EXPLICIT RETRY RELEASES ONLY AFTER THE CALLER ASKS ==
   else {
     delete record.escrow.fundTx;
     record.fundingPending = true;
-    record.escrow = { ...record.escrow, fundingPending: true, fundingReason: "not-sent",
+    record.escrow = { ...record.escrow, fundingPending: true, fundingReason: "send-unknown",
       sendAttempted: true, sendNonce: 5, funded: false };
     saveState(state);
     const second = await startPending({ fresh: false, escrow: predicted, receipt: createdReceipt(),

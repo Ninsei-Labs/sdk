@@ -35,7 +35,7 @@ function fixture({ status = statusAnswer(false), logs = [], receipt = null, nonc
     side: "buy",
     escrow: { address: escrow, factory, fundingPending: true, fundingReason: "not-sent",
       sendAttempted: true, sendNonce: 5, ...escrowPatch },
-    order: { factory },
+    order: { factory, locker },
     quote: { factory },
   };
   engine.swap.saveSwap(swap, store);
@@ -43,7 +43,8 @@ function fixture({ status = statusAnswer(false), logs = [], receipt = null, nonc
     call: async () => status,
     logs: async () => logs,
   });
-  return { api, store, swap, wallet: nonce === null ? null : { nonce: async () => nonce } };
+  return { api, store, swap, wallet: nonce === null ? null
+    : { nonce: async (_block, account) => { if (account !== locker) throw new Error("wrong nonce account"); return nonce; } } };
 }
 
 const check = async (name, body) => {

@@ -569,7 +569,9 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       try { engine.swap.saveSwap(swap, store); }
       catch { throw new SdkError("storage-unavailable", { step: "save-pending" }); }
     }
-    if (!txHash && onChain && !onChain.isFunded && escrowRecord.fundingReason === "not-sent" && !sendAttempted) {
+    if (!txHash && onChain && !onChain.isFunded
+        && (escrowRecord.fundingReason === "not-sent" || escrowRecord.fundingReason === "send-unknown")
+        && !sendAttempted) {
       delete swap.fundingPending;
       swap.escrow = { ...escrowRecord, fundingPending: false, fundingReason: "send-not-started", sendAttempted: false };
       try { engine.swap.saveSwap(swap, store); }
@@ -642,11 +644,14 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
     }
     const verdict = fundingReceiptVerdict(receipt, { factory, expectedEscrow: address });
     let orderLog = null;
-    const logReader = typeof request.evmLogs === "function" ? request.evmLogs : (typeof chainLogs === "function" ? chainLogs : null);
+    const logReader = logReaderOf(typeof request.evmLogs === "function" ? request.evmLogs : chainLogs);
     if (!fundTx && logReader && address && factory) {
       const topicAddress = "0x" + String(address).replace(/^0x/i, "").toLowerCase().padStart(64, "0");
+      const configuredDeployment = Number(config && config.settlement && config.settlement.escrow
+        && config.settlement.escrow.deploymentBlock);
       const fromBlock = request.fromBlock !== undefined ? request.fromBlock
-        : (escrowRecord.evmBirthBlock ?? escrowRecord.birthHeight ?? 0);
+        : (escrowRecord.evmBirthBlock ?? escrowRecord.birthHeight
+          ?? (Number.isSafeInteger(configuredDeployment) && configuredDeployment > 0 ? configuredDeployment : "earliest"));
       const toBlock = request.toBlock !== undefined ? request.toBlock : "latest";
       try {
         const logs = await logReader({ address: factory, topics: [ORDER_CREATED_TOPIC, topicAddress],
@@ -665,7 +670,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
     let nonceNow = null;
     if (request.wallet && typeof request.wallet.nonce === "function") {
       try {
-        const value = Number(await request.wallet.nonce("pending"));
+        const value = Number(await request.wallet.nonce("pending", order.locker || null));
         if (Number.isSafeInteger(value) && value >= 0) nonceNow = value;
       } catch { nonceNow = null; }
     }
@@ -698,9 +703,11 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       reason = "no-transaction-hash";
     }
     const resolvedTx = fundTx || (orderLog && orderLog.fundTx) || null;
+    let resolvedAddress = address;
     if (state === "funded") {
       const resolvedEscrow = (orderLog && orderLog.escrow) || (verdict.status === "funded" ? verdict.escrow : address);
       if (resolvedEscrow) {
+        resolvedAddress = resolvedEscrow;
         swap.escrow = { ...escrowRecord, address: resolvedEscrow, fundTx: resolvedTx,
           funded: true, fundingPending: false, fundingReason: null,
           evmBirthBlock: blockNumber ?? escrowRecord.evmBirthBlock ?? escrowRecord.birthHeight ?? null };
@@ -709,7 +716,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         catch { throw new SdkError("storage-unavailable", { step: "save-escrow" }); }
       }
     }
-    return { id, state, escrow: address, fundTx: resolvedTx, blockNumber, evidence,
+    return { id, state, escrow: resolvedAddress, fundTx: resolvedTx, blockNumber, evidence,
       nonceBefore, nonceNow, nonceMoved, reason };
   }
 
@@ -1409,7 +1416,7 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       let sendNonce = null;
       if (typeof wallet.nonce === "function") {
         try {
-          const value = Number(await wallet.nonce("pending"));
+          const value = Number(await wallet.nonce("pending", lockRequest.locker));
           if (Number.isSafeInteger(value) && value >= 0) sendNonce = value;
         } catch { sendNonce = null; }
       }
@@ -1447,7 +1454,9 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         // start read the predicted escrow instead of signing a second deposit.
         const refusedBeforeSend = new Set(["wallet-rejected", "caller-refused", "insufficient-funds",
           "wrong-chain", "bad-input", "quote-expired", "quote-refused", "quote-unchecked",
-          "address-denied"]).has(classified.code);
+          "address-denied"]).has(classified.code)
+          || (classified.code === "wallet-not-connected"
+            && ["unauthorized", "request-pending"].includes(classified.params && classified.params.why));
         if (record.swap.escrow && record.swap.escrow.fundingReason === "not-sent") {
           if (refusedBeforeSend) {
             delete record.swap.fundingPending;

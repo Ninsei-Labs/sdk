@@ -430,7 +430,7 @@ export interface WalletAdapter {
    * in a node's mempool; `latest` counts only mined ones. Optional: a wallet without it still funds, but the
    * ambiguous-send recovery loses one piece of evidence.
    */
-  nonce?(block?: "latest" | "pending"): Promise<number | string | null>;
+  nonce?(block?: "latest" | "pending", account?: string): Promise<number | string | null>;
   /**
    * SIGN TYPED DATA (EIP-712). Not a transaction: no gas, no money moves, so a person without their own coin can
    * give it. What is signed is decided by the CALLER (ready typed data arrives here). Optional - a wallet that
@@ -1648,11 +1648,11 @@ export interface ReconcileFundingRequest {
 /** A read-only funding recovery answer. It never signs or sends. */
 export interface ReconcileFundingResult {
   readonly id: string;
-  readonly state: "funded" | "pending" | "not-funded" | "unknown";
+  readonly state: "funded" | "pending" | "not-funded" | "not-found" | "unknown";
   readonly escrow: string | null;
   readonly fundTx: string | null;
   readonly blockNumber: number | null;
-  readonly evidence: "receipt" | "order-created" | "escrow-status" | "nonce" | null;
+  readonly evidence: "receipt" | "order-created" | "escrow-status" | null;
   /** The recorded pending nonce before the send, when the adapter supplied one. */
   readonly nonceBefore: number | null;
   /** The current pending nonce, or null when the adapter cannot read it. */

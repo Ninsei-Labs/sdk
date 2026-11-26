@@ -140,12 +140,12 @@ export function evmWallet(provider, { id = "evm" } = {}) {
     },
     // THE ACCOUNT'S NEXT NONCE, when the provider can answer. `pending` sees a transaction still in a node's
     // mempool; `latest` counts only mined ones. A missing or malformed answer is null, never zero.
-    async nonce(block = "pending") {
+    async nonce(block = "pending", account = null) {
       const accounts = await provider.request({ method: "eth_accounts" }).catch(() => null);
-      const account = Array.isArray(accounts) ? accounts[0] : null;
-      if (typeof account !== "string" || !ADDRESS_RE.test(account)) return null;
+      const selected = ADDRESS_RE.test(String(account)) ? account : (Array.isArray(accounts) ? accounts[0] : null);
+      if (typeof selected !== "string" || !ADDRESS_RE.test(selected)) return null;
       const tag = block === "latest" ? "latest" : "pending";
-      const raw = await provider.request({ method: "eth_getTransactionCount", params: [account, tag] }).catch(() => null);
+      const raw = await provider.request({ method: "eth_getTransactionCount", params: [selected, tag] }).catch(() => null);
       const value = hexToInt(raw);
       return Number.isSafeInteger(value) && value >= 0 ? value : null;
     },
