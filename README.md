@@ -464,12 +464,13 @@ The predicted escrow and its salt are written to the pending record before the f
 hash is written immediately after the send, before the receipt wait. The pre-send record also carries
 `sendAttempted: true`: if a reload finds no hash, the SDK reads the predicted escrow and never sends a second
 deposit automatically. A funded escrow recovers the row and reports it locked; an empty or unreadable escrow stays
-`funding-pending` with `reason: "hash-unrecorded"` until the wallet or chain can be checked. A retry after a late
-receipt or a process restart finds that record by the salt, the chain, the factory and the predicted escrow, and
-reads the same transaction; it does not build a second side or send a second deposit. `not-sent` is used only while
-no hash is known and no send was attempted. An explicit wallet rejection clears the pending mark so the person can
-sign again. A transaction that was already mined is stopped by the escrow state guard; one still in the mempool can
-make the resend revert and cost gas, but cannot create a second deposit.
+`funding-pending` with `reason: "hash-unrecorded"` until the wallet or chain can be checked. An ambiguous
+`wallet.send` error after the request may have reached the provider is kept as `send-unknown`, not mistaken for a
+refusal. A retry after a late receipt or a process restart finds that record by the salt, the chain, the factory and
+the predicted escrow, and reads the same transaction; it does not build a second side or send a second deposit.
+`not-sent` is used only while no hash is known and no send was attempted. An explicit refusal before broadcast
+clears the pending mark so the person can sign again. A transaction that was already mined is stopped by the escrow
+state guard; one still in the mempool can make the resend revert and cost gas, but cannot create a second deposit.
 
 The wallet adapter accepts the standard Monero network names (`mainnet`, `stagenet`, `testnet`, `fakechain`) and
 still checks the address shape, so a mainnet withdrawal is not refused because the demo registry lists only

@@ -553,6 +553,26 @@ console.log("=== 1d2a5) A FUNDED ESCROW RECOVERS EVEN WITHOUT A RECORDED HASH ==
   }
 }
 
+console.log("=== 1d2a6) AN AMBIGUOUS SEND ERROR IS NOT A FREE RETRY ===");
+{
+  const failure = Object.assign(new Error("connection reset"), { code: "ECONNRESET" });
+  const first = await startWith(derived.makerViewHalf, order.salt, {}, false, { failure });
+  const state = loadState();
+  const record = Object.values((state && state.swaps) || {})[0];
+  const second = await startPending({ fresh: false, receipt: null });
+  if (first.result && first.result.code === "wallet-not-connected"
+      && record && record.escrow && record.escrow.sendAttempted === true
+      && record.escrow.fundingReason === "send-unknown" && record.escrow.fundingPending === true
+      && second.result && second.result.step === "funding-pending"
+      && second.result.reason === "hash-unrecorded" && second.sent === 0) {
+    ok("an ambiguous wallet.send error keeps the send intent and does not retry blind");
+  } else {
+    bad("ambiguous send error: " + JSON.stringify({ code: first.result && first.result.code,
+      record: record && record.escrow, step: second.result && second.result.step,
+      reason: second.result && second.result.reason, sent: second.sent }));
+  }
+}
+
 console.log("=== 1d2b) A RETRY WITHOUT AN ORDER ID FINDS THE SALT-KEYED PENDING RECORD ===");
 {
   const first = await startPending();

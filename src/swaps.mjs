@@ -1319,18 +1319,28 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       let funded = null;
       try { funded = await lock.send(lockRequest, wallet, { call: reader, nowSec: lockNowSec, onPredicted: notePredicted, onSent: noteSent }); }
       catch (error) {
-        // A REJECTION BEFORE BROADCAST MUST NOT LEAVE THE SWAP STUCK IN funding-pending. The pre-send record exists
-        // for a process that dies while the send is in flight; an explicit wallet refusal is the other case, and the
-        // retry has to be allowed to sign again. A transaction that was already mined is caught by the escrow's own
-        // state guard; one still in the mempool is not, and the resend can revert and cost gas - never a second deposit.
+        const classified = walletError(error, "lock");
+        // ONLY A REFUSAL THAT HAPPENED BEFORE BROADCAST MAY CLEAR THE INTENT. A transport error or an unclassified
+        // failure can arrive after the wallet already sent the transaction; keeping `sendAttempted` makes the next
+        // start read the predicted escrow instead of signing a second deposit.
+        const refusedBeforeSend = new Set(["wallet-rejected", "caller-refused", "insufficient-funds",
+          "wrong-chain", "bad-input", "quote-expired", "quote-refused", "quote-unchecked",
+          "address-denied"]).has(classified.code);
         if (record.swap.escrow && record.swap.escrow.fundingReason === "not-sent") {
-          delete record.swap.fundingPending;
-          record.swap.escrow = { ...record.swap.escrow, fundingPending: false, fundingReason: "send-rejected", sendAttempted: false };
+          if (refusedBeforeSend) {
+            delete record.swap.fundingPending;
+            record.swap.escrow = { ...record.swap.escrow, fundingPending: false, fundingReason: "send-rejected", sendAttempted: false };
+          } else {
+            // THE SEND MAY HAVE BEEN BROADCAST. Keep the pre-send record pending; a reload will read the escrow and
+            // report `hash-unrecorded` rather than retrying blind.
+            record.swap.fundingPending = true;
+            record.swap.escrow = { ...record.swap.escrow, fundingPending: true, fundingReason: "send-unknown", sendAttempted: true };
+          }
           try { engine.swap.saveSwap(record.swap, store); } catch { /* the pending record stays; never resend blind */ }
         }
         // A NUMERIC WALLET ERROR IS NOT A SERVER FAILURE. Use the same classifier as markReady/claim/refund:
         // 4001 stays a rejection, 4100/-32002/transport stay wallet-side, and only a real revert is a chain answer.
-        throw walletError(error, "lock");
+        throw classified;
       }
       // A SENT TRANSACTION IS NOT A FUNDED ESCROW. Without a status-1 receipt and the expected OrderCreated, the
       // address is unknown and calling the step xmr-incoming would make the person wait for XMR at a guess. Keep
