@@ -192,12 +192,17 @@ console.log("=== 1c1) A MALFORMED SALT IS REFUSED BY NAME, NOT IGNORED ===");
   } else bad("malformed salt: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
 }
 
-async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 }, funded = false, statusData = null, withId = true, withQuote = true, withSignature = true, escrow = null, recoverySalt = order.salt, orderSalt = order.salt, predictThrows = false, predictFromData = false, quotePatch = {}, orderPatch = {} } = {}) {
+async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 }, funded = false, statusData = null, withId = true, withQuote = true, withSignature = true, escrow = null, recoverySalt = order.salt, orderSalt = order.salt, predictThrows = false, predictFromData = false, quotePatch = {}, orderPatch = {}, receiptProbe = null } = {}) {
   if (fresh) setStorage(memoryStorage());
   let sent = 0;
+  let receiptCalls = 0;
   const wallet = { chainId: async () => order.chainId, address: async () => order.locker,
     send: async () => { sent += 1; return "0x" + "99".repeat(32); },
-    receipt: async () => receipt };
+    receipt: async () => {
+      receiptCalls += 1;
+      if (receiptCalls === 1 && typeof receiptProbe === "function") receiptProbe(loadState());
+      return receipt;
+    } };
   const counterparty = { proof: maker.side.proof, edPointClaimer: maker.spendPoint,
     commitHalfClaimer: quote.commitHalfClaimer, viewHalfClaimer: derived.makerViewHalf };
   const baseQuote = withSignature ? quote : { ...quote, signature: undefined };
@@ -436,17 +441,22 @@ console.log("=== 1d2a) A CONFIRMED DEPOSIT KEEPS THE HASH, CLEARS PENDING AND LO
 
 console.log("=== 1d2a1) THE HASH IS SAVED BEFORE THE RECEIPT ARRIVES ===");
 {
-  const { result } = await startPending({ receipt: null });
+  let atReceipt = null;
+  const { result } = await startPending({ receipt: null, receiptProbe: (state) => { atReceipt = state; } });
   const record = Object.values((loadState() && loadState().swaps) || {})[0];
+  const during = Object.values((atReceipt && atReceipt.swaps) || {})[0];
   const shown = result && result.id ? await createSwaps({}).get(result.id) : null;
   if (result && result.step === "funding-pending" && result.txHash === SENT_HASH
+      && during && during.escrow && during.escrow.fundTx === SENT_HASH
+      && during.escrow.fundingReason === "no-receipt"
       && record && record.escrow && record.escrow.fundTx === SENT_HASH
       && record.escrow.fundingReason === "no-receipt"
       && shown && shown.funds && shown.funds.escrowLocked === true) {
     ok("a pending receipt still records the hash and locks the escrow");
   } else {
     bad("hash before receipt: " + JSON.stringify({ step: result && result.step, txHash: result && result.txHash,
-      record: record && record.escrow, locked: shown && shown.funds && shown.funds.escrowLocked }));
+      during: during && during.escrow, record: record && record.escrow,
+      locked: shown && shown.funds && shown.funds.escrowLocked }));
   }
 }
 
