@@ -80,6 +80,12 @@ const contentsOf = (file) => (typeof file === "string" ? file : file && typeof f
 
 const bare = (value) => String(value == null ? "" : value).replace(/^0x/i, "").toLowerCase();
 
+// THE JOINT VIEW SECRET IS A SUM, IN MONERO'S BYTE ORDER. The two halves are independent scalars of the same
+// address; the sum is what a wallet watches with. `sweep.keys` returns it little-endian after the spend half is
+// revealed, so this path must use the same notation before any reveal.
+const moneroScalarHex = (value) =>
+  BigInt(value).toString(16).padStart(64, "0").match(/../g).reverse().join("");
+
 // A FOUND ORDER AND THE KEY, WITHOUT A FILE. The recovery page used to write the order into the SDK's own payload
 // (buildPayload) in memory; that rule belongs here, next to the withdrawal it feeds. The page keeps the order and
 // the key; this function decides which side is the person, checks the chain's points against the key, builds the
@@ -155,10 +161,13 @@ const payloadFromOrder = async (request) => {
   // `actions.refund` / `actions.claim` need; returning them here keeps the page from rebuilding the order fields.
   // A found order from `findSwaps` carries every field; an incomplete order is refused before a half can be used.
   const action = actionMaterialOf({ order, chainId, half: halves.spendHalf });
+  const viewSecret = moneroScalarHex(engine.halves.createHalves(primitives)
+    .combineHalves(BigInt(halves.viewHalf), BigInt(halves.makerViewHalf)));
   return {
     payload,
     contents: await engine.recoveryFile.createRecoveryFile(payload, passphrase),
     address: joint.address,
+    viewSecret,
     ...action,
   };
 };

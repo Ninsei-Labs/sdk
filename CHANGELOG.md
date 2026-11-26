@@ -4,6 +4,7 @@
 - **BREAKING:** `claimViaRelay` reports `tipWei` as the tip the chain actually paid, not the signed tip. The escrow status alone and a relay answer are not proof of the claimer, so the method returns `tipWei: null`; the signed value is named separately as `promisedTipWei`.
 - **BREAKING:** `salePayoutBeforeClaim` and `salePayoutAfterClaim` treat a claim tip that is left out, null or unreadable as unknown, never zero: the guaranteed minimum and a third party's receipt are null, while the seller's own figure remains `amount - fee`. An explicit `0` still means no tip, and the seller's own receipt is known in every tip case.
 - `wallet.balances` is one snapshot: every row comes from the account and chain captured before the native and token reads, and a change during either read is a named `wrong-account` or `wrong-chain` refusal instead of a mixed figure. A provider already on another network refuses before the driver is called; a stable read returns its exact balances, a measured zero included.
+- `sweep.fromOrder` returns `viewSecret`, the joint private view key of the address it just built, from the same two view halves and in Monero byte order. It exists while the swap is open, matches `sweep.keys().privateViewKey` after a reveal, and is never sent to a service.
 
 ## Unreleased — 2026-11-25
 

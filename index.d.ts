@@ -2077,6 +2077,11 @@ export interface SweepFromOrderResult {
   readonly contents: string;
   /** The joint Monero address built from the key and the order. */
   readonly address: string;
+  /**
+   * The joint private view key of `address`, 64 hex without `0x`, in Monero byte order. It exists while the swap is
+   * open, before any half is revealed; after a claim or refund it equals `sweep.keys(...).privateViewKey`.
+   */
+  readonly viewSecret: string;
   /** The side of the recovered taker: a locker refunds, a claimer claims. */
   readonly side: "locker" | "claimer";
   /** The ETH action the recovered half authorizes. */
