@@ -134,6 +134,10 @@ jobs:
       - name: Break the action-decision guard (RED, then restored)
         run: pnpm run check:action-decision-teeth
 
+      # The explicit retry of an ambiguous send is a money-adjacent decision: prove the release gate is load-bearing.
+      - name: Break the funding reconcile guard (RED, then restored)
+        run: pnpm run check:funding-reconcile-teeth
+
       # The release workflow's tag rule is a decision, so it is exercised on every change, not only at release time.
       - name: Check the release tag rule (version -> npm dist-tag)
         run: node tools/npm-tag.test.mjs
