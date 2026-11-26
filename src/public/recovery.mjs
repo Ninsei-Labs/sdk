@@ -54,3 +54,12 @@ export {
   saveRecoveryKey,
   takerHalvesV2,
 } from "../recovery-key.mjs";
+
+// THE NETWORK BOUNDARY OF THE RECOVERY READ. The page owns its CORS-checked RPC list; this reader owns the range
+// split, provider fallthrough and the block-receipts fallback. It is exported for a console tool or another client
+// that needs the same "unknown, never empty" rule without copying the transport.
+export {
+  SETTLEMENT_LOG_TIMEOUT_MS,
+  SETTLEMENT_LOG_WINDOW,
+  createSettlementLogReader,
+} from "../recovery-logs.mjs";

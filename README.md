@@ -349,6 +349,13 @@ an address filter: the caller receives every event in the block range and filter
 privacy-preserving path for a recovery page, because the RPC does not learn which escrows belong to the visitor.
 `readEscrowEvents` keeps only the escrows named in its request, and both readers drop logs marked `removed`.
 
+The transport is separate from the decoder. `createSettlementLogReader({ rpcs, fetchImpl?, timeoutMs?, maxWindow? })`
+returns the `evmLogs` seam: it tries the caller's RPCs in order, splits a refused numeric range down to one block, and
+for a single block that every RPC refuses it reads `eth_getBlockReceipts` by block number only and applies the address
+and topic filters locally. A tag range cannot be subdivided, so a refusal there is the named unknown. If the evidence
+cannot be completed the reader throws `recovery-failed` with `stage: "logs"`; an incomplete read is unknown, never an
+empty list. The caller owns the RPC list, so the SDK does not bake in public endpoints or a browser CORS policy.
+
 `sweep.relay` returns `outcome: "sent"` with the transaction ids. If the wallet throws or returns no transaction id,
 the answer is `sweep-relay-unknown`: the session token, the signed set and any known txids stay in the open session.
 The same token never relays that set again. Check the chain before signing a new withdrawal.

@@ -73,6 +73,8 @@
     "check:arrival-consensus": "node tools/check-arrival-consensus.mjs",
     "check:arrival-recovery": "node tools/check-arrival-recovery.mjs",
     "check:recovery-read": "node tools/check.mjs --only=recovery-read",
+    "check:settlement-logs": "node tools/check-settlement-logs.mjs",
+    "check:settlement-logs-teeth": "node tools/check-settlement-logs-teeth.mjs",
     "check:recovery-read-live": "node tools/check-recovery-read-live.mjs",
     "check:recovery-witness": "node tools/check.mjs --only=recovery-witness",
     "check:recovery-witness-live": "node tools/check-recovery-witness-live.mjs",
