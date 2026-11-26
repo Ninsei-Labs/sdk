@@ -252,15 +252,23 @@ const relaySender = offer.claimSender; // GET /v1/relay; the relay origin that a
 const claimed = await sdk.swaps.claimViaRelay({ id: sell.id,
   claimSenders: [...(relaySender ? [relaySender] : []), ...otherListedMakers] });
 if (claimed.state === "claimed") {
-  claimed.txid;    // the claim transaction, or null when the escrow itself showed claimed
-  claimed.from;    // the sender node's claim sender
-  claimed.tipWei;  // the signed tip paid out of the claim
+  claimed.provider; // the sender whose slot found the claim; a relay fact, not a proven msg.sender
+  claimed.txid;     // the relay-reported txid; not proof that this transaction landed
+  claimed.from;     // the relay-reported sender; diagnostic only
+  claimed.tipWei;   // always null: this path has no proven claimer, so no tip is called paid
+  claimed.promisedTipWei; // the tip signed in the order
 } else if (claimed.state === "claim-window") {
   claimed.reason;  // not-ready | window-closed | settlement-margin | not-funded | unreadable | escrow-refused | escrow-refunded
 } else {
   claimed.secondsLeft; // no sender landed it: claim yourself before t1
 }
 ```
+
+`tipWei` is the tip the chain actually paid, not the signed tip. `claimViaRelay` has no claimer fact: the escrow
+status alone does not name one, and a relay's answer is not proof that its transaction is the one that landed.
+Under the #409 rule only a confirmed direct claim with `{ to, from }` proves the sender, so this method reports
+`tipWei: null` and names the signed value separately as `promisedTipWei`. A seller's own claim pays none.
+`provider`, `txid` and `from` describe the relay attempt; they are not proof of the contract's `msg.sender`.
 
 `claimSenders` is the client's ordered list: the relay's own sender first, then other listed makers. `startSell`
 stores a list only when the caller passes `claimSenders`; otherwise the offer's published `claimSender` becomes a

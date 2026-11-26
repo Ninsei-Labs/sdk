@@ -1458,14 +1458,18 @@ export interface RelayClaimAttempt {
 export interface RelayClaimed {
   readonly state: "claimed";
   readonly id: string;
-  /** The sender whose slot found the claim; null when the escrow already read claimed before the first POST. */
+  /** The sender whose slot found the claim; a relay/attempt fact, not a proven `msg.sender`. */
   readonly provider: string | null;
   readonly escrow: string;
   readonly relayUrl: string;
-  /** The txid when an answer carried one; `null` when the claim was found on chain without it. */
+  /** The txid the relay reported; not proof that this transaction is the one that landed. */
   readonly txid: string | null;
+  /** The sender the relay named; diagnostic only, not the contract's proven `msg.sender`. */
   readonly from: string | null;
-  readonly tipWei: string;
+  /** Always null on this path: no claimer fact is proven, so no tip is called paid. */
+  readonly tipWei: null;
+  /** The tip signed in the order, named so a caller can show it without calling it paid. */
+  readonly promisedTipWei: string;
   readonly tried: readonly RelayClaimAttempt[];
 }
 
@@ -1479,7 +1483,9 @@ export interface RelayClaimYourself {
   readonly relayUrl: string;
   readonly txid: null;
   readonly from: null;
-  readonly tipWei: string;
+  readonly tipWei: null;
+  /** The tip signed in the order; no claim was made, so no tip was paid. */
+  readonly promisedTipWei: string;
   readonly t1: number | null;
   readonly secondsLeft: number | null;
   readonly tried: readonly RelayClaimAttempt[];
@@ -1499,7 +1505,9 @@ export interface RelayClaimWindow {
   readonly relayUrl: string;
   readonly txid: null;
   readonly from: null;
-  readonly tipWei: string;
+  readonly tipWei: null;
+  /** The tip signed in the order; no claim was made, so no tip was paid. */
+  readonly promisedTipWei: string;
   readonly t1: number | null;
   readonly secondsLeft: number | null;
   readonly tried: readonly RelayClaimAttempt[];
