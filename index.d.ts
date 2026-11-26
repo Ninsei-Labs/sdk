@@ -1458,15 +1458,16 @@ export interface RelayClaimAttempt {
 export interface RelayClaimed {
   readonly state: "claimed";
   readonly id: string;
-  /** The sender whose slot found the claim; null when the escrow already read claimed before the first POST. */
+  /** The sender whose slot found the claim; a relay/attempt fact, not a proven `msg.sender`. */
   readonly provider: string | null;
   readonly escrow: string;
   readonly relayUrl: string;
-  /** The txid when an answer carried one; `null` when the claim was found on chain without it. */
+  /** The txid the relay reported; not proof that this transaction is the one that landed. */
   readonly txid: string | null;
+  /** The sender the relay named; diagnostic only, not the contract's proven `msg.sender`. */
   readonly from: string | null;
-  /** The tip actually paid, or null when more than the escrow status is unknown. A relay answer is not proof. */
-  readonly tipWei: string | null;
+  /** Always null on this path: no claimer fact is proven, so no tip is called paid. */
+  readonly tipWei: null;
   /** The tip signed in the order, named so a caller can show it without calling it paid. */
   readonly promisedTipWei: string;
   readonly tried: readonly RelayClaimAttempt[];
