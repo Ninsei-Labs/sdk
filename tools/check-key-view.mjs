@@ -192,19 +192,29 @@ console.log("=== 1c1) A MALFORMED SALT IS REFUSED BY NAME, NOT IGNORED ===");
   } else bad("malformed salt: " + JSON.stringify({ code: result && result.code, params: result && result.params, sent }));
 }
 
-async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 }, funded = false, statusData = null, withId = true, withQuote = true, withSignature = true, escrow = null, recoverySalt = order.salt, orderSalt = order.salt, predictThrows = false, predictFromData = false, quotePatch = {}, orderPatch = {} } = {}) {
+async function startPending({ fresh = true, receipt = { status: "0x1", logs: [], blockNumber: 10 }, funded = false, statusData = null, withId = true, withQuote = true, withSignature = true, escrow = null, recoverySalt = order.salt, orderSalt = order.salt, predictThrows = false, predictFromData = false, quotePatch = {}, orderPatch = {}, receiptProbe = null, nonce = null, retryUnknownSend = false } = {}) {
   if (fresh) setStorage(memoryStorage());
   let sent = 0;
+  let receiptCalls = 0;
   const wallet = { chainId: async () => order.chainId, address: async () => order.locker,
     send: async () => { sent += 1; return "0x" + "99".repeat(32); },
-    receipt: async () => receipt };
+    receipt: async () => {
+      receiptCalls += 1;
+      if (receiptCalls === 1 && typeof receiptProbe === "function") receiptProbe(loadState());
+      return receipt;
+    },
+    ...(nonce === null ? {} : { nonce: async (_block, account) => {
+      if (account !== order.locker) throw new Error("wrong nonce account");
+      return nonce;
+    } }) };
   const counterparty = { proof: maker.side.proof, edPointClaimer: maker.spendPoint,
     commitHalfClaimer: quote.commitHalfClaimer, viewHalfClaimer: derived.makerViewHalf };
   const baseQuote = withSignature ? quote : { ...quote, signature: undefined };
   const activeQuote = { ...baseQuote, ...quotePatch };
   const request = { quote: { ...(withId ? { id: "q" } : {}), chain: "arbitrum-sepolia", asset: "ETH", amount: 1, size: 1 }, order: { ...order, salt: orderSalt, ...orderPatch }, ...(withQuote ? { orderQuote: activeQuote } : {}),
     counterparty, recoveryKey: WORDS, recoverySalt, receiveTo: XMR_TO,
-    restoreHeight: 100, wallet, onRecoveryKey: async () => true, ...(escrow ? { escrow } : {}) };
+    restoreHeight: 100, wallet, onRecoveryKey: async () => true, ...(escrow ? { escrow } : {}),
+    ...(retryUnknownSend ? { retryUnknownSend: true } : {}) };
   const fundedStatus = "0x" + [1, 0, 0, 0].map((value) => BigInt(value).toString(16).padStart(64, "0")).join("");
   const result = await createSwaps({ mode: "live", xmrNetwork: "stagenet", logs: async () => [],
     call: async ({ data }) => {
@@ -219,6 +229,17 @@ async function startPending({ fresh = true, receipt = { status: "0x1", logs: [],
   }).start(request).catch((error) => error);
   return { result, sent };
 }
+
+const SENT_HASH = "0x" + "99".repeat(32);
+const predictedEscrow = "0x" + "88".repeat(20);
+const createdReceipt = ({ status = "0x1", escrow = predictedEscrow } = {}) => {
+  const pad = (v) => "0x" + String(v).replace(/^0x/, "").toLowerCase().padStart(64, "0");
+  return { status, blockNumber: 11, logs: status === "0x1" ? [{
+    address: order.factory,
+    topics: [ORDER_CREATED_TOPIC, pad(escrow), pad(order.locker), pad(order.claimer)],
+    data: "0x" + "00".repeat(12 * 32),
+  }] : [] };
+};
 
 console.log("=== 1c3) A RELOADED PENDING RETRY FINDS THE SAME ESCROW ===");
 {
@@ -404,6 +425,184 @@ console.log("=== 1d2) A RETRY READS THE SAME HASH AND DOES NOT SEND AGAIN ===");
   if (predicted && second.result && second.result.step === "xmr-incoming" && second.result.escrow === predicted && second.sent === 0) {
     ok("the retry reads the pending hash, saves the escrow and sends nothing");
   } else bad("pending retry: " + JSON.stringify({ ctor: second.result && second.result.constructor && second.result.constructor.name, code: second.result && second.result.code, params: second.result && second.result.params, msg: second.result && second.result.message, sent: second.sent }));
+}
+
+console.log("=== 1d2a) A CONFIRMED DEPOSIT KEEPS THE HASH, CLEARS PENDING AND LOCKS THE ROW ===");
+{
+  const { result } = await startPending({ receipt: createdReceipt() });
+  const record = Object.values((loadState() && loadState().swaps) || {})[0];
+  const shown = result && result.id ? await createSwaps({}).get(result.id) : null;
+  if (result && result.step === "xmr-incoming" && result.escrow === predictedEscrow
+      && record && record.escrow && record.escrow.fundTx === SENT_HASH
+      && record.escrow.fundingPending !== true && record.escrow.fundingReason !== "not-sent"
+      && record.fundingPending !== true && shown && shown.funds && shown.funds.escrowLocked === true) {
+    ok("a confirmed deposit keeps its hash and reports a locked escrow");
+  } else {
+    bad("confirmed deposit record: " + JSON.stringify({ step: result && result.step, escrow: result && result.escrow,
+      record: record && record.escrow, pending: record && record.fundingPending,
+      locked: shown && shown.funds && shown.funds.escrowLocked }));
+  }
+}
+
+console.log("=== 1d2a1) THE HASH IS SAVED BEFORE THE RECEIPT ARRIVES ===");
+{
+  let atReceipt = null;
+  const { result } = await startPending({ receipt: null, receiptProbe: (state) => { atReceipt = state; } });
+  const record = Object.values((loadState() && loadState().swaps) || {})[0];
+  const during = Object.values((atReceipt && atReceipt.swaps) || {})[0];
+  const shown = result && result.id ? await createSwaps({}).get(result.id) : null;
+  if (result && result.step === "funding-pending" && result.txHash === SENT_HASH
+      && during && during.escrow && during.escrow.fundTx === SENT_HASH
+      && during.escrow.fundingReason === "no-receipt"
+      && record && record.escrow && record.escrow.fundTx === SENT_HASH
+      && record.escrow.fundingReason === "no-receipt"
+      && shown && shown.funds && shown.funds.escrowLocked === true) {
+    ok("a pending receipt still records the hash and locks the escrow");
+  } else {
+    bad("hash before receipt: " + JSON.stringify({ step: result && result.step, txHash: result && result.txHash,
+      during: during && during.escrow, record: record && record.escrow,
+      locked: shown && shown.funds && shown.funds.escrowLocked }));
+  }
+}
+
+console.log("=== 1d2a2) A RELOAD AFTER THE HASH READS THE RECEIPT AND DOES NOT SEND AGAIN ===");
+{
+  const first = await startPending({ receipt: null });
+  const second = await startPending({ fresh: false, receipt: null });
+  const record = Object.values((loadState() && loadState().swaps) || {})[0];
+  const shown = second.result && second.result.id ? await createSwaps({}).get(second.result.id) : null;
+  if (first.result && first.result.step === "funding-pending"
+      && second.result && second.result.step === "funding-pending" && second.sent === 0
+      && record && record.escrow && record.escrow.fundTx === SENT_HASH
+      && shown && shown.funds && shown.funds.escrowLocked === true) {
+    ok("a reload keeps the hash and the locked escrow without a second send");
+  } else {
+    bad("reload after hash: " + JSON.stringify({ first: first.result && first.result.step,
+      second: second.result && second.result.step, sent: second.sent, record: record && record.escrow,
+      locked: shown && shown.funds && shown.funds.escrowLocked }));
+  }
+}
+
+console.log("=== 1d2a3) A REVERTED RECEIPT DOES NOT UNLOCK A FUNDED ESCROW ===");
+{
+  const first = await startPending({ receipt: null });
+  const predicted = first.result && first.result.escrow;
+  const second = await startPending({ fresh: false, escrow: predicted, funded: true,
+    receipt: createdReceipt({ status: "0x0" }) });
+  const record = Object.values((loadState() && loadState().swaps) || {})[0];
+  const shown = second.result && second.result.id ? await createSwaps({}).get(second.result.id) : null;
+  if (predicted && second.result && second.result.step === "xmr-incoming"
+      && record && record.escrow && record.escrow.fundTx === SENT_HASH
+      && record.escrow.fundingPending !== true
+      && shown && shown.funds && shown.funds.escrowLocked === true) {
+    ok("a reverted receipt with a funded escrow stays locked and keeps the hash");
+  } else {
+    bad("reverted receipt with funded escrow: " + JSON.stringify({ step: second.result && second.result.step,
+      escrow: second.result && second.result.escrow, record: record && record.escrow,
+      locked: shown && shown.funds && shown.funds.escrowLocked }));
+  }
+}
+
+console.log("=== 1d2a4) A SEND WITHOUT A SAVED HASH IS NOT RETRIED ===");
+{
+  const first = await startPending({ receipt: null });
+  const predicted = first.result && first.result.escrow;
+  const state = loadState();
+  const record = Object.values((state && state.swaps) || {})[0];
+  if (!record || !record.escrow) bad("send-attempt fixture: no pending record");
+  else {
+    delete record.escrow.fundTx;
+    record.fundingPending = true;
+    record.escrow = { ...record.escrow, fundingPending: true, fundingReason: "not-sent",
+      sendAttempted: true, funded: false };
+    saveState(state);
+    const second = await startPending({ fresh: false, escrow: predicted, receipt: null });
+    const after = Object.values((loadState() && loadState().swaps) || {})[0];
+    if (second.result && second.result.step === "funding-pending"
+        && second.result.txHash === null && second.result.reason === "hash-unrecorded"
+        && second.sent === 0 && after && after.escrow && !after.escrow.fundTx
+        && after.escrow.fundingReason === "not-sent") {
+      ok("a possible in-flight send with no recorded hash is not sent again");
+    } else {
+      bad("send-attempt retry: " + JSON.stringify({ step: second.result && second.result.step,
+        reason: second.result && second.result.reason, sent: second.sent, record: after && after.escrow }));
+    }
+  }
+}
+
+console.log("=== 1d2a5) A FUNDED ESCROW RECOVERS EVEN WITHOUT A RECORDED HASH ===");
+{
+  const first = await startPending({ receipt: null });
+  const predicted = first.result && first.result.escrow;
+  const state = loadState();
+  const record = Object.values((state && state.swaps) || {})[0];
+  if (!record || !record.escrow) bad("funded-without-hash fixture: no pending record");
+  else {
+    delete record.escrow.fundTx;
+    record.fundingPending = true;
+    record.escrow = { ...record.escrow, fundingPending: true, fundingReason: "not-sent",
+      sendAttempted: true, funded: false };
+    saveState(state);
+    const second = await startPending({ fresh: false, escrow: predicted, funded: true, receipt: null });
+    const after = Object.values((loadState() && loadState().swaps) || {})[0];
+    const shown = second.result && second.result.id ? await createSwaps({}).get(second.result.id) : null;
+    if (predicted && second.result && second.result.step === "xmr-incoming"
+        && second.sent === 0 && after && after.escrow && after.escrow.funded === true
+        && shown && shown.funds && shown.funds.escrowLocked === true) {
+      ok("a funded escrow recovers with a locked row and no second send");
+    } else {
+      bad("funded without hash: " + JSON.stringify({ step: second.result && second.result.step,
+        sent: second.sent, record: after && after.escrow,
+        locked: shown && shown.funds && shown.funds.escrowLocked }));
+    }
+  }
+}
+
+console.log("=== 1d2a6) AN AMBIGUOUS SEND ERROR IS NOT A FREE RETRY ===");
+{
+  const failure = Object.assign(new Error("connection reset"), { code: "ECONNRESET" });
+  const first = await startWith(derived.makerViewHalf, order.salt, {}, false, { failure });
+  const state = loadState();
+  const record = Object.values((state && state.swaps) || {})[0];
+  const second = await startPending({ fresh: false, receipt: null });
+  if (first.result && first.result.code === "wallet-not-connected"
+      && record && record.escrow && record.escrow.sendAttempted === true
+      && record.escrow.fundingReason === "send-unknown" && record.escrow.fundingPending === true
+      && second.result && second.result.step === "funding-pending"
+      && second.result.reason === "hash-unrecorded" && second.sent === 0) {
+    ok("an ambiguous wallet.send error keeps the send intent and does not retry blind");
+  } else {
+    bad("ambiguous send error: " + JSON.stringify({ code: first.result && first.result.code,
+      record: record && record.escrow, step: second.result && second.result.step,
+      reason: second.result && second.result.reason, sent: second.sent }));
+  }
+}
+
+console.log("=== 1d2a7) AN EXPLICIT RETRY RELEASES ONLY AFTER THE CALLER ASKS ===");
+{
+  const first = await startPending({ receipt: null, nonce: 5 });
+  const predicted = first.result && first.result.escrow;
+  const state = loadState();
+  const record = Object.values((state && state.swaps) || {})[0];
+  if (!record || !record.escrow || record.escrow.sendNonce !== 5) bad("explicit-retry fixture: no pending record or nonce");
+  else {
+    delete record.escrow.fundTx;
+    record.fundingPending = true;
+    record.escrow = { ...record.escrow, fundingPending: true, fundingReason: "send-unknown",
+      sendAttempted: true, sendNonce: 5, funded: false };
+    saveState(state);
+    const second = await startPending({ fresh: false, escrow: predicted, receipt: createdReceipt(),
+      nonce: 5, retryUnknownSend: true });
+    const after = second.result && second.result.id ? (loadState().swaps || {})[second.result.id] : null;
+    if (predicted && second.result && second.result.step === "xmr-incoming"
+        && second.sent === 1 && after && after.escrow && after.escrow.fundTx === SENT_HASH
+        && after.escrow.funded === true && after.escrow.sendNonce === 5) {
+      ok("an explicit retry sends once and keeps the recorded nonce");
+    } else {
+      bad("explicit retry: " + JSON.stringify({ step: second.result && second.result.step,
+        sent: second.sent, record: after && after.escrow }));
+    }
+  }
 }
 
 console.log("=== 1d2b) A RETRY WITHOUT AN ORDER ID FINDS THE SALT-KEYED PENDING RECORD ===");

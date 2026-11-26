@@ -91,6 +91,7 @@ export async function send(request, wallet, deps = {}) {
       call: reader,
       nowSec: Number.isSafeInteger(Number(deps.nowSec)) && Number(deps.nowSec) > 0 ? Number(deps.nowSec) : null,
       onPredicted: deps.onPredicted,
+      onSent: deps.onSent,
       send: (tx) => wallet.send({ ...tx, chainId: canonical.chainId, from: canonical.locker }),
       // NORMALISING THE RECEIPT ARGUMENT'S SHAPE - HERE, AT THE CORE'S BOUNDARY, NOT AT EVERY CALLER.
       //
