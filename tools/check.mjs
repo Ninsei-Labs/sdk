@@ -2697,6 +2697,7 @@ const CHECKS = {
   terminal: terminalCheck,
   provider: providerCheck,
   "recovery-key": recoveryKeyCheck,
+  "settlement-logs": () => runScriptCheck("check-settlement-logs.mjs", "settlement logs"),
   "monero-keys": moneroKeysCheck,
   "action-state": actionStateCheck,
   "vendor-bundles": vendorBundlesCheck,

@@ -433,6 +433,39 @@ export declare function readEscrowEventsByTopic(request: {
   toBlock?: number | string;
 }): Promise<EscrowEvent[]>;
 
+/** The default number of blocks in one log request. */
+export declare const SETTLEMENT_LOG_WINDOW: number;
+/** The default per-RPC timeout, in milliseconds. */
+export declare const SETTLEMENT_LOG_TIMEOUT_MS: number;
+
+/** One address-free settlement log request. `address` is optional: when omitted, the RPC learns only the topics. */
+export interface SettlementLogRequest {
+  readonly address?: string | readonly string[];
+  readonly topics: readonly (string | readonly string[] | null)[];
+  readonly fromBlock?: number | string;
+  readonly toBlock?: number | string;
+}
+
+/** The transport inputs. The caller owns the RPC list and may inject fetch and the limits. */
+export interface SettlementLogReaderOptions {
+  readonly rpcs: readonly string[];
+  readonly fetchImpl?: typeof fetch;
+  readonly timeoutMs?: number;
+  readonly maxWindow?: number;
+}
+
+/**
+ * Build the `evmLogs` seam for `readEscrowEventsByTopic`.
+ *
+ * Providers are tried in order. A refused range is split down to one block; a single block refused by every
+ * provider is read through `eth_getBlockReceipts` without an address filter and filtered locally. If the evidence
+ * cannot be completed, the reader throws `recovery-failed` with `stage: "logs"`; it never returns an empty list as
+ * a complete answer.
+ */
+export declare function createSettlementLogReader(
+  options: SettlementLogReaderOptions,
+): (request: SettlementLogRequest) => Promise<unknown[]>;
+
 /** Finds orders whose commitment was made from the key's halves. */
 export declare function findSwaps(request: {
   mnemonic: string;
