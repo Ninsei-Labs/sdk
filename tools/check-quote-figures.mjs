@@ -96,6 +96,86 @@ const OTHER = "0x" + "22".repeat(20);
   equal(before.claimTipWei, TIP, "the claim tip is a separate field");
 }
 {
+  // THE TIP IS NOT ZERO WHEN IT IS NOT KNOWN. A caller that leaves the field out must not be shown the
+  // no-tip figure; the seller's own claim still does not need the tip and stays known.
+  const amount = 10_000n;
+  const fee = 30n;
+  const cases = [
+    ["zero", 0n, 9_970n, 9_970n],
+    ["five", 5n, 9_965n, 9_965n],
+    ["left out", undefined, null, null],
+    ["explicit null", null, null, null],
+    ["empty", "", null, null],
+  ];
+  for (const [name, tip, guaranteed, thirdParty] of cases) {
+    const expectedTip = tip === undefined || tip === null || tip === "" ? null : tip;
+    const request = { amountWei: amount, feeWei: fee };
+    if (tip !== undefined) request.claimTipWei = tip;
+    const before = salePayoutBeforeClaim(request);
+    check(before !== null, `the ${name} tip still leaves the seller figure measurable`);
+    if (before !== null) {
+      equal(before.sellerClaimWei, 9_970n, `the ${name} tip does not change the seller's own figure`);
+      equal(before.guaranteedMinimumWei, guaranteed, `the ${name} tip gives the expected guaranteed minimum`);
+      equal(before.claimTipWei, expectedTip, `the ${name} tip is reported as known or unknown`);
+    }
+    const seller = salePayoutAfterClaim({ amountWei: amount, feeWei: fee, ...(tip === undefined ? {} : { claimTipWei: tip }),
+      claimed: true, claimSucceeded: true, sender: CLAIMER, claimer: CLAIMER });
+    equal(seller.payoutWei, 9_970n, `the ${name} tip keeps the seller's receipt at amount - fee`);
+    check(seller.outcome === "claimed", `the ${name} tip still names the seller's claim`);
+    const other = salePayoutAfterClaim({ amountWei: amount, feeWei: fee, ...(tip === undefined ? {} : { claimTipWei: tip }),
+      claimed: true, claimSucceeded: true, sender: OTHER, claimer: CLAIMER });
+    equal(other.payoutWei, thirdParty, `the ${name} tip gives the expected third-party receipt`);
+    const unknown = salePayoutAfterClaim({ amountWei: amount, feeWei: fee, ...(tip === undefined ? {} : { claimTipWei: tip }),
+      claimed: true, claimSucceeded: true, sender: null, claimer: CLAIMER });
+    equal(unknown.payoutWei, tip === 0n ? 9_970n : null, `the ${name} tip with an unknown caller is known only at zero`);
+  }
+}
+{
+  // AN UNREADABLE TIP IS UNKNOWN, NOT ZERO. The wire form is usually a decimal string, so pin both the garbage
+  // cases and the valid string form.
+  for (const raw of ["abc", "-1", "5.5", true, false]) {
+    const before = salePayoutBeforeClaim({ amountWei: 10_000n, feeWei: 30n, claimTipWei: raw });
+    check(before && before.claimTipWei === null && before.guaranteedMinimumWei === null,
+      `the unreadable tip ${JSON.stringify(raw)} is unknown`);
+    equal(before && before.sellerClaimWei, 9_970n, `the unreadable tip ${JSON.stringify(raw)} keeps the seller figure`);
+    const seller = salePayoutAfterClaim({ amountWei: 10_000n, feeWei: 30n, claimTipWei: raw,
+      claimed: true, claimSucceeded: true, sender: CLAIMER, claimer: CLAIMER });
+    equal(seller.payoutWei, 9_970n, `the unreadable tip ${JSON.stringify(raw)} keeps the seller receipt`);
+    const other = salePayoutAfterClaim({ amountWei: 10_000n, feeWei: 30n, claimTipWei: raw,
+      claimed: true, claimSucceeded: true, sender: OTHER, claimer: CLAIMER });
+    equal(other.payoutWei, null, `the unreadable tip ${JSON.stringify(raw)} gives no third-party receipt`);
+  }
+  const stringTip = salePayoutBeforeClaim({ amountWei: 10_000n, feeWei: 30n, claimTipWei: "5" });
+  equal(stringTip && stringTip.claimTipWei, 5n, "a decimal-string tip is read as its number");
+  equal(stringTip && stringTip.guaranteedMinimumWei, 9_965n, "a decimal-string tip drives the guaranteed minimum");
+  const stringThird = salePayoutAfterClaim({ amountWei: 10_000n, feeWei: 30n, claimTipWei: "5",
+    claimed: true, claimSucceeded: true, sender: OTHER, claimer: CLAIMER });
+  equal(stringThird.payoutWei, 9_965n, "a decimal-string tip drives the third-party receipt");
+}
+{
+  // BREAKING RUN: restoring the old zero default in BOTH helpers must make the omitted-tip cases red. The anchor
+  // appears in salePayoutBeforeClaim and salePayoutAfterClaim; a single replace would leave the second copy untested.
+  const dir = mkdtempSync(join(tmpdir(), "sdk-quote-tip-"));
+  try {
+    const source = readFileSync(new URL("../engine/evm/fees.js", import.meta.url), "utf8");
+    const anchor = "const tip = payoutBig(claimTipWei);";
+    const occurrences = source.split(anchor).length - 1;
+    equal(occurrences, 2, "the tip parser is present in both payout helpers");
+    const mutated = source.replaceAll(anchor, "const tip = claimTipWei === undefined ? 0n : payoutBig(claimTipWei);");
+    check(mutated !== source, "the breaking run could not find the tip parser");
+    if (mutated !== source) {
+      const copy = join(dir, "fees.js");
+      writeFileSync(copy, mutated);
+      const broken = await import(pathToFileURL(copy).href + "?run=" + Date.now());
+      const before = broken.salePayoutBeforeClaim({ amountWei: 10_000n, feeWei: 30n });
+      equal(before && before.guaranteedMinimumWei, 9_970n, "restoring the zero default did not change the omitted tip");
+      const thirdParty = broken.salePayoutAfterClaim({ amountWei: 10_000n, feeWei: 30n, claimed: true,
+        claimSucceeded: true, sender: null, claimer: CLAIMER });
+      equal(thirdParty.payoutWei, 9_970n, "restoring the zero default did not change the omitted third-party figure");
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+{
   const same = salePayoutAfterClaim({ amountWei: AMOUNT, feeWei: FEE, claimTipWei: TIP,
     claimed: true, claimSucceeded: true, sender: CLAIMER, claimer: CLAIMER });
   equal(same.payoutWei, 99_700_000_000_000_000n, "the claimer's own claim pays amount - fee");
