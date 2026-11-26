@@ -61,7 +61,7 @@ export function evmWallet(provider, { id = "evm" } = {}) {
     subscribe(handler) {
       if (typeof provider.on !== "function") return () => {};
       for (const event of ["accountsChanged", "chainChanged"]) {
-        const wrapped = () => handler();
+        const wrapped = () => handler(event);
         provider.on(event, wrapped);
         handoff.push([event, wrapped]);
       }

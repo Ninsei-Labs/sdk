@@ -1,3 +1,7 @@
+## Unreleased — 2026-11-26
+
+- `wallet.balances` is one snapshot: every row comes from the account and chain captured before the native and token reads, and a change during either read is a named `wrong-account` or `wrong-chain` refusal instead of a mixed figure. A provider already on another network refuses before the driver is called.
+
 ## Unreleased — 2026-11-25
 
 - `actionDecision` is the one pure rule for refund, claim, ready mark and the sale's send window. It takes the escrow read at one block, the arrival verdict and both clocks as data, never calls `Date.now()`, and returns the allowed action, its deadline and a stable reason. The early refund closes by the later of the block and device times; a late refund opens only on a block at or after `t1`; an unfinished read never allows a ready mark. The defaults and the exported `ACTION_DECISION_DEFAULTS` keep the 180 s refund margin, the 60 s claim and mark margins in one place; a sale must pass the node's own send lead.

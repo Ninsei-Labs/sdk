@@ -206,6 +206,18 @@ const cases = [
     from: "    cashier: chain.escrow.cashier || null,", to: "",
     wants: "has cashier",
   },
+  {
+    check: "wallet-balances", source: "src/wallet.mjs",
+    name: "the balance chain snapshot check is removed",
+    from: "if (chainMoved) {", to: "if (false) {",
+    wants: "a chain change and return during the read",
+  },
+  {
+    check: "wallet-balances", source: "src/wallet.mjs",
+    name: "the balance account snapshot check is removed",
+    from: "if (accountMoved || changes !== startChanges) {", to: "if (false) {",
+    wants: "an account change between the native and token replies",
+  },
 ];
 
 const originals = new Map();

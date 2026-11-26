@@ -360,7 +360,9 @@ export interface WalletApi {
   /**
    * Balances of the settlement network's native and ERC-20 tokens, in minimal units as a string. For a Monero
    * wallet - one XMR balance in atomic units (piconero): it is read by the wallet itself, with the method
-   * `unlockedBalance`. What is not read is not replaced with zero: a refusal comes as a code.
+   * `unlockedBalance`. What is not read is not replaced with zero: a refusal comes as a code. For an EVM wallet,
+   * every row belongs to the account and chain captured before the read; a change during it is `wrong-account`
+   * or `wrong-chain`, never a mixed figure.
    */
   balances(tokens?: readonly string[]): Promise<readonly Balance[]>;
   /** Subscribe to wallet changes. Returns an unsubscribe function. */
