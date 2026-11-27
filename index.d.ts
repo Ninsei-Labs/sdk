@@ -2450,6 +2450,8 @@ export interface ActionDecisionRequest {
   readonly arrivalError?: { readonly code?: string } | null;
   /** The device clock, in epoch seconds. A caller must pass it; the function never reads a clock. */
   readonly deviceTimeSec: number;
+  /** Operators that must agree on an incomplete read: 2 on testnet/stagenet, 3 on mainnet. Default 2. */
+  readonly requiredOperators?: number;
   /** How long before readyBy the early refund opens. Default 780 s (13 min: the site's 10 min plus the margin). */
   readonly refundLeadSec?: number;
   /** The protective margin that closes the early refund. Default 180 s. */

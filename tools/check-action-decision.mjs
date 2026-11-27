@@ -275,6 +275,11 @@ console.log("=== 16) REOPENED SALE, EXACT PROOF, STALE BLOCK, LAZY LEAD ===");
   equal(shortPayment.reason, "claim-window-opens", "the short payment waits for readyBy");
   const poolPayment = sale(paid(unknown(), { state: "pool", txid: "ff".repeat(32), amountAtomic: "1000" }));
   equal(poolPayment.action, "later", "a pool payment at the address is not sent again");
+  const unverifiedPayment = sale(paid(short(), { amountAtomic: "0",
+    outputs: [{ index: 0, key: "11".repeat(32), amountAtomic: null, amountVerified: false }] }));
+  equal(unverifiedPayment.action, "later", "a payment with an unverified amount is still not sent again");
+  const errorPayment = sale(null, { arrivalError: { code: "xmr-underpaid" } });
+  equal(errorPayment.action, "later", "an underpaid refusal keeps the send window closed");
   const txidOnly = sale({ ...unknown(), txid: "ff".repeat(32), amountAtomic: "1000" });
   equal(txidOnly.action, "sendXmr", "a txid without an output is not a payment");
 

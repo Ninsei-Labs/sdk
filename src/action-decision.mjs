@@ -52,18 +52,19 @@ function paymentEvidence(arrival) {
     ...transfers.flatMap((transfer) => (Array.isArray(transfer.outputs) ? transfer.outputs : [])),
   ];
   const txid = arrival.txid || transfers.find((transfer) => transfer.txid)?.txid || null;
-  const amount = Number(arrival.amountAtomic);
-  if (!txid || !outputs.length || !Number.isFinite(amount) || amount <= 0) return null;
+  // THE AMOUNT MAY BE UNVERIFIED OR UNREAD; ITS OUTPUT IS STILL A PAYMENT. A txid alone is not, because a txid can
+  // be reported without any output the swap address owns.
+  if (!txid || !outputs.length) return null;
   const operators = new Set([
     ...(Array.isArray(arrival.operators) ? arrival.operators : []),
     ...transfers.flatMap((transfer) => (Array.isArray(transfer.operators) ? transfer.operators : [])),
   ]);
-  return { amount, operators: operators.size, comparison: arrival.amountComparison };
+  return { amount: Number(arrival.amountAtomic), operators: operators.size, comparison: arrival.amountComparison };
 }
 
 // The arrival's kind is the part the decision needs. An error code is kept as the same kind the returned verdict
 // would carry, so a caller that still catches `xmr-underpaid`/`xmr-locked` gets the same rule.
-function arrivalKindOf(arrival, arrivalError) {
+function arrivalKindOf(arrival, arrivalError, requiredOperators) {
   const code = arrivalError && typeof arrivalError === "object" ? arrivalError.code : null;
   if (code === "xmr-underpaid") return "short";
   if (code === "xmr-locked") return "locked";
@@ -75,9 +76,9 @@ function arrivalKindOf(arrival, arrivalError) {
   if (state === "unknown") {
     if (arrival.absent === true) return "unknown";
     const payment = paymentEvidence(arrival);
-    // Two required operators saw the amount while confirmations accrue. An incomplete third node does not turn
+    // The required operators saw the amount while confirmations accrue. An incomplete extra node does not turn
     // that into a refund offer; a single operator does.
-    if (payment && payment.operators >= 2) return payment.comparison === "short" ? "short" : "seen";
+    if (payment && payment.operators >= requiredOperators) return payment.comparison === "short" ? "short" : "seen";
     return "unknown";
   }
   if (arrival.absent === true) return "absent";
@@ -111,9 +112,11 @@ export function actionDecision(request) {
   if (!request || typeof request !== "object") throw bad("request");
   if (request.side !== "buy" && request.side !== "sale") throw bad("side");
   const deviceTimeSec = int(request.deviceTimeSec, "deviceTimeSec", { min: 1 });
+  const requiredOperators = request.requiredOperators === undefined || request.requiredOperators === null
+    ? 2 : int(request.requiredOperators, "requiredOperators", { min: 1 });
   const escrow = readEscrow(request.escrow === undefined ? null : request.escrow);
   const arrival = request.arrival === undefined ? null : request.arrival;
-  const kind = arrivalKindOf(arrival, request.arrivalError);
+  const kind = arrivalKindOf(arrival, request.arrivalError, requiredOperators);
   const read = knownArrival(kind) ? "complete" : "unknown";
   const answer = (action, reason, untilSec = null) => ({
     action, reason, untilSec, blockTimeSec: escrow ? escrow.blockTimeSec : null, deviceTimeSec, read,
@@ -134,7 +137,9 @@ export function actionDecision(request) {
   const claimMarginSec = optionalInt(request.claimMarginSec, "claimMarginSec", ACTION_DECISION_DEFAULTS.claimMarginSec);
   const markReadyMarginSec = optionalInt(request.markReadyMarginSec, "markReadyMarginSec", ACTION_DECISION_DEFAULTS.markReadyMarginSec);
   // A CLOSING WINDOW MAY NOT REST ON AN OLD BLOCK. The age is measured against the device clock, which can only
-  // narrow a closing window; a refund opened by a block at `t1` is not age-limited.
+  // narrow a closing window; a refund opened by a block at `t1` is not age-limited. A device clock that runs more
+  // than `maxBlockAgeSec` ahead is deliberately indistinguishable from an old read: both close the windows rather
+  // than sign on a cut the caller cannot prove is current.
   const maxBlockAgeSec = optionalInt(request.maxBlockAgeSec, "maxBlockAgeSec", ACTION_DECISION_DEFAULTS.maxBlockAgeSec);
   const staleEscrow = deviceTimeSec - blockTimeSec > maxBlockAgeSec;
   const earlyRefundClosesAt = readyBy - refundMarginSec;
@@ -197,7 +202,9 @@ export function actionDecision(request) {
 
   // THE ADDRESS ALREADY HOLDS MONEY. A reopened card must not ask for the same XMR again, whether the read is
   // full, short, locked, in the pool, seen by one operator or still unknown: wait for the claim window instead.
-  if (payment || kind === "seen" || kind === "arrived") return answer("later", "claim-window-opens", readyBy);
+  if (payment || ["seen", "arrived", "short", "locked", "pool", "one"].includes(kind)) {
+    return answer("later", "claim-window-opens", readyBy);
+  }
   // The lead is required only when XMR may still be sent. A marked claim, an exact unmarked one and an expired sale
   // must answer without it.
   const saleLeadSec = int(request.saleLeadSec, "saleLeadSec");
