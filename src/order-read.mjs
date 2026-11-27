@@ -82,6 +82,11 @@ export async function orderLookup(escrow, request = {}) {
     catch { throw bad("block", "unreadable"); }
     const height = Number(block && block.number);
     if (!Number.isSafeInteger(height) || height < 0) throw bad("block", "incomplete");
+    // A NUMERIC TAG IS A CLAIM ABOUT THE BLOCK, exactly as in order.read. A provider that answers another height
+    // must not silently replace the caller's stated cut.
+    const tagged = typeof toBlock === "number" ? toBlock
+      : (typeof toBlock === "string" && /^0x[0-9a-f]+$/i.test(toBlock) ? Number.parseInt(toBlock, 16) : null);
+    if (tagged !== null && tagged !== height) throw bad("block", "wrong-height");
     toBlock = height;
   }
   const found = await findOrderByEscrow({

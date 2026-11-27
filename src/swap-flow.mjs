@@ -401,18 +401,25 @@ export async function orderRead(escrow, deps = {}) {
   // THE BLOCK IS FIXED BEFORE THE CALLS. Four reads at `latest` are four different cuts: the head can move between
   // them, so the fields would belong to different blocks even though each request named the same tag. Resolve the
   // tag once, then ask every field at that concrete height.
-  const first = await blockIdentity(readBlock, blockTag);
-  const at = "0x" + first.number.toString(16);
-  const [rawStatus, rawReady, rawT1, rawReadyBy] = await Promise.all([
-    call({ to: escrow, data: encodeStatus(), block: at }),
-    call({ to: escrow, data: encodeRead("ready"), block: at }),
-    call({ to: escrow, data: encodeT1(), block: at }),
-    call({ to: escrow, data: encodeRead("readyBy"), block: at }),
-  ]);
-  // Read the same height again: the answer names the block that is canonical after the calls. A chain that moved on
-  // is not a refusal; a provider that answers a different height for a numeric tag is.
-  const block = await blockIdentity(readBlock, first.number);
-  if (block.number !== first.number) throw new SdkError("bad-input", { field: "block", why: "wrong-height" });
+  let current = await blockIdentity(readBlock, blockTag);
+  let raws;
+  let block;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const at = "0x" + current.number.toString(16);
+    raws = await Promise.all([
+      call({ to: escrow, data: encodeStatus(), block: at }),
+      call({ to: escrow, data: encodeRead("ready"), block: at }),
+      call({ to: escrow, data: encodeT1(), block: at }),
+      call({ to: escrow, data: encodeRead("readyBy"), block: at }),
+    ]);
+    // Read the same height again. If the hash changed, a reorg replaced the block while the calls were in flight, so
+    // the fields may belong to the old block. Read them again at the same height and name the new canonical block.
+    // A chain that moved on is not a refusal; a provider that answers a different height for a numeric tag is.
+    block = await blockIdentity(readBlock, current.number);
+    if (block.hash === current.hash) break;
+    current = block;
+  }
+  const [rawStatus, rawReady, rawT1, rawReadyBy] = raws;
   const answers = { status: rawStatus, ready: rawReady, t1: rawT1, readyBy: rawReadyBy };
   const empty = Object.entries(answers).filter(([, value]) => String(value ?? "").replace(/^0x/i, "").length === 0);
   if (empty.length === Object.keys(answers).length) {

@@ -107,6 +107,26 @@ const createdLog = ({ removed = false, blockNumber = 100, salt = "0x" + "ab".rep
   check(noContract && noContract.code === "bad-input" && noContract.params.field === "escrow"
     && noContract.params.why === "no-contract" && noContract.params.block.number === 42,
     "an address without code was not named with its block");
+  let round = 0;
+  const reorgCalls = [];
+  const reorg = await orderRead(ESCROW, {
+    blockTag: "latest",
+    call: async ({ data, block }) => {
+      reorgCalls.push(block);
+      if (data === ESCROW_METHODS.status) return words(1, 0, 0, 1000);
+      if (data === ESCROW_METHODS.ready) return word(round === 0 ? 0 : 1);
+      if (data === ESCROW_METHODS.t1) return word(3000);
+      if (data === ESCROW_METHODS.readyBy) return word(2000);
+      throw new Error("unexpected selector " + data);
+    },
+    block: async (tag) => {
+      if (tag === "latest") return { number: 42, hash: H(42), timestamp: 1000 };
+      if (round === 0) { round = 1; return { number: 42, hash: H(99), timestamp: 1001 }; }
+      return { number: 42, hash: H(99), timestamp: 1001 };
+    },
+  });
+  check(round === 1 && reorg.ready === true && reorg.block.hash === H(99) && reorgCalls.length === 8,
+    "a replaced block was not read again at the same height");
   let missing = null;
   try { await orderRead(ESCROW, { call }); } catch (error) { missing = error; }
   check(missing && missing.code === "bad-input" && missing.params.field === "block", "a read without a block seam was refused");
@@ -198,6 +218,16 @@ const createdLog = ({ removed = false, blockNumber = 100, salt = "0x" + "ab".rep
   });
   check(cuts.length === 2 && cuts.every((block) => block === 200),
     "lookup read its creation and terms at different blocks");
+  let mismatch = null;
+  try {
+    await orderLookup(ESCROW, {
+      factory: FACTORY, toBlock: 150,
+      evmLogs: async () => [createdLog({ blockNumber: 100 }), termsLog({ blockNumber: 100 })],
+      evmBlock: async () => ({ number: 200, hash: H(200), timestamp: 1000 }),
+    });
+  } catch (error) { mismatch = error; }
+  check(mismatch && mismatch.code === "bad-input" && mismatch.params.field === "block"
+    && mismatch.params.why === "wrong-height", "lookup replaced an explicit block height without a refusal");
 }
 {
   const requests = [];
