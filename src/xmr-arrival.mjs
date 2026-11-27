@@ -1602,7 +1602,7 @@ export async function verifyArrivalFromRead(request) {
   const recovery = await verifyRecovery({
     nodes: request.nodes, address: request.address, viewSecret: request.viewSecret, spendPub: request.spendPub,
     fromHeight, toHeight: request.toHeight, minConfirmations: request.minConfirmations, nowSec: request.nowSec,
-    timeoutMs: request.timeoutMs, fetch: request.fetch, keyImages: request.keyImages,
+    timeoutMs: request.timeoutMs, fetch: request.fetch, keyImages: request.keyImages, spentStatus: request.spentStatus,
     checkpoint: request.checkpoint, onProgress: request.onProgress, signal: request.signal,
   });
   const transfers = recovery.transfers || [];
@@ -1818,9 +1818,10 @@ export async function verifyRecovery(request) {
         address: request.address, viewSecret: request.viewSecret, spendPub,
         fromHeight, toHeight, minConfirmations, network,
         nowSec, timeoutMs, idleTimeoutMs: request.idleTimeoutMs ?? request.timeoutMs, fetch: fetchImpl,
+        spentStatus: request.spentStatus,
       };
       // THE WITNESS NEVER GETS KEY IMAGES. Its job is agreement on the block data; spent status belongs to the
-      // trusted primary node.
+      // trusted primary node. `spentStatus: false` reaches this read too, so a caller that opted out sends none.
       read = isPrimary
         ? await readRecovery({ ...common, node, keyImages: request.keyImages, checkpoint, onProgress, signal })
         : await readRecoveryWitness({ ...common, node, tipHeight: nodeTop, onProgress, signal });
