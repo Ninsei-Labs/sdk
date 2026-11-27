@@ -1976,6 +1976,8 @@ export interface SweepRestoreResult {
     readonly blocks: number;
     readonly txs: number;
     readonly spent?: number | null;
+    /** Pool spends counted as pending: they leave the spendable remainder but not the total. */
+    readonly pending?: number;
     readonly keyImages?: number;
     readonly spentWhy?: string;
   } | null;

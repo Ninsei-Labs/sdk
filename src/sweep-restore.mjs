@@ -256,13 +256,18 @@ export async function restoreWallet(request = {}) {
       // `window.trustedNode: true`; otherwise the pass reports spent status as unavailable and the full-scan path
       // (which uses the wallet's own spent check) remains available.
       if (windowReport.used && requestWindow.nodeUrl && requestWindow.trustedNode === true
-          && typeof driver.getKeyImages === "function") {
+          && (typeof driver.exportKeyImages === "function" || typeof driver.getKeyImages === "function")) {
         try {
-          const exported = await driver.getKeyImages();
+          // THE LIBRARY'S OWN EXPORT IS `exportKeyImages(all)`, and `all: true` is the set the spent answer must
+          // cover. `getKeyImages()` remains for older adapters that exposed the result directly.
+          const exported = typeof driver.exportKeyImages === "function"
+            ? await driver.exportKeyImages(true)
+            : await driver.getKeyImages();
           const images = Array.isArray(exported) ? exported
             : (exported && typeof exported.getKeyImages === "function" ? exported.getKeyImages() : []);
           const hexes = images.map((image) => typeof image === "string" ? image
-            : (image && typeof image.getHex === "function" ? image.getHex() : image && image.hex)).filter(Boolean);
+            : (image && typeof image.getHex === "function" ? image.getHex() : image && image.hex))
+            .filter(Boolean).map((hex) => String(hex).replace(/^0x/i, "").toLowerCase());
           if (hexes.length) {
             let base = String(requestWindow.nodeUrl);
             while (base.endsWith("/")) base = base.slice(0, -1);
@@ -274,16 +279,81 @@ export async function restoreWallet(request = {}) {
             const body = response && response.ok === true ? await response.json() : null;
             if (body && Array.isArray(body.spent_status)) {
               windowReport.keyImages = hexes.length;
-              // The node must answer for every key image, and only 0, 1 or 2 are known. A short, long or
-              // non-integer list is not a spent count.
+              // The node must answer for every key image, and only 0, 1 or 2 are known, and it must be a trusted
+              // answer. A short, long, non-integer or untrusted list is not a spent count.
               const statuses = body.spent_status;
-              const valid = statuses.length === hexes.length
+              const valid = body.status === "OK" && body.untrusted !== true
+                && statuses.length === hexes.length
                 && statuses.every((value) => Number.isInteger(value) && value >= 0 && value <= 2);
               if (valid) {
                 windowReport.spent = statuses.filter((value) => value === 1 || value === 2).length;
+                // THE WALLET'S OUTPUTS ARE THE AMOUNTS, THE NODE'S STATUSES ARE THE SPEND. The wallet balance alone
+                // cannot exclude a spent output: `scanTxs` found it and `unlockedBalance` may still count it.
+                try {
+                  const outputs = await step("getOutputs", () => driver.getOutputs());
+                  if (!Array.isArray(outputs) || outputs.length !== hexes.length) {
+                    windowReport.spent = null;
+                    windowReport.spentWhy = "key-images-short";
+                  } else {
+                    const byImage = new Map(hexes.map((hex, index) => [hex, statuses[index]]));
+                    let covered = true;
+                    let removedTotal = 0n;
+                    let removedUnlocked = 0n;
+                    let pending = 0;
+                    for (const output of outputs) {
+                      const rawImage = output && typeof output.getKeyImage === "function" ? output.getKeyImage()
+                        : output && output.keyImage;
+                      const image = rawImage && typeof rawImage.getHex === "function" ? rawImage.getHex()
+                        : (rawImage && rawImage.hex !== undefined ? rawImage.hex : rawImage);
+                      const key = String(image == null ? "" : image).replace(/^0x/i, "").toLowerCase();
+                      const status = byImage.get(key);
+                      const rawAmount = output && typeof output.getAmount === "function" ? output.getAmount()
+                        : output && output.amount;
+                      let amount;
+                      try { amount = BigInt(rawAmount); } catch { amount = null; }
+                      if (status === undefined || amount === null) { covered = false; break; }
+                      if (status === 1) { removedTotal += amount; removedUnlocked += amount; }
+                      else if (status === 2) { removedUnlocked += amount; pending += 1; }
+                    }
+                    if (!covered) {
+                      windowReport.spent = null;
+                      windowReport.spentWhy = "key-images-mismatch";
+                    } else {
+                      // THE WALLET MUST ALSO KNOW THE SPEND: SIGNING READS ITS OWN BALANCE, NOT THIS REPORT.
+                      // `rescanSpent` is the one call that turns the trusted answer into a spendable remainder;
+                      // when it is absent or leaves the balance unchanged, the report subtracts the amounts
+                      // itself so a complete scan never calls a spent output spendable.
+                      let walletUpdated = false;
+                      if (windowReport.spent > 0 && typeof driver.rescanSpent === "function") {
+                        try {
+                          const beforeTotal = windowTotal;
+                          const beforeUnlocked = windowUnlocked;
+                          await step("rescanSpent", () => driver.rescanSpent());
+                          try { await wallet.sync(); } catch { /* the balances below decide */ }
+                          const afterTotal = asAmount(await step("getBalance", () => driver.getBalance()), "balance");
+                          const afterUnlocked = asAmount(await step("unlockedBalance", () => wallet.unlockedBalance()), "unlockedBalance");
+                          if (afterTotal < beforeTotal || afterUnlocked < beforeUnlocked) {
+                            windowTotal = afterTotal;
+                            windowUnlocked = afterUnlocked;
+                            walletUpdated = true;
+                          }
+                        } catch { /* the trusted answer remains; subtract below */ }
+                      }
+                      if (!walletUpdated) {
+                        windowTotal = windowTotal > removedTotal ? windowTotal - removedTotal : 0n;
+                        windowUnlocked = windowUnlocked > removedUnlocked ? windowUnlocked - removedUnlocked : 0n;
+                      }
+                      windowReport.pending = pending;
+                    }
+                  }
+                } catch {
+                  windowReport.spent = null;
+                  windowReport.spentWhy = "outputs-unavailable";
+                }
               } else {
                 windowReport.spent = null;
-                windowReport.spentWhy = "spent-status-invalid";
+                windowReport.spentWhy = body.untrusted === true ? "untrusted"
+                  : (body.status !== "OK" ? "spent-status" : "spent-status-invalid");
               }
             } else {
               windowReport.spent = null;
@@ -296,8 +366,11 @@ export async function restoreWallet(request = {}) {
         windowReport.spentWhy = requestWindow.trustedNode === true ? "no-key-images" : "untrusted-node";
       }
       // A WINDOW WITH COINS IS THE ANSWER. A window with none falls through to the full scan unless the caller
-      // explicitly turned the fallback off.
-      if (windowReport.used && (windowTotal > 0n || windowUnlocked > 0n || requestWindow.fallback === false)) {
+      // explicitly turned the fallback off. A window whose every coin was spent still had coins: its zero balances
+      // are the answer, not an empty window.
+      if (windowReport.used && (windowTotal > 0n || windowUnlocked > 0n
+          || (windowReport.spent !== null && windowReport.spent !== undefined)
+          || requestWindow.fallback === false)) {
         const completeness = await scanCompleteness(driver, { syncError: windowSyncError,
           spentChecked: windowReport.spent !== null && windowReport.spent !== undefined, window: true });
         return {

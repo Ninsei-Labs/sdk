@@ -3,7 +3,8 @@
 // The same object the page opens and syncs is passed to `sweep.restore` and to `sweep.sign`. This guard checks
 // that it really carries both roles: the connected wallet, the no-op `open`, and the withdrawal calls.
 import { moneroWalletAdapter } from "../src/adapters/monero-wallet.mjs";
-import { MAX_SWEEP_FEE_ATOMIC, sweepFeeVerdict } from "../src/sweep.mjs";
+import { moneroWallet } from "../src/adapters/monero.mjs";
+import { MAX_SWEEP_FEE_ATOMIC, sweepFeeVerdict, createSweep } from "../src/sweep.mjs";
 
 const ADDRESS = "55naYi3LrxM6gXXwcSE4MugfkAPPNuzNfe9vPDPHi5apfNuzpzLVQxih3F2TCjS3eWYaR5pddFVfh8dX6jKnYXGtEWJTFHM";
 
@@ -76,6 +77,27 @@ export const sweepAdapterCheck = async () => {
   check(wrongChain && wrongChain.code === "wrong-chain", "a stagenet address under mainnet is not refused as wrong-chain: " + JSON.stringify(wrongChain && wrongChain.code));
   check(mainnetConfig && mainnetConfig.networkType === "mainnet", "mainnet did not reach createWallet");
   notes.push("mainnet and testnet are valid Monero networks, not demo-only names");
+
+  // THE EXPORTED WITHDRAWAL ADAPTER MUST BE THE SAME WALLET THE RESTORE PASS SCANNED. Without `driver()` the
+  // package advertised a wallet that `sweep.restore` refused before it read the chain.
+  {
+    const library = {
+      async getAddress() { return ADDRESS; },
+      async setRestoreHeight() {},
+      async getBalance() { return 5n; },
+      async getHeight() { return 1000; },
+      async getDaemonHeight() { return 1000; },
+      async rescanBlockchain() {},
+      async sync() {},
+      async getUnlockedBalance() { return 5n; },
+    };
+    const withdrawal = moneroWallet({ createWallet: async () => library, networkType: "stagenet", serverUri: "https://node.example" });
+    await withdrawal.open({ address: ADDRESS, restoreHeight: 100 });
+    check(withdrawal.driver() === library, "the exported withdrawal adapter does not expose the wallet it opened");
+    const restored = await createSweep().restore({ wallet: withdrawal, fromHeight: 100 });
+    check(restored.scanComplete === true && restored.unlocked === "5",
+      `the exported withdrawal adapter did not pass restore: ${JSON.stringify(restored)}`);
+  }
 
   return { note: "one wallet adapter serves restore and sign", problems, notes };
 };

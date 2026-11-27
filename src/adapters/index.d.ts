@@ -42,6 +42,8 @@ export interface MoneroWalletOptions {
 export interface MoneroWithdrawalWallet {
   open(plan: { readonly address?: string; readonly restoreHeight?: number; readonly networkType?: string } | unknown): Promise<void>;
   sync(): Promise<void>;
+  /** The library wallet behind the adapter, for the restore pass (`scanTxs`, outputs and key images). */
+  driver(): unknown;
   unlockedBalance(): Promise<bigint | number | string>;
   sweepUnlocked(request: { readonly address: string; readonly relay: boolean }): Promise<unknown>;
   fee?(signed: unknown): Promise<string | null>;
