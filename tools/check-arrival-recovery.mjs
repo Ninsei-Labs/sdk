@@ -173,6 +173,45 @@ console.log("=== 1c) A WITNESS BELOW THE PRIMARY TOP MAKES THE READ INCOMPLETE =
   } else bad("lower-tip recovery: " + JSON.stringify(verdict));
 }
 
+console.log("=== 1c2) ABSENCE NEEDS EVERY CONFIGURED OPERATOR, AND A WITNESS AHEAD OF THE PRIMARY IS UNKNOWN ===");
+{
+  const three = [
+    { url: "https://a.example", operator: "A" },
+    { url: "https://b.example", operator: "B" },
+    { url: "https://c.example", operator: "C" },
+  ];
+  const base = rpc();
+  const thirdDown = async (url, init) => {
+    if (new URL(url).hostname === "c.example" && JSON.parse(init.body).method === "get_info") {
+      return { ok: false, status: 503 };
+    }
+    return base(url, init);
+  };
+  const missing = await verifyArrival({
+    ...request(thirdDown, three, { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE }),
+  });
+  okIf(missing.absent === false && missing.state === "unknown",
+    "a failing third operator did not turn an empty read into absence");
+
+  const ahead = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (body.method === "get_info") {
+      const host = new URL(url).hostname;
+      const height = host === "b.example" ? 106 : 102;
+      return { ok: true, json: async () => ({ result: { height, synchronized: true, nettype: "stagenet" } }) };
+    }
+    return base(url, init);
+  };
+  const behind = await verifyRecovery(request(ahead));
+  okIf(behind.complete === false && behind.failed.some((failure) => failure.why === "witness-ahead"),
+    "a witness ahead of the primary left the recovery read incomplete");
+  const behindArrival = await verifyArrival({
+    ...request(ahead, undefined, { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE }),
+  });
+  okIf(behindArrival.absent === false && behindArrival.state === "unknown",
+    "a primary behind its witness did not claim absence");
+}
+
 console.log("=== 1d) A DOWN PRIMARY IS NOT REPLACED BY A WITNESS ===");
 {
   const baseFetch = rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) } });

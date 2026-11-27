@@ -1663,7 +1663,10 @@ export async function verifyArrivalFromRead(request) {
   const requiredOperators = Number(recovery.requiredOperators) || 2;
   const quorate = completedOperators.length >= requiredOperators;
   const seen = seenByAmount && (recovery.complete === true || (rule === "at-least" && quorate));
-  const absent = transfers.length === 0 && !poolHit && quorate;
+  // ABSENCE IS THE STRONGEST ANSWER: it lets a buyer take the ETH back. It is allowed only when every configured
+  // operator finished the range (and the pool, while the window is open), and there are enough operators to form a
+  // quorum. A failing third operator or a one-node read must leave the answer unknown, never absent.
+  const absent = transfers.length === 0 && !poolHit && recovery.complete === true && quorate;
   const lockedTransfer = source.find((transfer) => transfer.locked === true) || null;
   const need = Number(recovery.minConfirmations) || 1;
   const confirming = source.some((transfer) => !transfer.pool && !transfer.confirmed && Number(transfer.confirmations) < need);
@@ -1797,8 +1800,16 @@ export async function verifyRecovery(request) {
       complete = false;
       continue;
     }
+    // A WITNESS AHEAD OF THE PRIMARY PROVES THAT THE PRIMARY IS BEHIND. Reading the witness only to the primary's
+    // top would then turn a payment it can already see into a false absence. No source is promoted instead. A
+    // one-block propagation skew therefore yields unknown until the next poll: safe, and self-healing.
+    if (!isPrimary && Number(info.height) > Number(tip)) {
+      failed.push({ url: node.url, operator: node.operator, code: "stale", why: "witness-ahead" });
+      complete = false;
+      continue;
+    }
     // EVERY WITNESS IS READ TO THE PRIMARY'S VERIFIED TOP. A witness below it cannot answer the top blocks, so its
-    // read is incomplete; a witness ahead of the primary is clamped, never trusted to widen the range.
+    // read is incomplete. A witness ahead of the primary has already been refused above, not clamped or promoted.
     const nodeTop = top;
     let read;
     let poolComplete = true;
