@@ -1,5 +1,6 @@
 ## Unreleased — 2026-11-27
 
+- `verifyArrival` with `at-least` settles on the required witnesses when the primary is down; the primary is not promoted and `ready` stays false. With `exact`, any transfer that only one operator sees keeps the answer `unknown`, even when the agreed transfers are exactly the signed amount.
 - A resumed read recomputes both `locked` and the nested `unlock` (`locked` and `code`) at the new tip, so a lock that matures between two saved reads is not carried over.
 - `verifyRecovery` and `verifyArrival` keep the caller's `spentStatus`: `false` sends no key images, `true` asks only the trusted primary, and a witness never receives them.
 - `verifyArrival` marks `absent` only when every configured operator completed the range and the pool, and enough operators form the quorum. A failing third operator or a witness ahead of the primary leaves the answer `unknown`; `refundIfXmrMissing` therefore signs nothing on those reads.

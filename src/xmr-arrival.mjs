@@ -1661,7 +1661,9 @@ export async function verifyArrivalFromRead(request) {
     }
     if (contributed) displayed.push(transfer);
   }
-  const seenByAmount = rule === "exact" ? total === expectedAtomic : total >= expectedAtomic;
+  const seenByAmount = (rule === "exact" ? total === expectedAtomic : total >= expectedAtomic)
+    && (rule !== "exact" || transfers.every((transfer) => transfer.agreed === true));
+  const unagreed = transfers.some((transfer) => transfer.agreed !== true);
   const poolHit = transfers.find((transfer) => transfer.pool);
   const completedOperators = recovery.completedOperators || [];
   const requiredOperators = Number(recovery.requiredOperators) || 2;
@@ -1679,6 +1681,7 @@ export async function verifyArrivalFromRead(request) {
   else if (poolHit) state = "pool";
   else if (recovery.complete !== true) state = "unknown";
   else if (source.length === 0) state = "pending";
+  else if (rule === "exact" && unagreed) state = "unknown";
   else if (lockedTransfer) state = "locked";
   else if (confirming) state = "confirming";
   else if (agreed.length === 0) state = rule === "exact" ? "unknown" : "one-node";
@@ -1775,16 +1778,24 @@ export async function verifyRecovery(request) {
   // receives the exact-start walk or key images; without the primary the read is incomplete.
   const primaryLive = live.find((entry) => entry.node === primaryNode);
   const addressNetwork = bound.keys && bound.keys.network ? bound.keys.network : null;
-  const earlyNetwork = isStr(request.network) ? request.network : addressNetwork;
-  if (!primaryLive) {
+  const observedNetwork = primaryLive && primaryLive.info.nettype ? primaryLive.info.nettype
+    : (addressNetwork || (live.find((entry) => isStr(entry.info.nettype)) || {}).info?.nettype);
+  const earlyNetwork = isStr(request.network) ? request.network : observedNetwork;
+  const earlyRequired = earlyNetwork === "mainnet" ? 3 : 2;
+  // A DOWN PRIMARY IS NOT PROMOTED. `at-least` may still settle on witnesses that each finished their own range, so
+  // a witness-only read is allowed when enough of them are present; absence and `exact` still require the primary.
+  // With fewer witnesses than the quorum the read stays the old incomplete answer and no witness is walked.
+  const witnessCandidates = live.filter((entry) => entry.node !== primaryNode && entry.info.synced === true);
+  if (!primaryLive && witnessCandidates.length < earlyRequired) {
     return { state: "none", transfers: [], tip: null, fromHeight, toHeight, minConfirmations, complete: false,
       completedOperators: [], spends: [], spendsDisagreements: [], ...UNKNOWN_TOTALS, availableAtomic: null,
       availableSource: null, network: earlyNetwork,
-      requiredOperators: earlyNetwork === "mainnet" ? 3 : 2, checked, failed };
+      requiredOperators: earlyRequired, checked, failed };
   }
-  const tip = primaryLive.info.height;
+  const tip = primaryLive ? primaryLive.info.height
+    : Math.max(...live.filter((entry) => entry.info.synced === true).map((entry) => Number(entry.info.height) || 0));
   const top = Math.max(0, tip - 1);
-  const network = isStr(request.network) ? request.network : (primaryLive.info.nettype || addressNetwork);
+  const network = isStr(request.network) ? request.network : observedNetwork;
   if (!isStr(network)) throw new SdkError("bad-input", { field: "network" });
   const requiredOperators = network === "mainnet" ? 3 : 2;
   const observations = new Map();
@@ -1807,14 +1818,14 @@ export async function verifyRecovery(request) {
     // A WITNESS AHEAD OF THE PRIMARY PROVES THAT THE PRIMARY IS BEHIND. Reading the witness only to the primary's
     // top would then turn a payment it can already see into a false absence. No source is promoted instead. A
     // one-block propagation skew therefore yields unknown until the next poll: safe, and self-healing.
-    if (!isPrimary && Number(info.height) > Number(tip)) {
+    if (primaryLive && !isPrimary && Number(info.height) > Number(tip)) {
       failed.push({ url: node.url, operator: node.operator, code: "stale", why: "witness-ahead" });
       complete = false;
       continue;
     }
-    // EVERY WITNESS IS READ TO THE PRIMARY'S VERIFIED TOP. A witness below it cannot answer the top blocks, so its
-    // read is incomplete. A witness ahead of the primary has already been refused above, not clamped or promoted.
-    const nodeTop = top;
+    // EVERY WITNESS IS READ TO THE PRIMARY'S VERIFIED TOP WHILE IT IS LIVE. Without the primary each witness is read
+    // to its own top, so a witness-only `at-least` can settle on the operators that actually saw the payment.
+    const nodeTop = primaryLive ? top : Math.max(0, Number(info.height) - 1);
     let read;
     let poolComplete = true;
     try {
@@ -1917,7 +1928,9 @@ export async function verifyRecovery(request) {
     ? recoveryTotals(transfers, tracked, spends)
     : { receivedAtomic: null, spentAtomic: null, unspentAtomic: null, withdrawalState: "unknown" };
   const availableForVerdict = spendsDisagreements.length ? null : availableAtomic;
-  const ready = transfers.some((transfer) => transfer.agreed && transfer.confirmed && !transfer.locked);
+  // A WITNESS-ONLY READ CAN SETTLE `at-least`, BUT IT IS NOT THE PRIMARY'S READY STATE. The ready mark stays with the
+  // primary and the required operators; without the primary the caller gets the transfers, not a ready verdict.
+  const ready = primaryLive !== undefined && transfers.some((transfer) => transfer.agreed && transfer.confirmed && !transfer.locked);
   const agreed = transfers.some((transfer) => transfer.agreed);
   return {
     state: ready ? "ready" : (agreed ? "pending" : (transfers.length ? "one-node" : "none")),

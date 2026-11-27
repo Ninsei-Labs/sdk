@@ -1192,16 +1192,17 @@ export interface XmrRecoveryTransfer {
   readonly disagreements: readonly { readonly operators: readonly string[]; readonly amountAtomic: string }[];
 }
 
-/** The recovery read's answer. `ready` means at least one agreed, confirmed, unlocked transfer exists. */
+/** The recovery read's answer. `ready` means the primary answered and an agreed, confirmed, unlocked transfer exists. */
 export interface XmrRecoveryVerdict extends XmrRecoveryTotals {
+  /** `ready` requires the primary; a witness-only read can be `pending` with agreed transfers. */
   readonly state: "ready" | "pending" | "one-node" | "none";
   readonly transfers: readonly XmrRecoveryTransfer[];
-  /** Null when the primary did not answer; no witness is promoted and the read is incomplete. */
+  /** Null only when the read could not pick a tip: no primary and not enough witnesses to read. */
   readonly tip: number | null;
   readonly fromHeight: number;
   readonly toHeight: number | null;
   readonly minConfirmations: number;
-  /** The network the primary reported; null when the primary did not answer. */
+  /** The network the primary or a live node reported; null when neither the address nor a node named it. */
   readonly network: string | null;
   /** Complete operators needed for a positive decision: 2 on testnet/stagenet, 3 on mainnet. */
   readonly requiredOperators: number;
@@ -1264,6 +1265,7 @@ export interface XmrArrivalShadowResult {
 
 /** The XMR state the watch hands to the interface: the fact, the waiting state, or a refusal with a code. */
 export interface XmrArrivalVerdict {
+  /** True when the amount rule is met: `at-least` may settle on the required operator quorum; `exact` needs the complete read and no unagreed transfer. */
   readonly seen: boolean;
   readonly state: "arrived" | "pending" | "one-node" | "pool" | "confirming" | "locked" | "short" | "over" | "unknown";
   /** True only when every configured operator's complete read found no matching transaction, in a block or the pool. */
