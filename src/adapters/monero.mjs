@@ -33,6 +33,12 @@ export function moneroWallet({ createWallet, networkType, serverUri, password = 
       need();
       await wallet.sync();
     },
+    // THE RESTORE ROLE NEEDS THE LIBRARY WALLET ITSELF: heights, `scanTxs`, key images and outputs are its facts.
+    // Without this the exported withdrawal adapter could not pass `sweep.restore`, which is the pass before `sign`.
+    driver() {
+      need();
+      return wallet;
+    },
     async unlockedBalance() {
       need();
       return await wallet.getUnlockedBalance();

@@ -30,20 +30,8 @@ export function reconcileVerdict({ read, txid, keyImages }) {
       failed: read.failed || [],
     };
   }
-  if (spent.length) {
-    return {
-      outcome: "inputs-spent",
-      resend: false,
-      txid: hash,
-      height: null,
-      blockHash: null,
-      pool: spent.some((spend) => spend.pool === true),
-      complete: read.complete === true,
-      failed: read.failed || [],
-    };
-  }
-  // The node itself answered the two facts this verdict needs. A partial, unreadable or substituted answer is
-  // incomplete; an empty block range is no longer part of the question.
+  // AN INCOMPLETE READ IS NEVER INPUTS-SPENT. The spent answer alone does not prove that the signed bytes are
+  // gone; only the second hash answer, after the inputs, can separate spent from still-absent.
   if (read.complete !== true) {
     return {
       outcome: "unknown",
@@ -53,6 +41,18 @@ export function reconcileVerdict({ read, txid, keyImages }) {
       blockHash: null,
       pool: false,
       complete: false,
+      failed: read.failed || [],
+    };
+  }
+  if (spent.length) {
+    return {
+      outcome: "inputs-spent",
+      resend: false,
+      txid: hash,
+      height: null,
+      blockHash: null,
+      pool: spent.some((spend) => spend.pool === true),
+      complete: read.complete === true,
       failed: read.failed || [],
     };
   }

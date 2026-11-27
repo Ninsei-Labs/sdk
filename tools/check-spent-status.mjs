@@ -13,12 +13,15 @@ const cases = [
 ];
 for (const [name, spent_status, expected] of cases) test(name, async () => {
   const requests = [];
+  const outputs = images.map((key) => ({ getKeyImage: () => ({ getHex: () => key }), getAmount: () => 1n }));
   const driver = { async setRestoreHeight() {}, async getBalance() { return 5n; }, async getHeight() { return 1000; },
-    async getDaemonHeight() { return 1000; }, async scanTxs() {}, async getKeyImages() { return images.map((key) => ({ getHex: () => key })); } };
+    async getDaemonHeight() { return 1000; }, async scanTxs() {},
+    async exportKeyImages(all) { return { all, getKeyImages: () => images.map((key) => ({ getHex: () => key })) }; },
+    async getOutputs() { return outputs; } };
   const wallet = { driver: () => driver, async sync() {}, async unlockedBalance() { return 5n; } };
   const result = await restoreWallet({ wallet, fromHeight: 100,
     window: { txHashes: ["dd".repeat(32)], toHeight: 110, tipHeight: 1000, nodeUrl: "https://node.example", trustedNode: true },
-    fetchImpl: async (url, init) => { requests.push([url, JSON.parse(init.body)]); return { ok: true, json: async () => ({ spent_status }) }; },
+    fetchImpl: async (url, init) => { requests.push([url, JSON.parse(init.body)]); return { ok: true, json: async () => ({ status: "OK", untrusted: false, spent_status }) }; },
   });
   assert.deepEqual(requests, [["https://node.example/is_key_image_spent", { key_images: images }]]);
   assert.equal(result.window.keyImages, 3);

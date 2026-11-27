@@ -7,6 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createSweep } from "../src/sweep.mjs";
 import { createSwaps } from "../src/swaps.mjs";
+import { moneroWallet } from "../src/adapters/monero.mjs";
 import * as engine from "../src/engine.mjs";
 
 const ADDRESS = "59DnddZzVBCevVg9YB3zCs24DSRH4ByS2FMBafPpYxSEB6FMegQNEbtNzbLjrrEUPNAg9NhK5uMiiAZpAvENBS4D4mEPcRq";
@@ -65,6 +66,70 @@ test("checkAddress names the actual network in a wrong-network refusal", async (
   const result = await engine.xmrAddress.checkAddress(MAINNET, { expectNetwork: "stagenet" });
   assert.equal(result.ok, false);
   assert.equal(result.network, "mainnet");
+});
+
+test("the exported withdrawal adapter carries restore and sign", async () => {
+  const calls = { sweep: 0 };
+  const library = {
+    async getAddress() { return ADDRESS; },
+    async setRestoreHeight() {},
+    async getBalance() { return 5_000_000_000_000n; },
+    async getHeight() { return 200; },
+    async getDaemonHeight() { return 200; },
+    async rescanBlockchain() {},
+    async sync() {},
+    async getUnlockedBalance() { return 5_000_000_000_000n; },
+    async sweepUnlocked() {
+      calls.sweep += 1;
+      return [{ getInputs: () => [{ getKeyImage: () => ({ getHex: () => KEY_IMAGE }) }], getFee: () => 30_000_000n }];
+    },
+    async relayTxs() { return ["tx-1"]; },
+    async close() {},
+  };
+  const withdrawal = moneroWallet({ createWallet: async () => library, networkType: "stagenet", serverUri: "https://node.example" });
+  await withdrawal.open({ address: ADDRESS, restoreHeight: 100 });
+  const sweep = createSweep({});
+  const scan = await sweep.restore({ wallet: withdrawal, fromHeight: 100 });
+  assert.equal(scan.scanComplete, true);
+  const signed = await sweep.sign({ ...(await planRequest()), wallet: withdrawal });
+  assert.equal(signed.amount, "5000000000000");
+  assert.equal(calls.sweep, 1);
+});
+
+test("a partially spent window leaves the unspent part signable", async () => {
+  let unlocked = 5_000_000_000_000n;
+  const spentKey = "11".repeat(32);
+  const output = (key, amount) => ({ getKeyImage: () => ({ getHex: () => key }), getAmount: () => amount });
+  const driver = {
+    async setRestoreHeight() {},
+    async getBalance() { return 5_000_000_000_000n; },
+    async getHeight() { return 200; },
+    async getDaemonHeight() { return 200; },
+    async scanTxs() {},
+    async exportKeyImages(all) { return { all, getKeyImages: () => [spentKey, KEY_IMAGE].map((key) => ({ getHex: () => key })) }; },
+    async getOutputs() { return [output(spentKey, 2_000_000_000_000n), output(KEY_IMAGE, 3_000_000_000_000n)]; },
+    async rescanSpent() { unlocked = 3_000_000_000_000n; },
+  };
+  const adapter = {
+    driver: () => driver,
+    async sync() {},
+    async unlockedBalance() { return unlocked; },
+    async open() {},
+    async sweepUnlocked() {
+      return [{ getInputs: () => [{ getKeyImage: () => ({ getHex: () => KEY_IMAGE }) }], getFee: () => 30_000_000n }];
+    },
+    async relay() { return ["tx-1"]; },
+    async close() {},
+    async fee() { return 30_000_000n; },
+  };
+  const sweep = createSweep({});
+  const scan = await sweep.restore({ wallet: adapter, fromHeight: 100,
+    window: { txHashes: ["a"], toHeight: 110, tipHeight: 200, nodeUrl: "https://node.example", trustedNode: true },
+    fetchImpl: async () => ({ ok: true, json: async () => ({ status: "OK", untrusted: false, spent_status: [1, 0] }) }),
+  });
+  assert.equal(scan.unlocked, "3000000000000");
+  const signed = await sweep.sign({ ...(await planRequest()), wallet: adapter });
+  assert.equal(signed.amount, "3000000000000");
 });
 
 test("sign without a complete restore refuses by name", async () => {
