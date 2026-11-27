@@ -1015,21 +1015,6 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       // TIME STILL LEFT BEYOND THE RESERVE - the maker has room to deliver; a refund now would abandon a live trade.
       if (leftSec > leadSec) return { refunded: false, state: "waiting", leftSec, needSec: leadSec, readyBy, nowSec };
 
-      // ONE ESCROW CUT FOR THE DECISION. The helper owns the margins and the stale-block rule; a caller without a
-      // block reader keeps the old time gate, but a live caller's `evmBlock` (or a test seam) gives it one block.
-      let escrowCut = null;
-      try {
-        if (typeof deps.orderRead === "function") {
-          escrowCut = await deps.orderRead({ escrow, request });
-        } else {
-          const readBlock = request.readBlock || deps.block || (typeof evmBlock === "function" ? evmBlock : null);
-          if (readBlock) escrowCut = await flow.orderRead(escrow, { call: reader, block: readBlock, blockTag: request.blockTag });
-        }
-      } catch (error) {
-        return { refunded: false, state: "escrow-unread", leftSec, readyBy, nowSec,
-          error: (error && error.params) || null };
-      }
-
       let verdict = null;
       try {
         verdict = await verify({
@@ -1056,6 +1041,20 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       // for. A throw from `verify` above never reaches here and signs nothing either.
       if (!verdict || verdict.absent !== true || verdict.state === "unknown") {
         return { refunded: false, state: "arrival-pending", leftSec, verdict };
+      }
+      // ONE ESCROW CUT FOR THE DECISION, ONLY AFTER THE ARRIVAL GUARDS. An arrived payment must report `arrived`
+      // even when the EVM read is down; an absent read is the case that needs the cut's margin and age.
+      let escrowCut = null;
+      try {
+        if (typeof deps.orderRead === "function") {
+          escrowCut = await deps.orderRead({ escrow, request });
+        } else {
+          const readBlock = request.readBlock || deps.block || (typeof evmBlock === "function" ? evmBlock : null);
+          if (readBlock) escrowCut = await flow.orderRead(escrow, { call: reader, block: readBlock, blockTag: request.blockTag });
+        }
+      } catch (error) {
+        return { refunded: false, state: "escrow-unread", leftSec, verdict,
+          error: (error && error.params) || null };
       }
       // THE ONE DECISION OWNS THE CLOSING WINDOW. An absent read near the 180 s margin, or an escrow cut that is
       // older than `maxBlockAgeSec`, is not permission to call the wallet.
