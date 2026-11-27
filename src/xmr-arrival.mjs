@@ -52,7 +52,8 @@ const failureOf = (error, node) => {
   else if (/^(TimeoutError|AbortError)$/.test(name) || /timeout|abort/i.test(why) || /timeout|abort/i.test(name)) code = "timeout";
   else if (why === "bad-json" || why === "no-height" || why === "no-block" || why === "busy"
     || why === "partial-transactions" || why === "partial-answer" || why === "target-mismatch"
-    || why === "spent-status" || why === "rpc-status") code = "bad-answer";
+    || why === "spent-status" || why === "rpc-status" || why === "untrusted" || why === "ambiguous-answer"
+    || why === "absence-unproven") code = "bad-answer";
   const out = { url: node.url, operator: node.operator, code };
   if (params.status !== undefined && params.status !== null) out.status = params.status;
   if (why) out.why = why;
@@ -907,6 +908,59 @@ async function getBlockHashAt(node, height, fetchImpl, timeoutMs, options = {}) 
   return hash64(hash) ? normalizedHash(hash) : null;
 }
 
+// ONE HASH QUESTION, WITH THE TWO VALID ABSENCE SHAPES. A real restricted monerod omits `txs` and `txs_as_json`
+// when it does not know the hash and names it in `missed_tx`; an empty pair with the same name is the same fact.
+// A present hash and a missed hash in one answer, a missing or foreign `missed_tx`, an untrusted answer and a
+// partial wrapper are all ambiguous and never an absence.
+async function readWithdrawalHash({ node, targetTxid, fetchImpl, timeoutMs, signal }) {
+  const body = await call(node, "/get_transactions", { txs_hashes: [targetTxid], decode_as_json: true },
+    fetchImpl, timeoutMs, { signal });
+  if (!body || body.status !== "OK") throw new SdkError("xmr-no-nodes", { node: node.url, why: "rpc-status" });
+  if (body.untrusted === true) throw new SdkError("xmr-no-nodes", { node: node.url, why: "untrusted" });
+  const wrappers = Array.isArray(body.txs) ? body.txs : null;
+  const bodies = Array.isArray(body.txs_as_json) ? body.txs_as_json : null;
+  const missed = body.missed_tx === undefined || body.missed_tx === null ? [] : (
+    Array.isArray(body.missed_tx) ? body.missed_tx.map(normalizedHash) : null);
+  if (missed === null) throw new SdkError("xmr-no-nodes", { node: node.url, why: "partial-answer" });
+  if (wrappers !== null || bodies !== null) {
+    if (wrappers === null || bodies === null) {
+      throw new SdkError("xmr-no-nodes", { node: node.url, why: "partial-answer" });
+    }
+    if (wrappers.length > 1 || bodies.length > 1 || wrappers.length !== bodies.length) {
+      throw new SdkError("xmr-no-nodes", { node: node.url, why: "partial-answer" });
+    }
+    if (wrappers.length === 1) {
+      // THE NODE NAMED BOTH A FOUND HASH AND A MISS. That is not a present or an absent answer; the caller must
+      // keep the bytes and retry the read.
+      if (missed.length) throw new SdkError("xmr-no-nodes", { node: node.url, why: "ambiguous-answer" });
+      const wrapper = wrappers[0] || {};
+      if (normalizedHash(wrapper.tx_hash) !== targetTxid) {
+        throw new SdkError("xmr-no-nodes", { node: node.url, why: "target-mismatch" });
+      }
+      const rawHeight = wrapper.block_height;
+      const height = rawHeight === null || rawHeight === undefined || rawHeight === "" ? null : Number(rawHeight);
+      // A POOL TRANSACTION HAS NO BLOCK. `in_pool` is the explicit marker; an absent or zero height is the same
+      // fact on daemons that omit it.
+      const pool = wrapper.in_pool === true || height === null || height === 0;
+      if (!pool && (!Number.isSafeInteger(height) || height < 0)) {
+        throw new SdkError("xmr-no-nodes", { node: node.url, why: "partial-answer" });
+      }
+      const target = { txid: targetTxid, height: pool ? null : height, blockHash: null, pool };
+      if (!pool) {
+        try { target.blockHash = await getBlockHashAt(node, height, fetchImpl, timeoutMs, { signal }); }
+        catch { target.blockHash = null; }
+      }
+      return { target, absent: false };
+    }
+  }
+  // AN ABSENCE MUST BE NAMED BY THE NODE ITSELF. Empty lists alone do not say whether the transaction is missing
+  // or whether the node did not answer the question.
+  if (missed.length !== 1 || missed[0] !== targetTxid) {
+    throw new SdkError("xmr-no-nodes", { node: node.url, why: "absence-unproven" });
+  }
+  return { target: null, absent: true };
+}
+
 // THE LATER CHECK OF A SIGNED WITHDRAWAL, WITHOUT A BLOCK WALK. The token is gone and the caller still has the
 // transaction id and the key images that were verified before signing. A trusted node can answer both facts
 // directly: `/get_transactions` says whether this exact hash is in a block or in the pool, and
@@ -931,42 +985,15 @@ export async function readWithdrawalState(request = {}) {
 
   // The hash first. One request names exactly one transaction; a node that answers with another hash, more than one
   // transaction or a partial wrapper has not answered this question.
-  let target = null;
+  let first;
   try {
-    const body = await call(node, "/get_transactions", { txs_hashes: [targetTxid], decode_as_json: true },
-      fetchImpl, timeoutMs, { signal });
-    if (!body || body.status !== "OK") throw new SdkError("xmr-no-nodes", { node: node.url, why: "rpc-status" });
-    const wrappers = body && Array.isArray(body.txs) ? body.txs : null;
-    const bodies = body && Array.isArray(body.txs_as_json) ? body.txs_as_json : null;
-    if (!wrappers || !bodies) throw new SdkError("xmr-no-nodes", { node: node.url, why: "partial-answer" });
-    if (wrappers.length > 1 || bodies.length > 1 || wrappers.length !== bodies.length) {
-      throw new SdkError("xmr-no-nodes", { node: node.url, why: "partial-answer" });
-    }
-    if (wrappers.length === 1) {
-      const wrapper = wrappers[0] || {};
-      if (normalizedHash(wrapper.tx_hash) !== targetTxid) {
-        throw new SdkError("xmr-no-nodes", { node: node.url, why: "target-mismatch" });
-      }
-      const rawHeight = wrapper.block_height;
-      const height = rawHeight === null || rawHeight === undefined || rawHeight === "" ? null : Number(rawHeight);
-      // A POOL TRANSACTION HAS NO BLOCK. `in_pool` is the explicit marker; an absent or zero height is the same
-      // fact on daemons that omit it.
-      const pool = wrapper.in_pool === true || height === null || height === 0;
-      if (!pool && (!Number.isSafeInteger(height) || height < 0)) {
-        throw new SdkError("xmr-no-nodes", { node: node.url, why: "partial-answer" });
-      }
-      target = { txid: targetTxid, height: pool ? null : height, blockHash: null, pool };
-      if (!pool) {
-        try { target.blockHash = await getBlockHashAt(node, height, fetchImpl, timeoutMs, { signal }); }
-        catch { target.blockHash = null; }
-      }
-    }
+    first = await readWithdrawalHash({ node, targetTxid, fetchImpl, timeoutMs, signal });
   } catch (error) {
     return { target: null, spends: [], complete: false, failed: [failureOf(error, node)] };
   }
   // A PRESENT HASH IS THE WHOLE ANSWER. It never permits a resend, so the inputs do not need to be sent to the
   // node for this verdict.
-  if (target) return { target, spends: [], complete: true, failed: [] };
+  if (first.target) return { target: first.target, spends: [], complete: true, failed: [] };
 
   // The hash is absent. The only way absence may permit a resend is a complete key-image answer: every requested
   // image must come back with a known status. A short, long or non-integer list is unreadable, not "unspent".
@@ -974,6 +1001,7 @@ export async function readWithdrawalState(request = {}) {
     const body = await call(node, "/is_key_image_spent", { key_images: images }, fetchImpl, timeoutMs,
       { signal, contentType: "application/json" });
     if (!body || body.status !== "OK") throw new SdkError("xmr-no-nodes", { node: node.url, why: "rpc-status" });
+    if (body.untrusted === true) throw new SdkError("xmr-no-nodes", { node: node.url, why: "untrusted" });
     const statuses = body && Array.isArray(body.spent_status) ? body.spent_status : null;
     if (!statuses || statuses.length !== images.length
         || !statuses.every((value) => Number.isInteger(value) && value >= 0 && value <= 2)) {
@@ -983,6 +1011,15 @@ export async function readWithdrawalState(request = {}) {
     statuses.forEach((status, index) => {
       if (status === 1 || status === 2) spends.push({ keyImage: images[index], pool: status === 2 });
     });
+    // THE HASH IS ASKED AGAIN AFTER THE INPUTS. The person's own transaction can land between the two answers;
+    // then the second answer is present, and it must not become inputs-spent (or a reason to resend).
+    let after;
+    try {
+      after = await readWithdrawalHash({ node, targetTxid, fetchImpl, timeoutMs, signal });
+    } catch (error) {
+      return { target: null, spends: [], complete: false, failed: [failureOf(error, node)] };
+    }
+    if (after.target) return { target: after.target, spends: [], complete: true, failed: [] };
     return { target: null, spends, complete: true, failed: [] };
   } catch (error) {
     return { target: null, spends: [], complete: false, failed: [failureOf(error, node)] };
