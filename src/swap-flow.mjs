@@ -387,22 +387,68 @@ export async function orderDecline(escrow, deps = {}) {
 // the simulator. The contract no longer has t0() (decision 2026-09-16, doc 26).
 // ONE CUT OF AN ESCROW. Every action decision needs the state, the ready mark and both deadlines from the SAME
 // block; reading them separately lets a claim judge one block and its deadline another. `order.read` takes the
-// caller's chain reader and block reader, asks every field at one tag, and returns that block's number, hash and
-// timestamp with the decoded values. A block that cannot be identified is a refusal, never a fabricated latest.
+// caller's chain reader and block reader, fixes the block height first, asks every field at that height, and returns
+// that block's number, hash and timestamp with the decoded values. A block that cannot be identified is a refusal,
+// never a fabricated latest.
 export async function orderRead(escrow, deps = {}) {
-  if (!escrow) throw new SdkError("bad-input", { field: "escrow" });
+  if (typeof escrow !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(escrow)) {
+    throw new SdkError("bad-input", { field: "escrow" });
+  }
   const call = deps.call || readContract;
   const readBlock = deps.block || deps.evmBlock;
   if (typeof readBlock !== "function") throw new SdkError("bad-input", { field: "block" });
   const blockTag = deps.blockTag === undefined || deps.blockTag === null ? "latest" : deps.blockTag;
-  const [rawStatus, rawReady, rawT1, rawReadyBy] = await Promise.all([
-    call({ to: escrow, data: encodeStatus(), block: blockTag }),
-    call({ to: escrow, data: encodeRead("ready"), block: blockTag }),
-    call({ to: escrow, data: encodeT1(), block: blockTag }),
-    call({ to: escrow, data: encodeRead("readyBy"), block: blockTag }),
-  ]);
+  // THE BLOCK IS FIXED BEFORE THE CALLS. Four reads at `latest` are four different cuts: the head can move between
+  // them, so the fields would belong to different blocks even though each request named the same tag. Resolve the
+  // tag once, then ask every field at that concrete height.
+  let current = await blockIdentity(readBlock, blockTag);
+  let raws;
   let block;
-  try { block = await readBlock(blockTag); }
+  let stable = false;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const at = "0x" + current.number.toString(16);
+    raws = await Promise.all([
+      call({ to: escrow, data: encodeStatus(), block: at }),
+      call({ to: escrow, data: encodeRead("ready"), block: at }),
+      call({ to: escrow, data: encodeT1(), block: at }),
+      call({ to: escrow, data: encodeRead("readyBy"), block: at }),
+    ]);
+    // Read the same height again. If the hash changed, a reorg replaced the block while the calls were in flight, so
+    // the fields may belong to the old block. Read them again at the same height and name the new canonical block.
+    // A chain that moved on is not a refusal; a provider that answers a different height for a numeric tag is.
+    block = await blockIdentity(readBlock, current.number);
+    if (block.hash === current.hash) { stable = true; break; }
+    current = block;
+  }
+  // THREE REORGS DURING ONE READ ARE NOT A CUT. Returning the previous fields with the newest block identity would
+  // be exactly the mixture this read exists to prevent, so name the unstable block instead of pretending it settled.
+  if (!stable) throw new SdkError("bad-input", { field: "block", why: "unstable", block });
+  const [rawStatus, rawReady, rawT1, rawReadyBy] = raws;
+  const answers = { status: rawStatus, ready: rawReady, t1: rawT1, readyBy: rawReadyBy };
+  // A MISSING ANSWER IS NOT AN EMPTY CONTRACT. Only `0x` means no code at the address; null, undefined and an empty
+  // string are a refusal that names the missing field. A malformed non-empty answer is a named decode refusal.
+  const missing = Object.entries(answers).filter(([, value]) => value === null || value === undefined || value === "");
+  if (missing.length) throw new SdkError("bad-input", { field: missing[0][0], why: "missing", block });
+  const empty = Object.entries(answers).filter(([, value]) => typeof value === "string" && value.replace(/^0x/i, "").length === 0);
+  if (empty.length === Object.keys(answers).length) {
+    // NO CODE AT THE ADDRESS. This is the predicted-escrow case: the creation transaction did not land, so every
+    // getter answers empty. Name it with the block that was read instead of decoding an empty status as a false one.
+    throw new SdkError("bad-input", { field: "escrow", why: "no-contract", block });
+  }
+  if (empty.length) throw new SdkError("bad-input", { field: empty[0][0], why: "empty", block });
+  let status, ready, readyBy, t1;
+  try {
+    status = decodeStatus(rawStatus);
+    ready = decodeUint64(rawReady, "ready()") !== 0;
+    readyBy = decodeUint64(rawReadyBy, "readyBy()");
+    t1 = decodeUint64(rawT1, "t1()");
+  } catch { throw new SdkError("bad-input", { field: "answer", why: "unreadable", block }); }
+  return { status, ready, readyBy, t1, block };
+}
+
+async function blockIdentity(readBlock, tag) {
+  let block;
+  try { block = await readBlock(tag); }
   catch { throw new SdkError("bad-input", { field: "block", why: "unreadable" }); }
   const number = Number(block && block.number);
   const timestamp = Number(block && block.timestamp);
@@ -413,16 +459,10 @@ export async function orderRead(escrow, deps = {}) {
   }
   // A NUMERIC TAG IS A CLAIM ABOUT THE BLOCK. When the caller named a concrete height, the reader must return that
   // height; a provider that answered another block has not answered this read.
-  const tagged = typeof blockTag === "number" ? blockTag
-    : (typeof blockTag === "string" && /^0x[0-9a-f]+$/i.test(blockTag) ? Number.parseInt(blockTag, 16) : null);
+  const tagged = typeof tag === "number" ? tag
+    : (typeof tag === "string" && /^0x[0-9a-f]+$/i.test(tag) ? Number.parseInt(tag, 16) : null);
   if (tagged !== null && tagged !== number) throw new SdkError("bad-input", { field: "block", why: "wrong-height" });
-  return {
-    status: decodeStatus(rawStatus),
-    ready: BigInt(rawReady) !== 0n,
-    readyBy: decodeUint64(rawReadyBy, "readyBy()"),
-    t1: decodeUint64(rawT1, "t1()"),
-    block: { number, hash: "0x" + hash, timestamp },
-  };
+  return { number, hash: "0x" + hash, timestamp };
 }
 
 export async function orderDeadlines(escrow, deps = {}) {

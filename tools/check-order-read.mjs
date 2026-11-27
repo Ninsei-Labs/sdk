@@ -85,12 +85,83 @@ const createdLog = ({ removed = false, blockNumber = 100, salt = "0x" + "ab".rep
   check(read.status.isFunded === true && read.status.balance === 1000n, "read decoded the status");
   check(read.ready === true && read.readyBy === 2000 && read.t1 === 3000, "read decoded ready and both deadlines");
   check(read.block.number === 42 && read.block.hash === H(42) && read.block.timestamp === 1000, "read returned the block identity");
-  check(calls.length === 4 && calls.every((entry) => entry.block === 42), "the four fields did not come from one tag");
+  check(calls.length === 4 && calls.every((entry) => entry.block === "0x2a"), "the four fields were not asked at the resolved block");
   let wrong = null;
   try {
     await orderRead(ESCROW, { call, blockTag: 42, block: async () => ({ number: 41, hash: H(41), timestamp: 1000 }) });
   } catch (error) { wrong = error; }
   check(wrong && wrong.code === "bad-input" && wrong.params.field === "block", "a block at another height was refused");
+  let empty = null;
+  try {
+    await orderRead(ESCROW, { blockTag: 42,
+      call: async ({ data }) => data === ESCROW_METHODS.ready ? "0x" : "0x" + "0".repeat(64),
+      block: async () => ({ number: 42, hash: H(42), timestamp: 1000 }) });
+  } catch (error) { empty = error; }
+  check(empty && empty.code === "bad-input" && empty.params.field === "ready" && empty.params.why === "empty",
+    "an empty ready answer was not a named refusal");
+  let missingAnswer = null;
+  try {
+    await orderRead(ESCROW, { blockTag: 42,
+      call: async ({ data }) => data === ESCROW_METHODS.ready ? null : "0x" + "0".repeat(64),
+      block: async () => ({ number: 42, hash: H(42), timestamp: 1000 }) });
+  } catch (error) { missingAnswer = error; }
+  check(missingAnswer && missingAnswer.code === "bad-input" && missingAnswer.params.field === "ready"
+    && missingAnswer.params.why === "missing", "a null ready answer was read as an empty contract");
+  let unreadable = null;
+  try {
+    await orderRead(ESCROW, { blockTag: 42,
+      call: async ({ data }) => data === ESCROW_METHODS.ready ? "0x1234" : "0x" + "0".repeat(64),
+      block: async () => ({ number: 42, hash: H(42), timestamp: 1000 }) });
+  } catch (error) { unreadable = error; }
+  check(unreadable && unreadable.code === "bad-input" && unreadable.params.field === "answer"
+    && unreadable.params.why === "unreadable", "a malformed ready answer was not a named refusal");
+  let noContract = null;
+  try {
+    await orderRead(ESCROW, { blockTag: 42, call: async () => "0x",
+      block: async () => ({ number: 42, hash: H(42), timestamp: 1000 }) });
+  } catch (error) { noContract = error; }
+  check(noContract && noContract.code === "bad-input" && noContract.params.field === "escrow"
+    && noContract.params.why === "no-contract" && noContract.params.block.number === 42,
+    "an address without code was not named with its block");
+  let round = 0;
+  const reorgCalls = [];
+  const reorg = await orderRead(ESCROW, {
+    blockTag: "latest",
+    call: async ({ data, block }) => {
+      reorgCalls.push(block);
+      if (data === ESCROW_METHODS.status) return words(1, 0, 0, 1000);
+      if (data === ESCROW_METHODS.ready) return word(round === 0 ? 0 : 1);
+      if (data === ESCROW_METHODS.t1) return word(3000);
+      if (data === ESCROW_METHODS.readyBy) return word(2000);
+      throw new Error("unexpected selector " + data);
+    },
+    block: async (tag) => {
+      if (tag === "latest") return { number: 42, hash: H(42), timestamp: 1000 };
+      if (round === 0) { round = 1; return { number: 42, hash: H(99), timestamp: 1001 }; }
+      return { number: 42, hash: H(99), timestamp: 1001 };
+    },
+  });
+  check(round === 1 && reorg.ready === true && reorg.block.hash === H(99) && reorgCalls.length === 8,
+    "a replaced block was not read again at the same height");
+  let unstable = null;
+  let unstableRound = 99;
+  try {
+    await orderRead(ESCROW, {
+      blockTag: "latest",
+      call: async ({ data }) => {
+        if (data === ESCROW_METHODS.status) return words(1, 0, 0, 1000);
+        if (data === ESCROW_METHODS.ready) return word(1);
+        if (data === ESCROW_METHODS.t1) return word(3000);
+        if (data === ESCROW_METHODS.readyBy) return word(2000);
+        throw new Error("unexpected selector " + data);
+      },
+      block: async (tag) => tag === "latest"
+        ? { number: 42, hash: H(42), timestamp: 1000 }
+        : { number: 42, hash: H(++unstableRound), timestamp: 1000 },
+    });
+  } catch (error) { unstable = error; }
+  check(unstable && unstable.code === "bad-input" && unstable.params.field === "block"
+    && unstable.params.why === "unstable", "three replacements returned a mixed block cut");
   let missing = null;
   try { await orderRead(ESCROW, { call }); } catch (error) { missing = error; }
   check(missing && missing.code === "bad-input" && missing.params.field === "block", "a read without a block seam was refused");
@@ -132,6 +203,67 @@ const createdLog = ({ removed = false, blockNumber = 100, salt = "0x" + "ab".rep
 }
 
 // --- history: removed logs dropped, terms and settlement state joined, checkpoint returned ---
+{
+  const zero = "0x" + "00".repeat(20);
+  const deposit = await orderHistory({
+    escrows: [ESCROW], fromBlock: 0, toBlock: 20,
+    evmLogs: async () => [
+      termsLog({ blockNumber: 7 }),
+      settlementLog(ESCROW_EVENT_TOPICS.ready, 7, "0x", [ESCROW_EVENT_TOPICS.ready, pad(zero)]),
+    ],
+    evmBlock: async (tag) => ({ number: Number(tag), hash: H(Number(tag)), timestamp: 1000 }),
+  });
+  check(deposit.escrows[0].status.ready === false, "the deposit's Ready(0) marker was read as a locker mark");
+  const marked = await orderHistory({
+    escrows: [ESCROW], fromBlock: 0, toBlock: 20,
+    evmLogs: async () => [
+      termsLog({ blockNumber: 7 }),
+      settlementLog(ESCROW_EVENT_TOPICS.ready, 8, "0x", [ESCROW_EVENT_TOPICS.ready, pad(LOCKER)]),
+    ],
+    evmBlock: async (tag) => ({ number: Number(tag), hash: H(Number(tag)), timestamp: 1000 }),
+  });
+  check(marked.escrows[0].status.ready === true, "the locker's Ready mark was not read as ready");
+}
+{
+  const zero = "0x" + "00".repeat(20);
+  const lookup = await orderLookup(ESCROW, {
+    factory: FACTORY, deploymentBlock: 0, toBlock: 200,
+    evmLogs: async () => [createdLog({ blockNumber: 100 }), termsLog({ blockNumber: 100 }),
+      settlementLog(ESCROW_EVENT_TOPICS.ready, 100, "0x", [ESCROW_EVENT_TOPICS.ready, pad(zero)])],
+    evmBlock: async (tag) => ({ number: Number(tag), hash: H(Number(tag)), timestamp: 1000 }),
+  });
+  check(lookup.found === true && lookup.status && lookup.status.ready === false,
+    "lookup read the deposit's Ready(0) marker as a locker mark");
+  const marked = await orderLookup(ESCROW, {
+    factory: FACTORY, deploymentBlock: 0, toBlock: 200,
+    evmLogs: async () => [createdLog({ blockNumber: 100 }), termsLog({ blockNumber: 100 }),
+      settlementLog(ESCROW_EVENT_TOPICS.ready, 101, "0x", [ESCROW_EVENT_TOPICS.ready, pad(LOCKER)])],
+    evmBlock: async (tag) => ({ number: Number(tag), hash: H(Number(tag)), timestamp: 1000 }),
+  });
+  check(marked.found === true && marked.status && marked.status.ready === true,
+    "lookup did not read the locker's Ready mark");
+  const cuts = [];
+  await orderLookup(ESCROW, {
+    factory: FACTORY, toBlock: "latest",
+    evmLogs: async (request) => {
+      cuts.push(request.toBlock);
+      return [createdLog({ blockNumber: 100 }), termsLog({ blockNumber: 100 })];
+    },
+    evmBlock: async () => ({ number: 200, hash: H(200), timestamp: 1000 }),
+  });
+  check(cuts.length === 2 && cuts.every((block) => block === 200),
+    "lookup read its creation and terms at different blocks");
+  let mismatch = null;
+  try {
+    await orderLookup(ESCROW, {
+      factory: FACTORY, toBlock: 150,
+      evmLogs: async () => [createdLog({ blockNumber: 100 }), termsLog({ blockNumber: 100 })],
+      evmBlock: async () => ({ number: 200, hash: H(200), timestamp: 1000 }),
+    });
+  } catch (error) { mismatch = error; }
+  check(mismatch && mismatch.code === "bad-input" && mismatch.params.field === "block"
+    && mismatch.params.why === "wrong-height", "lookup replaced an explicit block height without a refusal");
+}
 {
   const requests = [];
   const history = await orderHistory({
