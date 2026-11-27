@@ -57,7 +57,10 @@ export async function orderHistory(request = {}) {
         deploymentBlock: Number(request.deploymentBlock) || 0, startAt: request.startAt, head: request.head,
         blockAt: request.blockAt })).block;
     }
-    found = await findSwaps({ ...request, fromBlock, evmLogs });
+    found = await findSwaps({ ...request, fromBlock, evmLogs,
+      // A HISTORY NEEDS NAMES, NOT PER-ORDER ENRICHMENT. These seams name an escrow or its block; the history path
+      // must not use them, even when the caller supplied them for a normal recovery search.
+      evmCode: null, evmBlockTime: null, evmBlockTimes: null });
     escrows = found.swaps.map((order) => order.escrow);
     privateRead = true;
   }
