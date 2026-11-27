@@ -692,9 +692,11 @@ function recoveryTotals(transfers, tracked, spends) {
   }
   if (!complete) return { receivedAtomic: null, spentAtomic: null, unspentAtomic: null, withdrawalState: "unknown" };
   const unspent = received - spentTotal;
+  const poolSpent = spends.some((spend) => spend.pool === true);
   const withdrawalState = received === 0n ? "empty"
     : spentTotal === 0n ? "unspent"
-      : spentTotal === received ? "withdrawn" : "partly-withdrawn";
+      : (poolSpent && spentTotal === received ? "pending"
+        : spentTotal === received ? "withdrawn" : "partly-withdrawn");
   return { receivedAtomic: received.toString(), spentAtomic: spentTotal.toString(),
     unspentAtomic: unspent.toString(), withdrawalState };
 }
@@ -776,7 +778,12 @@ function availableAtomicOf(transfers, tracked, spends, minConfirmations = 1) {
   for (const transfer of transfers) {
     if (transfer.pool || transfer.locked || Number(transfer.confirmations) < minConfirmations) continue;
     for (const output of transfer.outputs || []) {
-      if (!output.amountVerified || output.amountAtomic === null || output.amountAtomic === undefined) continue;
+      if (!output.amountVerified || output.amountAtomic === null || output.amountAtomic === undefined) {
+        // AN UNVERIFIED OUTPUT IS NOT ZERO. A total that leaves it out would understate the money just as a total
+        // that includes it would overstate it; the remainder is unknown instead.
+        complete = false;
+        continue;
+      }
       const keyImage = tracked.byOutput.get(String(output.key || "").toLowerCase());
       if (!keyImage) { complete = false; continue; }
       if (!spent.has(keyImage)) total += BigInt(output.amountAtomic);
@@ -1688,7 +1695,8 @@ export async function verifyArrivalFromRead(request) {
   else if (total < expectedAtomic) state = "short";
   else if (rule === "exact" && total > expectedAtomic) state = "over";
   else state = "pending";
-  const comparison = displayTotal === expectedAtomic ? "exact" : displayTotal < expectedAtomic ? "short" : "over";
+  const comparison = seen && rule === "exact" ? "exact"
+    : displayTotal === expectedAtomic ? "exact" : displayTotal < expectedAtomic ? "short" : "over";
   const outputs = [];
   const outputKeys = new Set();
   for (const transfer of (chosen.length ? chosen : displayed)) {

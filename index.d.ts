@@ -1169,7 +1169,7 @@ export interface XmrRecoveryTotals {
   readonly receivedAtomic: string | null;
   readonly spentAtomic: string | null;
   readonly unspentAtomic: string | null;
-  readonly withdrawalState: "empty" | "unspent" | "partly-withdrawn" | "withdrawn" | "unknown";
+  readonly withdrawalState: "empty" | "unspent" | "pending" | "partly-withdrawn" | "withdrawn" | "unknown";
 }
 
 /** One verified transfer returned by the recovery read. */
