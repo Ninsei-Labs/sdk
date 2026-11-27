@@ -1,5 +1,6 @@
 ## Unreleased — 2026-11-27
 
+- `recoveryEndHeight` treats `get_info.height` as the block count and reads the reachable tip one block below it, so a real monerod no longer refuses the first header request.
 - A pool spend reports `pending`, an unverified output leaves `availableAtomic` unknown instead of being counted as zero, and an `arrived` exact answer reports the amount, txid and confirmations of the transfers it used, never `over`.
 - `verifyArrival` with `at-least` settles on the required witnesses when the primary is down; the primary is not promoted and `ready` stays false. With `exact`, any transfer that only one operator sees keeps the answer `unknown`, even when the agreed transfers are exactly the signed amount.
 - A resumed read recomputes both `locked` and the nested `unlock` (`locked` and `code`) at the new tip, so a lock that matures between two saved reads is not carried over.
