@@ -345,11 +345,11 @@ console.log("=== 12) A STALE EXACT NODE DOES NOT INFLATE THE TARGET ===");
 {
   const result = await shadow({ fromHeight: 106, witnessTop: 120, exactStaleHeight: 1001, exactThird: true,
     witnessOperators: ["W", "X"] });
-  if (result.exact && result.exact.absent === true) ok("two synced exact nodes still establish absence");
+  if (result.exact && result.exact.absent === false) ok("a stale exact node leaves absence unproven");
   else bad("stale exact absence: " + JSON.stringify(result.exact || result.exactError));
   if (result.witness.completed === true) ok("a stale exact height does not keep an honest witness below the target");
   else bad("stale exact height: " + JSON.stringify(result.witness));
-  if (result.agrees === true && result.problems.length === 0) ok("the honest witness still agrees with the exact reading");
+  if (result.agrees === null && result.problems.length === 0) ok("there is no absence for the witness to agree on");
   else bad("stale exact agreement: " + JSON.stringify({ agrees: result.agrees, problems: result.problems }));
 }
 

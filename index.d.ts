@@ -1266,7 +1266,7 @@ export interface XmrArrivalShadowResult {
 export interface XmrArrivalVerdict {
   readonly seen: boolean;
   readonly state: "arrived" | "pending" | "one-node" | "pool" | "confirming" | "locked" | "short" | "over" | "unknown";
-  /** True only when a complete read found no matching transaction, in a block or the pool. */
+  /** True only when every configured operator's complete read found no matching transaction, in a block or the pool. */
   readonly absent?: boolean;
   /** The operators whose complete read found no matching transaction. */
   readonly completedOperators?: readonly string[];
