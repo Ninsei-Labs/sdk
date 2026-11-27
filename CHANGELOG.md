@@ -1,6 +1,6 @@
 ## Unreleased — 2026-11-27
 
-- A resumed read recomputes both `locked` and the nested `unlock.locked` at the new tip, so a lock that matures between two saved reads is not carried over.
+- A resumed read recomputes both `locked` and the nested `unlock` (`locked` and `code`) at the new tip, so a lock that matures between two saved reads is not carried over.
 - `verifyRecovery` and `verifyArrival` keep the caller's `spentStatus`: `false` sends no key images, `true` asks only the trusted primary, and a witness never receives them.
 - `verifyArrival` marks `absent` only when every configured operator completed the range and the pool, and enough operators form the quorum. A failing third operator or a witness ahead of the primary leaves the answer `unknown`; `refundIfXmrMissing` therefore signs nothing on those reads.
 - `order.read` fixes the block height before it asks the escrow, then reads `status`, `ready`, `readyBy` and `t1` at that same height; if a reorg replaces the block, it reads the fields again at the same height, and a block that does not settle is a named `unstable` refusal. A block that answers another height is a named refusal. The deposit's `Ready(address(0))` marker no longer makes `order.history` or `order.lookup` report the locker's ready mark, and a lookup fixes one end height for both its creation and terms reads.

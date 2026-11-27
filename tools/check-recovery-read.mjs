@@ -317,7 +317,7 @@ check(badRead.complete === true && badDaemon.calls.some((c) => c.method === "get
   const resumed = await readRecovery(request(d.fetch, c));
   const transfer = resumed.transfers.find((entry) => entry.height === 6);
   check(before.complete && resumed.complete && transfer && transfer.locked === false
-    && transfer.unlock && transfer.unlock.locked === false,
+    && transfer.unlock && transfer.unlock.locked === false && transfer.unlock.code === "unlocked",
     `a resumed read kept the saved lock: ${JSON.stringify(transfer && { locked: transfer.locked, unlock: transfer.unlock })}`);
   TXS[6] = { [TX[6]]: FUNDING_6 };
 }
