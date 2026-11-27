@@ -1778,9 +1778,9 @@ export async function verifyRecovery(request) {
   // receives the exact-start walk or key images; without the primary the read is incomplete.
   const primaryLive = live.find((entry) => entry.node === primaryNode);
   const addressNetwork = bound.keys && bound.keys.network ? bound.keys.network : null;
-  const earlyNetwork = isStr(request.network) ? request.network
-    : (primaryLive && primaryLive.info.nettype ? primaryLive.info.nettype
-      : (addressNetwork || (live.find((entry) => isStr(entry.info.nettype)) || {}).info?.nettype));
+  const observedNetwork = primaryLive && primaryLive.info.nettype ? primaryLive.info.nettype
+    : (addressNetwork || (live.find((entry) => isStr(entry.info.nettype)) || {}).info?.nettype);
+  const earlyNetwork = isStr(request.network) ? request.network : observedNetwork;
   const earlyRequired = earlyNetwork === "mainnet" ? 3 : 2;
   // A DOWN PRIMARY IS NOT PROMOTED. `at-least` may still settle on witnesses that each finished their own range, so
   // a witness-only read is allowed when enough of them are present; absence and `exact` still require the primary.
@@ -1792,11 +1792,10 @@ export async function verifyRecovery(request) {
       availableSource: null, network: earlyNetwork,
       requiredOperators: earlyRequired, checked, failed };
   }
-  const tip = primaryLive ? primaryLive.info.height : Math.max(...live.map((entry) => Number(entry.info.height) || 0));
+  const tip = primaryLive ? primaryLive.info.height
+    : Math.max(...live.filter((entry) => entry.info.synced === true).map((entry) => Number(entry.info.height) || 0));
   const top = Math.max(0, tip - 1);
-  const network = isStr(request.network) ? request.network
-    : (primaryLive && primaryLive.info.nettype ? primaryLive.info.nettype
-      : (addressNetwork || (live.find((entry) => isStr(entry.info.nettype)) || {}).info?.nettype));
+  const network = isStr(request.network) ? request.network : observedNetwork;
   if (!isStr(network)) throw new SdkError("bad-input", { field: "network" });
   const requiredOperators = network === "mainnet" ? 3 : 2;
   const observations = new Map();
@@ -1931,7 +1930,7 @@ export async function verifyRecovery(request) {
   const availableForVerdict = spendsDisagreements.length ? null : availableAtomic;
   // A WITNESS-ONLY READ CAN SETTLE `at-least`, BUT IT IS NOT THE PRIMARY'S READY STATE. The ready mark stays with the
   // primary and the required operators; without the primary the caller gets the transfers, not a ready verdict.
-  const ready = primaryLive !== null && transfers.some((transfer) => transfer.agreed && transfer.confirmed && !transfer.locked);
+  const ready = primaryLive !== undefined && transfers.some((transfer) => transfer.agreed && transfer.confirmed && !transfer.locked);
   const agreed = transfers.some((transfer) => transfer.agreed);
   return {
     state: ready ? "ready" : (agreed ? "pending" : (transfers.length ? "one-node" : "none")),

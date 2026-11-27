@@ -413,6 +413,12 @@ console.log("=== 6) THE AMOUNT RULES OVER THE SAME READ ===");
   okIf(witnessOnly.state === "arrived" && witnessOnly.seen === true
     && witnessOnly.failed.some((failure) => String(failure.url).includes("a.example")),
     "at-least settles on two witnesses when the primary is down");
+  const witnessOnlyRecovery = await verifyRecovery(request(primaryDown, [
+    { url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" },
+    { url: "https://c.example", operator: "C" },
+  ]));
+  okIf(witnessOnlyRecovery.state === "pending" && witnessOnlyRecovery.availableSource === null,
+    "a witness-only read never reports ready without the primary");
   // AN UNAGREED EXTRA TRANSFER KEEPS `exact` UNKNOWN. The signed 0.30 is agreed by A and B; C also sees a 0.15 that
   // nobody agrees with. Paying the exact amount is not enough to call the sale exact while a second transfer exists.
   const baseAB = rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) } });
