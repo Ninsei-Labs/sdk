@@ -477,6 +477,15 @@ const createdLog = ({ removed = false, blockNumber = 100, salt = "0x" + "ab".rep
   } catch (error) { missingAnswer = error; }
   check(missingAnswer && missingAnswer.code === "bad-input" && missingAnswer.params.field === "answer"
     && missingAnswer.params.why === "missing", "a missing funding answer was read as expired or pending");
+  let unstableFunding = null;
+  let fundingRound = 1;
+  try {
+    await orderFunding({ escrow: ESCROW, validUntil: 100, finality: "safe", call: async () => "0x",
+      block: async (tag) => tag === "safe" ? { number: 1, hash: H(1), timestamp: 99 }
+        : { number: 1, hash: H(++fundingRound + 1), timestamp: 99 } });
+  } catch (error) { unstableFunding = error; }
+  check(unstableFunding && unstableFunding.code === "bad-input" && unstableFunding.params.why === "unstable"
+    && unstableFunding.params.block.number === 1, "an unsettled funding block was not named with its block");
   const landed = await orderFunding({
     escrow: ESCROW, validUntil: 99, finality: "finalized",
     call: async () => words(1, 0, 0, 1000),

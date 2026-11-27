@@ -161,7 +161,7 @@ export async function orderFunding(request = {}) {
     if (block.hash === current.hash) { stable = true; break; }
     current = block;
   }
-  if (!stable) throw bad("block", "unstable");
+  if (!stable) throw new SdkError("bad-input", { field: "block", why: "unstable", block });
   // A MISSING ANSWER IS NOT "NO CODE". Only an explicit empty bytes answer means the address has no contract; null,
   // undefined and an empty string are refusals.
   if (typeof raw !== "string" || raw === "") {
