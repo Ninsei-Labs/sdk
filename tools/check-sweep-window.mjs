@@ -9,8 +9,9 @@ import { restoreWallet, windowTxHashes } from "../src/sweep-restore.mjs";
 import { createSweep } from "../src/sweep.mjs";
 import { createNinsei } from "../src/index.mjs";
 
-const fake = ({ balance = 0n, scanTxs = true, scanFails = false, outputs = null, images = null } = {}) => {
+const fake = ({ balance = 0n, scanTxs = true, scanFails = false, outputs = null, images = null, rescanSpent = null } = {}) => {
   const calls = [];
+  let unlocked = balance;
   const driver = {
     async setRestoreHeight(height) { calls.push(["height", Number(height)]); },
     async getBalance() { return balance; },
@@ -18,6 +19,7 @@ const fake = ({ balance = 0n, scanTxs = true, scanFails = false, outputs = null,
     async getDaemonHeight() { return 1000; },
     async rescanBlockchain() { calls.push(["rescan"]); },
   };
+  if (rescanSpent !== null) driver.rescanSpent = async () => { calls.push(["rescan-spent"]); unlocked = rescanSpent; };
   if (scanFails) driver.scanTxs = async () => { calls.push(["scan-failed"]); throw new Error("Failed to get transaction from daemon"); };
   else if (scanTxs) driver.scanTxs = async (hashes) => { calls.push(["scan", hashes.length]); };
   if (outputs) driver.getOutputs = async () => outputs;
@@ -27,7 +29,7 @@ const fake = ({ balance = 0n, scanTxs = true, scanFails = false, outputs = null,
   }
   return {
     calls,
-    wallet: { async sync() {}, async unlockedBalance() { return balance; }, driver: () => driver },
+    wallet: { async sync() {}, async unlockedBalance() { return unlocked; }, driver: () => driver },
   };
 };
 const output = (key, amount) => ({
@@ -101,6 +103,18 @@ export const sweepWindowCheck = async () => {
     });
     check(result.unlocked === "0" && result.total === "0" && result.scanComplete === true,
       `a fully spent window still reported spendable coins: ${JSON.stringify({ total: result.total, unlocked: result.unlocked, window: result.window })}`);
+  }
+  {
+    // THE WALLET IS TOLD ABOUT THE SPEND AS WELL. Signing reads the wallet's own unlocked balance, so `restore`
+    // must run the wallet's spent rescan when it exists and keep the lower remainder.
+    const updated = fake({ balance: 5n, outputs: [output("aa", 2n), output("bb", 3n)],
+      images: [image("aa"), image("bb")], rescanSpent: 3n });
+    const result = await restoreWallet({ wallet: updated.wallet, fromHeight: 100,
+      window: { txHashes: ["a"], toHeight: 110, tipHeight: 900, nodeUrl: "https://node.example", trustedNode: true },
+      fetchImpl: async () => ({ ok: true, json: async () => ({ status: "OK", untrusted: false, spent_status: [1, 0] }) }),
+    });
+    check(result.unlocked === "3" && updated.calls.some(([name]) => name === "rescan-spent"),
+      `the wallet was not told about the spent output: ${JSON.stringify({ unlocked: result.unlocked, calls: updated.calls })}`);
   }
   {
     const pool = fake({ balance: 5n, outputs: [output("aa", 2n), output("bb", 3n)], images: [image("aa"), image("bb")] });

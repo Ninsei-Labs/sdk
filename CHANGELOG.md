@@ -1,7 +1,7 @@
 ## Unreleased — 2026-11-27
 
 - `sweep.reconcile` accepts the answer a real restricted monerod gives for a saved hash it does not know: `missed_tx` naming that hash, with `txs` and `txs_as_json` omitted. A missing or foreign `missed_tx`, an answer naming both a found and a missed hash, an untrusted answer and a partial key-image answer stay `unknown`. The hash is asked again after the spent status, so a transaction that lands between the two answers is `present`, not `inputs-spent`.
-- `sweep.restore` removes the spent part of a bounded window from the balances: a spent output is not spendable, a pool spend is pending, and an untrusted, short or incomplete spent answer leaves the scan incomplete instead of reporting a complete balance. The wallet's `exportKeyImages(true)` is the set the trusted answer must cover.
+- `sweep.restore` removes the spent part of a bounded window from the balances: a spent output is not spendable, a pool spend is pending, and an untrusted, short or incomplete spent answer leaves the scan incomplete instead of reporting a complete balance. When the wallet exposes `rescanSpent`, the same pass tells it about the spends so `sweep.sign` sees the lower remainder; `exportKeyImages(true)` is the set the trusted answer must cover.
 - The exported `moneroWallet` withdrawal adapter exposes `driver()`, so the advertised wallet can pass the documented `sweep.restore` before `sweep.sign`.
 
 ## Unreleased — 2026-11-26

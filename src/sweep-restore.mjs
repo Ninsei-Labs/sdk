@@ -319,8 +319,30 @@ export async function restoreWallet(request = {}) {
                       windowReport.spent = null;
                       windowReport.spentWhy = "key-images-mismatch";
                     } else {
-                      windowTotal = windowTotal > removedTotal ? windowTotal - removedTotal : 0n;
-                      windowUnlocked = windowUnlocked > removedUnlocked ? windowUnlocked - removedUnlocked : 0n;
+                      // THE WALLET MUST ALSO KNOW THE SPEND: SIGNING READS ITS OWN BALANCE, NOT THIS REPORT.
+                      // `rescanSpent` is the one call that turns the trusted answer into a spendable remainder;
+                      // when it is absent or leaves the balance unchanged, the report subtracts the amounts
+                      // itself so a complete scan never calls a spent output spendable.
+                      let walletUpdated = false;
+                      if (windowReport.spent > 0 && typeof driver.rescanSpent === "function") {
+                        try {
+                          const beforeTotal = windowTotal;
+                          const beforeUnlocked = windowUnlocked;
+                          await step("rescanSpent", () => driver.rescanSpent());
+                          try { await wallet.sync(); } catch { /* the balances below decide */ }
+                          const afterTotal = asAmount(await step("getBalance", () => driver.getBalance()), "balance");
+                          const afterUnlocked = asAmount(await step("unlockedBalance", () => wallet.unlockedBalance()), "unlockedBalance");
+                          if (afterTotal < beforeTotal || afterUnlocked < beforeUnlocked) {
+                            windowTotal = afterTotal;
+                            windowUnlocked = afterUnlocked;
+                            walletUpdated = true;
+                          }
+                        } catch { /* the trusted answer remains; subtract below */ }
+                      }
+                      if (!walletUpdated) {
+                        windowTotal = windowTotal > removedTotal ? windowTotal - removedTotal : 0n;
+                        windowUnlocked = windowUnlocked > removedUnlocked ? windowUnlocked - removedUnlocked : 0n;
+                      }
                       windowReport.pending = pending;
                     }
                   }

@@ -2672,7 +2672,7 @@ const CHECKS = {
   "adapter-contract": () => nodeTestCheck("check-adapter-contract.mjs", { tests: 3, pass: 3, fail: 0, skipped: 0 }),
   "spent-status": () => nodeTestCheck("check-spent-status.mjs", { tests: 9, pass: 9, fail: 0, skipped: 0 }),
   "sweep-relay": () => nodeTestCheck("check-sweep-relay.mjs", { tests: 3, pass: 3, fail: 0, skipped: 0 }),
-  "sweep-sign-guards": () => nodeTestCheck("check-sweep-sign-guards.mjs", { tests: 12, pass: 12, fail: 0, skipped: 0 }),
+  "sweep-sign-guards": () => nodeTestCheck("check-sweep-sign-guards.mjs", { tests: 13, pass: 13, fail: 0, skipped: 0 }),
   "sweep-inputs": () => nodeTestCheck("check-sweep-inputs.mjs", { tests: 5, pass: 5, fail: 0, skipped: 0 }),
   "sweep-reconcile": sweepReconcileCheck,
   syntax: syntaxCheck,
