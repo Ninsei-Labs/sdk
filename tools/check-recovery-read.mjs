@@ -438,11 +438,13 @@ check(cancelledError && cancelledError.code === "xmr-no-nodes"
 // THE WINDOW END IS A BINARY SEARCH OVER HEADERS, NOT A WALK. The client passes the result as `toHeight`.
 {
   const base = 1_000_000;
+  const headerHeights = [];
   const headerFetch = async (url, init) => {
     const body = JSON.parse(init.body);
     if (body.method === "get_info") return { ok: true, json: async () => ({ result: { height: 200, synchronized: true, nettype: "stagenet" } }) };
     if (body.method === "get_block_header_by_height") {
       const height = Number(body.params.height);
+      headerHeights.push(height);
       return { ok: true, json: async () => ({ result: { block_header: {
         height, timestamp: base + height * 120, hash: H(height),
       } } }) };
@@ -451,11 +453,13 @@ check(cancelledError && cancelledError.code === "xmr-no-nodes"
   };
   const node = { url: "https://one.example", operator: "one" };
   const found = await recoveryEndHeight({ node, t1: base + 50 * 120, marginSeconds: 0, fetch: headerFetch });
-  check(found.toHeight === 50 && found.beyondTip === false && found.tip === 200,
+  check(found.toHeight === 50 && found.beyondTip === false && found.tip === 199,
     "the window end is the first block whose timestamp reaches t1");
   const beyond = await recoveryEndHeight({ node, t1: base + 1_000 * 120, marginSeconds: 0, fetch: headerFetch });
-  check(beyond.toHeight === 200 && beyond.beyondTip === true,
+  check(beyond.toHeight === 199 && beyond.beyondTip === true,
     "a deadline past the tip returns the tip, not a fabricated height");
+  check(headerHeights.every((height) => height <= 199),
+    `the block count was requested as a header: ${Math.max(...headerHeights)}`);
   let badT1 = null;
   try { await recoveryEndHeight({ node, t1: Date.now(), fetch: headerFetch }); }
   catch (error) { badT1 = error; }

@@ -1059,7 +1059,9 @@ export async function recoveryEndHeight(request = {}) {
   if (typeof fetchImpl !== "function") throw new SdkError("bad-input", { field: "fetch" });
   const timeoutMs = Number.isFinite(Number(request.timeoutMs)) && Number(request.timeoutMs) > 0 ? Number(request.timeoutMs) : 20000;
   const info = await getInfo(node, fetchImpl, timeoutMs);
-  const tip = Number(info.height);
+  // `get_info.height` IS THE BLOCK COUNT, ONE PAST THE TOP BLOCK. A real monerod refuses a header request at that
+  // height ("greater than current top block"), so the reachable tip is the block below it.
+  const tip = Math.max(0, Number(info.height) - 1);
   if (!Number.isSafeInteger(tip) || tip < 0) throw new SdkError("xmr-no-nodes", { node: node.url, why: "height" });
   const target = t1 + marginSeconds;
   const header = async (height) => {
