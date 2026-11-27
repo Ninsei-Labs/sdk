@@ -34,7 +34,7 @@ const base = {
   leadSec: 100,
 };
 
-async function run(verdict, { request = {}, throws = false, error = null } = {}) {
+async function run(verdict, { request = {}, throws = false, error = null, orderRead = null } = {}) {
   let refunds = 0;
   let checks = 0;
   let args = null;
@@ -52,6 +52,7 @@ async function run(verdict, { request = {}, throws = false, error = null } = {})
         return { hash: "0x" + "bb".repeat(32) };
       },
       now: () => now,
+      ...(orderRead ? { orderRead } : {}),
     });
     return { result, refunds, checks, args };
   } catch (error) {
@@ -69,6 +70,31 @@ export const refundIfMissingCheck = async () => {
     check(got.result && got.result.refunded === true, "an absent verdict did not refund");
     check(got.result && got.result.state === "refunded", "an absent verdict did not report refunded");
     check(got.refunds === 1, "an absent verdict did not call the refund once");
+  }
+
+  // THE DECISION OWNS THE CLOSING WINDOW AND THE STALE CUT. The wallet is not called when the helper refuses.
+  {
+    const absent = { seen: false, state: "pending", absent: true, txid: null };
+    const cut = (readyBy, blockTime = now) => ({
+      status: { isFunded: true, isClaimed: false, isRefunded: false, balance: 1n },
+      ready: false, readyBy, t1: readyBy + 1_000, block: { timestamp: blockTime },
+    });
+    const refunded = await run(absent, { request: { readyBySec: now + 250, leadSec: 300 },
+      orderRead: async () => cut(now + 250) });
+    check(refunded.result && refunded.result.refunded === true && refunded.refunds === 1,
+      "an absent read inside the decision window did not refund");
+    const margin = await run(absent, { request: { readyBySec: now + 100, leadSec: 300 },
+      orderRead: async () => cut(now + 100) });
+    check(margin.result && margin.result.refunded === false && margin.refunds === 0
+      && margin.result.state === "refund-margin", "the 180 s margin still called the wallet");
+    const unknownAbsent = await run({ ...absent, state: "unknown" },
+      { request: { readyBySec: now + 250, leadSec: 300 }, orderRead: async () => cut(now + 250) });
+    check(unknownAbsent.result && unknownAbsent.result.refunded === false && unknownAbsent.refunds === 0
+      && unknownAbsent.result.state === "arrival-pending", "unknown plus absent called the wallet");
+    const stale = await run(absent, { request: { readyBySec: now + 250, leadSec: 300 },
+      orderRead: async () => cut(now + 250, now - 601) });
+    check(stale.result && stale.result.refunded === false && stale.refunds === 0
+      && stale.result.state === "escrow-unknown", "a stale escrow cut called the wallet");
   }
 
   // A PAYOUT WITH TOO FEW CONFIRMATIONS IS SEEN, NOT ABSENT. This is the regression that reversed paid swaps.
