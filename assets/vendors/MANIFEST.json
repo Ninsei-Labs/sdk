@@ -3,7 +3,7 @@
   "note": "Pinned browser bundles. A change to one of these files must be accompanied by a matching SHA-256 here and a rebuild of the page's asset registry.",
   "bundles": {
     "sdk/sdk-browser.js": {
-      "sha256": "e4c6906b4e24b9d50a11ca08fa2016e4e5a431870dc4a200c5c8dbec1b30e504",
+      "sha256": "bc48b62b36f215870a1bf6cfc08e6403b9e8ed937f76bec6a207d4802657fbcf",
       "source": "sdk/src (facade, adapters, recovery)"
     }
   }

@@ -2339,7 +2339,10 @@ export interface OrderApi {
   read(escrow: string, deps?: OrderReadDeps): Promise<OrderRead>;
   /**
    * Every escrow's terms and settlement state, from logs. Supply `escrows`, or a recovery key to find them first.
-   * Removed logs are dropped and `checkpoint` resumes from an anchored block only when its hash still matches.
+   * A key search uses topic-only log reads and does not name the key's escrows or their blocks to the RPC; an empty
+   * key sends the same request shape. Removed logs are dropped. A row whose terms were not read is a named refusal,
+   * never an unfunded order. `checkpoint` resumes from an anchored block only when its hash still matches; the
+   * resume replays a short window below it so a log answer that lagged the checkpoint does not lose an event.
    */
   history(request: OrderHistoryRequest): Promise<OrderHistoryResult>;
   /**
@@ -2543,6 +2546,7 @@ export interface OrderHistoryRequest {
   readonly checkpoint?: { readonly number: number; readonly hash: string } | null;
   /** The previous result's `escrows`; applied only when the checkpoint's block hash still matches. */
   readonly previous?: readonly OrderHistoryEntry[] | null;
+  /** `(tag) -> { number, hash, timestamp }`; the hash is the checkpoint anchor. */
   readonly evmBlock?: (tag?: string | number) => Promise<OrderBlock | null>;
 }
 
