@@ -347,6 +347,17 @@ console.log("=== 6) THE AMOUNT RULES OVER THE SAME READ ===");
   });
   okIf(buy.state === "arrived" && buy.amountRule === "at-least" && BigInt(buy.amountAtomic) === ATOMIC_QUOTE,
     "buy at-least accepts two outputs that reach the quote");
+  // AN ARRIVED EXACT READ DESCRIBES THE TRANSFERS IT USED. A confirmed 0.30 plus a pool 0.05 is not an `over`
+  // payment: the answer keeps the 0.30 txid, amount and confirmations, and its comparison stays exact.
+  const arrivedWithPool = await verifyArrival({
+    ...request(rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) }, poolHashes: [T4],
+      poolTxs: { [T4]: fixture(50_000_000_000n) } }), undefined,
+    { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE }),
+  });
+  okIf(arrivedWithPool.state === "arrived" && arrivedWithPool.amountComparison === "exact"
+    && arrivedWithPool.txid === T2 && arrivedWithPool.amountAtomic === ATOMIC_QUOTE.toString()
+    && arrivedWithPool.confirmations === 16,
+    "an arrived exact read keeps the pool amount out of its figures");
   const over = await verifyArrival({
     ...request(rpc({ blockTxids: [T1], txs: { [T1]: fixture(ATOMIC_OVER) } }), undefined, { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE }),
   });

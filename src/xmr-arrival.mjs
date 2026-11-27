@@ -693,10 +693,12 @@ function recoveryTotals(transfers, tracked, spends) {
   if (!complete) return { receivedAtomic: null, spentAtomic: null, unspentAtomic: null, withdrawalState: "unknown" };
   const unspent = received - spentTotal;
   const poolSpent = spends.some((spend) => spend.pool === true);
+  // A POOL SPEND IS NOT A COMPLETED WITHDRAWAL, even when only part of the window is being spent. The confirmed
+  // and pending parts stay visible in `spentAtomic`/`unspentAtomic`; the state says the money is still in flight.
   const withdrawalState = received === 0n ? "empty"
     : spentTotal === 0n ? "unspent"
-      : (poolSpent && spentTotal === received ? "pending"
-        : spentTotal === received ? "withdrawn" : "partly-withdrawn");
+      : poolSpent ? "pending"
+        : spentTotal === received ? "withdrawn" : "partly-withdrawn";
   return { receivedAtomic: received.toString(), spentAtomic: spentTotal.toString(),
     unspentAtomic: unspent.toString(), withdrawalState };
 }
@@ -1695,11 +1697,13 @@ export async function verifyArrivalFromRead(request) {
   else if (total < expectedAtomic) state = "short";
   else if (rule === "exact" && total > expectedAtomic) state = "over";
   else state = "pending";
+  const answer = chosen.length ? chosen : (displayed.length ? displayed : source);
+  const answerTotal = chosen.length ? total : displayTotal;
   const comparison = seen && rule === "exact" ? "exact"
-    : displayTotal === expectedAtomic ? "exact" : displayTotal < expectedAtomic ? "short" : "over";
+    : answerTotal === expectedAtomic ? "exact" : answerTotal < expectedAtomic ? "short" : "over";
   const outputs = [];
   const outputKeys = new Set();
-  for (const transfer of (chosen.length ? chosen : displayed)) {
+  for (const transfer of answer) {
     for (const output of transfer.outputs || []) {
       const id = output.key ? String(output.key) + ":" + String(output.amountAtomic) : transfer.txid + ":" + output.index;
       if (outputKeys.has(id)) continue;
@@ -1707,7 +1711,7 @@ export async function verifyArrivalFromRead(request) {
       outputs.push({ ...output, txid: transfer.txid, height: transfer.height, blockHash: transfer.blockHash });
     }
   }
-  const first = (chosen[0] || displayed[0] || poolHit || null);
+  const first = (answer[0] || poolHit || null);
   return {
     seen, state,
     absent,
@@ -1715,23 +1719,23 @@ export async function verifyArrivalFromRead(request) {
     txid: first ? first.txid : txidOf(request.txid),
     height: first ? first.height : null,
     blockHash: first ? first.blockHash : null,
-    amountAtomic: displayTotal.toString(),
-    amountVerified: displayed.length > 0 && displayed.every((transfer) => transfer.outputs.every((output) => output.amountVerified === true)),
+    amountAtomic: answerTotal.toString(),
+    amountVerified: answer.length > 0 && answer.every((transfer) => transfer.outputs.every((output) => output.amountVerified === true)),
     amountRule: rule,
     amountComparison: comparison,
-    shortfallAtomic: displayTotal < expectedAtomic ? (expectedAtomic - displayTotal).toString() : "0",
-    overageAtomic: displayTotal > expectedAtomic ? (displayTotal - expectedAtomic).toString() : "0",
-    confirmations: source.length ? Math.min(...source.map((transfer) => Number(transfer.confirmations))) : 0,
+    shortfallAtomic: answerTotal < expectedAtomic ? (expectedAtomic - answerTotal).toString() : "0",
+    overageAtomic: answerTotal > expectedAtomic ? (answerTotal - expectedAtomic).toString() : "0",
+    confirmations: answer.length ? Math.min(...answer.map((transfer) => Number(transfer.confirmations))) : 0,
     needConfirmations: recovery.minConfirmations,
     tip: recovery.tip,
-    operators: [...new Set(source.flatMap((transfer) => transfer.operators || []))],
+    operators: [...new Set(answer.flatMap((transfer) => transfer.operators || []))],
     checked: recovery.checked,
     failed: recovery.failed,
     outputs,
-    transfers: chosen.length ? chosen : displayed,
+    transfers: answer,
     locked: lockedTransfer !== null,
     unlock: lockedTransfer ? lockedTransfer.unlock : null,
-    agreedBy: source.flatMap((transfer) => transfer.agreedBy || []),
+    agreedBy: answer.flatMap((transfer) => transfer.agreedBy || []),
   };
 }
 

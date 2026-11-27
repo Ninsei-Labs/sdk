@@ -347,7 +347,7 @@ check(badRead.complete === true && badDaemon.calls.some((c) => c.method === "get
   tampered.rct_signatures.ecdhInfo[0].amount = "00".repeat(8);
   TXS[6] = { [TX[6]]: tampered };
   const unverified = await readRecovery(request(daemon().fetch, null, {
-    keyImages: [{ keyImage: SPENT_IMAGE, outputKey: FUNDING_6_KEY }],
+    keyImages: [{ keyImage: SPENT_IMAGE, outputKey: FUNDING_6_KEY }, { keyImage: UNSPENT_IMAGE, outputKey: FUNDING_9_KEY }],
   }));
   check(unverified.availableAtomic === null && unverified.complete === true,
     "an unverified output gave a numeric available remainder");
