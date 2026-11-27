@@ -127,6 +127,25 @@ const createdLog = ({ removed = false, blockNumber = 100, salt = "0x" + "ab".rep
   });
   check(round === 1 && reorg.ready === true && reorg.block.hash === H(99) && reorgCalls.length === 8,
     "a replaced block was not read again at the same height");
+  let unstable = null;
+  let unstableRound = 99;
+  try {
+    await orderRead(ESCROW, {
+      blockTag: "latest",
+      call: async ({ data }) => {
+        if (data === ESCROW_METHODS.status) return words(1, 0, 0, 1000);
+        if (data === ESCROW_METHODS.ready) return word(1);
+        if (data === ESCROW_METHODS.t1) return word(3000);
+        if (data === ESCROW_METHODS.readyBy) return word(2000);
+        throw new Error("unexpected selector " + data);
+      },
+      block: async (tag) => tag === "latest"
+        ? { number: 42, hash: H(42), timestamp: 1000 }
+        : { number: 42, hash: H(++unstableRound), timestamp: 1000 },
+    });
+  } catch (error) { unstable = error; }
+  check(unstable && unstable.code === "bad-input" && unstable.params.field === "block"
+    && unstable.params.why === "unstable", "three replacements returned a mixed block cut");
   let missing = null;
   try { await orderRead(ESCROW, { call }); } catch (error) { missing = error; }
   check(missing && missing.code === "bad-input" && missing.params.field === "block", "a read without a block seam was refused");

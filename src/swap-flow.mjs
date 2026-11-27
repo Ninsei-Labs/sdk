@@ -404,6 +404,7 @@ export async function orderRead(escrow, deps = {}) {
   let current = await blockIdentity(readBlock, blockTag);
   let raws;
   let block;
+  let stable = false;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const at = "0x" + current.number.toString(16);
     raws = await Promise.all([
@@ -416,9 +417,12 @@ export async function orderRead(escrow, deps = {}) {
     // the fields may belong to the old block. Read them again at the same height and name the new canonical block.
     // A chain that moved on is not a refusal; a provider that answers a different height for a numeric tag is.
     block = await blockIdentity(readBlock, current.number);
-    if (block.hash === current.hash) break;
+    if (block.hash === current.hash) { stable = true; break; }
     current = block;
   }
+  // THREE REORGS DURING ONE READ ARE NOT A CUT. Returning the previous fields with the newest block identity would
+  // be exactly the mixture this read exists to prevent, so name the unstable block instead of pretending it settled.
+  if (!stable) throw new SdkError("bad-input", { field: "block", why: "unstable", block });
   const [rawStatus, rawReady, rawT1, rawReadyBy] = raws;
   const answers = { status: rawStatus, ready: rawReady, t1: rawT1, readyBy: rawReadyBy };
   const empty = Object.entries(answers).filter(([, value]) => String(value ?? "").replace(/^0x/i, "").length === 0);
