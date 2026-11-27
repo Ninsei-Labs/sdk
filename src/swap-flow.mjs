@@ -425,20 +425,25 @@ export async function orderRead(escrow, deps = {}) {
   if (!stable) throw new SdkError("bad-input", { field: "block", why: "unstable", block });
   const [rawStatus, rawReady, rawT1, rawReadyBy] = raws;
   const answers = { status: rawStatus, ready: rawReady, t1: rawT1, readyBy: rawReadyBy };
-  const empty = Object.entries(answers).filter(([, value]) => String(value ?? "").replace(/^0x/i, "").length === 0);
+  // A MISSING ANSWER IS NOT AN EMPTY CONTRACT. Only `0x` means no code at the address; null, undefined and an empty
+  // string are a refusal that names the missing field. A malformed non-empty answer is a named decode refusal.
+  const missing = Object.entries(answers).filter(([, value]) => value === null || value === undefined || value === "");
+  if (missing.length) throw new SdkError("bad-input", { field: missing[0][0], why: "missing", block });
+  const empty = Object.entries(answers).filter(([, value]) => typeof value === "string" && value.replace(/^0x/i, "").length === 0);
   if (empty.length === Object.keys(answers).length) {
     // NO CODE AT THE ADDRESS. This is the predicted-escrow case: the creation transaction did not land, so every
     // getter answers empty. Name it with the block that was read instead of decoding an empty status as a false one.
     throw new SdkError("bad-input", { field: "escrow", why: "no-contract", block });
   }
   if (empty.length) throw new SdkError("bad-input", { field: empty[0][0], why: "empty", block });
-  return {
-    status: decodeStatus(rawStatus),
-    ready: BigInt(rawReady) !== 0n,
-    readyBy: decodeUint64(rawReadyBy, "readyBy()"),
-    t1: decodeUint64(rawT1, "t1()"),
-    block,
-  };
+  let status, ready, readyBy, t1;
+  try {
+    status = decodeStatus(rawStatus);
+    ready = decodeUint64(rawReady, "ready()") !== 0;
+    readyBy = decodeUint64(rawReadyBy, "readyBy()");
+    t1 = decodeUint64(rawT1, "t1()");
+  } catch { throw new SdkError("bad-input", { field: "answer", why: "unreadable", block }); }
+  return { status, ready, readyBy, t1, block };
 }
 
 async function blockIdentity(readBlock, tag) {

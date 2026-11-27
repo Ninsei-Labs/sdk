@@ -99,6 +99,22 @@ const createdLog = ({ removed = false, blockNumber = 100, salt = "0x" + "ab".rep
   } catch (error) { empty = error; }
   check(empty && empty.code === "bad-input" && empty.params.field === "ready" && empty.params.why === "empty",
     "an empty ready answer was not a named refusal");
+  let missingAnswer = null;
+  try {
+    await orderRead(ESCROW, { blockTag: 42,
+      call: async ({ data }) => data === ESCROW_METHODS.ready ? null : "0x" + "0".repeat(64),
+      block: async () => ({ number: 42, hash: H(42), timestamp: 1000 }) });
+  } catch (error) { missingAnswer = error; }
+  check(missingAnswer && missingAnswer.code === "bad-input" && missingAnswer.params.field === "ready"
+    && missingAnswer.params.why === "missing", "a null ready answer was read as an empty contract");
+  let unreadable = null;
+  try {
+    await orderRead(ESCROW, { blockTag: 42,
+      call: async ({ data }) => data === ESCROW_METHODS.ready ? "0x1234" : "0x" + "0".repeat(64),
+      block: async () => ({ number: 42, hash: H(42), timestamp: 1000 }) });
+  } catch (error) { unreadable = error; }
+  check(unreadable && unreadable.code === "bad-input" && unreadable.params.field === "answer"
+    && unreadable.params.why === "unreadable", "a malformed ready answer was not a named refusal");
   let noContract = null;
   try {
     await orderRead(ESCROW, { blockTag: 42, call: async () => "0x",
