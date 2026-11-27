@@ -25,6 +25,9 @@ const blockOf = async (readBlock, tag) => {
   const hash = String((block && block.hash) || "").replace(/^0x/i, "").toLowerCase();
   if (!Number.isSafeInteger(height) || height < 0 || !Number.isSafeInteger(timestamp) || timestamp <= 0
       || !/^[0-9a-f]{64}$/.test(hash)) throw bad("block", "incomplete");
+  const tagged = typeof tag === "number" ? tag
+    : (typeof tag === "string" && /^0x[0-9a-f]+$/i.test(tag) ? Number.parseInt(tag, 16) : null);
+  if (tagged !== null && tagged !== height) throw bad("block", "wrong-height");
   return { number: height, hash: "0x" + hash, timestamp };
 };
 
@@ -117,8 +120,8 @@ export async function orderLookup(escrow, request = {}) {
 
 /**
  * The funding verdict for a predicted escrow at a named finality. An existing escrow is `landed`; an address with
- * no code is `pending` until the signed `validUntil` and `expired` from it. The block timestamp and the contract
- * answer come from the same tag.
+ * no code is `pending` through `validUntil` and `expired` only after it. The status and the block timestamp come
+ * from one fixed height, and a missing status answer is a named refusal.
  */
 export async function orderFunding(request = {}) {
   if (!request || typeof request !== "object") throw bad("request");
@@ -140,20 +143,42 @@ export async function orderFunding(request = {}) {
   if (typeof call !== "function") throw bad("call");
   if (typeof readBlock !== "function") throw bad("block");
   const tag = request.blockTag === undefined || request.blockTag === null ? finality : request.blockTag;
-  const [raw, block] = await Promise.all([
-    call({ to: escrow, data: engine.escrow.encodeStatus(), block: tag }),
-    blockOf(readBlock, tag),
-  ]);
-  const body = String(raw || "").replace(/^0x/, "");
+  // THE ANSWER NAMES THE FINALITY IT ACTUALLY READ. A `blockTag` of `finalized` is a different read from the
+  // network default `safe`; reporting the default would describe another cut than the one used.
+  const reportedFinality = ["latest", "safe", "finalized"].includes(tag) ? tag : finality;
+  // A FINALITY TAG IS A MOVING TARGET. `safe` can advance between the status call and the block read, which would
+  // judge a code-less address at one block with another block's timestamp. Resolve the tag once, ask the escrow at
+  // that concrete height, then read the same height again. A replaced block is re-read; a block that never settles
+  // is a named refusal, never a mixed verdict.
+  let current = await blockOf(readBlock, tag);
+  let raw;
+  let block;
+  let stable = false;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const at = "0x" + current.number.toString(16);
+    raw = await call({ to: escrow, data: engine.escrow.encodeStatus(), block: at });
+    block = await blockOf(readBlock, current.number);
+    if (block.hash === current.hash) { stable = true; break; }
+    current = block;
+  }
+  if (!stable) throw bad("block", "unstable");
+  // A MISSING ANSWER IS NOT "NO CODE". Only an explicit empty bytes answer means the address has no contract; null,
+  // undefined and an empty string are refusals.
+  if (typeof raw !== "string" || raw === "") {
+    throw new SdkError("bad-input", { field: "answer", why: "missing", block });
+  }
+  const body = raw.replace(/^0x/i, "");
   if (body.length === 0) {
-    return { state: block.timestamp >= validUntil ? "expired" : "pending", escrow,
-      validUntil, finality, block };
+    // THE CONTRACT TAKES A DEPOSIT AT EXACTLY `validUntil`; expiry starts in the next second. Use `>` and name the
+    // block that was read at the chosen finality.
+    return { state: block.timestamp > validUntil ? "expired" : "pending", escrow,
+      validUntil, finality: reportedFinality, block };
   }
   let status;
   try { status = engine.escrow.decodeStatus(raw); }
   catch { throw bad("status", "unreadable"); }
   if (status.isFunded !== true) {
-    return { state: "pending", escrow, validUntil, finality, block, status };
+    return { state: "pending", escrow, validUntil, finality: reportedFinality, block, status };
   }
-  return { state: "landed", escrow, validUntil, finality, block, status };
+  return { state: "landed", escrow, validUntil, finality: reportedFinality, block, status };
 }

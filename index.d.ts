@@ -2350,7 +2350,11 @@ export interface OrderApi {
    * With `evmBlock`, both log reads use one fixed end height.
    */
   lookup(escrow: string, request: OrderLookupRequest): Promise<OrderLookupResult>;
-  /** `pending`, `landed` or `expired` for a predicted escrow at a named finality. */
+  /**
+   * `pending`, `landed` or `expired` for a predicted escrow at a named finality. The status and the block
+   * timestamp are read at one fixed height; `expired` starts only after `validUntil`, and a missing status answer
+   * is a named refusal rather than an expiry.
+   */
   funding(request: OrderFundingRequest): Promise<OrderFundingResult>;
   /**
    * The order deadlines from the chain: t1 (the settlement boundary), readyBy (the ready-mark boundary) and the
@@ -2586,6 +2590,7 @@ export interface OrderFundingRequest {
   readonly finality?: "latest" | "safe" | "finalized";
   readonly blockTag?: string | number;
   readonly call?: (request: { readonly to: string; readonly data: string; readonly block?: string | number }) => Promise<string>;
+  /** `(tag) -> { number, hash, timestamp }`; the same block fixes the status call and the expiry boundary. */
   readonly block?: (tag?: string | number) => Promise<OrderBlock | null>;
   readonly evmBlock?: (tag?: string | number) => Promise<OrderBlock | null>;
 }

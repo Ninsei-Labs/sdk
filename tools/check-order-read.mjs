@@ -455,15 +455,28 @@ const createdLog = ({ removed = false, blockNumber = 100, salt = "0x" + "ab".rep
 {
   const callTags = [];
   const blockTags = [];
-  const call = async ({ block: tag }) => { callTags.push(tag); return ""; };
+  const call = async ({ block: tag }) => { callTags.push(tag); return "0x"; };
   const block = async (tag) => { blockTags.push(tag); return { number: 1, hash: H(1), timestamp: 99 }; };
   const defaulted = await orderFunding({ escrow: ESCROW, validUntil: 100, network: "arbitrum-sepolia", call, block });
   check(defaulted.finality === "safe", "the network finality table did not name the default tag");
+  const overridden = await orderFunding({ escrow: ESCROW, validUntil: 100, network: "arbitrum-sepolia",
+    blockTag: "finalized", call, block });
+  check(overridden.finality === "finalized", "funding reported a finality other than the one it read");
   const pending = await orderFunding({ escrow: ESCROW, validUntil: 100, finality: "safe", call, block });
   check(pending.state === "pending" && pending.finality === "safe", "an address without code was pending before expiry");
-  check(callTags[0] === "safe" && blockTags[0] === "safe", "the contract and the block were not read at the same finality");
-  const expired = await orderFunding({ escrow: ESCROW, validUntil: 99, finality: "safe", call, block });
-  check(expired.state === "expired", "an address without code was expired at the signed deadline");
+  check(callTags[0] === "0x1" && blockTags[0] === "safe" && blockTags[1] === 1,
+    "the contract and the block were not read at the same resolved height");
+  const exact = await orderFunding({ escrow: ESCROW, validUntil: 99, finality: "safe", call, block });
+  check(exact.state === "pending", "an address without code expired at exactly validUntil");
+  const expired = await orderFunding({ escrow: ESCROW, validUntil: 98, finality: "safe", call, block });
+  check(expired.state === "expired", "an address without code was not expired after the signed deadline");
+  let missingAnswer = null;
+  try {
+    await orderFunding({ escrow: ESCROW, validUntil: 100, finality: "safe",
+      call: async () => null, block: async () => ({ number: 1, hash: H(1), timestamp: 99 }) });
+  } catch (error) { missingAnswer = error; }
+  check(missingAnswer && missingAnswer.code === "bad-input" && missingAnswer.params.field === "answer"
+    && missingAnswer.params.why === "missing", "a missing funding answer was read as expired or pending");
   const landed = await orderFunding({
     escrow: ESCROW, validUntil: 99, finality: "finalized",
     call: async () => words(1, 0, 0, 1000),
