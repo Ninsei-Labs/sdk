@@ -77,7 +77,7 @@ const T4 = "d".repeat(64);
 const T5 = "e".repeat(64);
 const T6 = "f".repeat(64);
 
-function rpc({ blockTxids = [], poolHashes = [], poolFails = false, txs = {}, failAt = null } = {}) {
+function rpc({ blockTxids = [], poolHashes = [], poolFails = false, txs = {}, poolTxs = {}, failAt = null } = {}) {
   return async (url, init) => {
     const body = JSON.parse(init.body);
     if (body.method === "get_info") return { ok: true, json: async () => ({ result: { height: 121, synchronized: true, nettype: "stagenet" } }) };
@@ -104,9 +104,10 @@ function rpc({ blockTxids = [], poolHashes = [], poolFails = false, txs = {}, fa
     }
     const hashes = body.txs_hashes || [];
     const inPool = !hashes.some((hash) => blockTxids.includes(hash));
+    const source = inPool ? (Object.keys(poolTxs).length ? poolTxs : txs) : txs;
     return { ok: true, json: async () => ({
       txs: hashes.map((hash) => ({ tx_hash: hash, block_height: inPool ? null : 105, confirmations: inPool ? 0 : 16 })),
-      txs_as_json: hashes.map((hash) => JSON.stringify(txs[hash] || { extra: [], vout: [] })),
+      txs_as_json: hashes.map((hash) => JSON.stringify(source[hash] || { extra: [], vout: [] })),
     }) };
   };
 }
@@ -350,14 +351,18 @@ console.log("=== 6) THE AMOUNT RULES OVER THE SAME READ ===");
   // AN ARRIVED EXACT READ DESCRIBES THE TRANSFERS IT USED. A confirmed 0.30 plus a pool 0.05 is not an `over`
   // payment: the answer keeps the 0.30 txid, amount and confirmations, and its comparison stays exact.
   const arrivedWithPool = await verifyArrival({
-    ...request(rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) }, poolHashes: [T4],
-      poolTxs: { [T4]: fixture(50_000_000_000n) } }), undefined,
+    ...request(rpc({ blockTxids: [T2], poolHashes: [T4],
+      txs: { [T2]: fixture(ATOMIC_QUOTE), [T4]: fixture(50_000_000_000n) } }), undefined,
     { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE }),
   });
   okIf(arrivedWithPool.state === "arrived" && arrivedWithPool.amountComparison === "exact"
     && arrivedWithPool.txid === T2 && arrivedWithPool.amountAtomic === ATOMIC_QUOTE.toString()
     && arrivedWithPool.confirmations === 16,
-    "an arrived exact read keeps the pool amount out of its figures");
+    "an arrived exact read keeps the pool amount out of its figures: " + JSON.stringify({
+      state: arrivedWithPool.state, comparison: arrivedWithPool.amountComparison, txid: arrivedWithPool.txid,
+      amount: arrivedWithPool.amountAtomic, confirmations: arrivedWithPool.confirmations,
+      transfers: arrivedWithPool.transfers.map((transfer) => ({ txid: transfer.txid, pool: transfer.pool, agreed: transfer.agreed, amount: transfer.amountAtomic })),
+    }));
   const over = await verifyArrival({
     ...request(rpc({ blockTxids: [T1], txs: { [T1]: fixture(ATOMIC_OVER) } }), undefined, { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE }),
   });
