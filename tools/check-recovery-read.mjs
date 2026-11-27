@@ -180,6 +180,7 @@ check(coldDaemon.calls.filter((c) => c.method === "get_block").map((c) => c.heig
   check(poolRead.spends.some((spend) => spend.keyImage === UNSPENT_IMAGE && spend.pool === true),
     "a pool input is reported as a pool spend");
   check(poolRead.availableAtomic === "0", "a pool spend is excluded from the available remainder");
+  check(poolRead.withdrawalState === "pending", "a pool spend is pending, not withdrawn");
 }
 
 // A failed pool read is unknown about the mempool, never an empty pool.
@@ -339,6 +340,18 @@ check(badRead.complete === true && badDaemon.calls.some((c) => c.method === "get
   check(broken.complete === false && broken.withdrawalState === "unknown" && broken.receivedAtomic === null
     && broken.failed.some((failure) => failure.why === "spent-status"),
     "an unreadable spent answer was accepted as unspent");
+}
+// AN UNVERIFIED OUTPUT IS NOT ZERO AND IS NOT SILENTLY LEFT OUT: the available remainder is unknown.
+{
+  const tampered = structuredClone(FUNDING_6);
+  tampered.rct_signatures.ecdhInfo[0].amount = "00".repeat(8);
+  TXS[6] = { [TX[6]]: tampered };
+  const unverified = await readRecovery(request(daemon().fetch, null, {
+    keyImages: [{ keyImage: SPENT_IMAGE, outputKey: FUNDING_6_KEY }, { keyImage: UNSPENT_IMAGE, outputKey: FUNDING_9_KEY }],
+  }));
+  check(unverified.availableAtomic === null && unverified.complete === true,
+    "an unverified output gave a numeric available remainder");
+  TXS[6] = { [TX[6]]: FUNDING_6 };
 }
 
 // A FAILED READ STILL NAMES EVERY TOTAL AS UNKNOWN. A consumer must not receive `undefined` for a window it could
