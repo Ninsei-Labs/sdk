@@ -25,12 +25,16 @@ const blockOf = async (readBlock, tag) => {
   const hash = String((block && block.hash) || "").replace(/^0x/i, "").toLowerCase();
   if (!Number.isSafeInteger(height) || height < 0 || !Number.isSafeInteger(timestamp) || timestamp <= 0
       || !/^[0-9a-f]{64}$/.test(hash)) throw bad("block", "incomplete");
+  const tagged = typeof tag === "number" ? tag
+    : (typeof tag === "string" && /^0x[0-9a-f]+$/i.test(tag) ? Number.parseInt(tag, 16) : null);
+  if (tagged !== null && tagged !== height) throw bad("block", "wrong-height");
   return { number: height, hash: "0x" + hash, timestamp };
 };
 
 /**
- * Read the state and terms of a list of escrows, or of every order made with a key, from logs. A key search first
- * finds the escrows with `findSwaps`, then reads the same terms and settlement events as an explicit list would.
+ * Read the state and terms of a list of escrows, or of every order made with a key, from logs. A key search finds
+ * the escrows with `findSwaps`, then reads terms and settlement events by topic without naming the escrows; an
+ * explicit list keeps its address filter because the caller named the escrows.
  */
 export async function orderHistory(request = {}) {
   if (!request || typeof request !== "object") throw bad("request");
@@ -39,6 +43,7 @@ export async function orderHistory(request = {}) {
   let escrows = request.escrows;
   let found = null;
   let fromBlock = request.fromBlock;
+  let privateRead = false;
   const explicit = escrows !== undefined && escrows !== null;
   if (explicit && (fromBlock === undefined || fromBlock === null)) {
     // AN EXPLICIT LIST HAS NO SEARCH START OF ITS OWN. Starting at genesis would turn one call into a full-chain
@@ -47,22 +52,27 @@ export async function orderHistory(request = {}) {
   }
   if (escrows === undefined || escrows === null) {
     if (typeof request.mnemonic !== "string") throw bad("escrows");
-    found = await findSwaps({ ...request, evmLogs });
-    escrows = found.swaps.map((order) => order.escrow);
-    // A key history starts where its search started, not at block zero. With orders the earliest creation block is
-    // enough (terms and settlement follow it); an empty key uses the same shared start rule as findSwaps.
+    // THE SEARCH START DOES NOT DEPEND ON THE FOUND ORDERS. The same key and chain conditions must send the same
+    // range whether the key has two orders, one or none; deriving it from the earliest creation block would leak
+    // that block through the RPC request and make an empty key look different.
     if (fromBlock === undefined || fromBlock === null) {
-      const blocks = found.swaps.map((order) => Number(order.blockNumber)).filter((value) => Number.isSafeInteger(value) && value >= 0);
-      fromBlock = blocks.length ? Math.min(...blocks)
-        : (await recoveryStartBlock({ madeBlock: request.madeBlock, deploymentBlock: Number(request.deploymentBlock) || 0,
-          startAt: request.startAt, head: request.head, blockAt: request.blockAt })).block;
+      fromBlock = (await recoveryStartBlock({ madeBlock: request.madeBlock,
+        deploymentBlock: Number(request.deploymentBlock) || 0, startAt: request.startAt, head: request.head,
+        blockAt: request.blockAt })).block;
     }
+    found = await findSwaps({ ...request, fromBlock, evmLogs,
+      // A HISTORY NEEDS NAMES, NOT PER-ORDER ENRICHMENT. These seams name an escrow or its block; the history path
+      // must not use them, even when the caller supplied them for a normal recovery search.
+      evmCode: null, evmBlockTime: null, evmBlockTimes: null });
+    escrows = found.swaps.map((order) => order.escrow);
+    privateRead = true;
   }
   if (!Array.isArray(escrows)) throw bad("escrows");
   const history = await readEscrowHistory({
     escrows, evmLogs, fromBlock: fromBlock === undefined || fromBlock === null ? 0 : fromBlock,
     toBlock: request.toBlock === undefined ? "latest" : request.toBlock,
     checkpoint: request.checkpoint || null, previous: request.previous || null, evmBlock: request.evmBlock || null,
+    privateRead,
   });
   return { ...history, ...(found ? { swaps: found.swaps } : {}) };
 }
@@ -110,8 +120,8 @@ export async function orderLookup(escrow, request = {}) {
 
 /**
  * The funding verdict for a predicted escrow at a named finality. An existing escrow is `landed`; an address with
- * no code is `pending` until the signed `validUntil` and `expired` from it. The block timestamp and the contract
- * answer come from the same tag.
+ * no code is `pending` through `validUntil` and `expired` only after it. The status and the block timestamp come
+ * from one fixed height, and a missing status answer is a named refusal.
  */
 export async function orderFunding(request = {}) {
   if (!request || typeof request !== "object") throw bad("request");
@@ -133,20 +143,42 @@ export async function orderFunding(request = {}) {
   if (typeof call !== "function") throw bad("call");
   if (typeof readBlock !== "function") throw bad("block");
   const tag = request.blockTag === undefined || request.blockTag === null ? finality : request.blockTag;
-  const [raw, block] = await Promise.all([
-    call({ to: escrow, data: engine.escrow.encodeStatus(), block: tag }),
-    blockOf(readBlock, tag),
-  ]);
-  const body = String(raw || "").replace(/^0x/, "");
+  // THE ANSWER NAMES THE FINALITY IT ACTUALLY READ. A `blockTag` of `finalized` is a different read from the
+  // network default `safe`; reporting the default would describe another cut than the one used.
+  const reportedFinality = ["latest", "safe", "finalized"].includes(tag) ? tag : finality;
+  // A FINALITY TAG IS A MOVING TARGET. `safe` can advance between the status call and the block read, which would
+  // judge a code-less address at one block with another block's timestamp. Resolve the tag once, ask the escrow at
+  // that concrete height, then read the same height again. A replaced block is re-read; a block that never settles
+  // is a named refusal, never a mixed verdict.
+  let current = await blockOf(readBlock, tag);
+  let raw;
+  let block;
+  let stable = false;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const at = "0x" + current.number.toString(16);
+    raw = await call({ to: escrow, data: engine.escrow.encodeStatus(), block: at });
+    block = await blockOf(readBlock, current.number);
+    if (block.hash === current.hash) { stable = true; break; }
+    current = block;
+  }
+  if (!stable) throw new SdkError("bad-input", { field: "block", why: "unstable", block });
+  // A MISSING ANSWER IS NOT "NO CODE". Only an explicit empty bytes answer means the address has no contract; null,
+  // undefined and an empty string are refusals.
+  if (typeof raw !== "string" || raw === "") {
+    throw new SdkError("bad-input", { field: "answer", why: "missing", block });
+  }
+  const body = raw.replace(/^0x/i, "");
   if (body.length === 0) {
-    return { state: block.timestamp >= validUntil ? "expired" : "pending", escrow,
-      validUntil, finality, block };
+    // THE CONTRACT TAKES A DEPOSIT AT EXACTLY `validUntil`; expiry starts in the next second. Use `>` and name the
+    // block that was read at the chosen finality.
+    return { state: block.timestamp > validUntil ? "expired" : "pending", escrow,
+      validUntil, finality: reportedFinality, block };
   }
   let status;
   try { status = engine.escrow.decodeStatus(raw); }
   catch { throw bad("status", "unreadable"); }
   if (status.isFunded !== true) {
-    return { state: "pending", escrow, validUntil, finality, block, status };
+    return { state: "pending", escrow, validUntil, finality: reportedFinality, block, status };
   }
-  return { state: "landed", escrow, validUntil, finality, block, status };
+  return { state: "landed", escrow, validUntil, finality: reportedFinality, block, status };
 }

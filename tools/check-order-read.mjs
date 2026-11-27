@@ -44,11 +44,11 @@ const settlementLog = (topic, blockNumber, data = "0x", topics = [topic]) => ({
   address: ESCROW, topics, data, blockNumber, blockHash: H(blockNumber), transactionHash: H(blockNumber + 200), logIndex: 1,
 });
 
-const createdLog = ({ removed = false, blockNumber = 100, salt = "0x" + "ab".repeat(32) } = {}) => {
+const createdLog = ({ removed = false, blockNumber = 100, salt = "0x" + "ab".repeat(32), escrow = ESCROW } = {}) => {
   const halves = takerHalvesV2({ mnemonic: WORDS, chainId: CHAIN, factory: FACTORY, salt });
   return {
     address: FACTORY,
-    topics: [ORDER_CREATED_TOPIC, pad(ESCROW), pad(LOCKER), pad(CLAIMER)],
+    topics: [ORDER_CREATED_TOPIC, pad(escrow), pad(LOCKER), pad(CLAIMER)],
     data: words(
       halves.spendCommitment, "0x" + "02".repeat(32), "0x" + "03".repeat(32), "0x" + "04".repeat(32),
       "0x" + "05".repeat(32), 1000, 5000000000000, 2000, 3000, salt,
@@ -202,6 +202,54 @@ const createdLog = ({ removed = false, blockNumber = 100, salt = "0x" + "ab".rep
   check(byKey.escrows[0].terms && byKey.escrows[0].terms.fee === "3", "a key history did not join the terms");
 }
 
+// --- a key history does not name its escrows to the RPC, and its requests do not depend on the key's orders ---
+{
+  const SECOND = "0x" + "a2".repeat(20);
+  const secondSalt = "0x" + "cd".repeat(32);
+  const oneCreated = [createdLog({ blockNumber: 100 })];
+  const twoCreated = [createdLog({ blockNumber: 100 }), createdLog({ escrow: SECOND, salt: secondSalt, blockNumber: 101 })];
+  const oneTerms = [termsLog({ blockNumber: 100 })];
+  const twoTerms = [termsLog({ blockNumber: 100 }), termsLog({ escrow: SECOND, blockNumber: 101 })];
+  const run = async (created, terms, extra = {}) => {
+    const requests = [];
+    const history = await orderHistory({
+      mnemonic: WORDS, chainId: CHAIN, factory: FACTORY, fromBlock: 0, toBlock: 20,
+      evmLogs: async (request) => {
+        requests.push(JSON.parse(JSON.stringify(request)));
+        return request.address ? created : terms;
+      },
+      evmBlock: async (tag) => ({ number: Number(tag), hash: H(Number(tag)), timestamp: 1000 }),
+      ...extra,
+    });
+    return { requests, history };
+  };
+  const none = await run([], []);
+  const one = await run(oneCreated, oneTerms);
+  const two = await run(twoCreated, twoTerms);
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  check(none.requests.length === 2 && same(none.requests, one.requests) && same(one.requests, two.requests),
+    "a key history sent different requests for none, one and two orders");
+  check(none.requests.every((request) => !Array.isArray(request.address)),
+    "a key history named its escrows to the RPC");
+  check(one.history.escrows.length === 1 && two.history.escrows.length === 2,
+    "a key history did not read the orders it found");
+  const resumedNone = await run([], [], { checkpoint: { number: 10, hash: H(10) }, previous: none.history.escrows });
+  const resumedOne = await run(oneCreated, oneTerms, { checkpoint: { number: 10, hash: H(10) }, previous: one.history.escrows });
+  const resumedTwo = await run(twoCreated, twoTerms, { checkpoint: { number: 10, hash: H(10) }, previous: two.history.escrows });
+  check(same(resumedNone.requests, resumedOne.requests) && same(resumedOne.requests, resumedTwo.requests),
+    "a resumed key history sent different requests for none, one and two orders");
+  let enriched = 0;
+  await orderHistory({
+    mnemonic: WORDS, chainId: CHAIN, factory: FACTORY, fromBlock: 0, toBlock: 20,
+    evmLogs: async (request) => request.address ? oneCreated : oneTerms,
+    evmBlock: async (tag) => ({ number: Number(tag), hash: H(Number(tag)), timestamp: 1000 }),
+    evmCode: async () => { enriched += 1; return "0x"; },
+    evmBlockTime: async () => { enriched += 1; return 1000; },
+    evmBlockTimes: async () => { enriched += 1; return new Map(); },
+  });
+  check(enriched === 0, "a key history used a per-order code or block read");
+}
+
 // --- history: removed logs dropped, terms and settlement state joined, checkpoint returned ---
 {
   const zero = "0x" + "00".repeat(20);
@@ -297,15 +345,15 @@ const createdLog = ({ removed = false, blockNumber = 100, salt = "0x" + "ab".rep
   const history = await orderHistory({
     escrows: [ESCROW], fromBlock: 0, toBlock: 20,
     checkpoint: { number: 10, hash: H(10) },
-    evmLogs: async (request) => { calls.push(request.fromBlock); return []; },
+    evmLogs: async (request) => { calls.push(request.fromBlock); return [termsLog({ blockNumber: 7 })]; },
     evmBlock: async (tag) => ({ number: Number(tag), hash: tag === 10 ? H(10) : H(Number(tag)), timestamp: 1000 }),
   });
-  check(calls[0] === 11 && history.replayed === false, "a matching checkpoint resumed after its block");
+  check(calls[0] === 0 && history.replayed === false, "a matching checkpoint did not replay its safety window");
   let replayFrom = null;
   const replayed = await orderHistory({
     escrows: [ESCROW], fromBlock: 0, toBlock: 20,
     checkpoint: { number: 10, hash: H(10) },
-    evmLogs: async (request) => { replayFrom = request.fromBlock; return []; },
+    evmLogs: async (request) => { replayFrom = request.fromBlock; return [termsLog({ blockNumber: 7 })]; },
     evmBlock: async (tag) => ({ number: Number(tag), hash: tag === 10 ? H(99) : H(Number(tag)), timestamp: 1000 }),
   });
   check(replayed.replayed === true && replayFrom === 0, "a moved checkpoint did not replay from the range start");
@@ -349,6 +397,58 @@ const createdLog = ({ removed = false, blockNumber = 100, salt = "0x" + "ab".rep
     "a moved checkpoint did not replay and match the full history");
 }
 
+// --- logs that lag the saved checkpoint: the claim in the gap is found on resume ---
+{
+  const firstLogs = [termsLog({ blockNumber: 7 })];
+  const claim = settlementLog(ESCROW_EVENT_TOPICS.halfRevealed, 11, words("0x" + "13".repeat(32), 1));
+  const block = async (tag) => ({ number: Number(tag), hash: H(Number(tag)), timestamp: 1000 });
+  const first = await orderHistory({
+    escrows: [ESCROW], fromBlock: 0, toBlock: 20, evmLogs: async () => firstLogs, evmBlock: block,
+  });
+  let resumedFrom = null;
+  const resumed = await orderHistory({
+    escrows: [ESCROW], fromBlock: 0, toBlock: 20, checkpoint: first.checkpoint, previous: first.escrows,
+    evmLogs: async (request) => { resumedFrom = request.fromBlock; return [claim]; }, evmBlock: block,
+  });
+  const full = await orderHistory({
+    escrows: [ESCROW], fromBlock: 0, toBlock: 20, evmLogs: async () => [...firstLogs, claim], evmBlock: block,
+  });
+  check(resumedFrom === 8 && resumed.escrows[0].status.isClaimed === true,
+    "a claim in the log lag was lost after the resume");
+  check(JSON.stringify(resumed.escrows[0].status) === JSON.stringify(full.escrows[0].status)
+    && resumed.escrows[0].events.length === full.escrows[0].events.length,
+    "a resumed history over lagging logs did not match the full history");
+}
+
+// --- unread terms are refused, never reported as an unfunded order ---
+{
+  const block = async (tag) => ({ number: Number(tag), hash: H(Number(tag)), timestamp: 1000 });
+  const refused = async (request) => {
+    try { await orderHistory(request); return null; } catch (error) { return error; }
+  };
+  const above = await refused({ escrows: [ESCROW], fromBlock: 50, toBlock: 60, evmLogs: async () => [], evmBlock: block });
+  check(above && above.code === "bad-input" && above.params.field === "terms" && above.params.why === "unread",
+    "a range above the creation block was reported as not funded");
+  const key = await refused({
+    mnemonic: WORDS, chainId: CHAIN, factory: FACTORY, fromBlock: 0, toBlock: 20, evmBlock: block,
+    evmLogs: async (request) => request.address ? [createdLog({ blockNumber: 100 })] : [],
+  });
+  check(key && key.code === "bad-input" && key.params.field === "terms" && key.params.why === "unread",
+    "a key's order without terms was reported as not funded");
+  const resume = await refused({
+    escrows: [ESCROW], fromBlock: 0, toBlock: 20, checkpoint: { number: 10, hash: H(10) },
+    evmLogs: async () => [], evmBlock: block,
+  });
+  check(resume && resume.code === "bad-input" && resume.params.field === "terms" && resume.params.why === "unread",
+    "a resume without the previous row was reported as not funded");
+  let lookup = null;
+  try {
+    await orderLookup(ESCROW, { factory: FACTORY, toBlock: 200, evmLogs: async () => [createdLog({ blockNumber: 100 })], evmBlock: block });
+  } catch (error) { lookup = error; }
+  check(lookup && lookup.code === "bad-input" && lookup.params.field === "terms" && lookup.params.why === "unread",
+    "a lookup with missing terms was reported as not funded");
+}
+
 // --- lookup: creation block and the terms event ---
 {
   const lookup = await orderLookup(ESCROW, {
@@ -371,15 +471,37 @@ const createdLog = ({ removed = false, blockNumber = 100, salt = "0x" + "ab".rep
 {
   const callTags = [];
   const blockTags = [];
-  const call = async ({ block: tag }) => { callTags.push(tag); return ""; };
+  const call = async ({ block: tag }) => { callTags.push(tag); return "0x"; };
   const block = async (tag) => { blockTags.push(tag); return { number: 1, hash: H(1), timestamp: 99 }; };
   const defaulted = await orderFunding({ escrow: ESCROW, validUntil: 100, network: "arbitrum-sepolia", call, block });
   check(defaulted.finality === "safe", "the network finality table did not name the default tag");
+  const overridden = await orderFunding({ escrow: ESCROW, validUntil: 100, network: "arbitrum-sepolia",
+    blockTag: "finalized", call, block });
+  check(overridden.finality === "finalized", "funding reported a finality other than the one it read");
   const pending = await orderFunding({ escrow: ESCROW, validUntil: 100, finality: "safe", call, block });
   check(pending.state === "pending" && pending.finality === "safe", "an address without code was pending before expiry");
-  check(callTags[0] === "safe" && blockTags[0] === "safe", "the contract and the block were not read at the same finality");
-  const expired = await orderFunding({ escrow: ESCROW, validUntil: 99, finality: "safe", call, block });
-  check(expired.state === "expired", "an address without code was expired at the signed deadline");
+  check(callTags[0] === "0x1" && blockTags[0] === "safe" && blockTags[1] === 1,
+    "the contract and the block were not read at the same resolved height");
+  const exact = await orderFunding({ escrow: ESCROW, validUntil: 99, finality: "safe", call, block });
+  check(exact.state === "pending", "an address without code expired at exactly validUntil");
+  const expired = await orderFunding({ escrow: ESCROW, validUntil: 98, finality: "safe", call, block });
+  check(expired.state === "expired", "an address without code was not expired after the signed deadline");
+  let missingAnswer = null;
+  try {
+    await orderFunding({ escrow: ESCROW, validUntil: 100, finality: "safe",
+      call: async () => null, block: async () => ({ number: 1, hash: H(1), timestamp: 99 }) });
+  } catch (error) { missingAnswer = error; }
+  check(missingAnswer && missingAnswer.code === "bad-input" && missingAnswer.params.field === "answer"
+    && missingAnswer.params.why === "missing", "a missing funding answer was read as expired or pending");
+  let unstableFunding = null;
+  let fundingRound = 1;
+  try {
+    await orderFunding({ escrow: ESCROW, validUntil: 100, finality: "safe", call: async () => "0x",
+      block: async (tag) => tag === "safe" ? { number: 1, hash: H(1), timestamp: 99 }
+        : { number: 1, hash: H(++fundingRound + 1), timestamp: 99 } });
+  } catch (error) { unstableFunding = error; }
+  check(unstableFunding && unstableFunding.code === "bad-input" && unstableFunding.params.why === "unstable"
+    && unstableFunding.params.block.number === 1, "an unsettled funding block was not named with its block");
   const landed = await orderFunding({
     escrow: ESCROW, validUntil: 99, finality: "finalized",
     call: async () => words(1, 0, 0, 1000),

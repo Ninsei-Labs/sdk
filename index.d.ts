@@ -2341,7 +2341,10 @@ export interface OrderApi {
   read(escrow: string, deps?: OrderReadDeps): Promise<OrderRead>;
   /**
    * Every escrow's terms and settlement state, from logs. Supply `escrows`, or a recovery key to find them first.
-   * Removed logs are dropped and `checkpoint` resumes from an anchored block only when its hash still matches.
+   * A key search uses topic-only log reads and does not name the key's escrows or their blocks to the RPC; an empty
+   * key sends the same request shape. Removed logs are dropped. A row whose terms were not read is a named refusal,
+   * never an unfunded order. `checkpoint` resumes from an anchored block only when its hash still matches; the
+   * resume replays a short window below it so a log answer that lagged the checkpoint does not lose an event.
    */
   history(request: OrderHistoryRequest): Promise<OrderHistoryResult>;
   /**
@@ -2349,7 +2352,11 @@ export interface OrderApi {
    * With `evmBlock`, both log reads use one fixed end height.
    */
   lookup(escrow: string, request: OrderLookupRequest): Promise<OrderLookupResult>;
-  /** `pending`, `landed` or `expired` for a predicted escrow at a named finality. */
+  /**
+   * `pending`, `landed` or `expired` for a predicted escrow at a named finality. The status and the block
+   * timestamp are read at one fixed height; `expired` starts only after `validUntil`, and a missing status answer
+   * is a named refusal rather than an expiry.
+   */
   funding(request: OrderFundingRequest): Promise<OrderFundingResult>;
   /**
    * The order deadlines from the chain: t1 (the settlement boundary), readyBy (the ready-mark boundary) and the
@@ -2545,11 +2552,13 @@ export interface OrderHistoryRequest {
   readonly checkpoint?: { readonly number: number; readonly hash: string } | null;
   /** The previous result's `escrows`; applied only when the checkpoint's block hash still matches. */
   readonly previous?: readonly OrderHistoryEntry[] | null;
+  /** `(tag) -> { number, hash, timestamp }`; the hash is the checkpoint anchor. */
   readonly evmBlock?: (tag?: string | number) => Promise<OrderBlock | null>;
 }
 
 export interface OrderHistoryResult {
   readonly escrows: readonly OrderHistoryEntry[];
+  /** The block the read ended at. A resume replays a short window below it, then continues through the range. */
   readonly checkpoint: { readonly number: number; readonly hash: string } | null;
   readonly replayed: boolean;
   readonly fromBlock: number | string;
@@ -2583,6 +2592,7 @@ export interface OrderFundingRequest {
   readonly finality?: "latest" | "safe" | "finalized";
   readonly blockTag?: string | number;
   readonly call?: (request: { readonly to: string; readonly data: string; readonly block?: string | number }) => Promise<string>;
+  /** `(tag) -> { number, hash, timestamp }`; the same block fixes the status call and the expiry boundary. */
   readonly block?: (tag?: string | number) => Promise<OrderBlock | null>;
   readonly evmBlock?: (tag?: string | number) => Promise<OrderBlock | null>;
 }
