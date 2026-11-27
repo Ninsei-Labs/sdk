@@ -222,6 +222,16 @@ const createdLog = ({ removed = false, blockNumber = 100, salt = "0x" + "ab".rep
   const resumedTwo = await run(twoCreated, twoTerms, { checkpoint: { number: 10, hash: H(10) }, previous: two.history.escrows });
   check(same(resumedNone.requests, resumedOne.requests) && same(resumedOne.requests, resumedTwo.requests),
     "a resumed key history sent different requests for none, one and two orders");
+  let enriched = 0;
+  await orderHistory({
+    mnemonic: WORDS, chainId: CHAIN, factory: FACTORY, fromBlock: 0, toBlock: 20,
+    evmLogs: async (request) => request.address ? oneCreated : oneTerms,
+    evmBlock: async (tag) => ({ number: Number(tag), hash: H(Number(tag)), timestamp: 1000 }),
+    evmCode: async () => { enriched += 1; return "0x"; },
+    evmBlockTime: async () => { enriched += 1; return 1000; },
+    evmBlockTimes: async () => { enriched += 1; return new Map(); },
+  });
+  check(enriched === 0, "a key history used a per-order code or block read");
 }
 
 // --- history: removed logs dropped, terms and settlement state joined, checkpoint returned ---
