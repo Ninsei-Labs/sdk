@@ -305,6 +305,22 @@ check(badRead.complete === true && badDaemon.calls.some((c) => c.method === "get
   check(changed.complete === true && after.includes(5) && after.includes(20),
     "a different key-image set reused a checkpoint written without it");
 }
+// A HEIGHT LOCK THAT MATURES BETWEEN THE TWO READS IS NOT CARRIED OVER. Both `locked` and the nested `unlock`
+// answer must describe the new tip, so a resumed read equals a cold one field by field.
+{
+  const lockedTx = { ...fixture(100_000_000_000n), unlock_time: 20 };
+  TXS[6] = { [TX[6]]: lockedTx };
+  const d = daemon({ topHeight: 11 });
+  const c = memoryCheckpoint();
+  const before = await readRecovery(request(d.fetch, c));
+  d.setTopHeight(21);
+  const resumed = await readRecovery(request(d.fetch, c));
+  const transfer = resumed.transfers.find((entry) => entry.height === 6);
+  check(before.complete && resumed.complete && transfer && transfer.locked === false
+    && transfer.unlock && transfer.unlock.locked === false && transfer.unlock.code === "unlocked",
+    `a resumed read kept the saved lock: ${JSON.stringify(transfer && { locked: transfer.locked, unlock: transfer.unlock })}`);
+  TXS[6] = { [TX[6]]: FUNDING_6 };
+}
 
 // THE TRUSTED NODE'S SPENT ANSWER MAKES THE WINDOW TOTALS. A partly spent window is not "withdrawn"; an unreadable
 // answer is unknown, never "unspent".
