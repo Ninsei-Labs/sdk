@@ -1,3 +1,9 @@
+## Unreleased — 2026-11-27
+
+- `sweep.reconcile` accepts the answer a real restricted monerod gives for a saved hash it does not know: `missed_tx` naming that hash, with `txs` and `txs_as_json` omitted. A missing or foreign `missed_tx`, an answer naming both a found and a missed hash, an untrusted answer and a partial key-image answer stay `unknown`. The hash is asked again after the spent status, so a transaction that lands between the two answers is `present`, not `inputs-spent`.
+- `sweep.restore` removes the spent part of a bounded window from the balances: a spent output is not spendable, a pool spend is pending, and an untrusted, short or incomplete spent answer leaves the scan incomplete instead of reporting a complete balance. The wallet's `exportKeyImages(true)` is the set the trusted answer must cover.
+- The exported `moneroWallet` withdrawal adapter exposes `driver()`, so the advertised wallet can pass the documented `sweep.restore` before `sweep.sign`.
+
 ## Unreleased — 2026-11-26
 
 - A buy records the funding hash as soon as the wallet returns it, before the receipt wait; a confirmed deposit keeps it and clears the pending `not-sent` mark. The pre-send record marks `sendAttempted`; if a reload finds no hash, the SDK reads the predicted escrow and never sends a second deposit automatically. A funded escrow recovers the row and locks it; an empty or unreadable one stays `funding-pending` with `reason: "hash-unrecorded"`. An ambiguous wallet send error is kept as `send-unknown`, not treated as a refusal. `swaps.reconcileFunding` reports the receipt, `OrderCreated`, escrow status and optional `wallet.nonce` evidence without signing; `start({ retryUnknownSend: true })` is the caller's explicit release. A reverted receipt does not unlock an escrow that reads funded, and `not-sent` is used only while no hash is known and no send was attempted.

@@ -9,7 +9,7 @@ import { restoreWallet, windowTxHashes } from "../src/sweep-restore.mjs";
 import { createSweep } from "../src/sweep.mjs";
 import { createNinsei } from "../src/index.mjs";
 
-const fake = ({ balance = 0n, scanTxs = true, scanFails = false } = {}) => {
+const fake = ({ balance = 0n, scanTxs = true, scanFails = false, outputs = null, images = null } = {}) => {
   const calls = [];
   const driver = {
     async setRestoreHeight(height) { calls.push(["height", Number(height)]); },
@@ -20,11 +20,21 @@ const fake = ({ balance = 0n, scanTxs = true, scanFails = false } = {}) => {
   };
   if (scanFails) driver.scanTxs = async () => { calls.push(["scan-failed"]); throw new Error("Failed to get transaction from daemon"); };
   else if (scanTxs) driver.scanTxs = async (hashes) => { calls.push(["scan", hashes.length]); };
+  if (outputs) driver.getOutputs = async () => outputs;
+  if (images) {
+    driver.exportKeyImages = async (all) => { calls.push(["export", all]); return { all, getKeyImages: () => images }; };
+    driver.getKeyImages = async () => images;
+  }
   return {
     calls,
     wallet: { async sync() {}, async unlockedBalance() { return balance; }, driver: () => driver },
   };
 };
+const output = (key, amount) => ({
+  getKeyImage: () => ({ getHex: () => key }),
+  getAmount: () => BigInt(amount),
+});
+const image = (key) => ({ getHex: () => key });
 
 export const sweepWindowCheck = async () => {
   const problems = [];
@@ -52,29 +62,99 @@ export const sweepWindowCheck = async () => {
   check(empty.calls.some((call) => call[0] === "height" && call[1] === 90), "the full scan did not start below the order height");
   notes.push("an empty window falls back to the full scan");
 
-  const withImages = fake({ balance: 5n });
+  const withImages = fake({ balance: 5n, outputs: [output("aa", 2n), output("bb", 3n)],
+    images: [image("aa"), image("bb")] });
   const nodeCalls = [];
-  withImages.wallet.driver().getKeyImages = async () => [{ getHex: () => "aa" }, { getHex: () => "bb" }];
   const spent = await restoreWallet({ wallet: withImages.wallet, fromHeight: 100,
     window: { txHashes: ["a"], toHeight: 110, tipHeight: 900, nodeUrl: "https://node.example", trustedNode: true },
-    fetchImpl: async (url, options) => { nodeCalls.push([url, JSON.parse(options.body)]); return { ok: true, json: async () => ({ spent_status: [0, 1] }) }; },
+    fetchImpl: async (url, options) => { nodeCalls.push([url, JSON.parse(options.body)]); return { ok: true, json: async () => ({ status: "OK", spent_status: [0, 1] }) }; },
   });
   check(spent.window && spent.window.spent === 1 && spent.window.keyImages === 2,
     `the spent check reported ${JSON.stringify(spent.window)}`);
   check(nodeCalls.length === 1 && nodeCalls[0][0].endsWith("/is_key_image_spent"), "the key images were not checked at the node");
   check(spent.scanComplete === true && spent.scanIncompleteReason === undefined,
     `a window with spent status was reported incomplete: ${JSON.stringify({ complete: spent.scanComplete, reason: spent.scanIncompleteReason })}`);
+  check(spent.unlocked === "2" && spent.total === "2",
+    `the spent output stayed in the window balance: ${JSON.stringify({ total: spent.total, unlocked: spent.unlocked })}`);
+  check(withImages.calls.some(([name, all]) => name === "export" && all === true),
+    "the window did not ask the wallet for all key images");
   notes.push("an explicitly trusted node may receive key images for the spent check");
+
+  // A WINDOW WITH A MIX OF SPENT AND UNSPENT OUTPUTS. The unspent part stays spendable; the spent amount is not
+  // reported as a balance. Pool spends are pending: they leave the spendable remainder but do not erase the total.
+  {
+    const mixed = fake({ balance: 5n, outputs: [output("aa", 2n), output("bb", 3n)], images: [image("aa"), image("bb")] });
+    const result = await restoreWallet({ wallet: mixed.wallet, fromHeight: 100,
+      window: { txHashes: ["a"], toHeight: 110, tipHeight: 900, nodeUrl: "https://node.example", trustedNode: true },
+      fetchImpl: async () => ({ ok: true, json: async () => ({ status: "OK", untrusted: false, spent_status: [1, 0] }) }),
+    });
+    check(result.unlocked === "3" && result.total === "3",
+      `a partially spent window kept the spent amount: ${JSON.stringify({ total: result.total, unlocked: result.unlocked })}`);
+    check(result.scanComplete === true && result.window && result.window.spent === 1,
+      `a partially spent window is complete with one spent output: ${JSON.stringify(result.window)}`);
+  }
+  {
+    const all = fake({ balance: 5n, outputs: [output("aa", 2n), output("bb", 3n)], images: [image("aa"), image("bb")] });
+    const result = await restoreWallet({ wallet: all.wallet, fromHeight: 100,
+      window: { txHashes: ["a"], toHeight: 110, tipHeight: 900, nodeUrl: "https://node.example", trustedNode: true },
+      fetchImpl: async () => ({ ok: true, json: async () => ({ status: "OK", untrusted: false, spent_status: [1, 1] }) }),
+    });
+    check(result.unlocked === "0" && result.total === "0" && result.scanComplete === true,
+      `a fully spent window still reported spendable coins: ${JSON.stringify({ total: result.total, unlocked: result.unlocked, window: result.window })}`);
+  }
+  {
+    const pool = fake({ balance: 5n, outputs: [output("aa", 2n), output("bb", 3n)], images: [image("aa"), image("bb")] });
+    const result = await restoreWallet({ wallet: pool.wallet, fromHeight: 100,
+      window: { txHashes: ["a"], toHeight: 110, tipHeight: 900, nodeUrl: "https://node.example", trustedNode: true },
+      fetchImpl: async () => ({ ok: true, json: async () => ({ status: "OK", untrusted: false, spent_status: [2, 0] }) }),
+    });
+    check(result.unlocked === "3" && result.total === "5" && result.window && result.window.pending === 1,
+      `a pool spend was not kept pending: ${JSON.stringify({ total: result.total, unlocked: result.unlocked, window: result.window })}`);
+  }
+  {
+    // THE WALLET EXPORTS FEWER IMAGES THAN IT HAS OUTPUTS. That answer cannot cover the window and must not be
+    // reported as a complete scan.
+    const short = fake({ balance: 5n, outputs: [output("aa", 2n), output("bb", 3n)], images: [image("aa")] });
+    const result = await restoreWallet({ wallet: short.wallet, fromHeight: 100,
+      window: { txHashes: ["a"], toHeight: 110, tipHeight: 900, nodeUrl: "https://node.example", trustedNode: true },
+      fetchImpl: async () => ({ ok: true, json: async () => ({ status: "OK", untrusted: false, spent_status: [1] }) }),
+    });
+    check(result.scanComplete === false && result.window && result.window.spentWhy === "key-images-short",
+      `a short key-image list was reported complete: ${JSON.stringify(result.window)}`);
+  }
+  for (const [name, body] of [
+    ["an untrusted status", { status: "OK", untrusted: true, spent_status: [1, 0] }],
+    ["a busy status", { status: "BUSY", spent_status: [1, 0] }],
+    ["an answer without status", { spent_status: [1, 0] }],
+  ]) {
+    const wallet = fake({ balance: 5n, outputs: [output("aa", 2n), output("bb", 3n)], images: [image("aa"), image("bb")] });
+    const result = await restoreWallet({ wallet: wallet.wallet, fromHeight: 100,
+      window: { txHashes: ["a"], toHeight: 110, tipHeight: 900, nodeUrl: "https://node.example", trustedNode: true },
+      fetchImpl: async () => ({ ok: true, json: async () => body }),
+    });
+    check(result.scanComplete === false && result.window && result.window.spent === null,
+      `${name} was treated as a complete spent answer: ${JSON.stringify(result.window)}`);
+  }
+  {
+    // WITHOUT OUTPUT AMOUNTS THE SPENT AMOUNT CANNOT BE REMOVED FROM THE BALANCE. An untrusted balance is safer
+    // than a complete scan that counts a spent output as spendable.
+    const noOutputs = fake({ balance: 5n, images: [image("aa"), image("bb")] });
+    const result = await restoreWallet({ wallet: noOutputs.wallet, fromHeight: 100,
+      window: { txHashes: ["a"], toHeight: 110, tipHeight: 900, nodeUrl: "https://node.example", trustedNode: true },
+      fetchImpl: async () => ({ ok: true, json: async () => ({ status: "OK", spent_status: [1, 0] }) }),
+    });
+    check(result.scanComplete === false && result.window && result.window.spentWhy === "outputs-unavailable",
+      `a window without output amounts was reported complete: ${JSON.stringify(result.window)}`);
+  }
 
   // A BLOCK THAT LANDS AFTER THE WINDOW'S SYNC IS NOT A GAP. The window is the scope, and the trusted node's
   // spent answer covers it; the wallet height may legitimately be below the node's when the return arrives.
-  const behind = fake({ balance: 5n });
+  const behind = fake({ balance: 5n, outputs: [output("aa", 2n), output("bb", 3n)], images: [image("aa"), image("bb")] });
   behind.wallet.driver().getHeight = async () => 995;
   behind.wallet.driver().getDaemonHeight = async () => 1000;
-  behind.wallet.driver().getKeyImages = async () => [{ getHex: () => "aa" }, { getHex: () => "bb" }];
   const ahead = await restoreWallet({ wallet: behind.wallet, fromHeight: 100,
     window: { txHashes: ["a"], toHeight: 110, tipHeight: 1000, nodeUrl: "https://node.example", trustedNode: true },
-    fetchImpl: async () => ({ ok: true, json: async () => ({ spent_status: [0, 0] }) }),
+    fetchImpl: async () => ({ ok: true, json: async () => ({ status: "OK", spent_status: [0, 0] }) }),
   });
   check(ahead.scanComplete === true && ahead.scanIncompleteReason === undefined,
     `a window behind a landed block was reported incomplete: ${JSON.stringify({ complete: ahead.scanComplete, reason: ahead.scanIncompleteReason })}`);
