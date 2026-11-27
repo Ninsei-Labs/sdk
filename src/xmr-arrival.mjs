@@ -711,6 +711,9 @@ function refreshTransferState(transfers, { tipHeight, nowSec }) {
       transfer.locked = Number.isFinite(untilTime) && untilTime > 0
         ? Number(nowSec) < untilTime
         : (Number.isFinite(untilHeight) && untilHeight > 0 ? Number(tipHeight) < untilHeight : false);
+      // THE NESTED LOCK IS PART OF THE SAME FACT. A consumer that reads `unlock.locked` must not see the stored
+      // state after the height or time has passed; the cold and resumed answers have to agree field by field.
+      transfer.unlock = { ...transfer.unlock, locked: transfer.locked };
     }
   }
   return transfers;
