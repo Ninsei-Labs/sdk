@@ -2342,7 +2342,10 @@ export interface OrderApi {
    * Removed logs are dropped and `checkpoint` resumes from an anchored block only when its hash still matches.
    */
   history(request: OrderHistoryRequest): Promise<OrderHistoryResult>;
-  /** The creation block and terms for one escrow; `found: false` when the creation event is outside the range. */
+  /**
+   * The creation block and terms for one escrow; `found: false` when the creation event is outside the range.
+   * With `evmBlock`, both log reads use one fixed end height.
+   */
   lookup(escrow: string, request: OrderLookupRequest): Promise<OrderLookupResult>;
   /** `pending`, `landed` or `expired` for a predicted escrow at a named finality. */
   funding(request: OrderFundingRequest): Promise<OrderFundingResult>;
@@ -2396,9 +2399,14 @@ export interface OrderBlock {
 }
 
 export interface OrderReadDeps {
+  /** The contract reader. The SDK asks every getter at the resolved block height, as a hex block tag. */
   readonly call?: (request: { readonly to: string; readonly data: string; readonly block?: string | number }) => Promise<string>;
+  /** `latest`, `safe`, `finalized` or a height. Default: `latest`. */
   readonly blockTag?: string | number;
-  /** (tag) -> block. The SDK also accepts `evmBlock`; one of the two is required. */
+  /**
+   * `(tag) -> { number, hash, timestamp }`. Called first to fix the height, then again at that height so the answer
+   * names the block that is canonical after the calls. The SDK also accepts `evmBlock`; one of the two is required.
+   */
   readonly block?: (tag?: string | number) => Promise<OrderBlock | null>;
   readonly evmBlock?: (tag?: string | number) => Promise<OrderBlock | null>;
 }

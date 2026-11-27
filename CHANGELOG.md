@@ -1,3 +1,7 @@
+## Unreleased — 2026-11-27
+
+- `order.read` fixes the block height before it asks the escrow, then reads `status`, `ready`, `readyBy` and `t1` at that same height; a block that answers another height is a named refusal. The deposit's `Ready(address(0))` marker no longer makes `order.history` or `order.lookup` report the locker's ready mark, and a lookup fixes one end height for both its creation and terms reads.
+
 ## Unreleased — 2026-11-26
 
 - A buy records the funding hash as soon as the wallet returns it, before the receipt wait; a confirmed deposit keeps it and clears the pending `not-sent` mark. The pre-send record marks `sendAttempted`; if a reload finds no hash, the SDK reads the predicted escrow and never sends a second deposit automatically. A funded escrow recovers the row and locks it; an empty or unreadable one stays `funding-pending` with `reason: "hash-unrecorded"`. An ambiguous wallet send error is kept as `send-unknown`, not treated as a refusal. `swaps.reconcileFunding` reports the receipt, `OrderCreated`, escrow status and optional `wallet.nonce` evidence without signing; `start({ retryUnknownSend: true })` is the caller's explicit release. A reverted receipt does not unlock an escrow that reads funded, and `not-sent` is used only while no hash is known and no send was attempted.

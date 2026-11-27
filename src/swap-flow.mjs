@@ -387,22 +387,52 @@ export async function orderDecline(escrow, deps = {}) {
 // the simulator. The contract no longer has t0() (decision 2026-09-16, doc 26).
 // ONE CUT OF AN ESCROW. Every action decision needs the state, the ready mark and both deadlines from the SAME
 // block; reading them separately lets a claim judge one block and its deadline another. `order.read` takes the
-// caller's chain reader and block reader, asks every field at one tag, and returns that block's number, hash and
-// timestamp with the decoded values. A block that cannot be identified is a refusal, never a fabricated latest.
+// caller's chain reader and block reader, fixes the block height first, asks every field at that height, and returns
+// that block's number, hash and timestamp with the decoded values. A block that cannot be identified is a refusal,
+// never a fabricated latest.
 export async function orderRead(escrow, deps = {}) {
-  if (!escrow) throw new SdkError("bad-input", { field: "escrow" });
+  if (typeof escrow !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(escrow)) {
+    throw new SdkError("bad-input", { field: "escrow" });
+  }
   const call = deps.call || readContract;
   const readBlock = deps.block || deps.evmBlock;
   if (typeof readBlock !== "function") throw new SdkError("bad-input", { field: "block" });
   const blockTag = deps.blockTag === undefined || deps.blockTag === null ? "latest" : deps.blockTag;
+  // THE BLOCK IS FIXED BEFORE THE CALLS. Four reads at `latest` are four different cuts: the head can move between
+  // them, so the fields would belong to different blocks even though each request named the same tag. Resolve the
+  // tag once, then ask every field at that concrete height.
+  const first = await blockIdentity(readBlock, blockTag);
+  const at = "0x" + first.number.toString(16);
   const [rawStatus, rawReady, rawT1, rawReadyBy] = await Promise.all([
-    call({ to: escrow, data: encodeStatus(), block: blockTag }),
-    call({ to: escrow, data: encodeRead("ready"), block: blockTag }),
-    call({ to: escrow, data: encodeT1(), block: blockTag }),
-    call({ to: escrow, data: encodeRead("readyBy"), block: blockTag }),
+    call({ to: escrow, data: encodeStatus(), block: at }),
+    call({ to: escrow, data: encodeRead("ready"), block: at }),
+    call({ to: escrow, data: encodeT1(), block: at }),
+    call({ to: escrow, data: encodeRead("readyBy"), block: at }),
   ]);
+  // Read the same height again: the answer names the block that is canonical after the calls. A chain that moved on
+  // is not a refusal; a provider that answers a different height for a numeric tag is.
+  const block = await blockIdentity(readBlock, first.number);
+  if (block.number !== first.number) throw new SdkError("bad-input", { field: "block", why: "wrong-height" });
+  const answers = { status: rawStatus, ready: rawReady, t1: rawT1, readyBy: rawReadyBy };
+  const empty = Object.entries(answers).filter(([, value]) => String(value ?? "").replace(/^0x/i, "").length === 0);
+  if (empty.length === Object.keys(answers).length) {
+    // NO CODE AT THE ADDRESS. This is the predicted-escrow case: the creation transaction did not land, so every
+    // getter answers empty. Name it with the block that was read instead of decoding an empty status as a false one.
+    throw new SdkError("bad-input", { field: "escrow", why: "no-contract", block });
+  }
+  if (empty.length) throw new SdkError("bad-input", { field: empty[0][0], why: "empty", block });
+  return {
+    status: decodeStatus(rawStatus),
+    ready: BigInt(rawReady) !== 0n,
+    readyBy: decodeUint64(rawReadyBy, "readyBy()"),
+    t1: decodeUint64(rawT1, "t1()"),
+    block,
+  };
+}
+
+async function blockIdentity(readBlock, tag) {
   let block;
-  try { block = await readBlock(blockTag); }
+  try { block = await readBlock(tag); }
   catch { throw new SdkError("bad-input", { field: "block", why: "unreadable" }); }
   const number = Number(block && block.number);
   const timestamp = Number(block && block.timestamp);
@@ -413,16 +443,10 @@ export async function orderRead(escrow, deps = {}) {
   }
   // A NUMERIC TAG IS A CLAIM ABOUT THE BLOCK. When the caller named a concrete height, the reader must return that
   // height; a provider that answered another block has not answered this read.
-  const tagged = typeof blockTag === "number" ? blockTag
-    : (typeof blockTag === "string" && /^0x[0-9a-f]+$/i.test(blockTag) ? Number.parseInt(blockTag, 16) : null);
+  const tagged = typeof tag === "number" ? tag
+    : (typeof tag === "string" && /^0x[0-9a-f]+$/i.test(tag) ? Number.parseInt(tag, 16) : null);
   if (tagged !== null && tagged !== number) throw new SdkError("bad-input", { field: "block", why: "wrong-height" });
-  return {
-    status: decodeStatus(rawStatus),
-    ready: BigInt(rawReady) !== 0n,
-    readyBy: decodeUint64(rawReadyBy, "readyBy()"),
-    t1: decodeUint64(rawT1, "t1()"),
-    block: { number, hash: "0x" + hash, timestamp },
-  };
+  return { number, hash: "0x" + hash, timestamp };
 }
 
 export async function orderDeadlines(escrow, deps = {}) {

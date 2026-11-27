@@ -72,15 +72,27 @@ export async function orderLookup(escrow, request = {}) {
   const target = address(escrow);
   if (typeof request.factory !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(request.factory)) throw bad("factory");
   if (typeof request.evmLogs !== "function") throw bad("evmLogs");
+  // ONE CUT FOR THE LOOKUP TOO: the creation event and the terms/state are two log reads. When the caller brings a
+  // block reader, fix the end height first; otherwise `latest` would let the second request see a different chain
+  // than the first one.
+  let toBlock = request.toBlock === undefined ? "latest" : request.toBlock;
+  if (typeof request.evmBlock === "function") {
+    let block;
+    try { block = await request.evmBlock(toBlock); }
+    catch { throw bad("block", "unreadable"); }
+    const height = Number(block && block.number);
+    if (!Number.isSafeInteger(height) || height < 0) throw bad("block", "incomplete");
+    toBlock = height;
+  }
   const found = await findOrderByEscrow({
     escrow: target, factory: request.factory, deploymentBlock: number(request.deploymentBlock || 0, "deploymentBlock"),
-    evmLogs: request.evmLogs, toBlock: request.toBlock === undefined ? "latest" : request.toBlock,
+    evmLogs: request.evmLogs, toBlock,
   });
   if (!found) return { escrow: target, found: false, creationBlock: null, creationBlockHash: null, terms: null };
   const history = await readEscrowHistory({
     escrows: [target], evmLogs: request.evmLogs,
     fromBlock: found.creationBlock === null || found.creationBlock === undefined ? 0 : found.creationBlock,
-    toBlock: request.toBlock === undefined ? "latest" : request.toBlock,
+    toBlock,
     evmBlock: request.evmBlock || null,
   });
   const row = history.escrows.find((entry) => entry.escrow === target) || null;

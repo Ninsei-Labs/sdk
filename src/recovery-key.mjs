@@ -697,8 +697,14 @@ export async function readEscrowHistory({ escrows, evmLogs, fromBlock = 0, toBlo
     if (event.event === "HalfRevealed") {
       if (event.byClaimer) row.status.isClaimed = true;
       else row.status.isRefunded = true;
-    } else if (event.event === "Ready") row.status.ready = true;
-    else if (event.event === "Declined") { row.status.isRefunded = true; row.status.declined = true; }
+    } else if (event.event === "Ready") {
+      // THE DEPOSIT ALSO EMITS `Ready(address(0))`. It marks the deposit, not the locker's readiness: `ready()` stays
+      // false until the locker calls markReady(), which emits `Ready(locker)`. Only a non-zero marker is a ready mark.
+      if (event.by && BigInt(event.by) !== 0n) row.status.ready = true;
+    } else if (event.event === "Declined") {
+      row.status.isRefunded = true;
+      row.status.declined = true;
+    }
   }
   for (const row of byEscrow.values()) {
     row.events.sort((a, b) => Number(a.blockNumber || 0) - Number(b.blockNumber || 0) || Number(a.logIndex || 0) - Number(b.logIndex || 0));
