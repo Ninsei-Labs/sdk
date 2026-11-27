@@ -1264,6 +1264,7 @@ export interface XmrArrivalShadowResult {
 
 /** The XMR state the watch hands to the interface: the fact, the waiting state, or a refusal with a code. */
 export interface XmrArrivalVerdict {
+  /** True when the amount rule is met: `at-least` may settle on the required operator quorum; `exact` needs the complete read and no unagreed transfer. */
   readonly seen: boolean;
   readonly state: "arrived" | "pending" | "one-node" | "pool" | "confirming" | "locked" | "short" | "over" | "unknown";
   /** True only when every configured operator's complete read found no matching transaction, in a block or the pool. */

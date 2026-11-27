@@ -397,6 +397,51 @@ console.log("=== 6) THE AMOUNT RULES OVER THE SAME READ ===");
   });
   okIf(quorum.state === "arrived" && quorum.seen === true,
     "at-least settles with two complete operators when the third never answered");
+  // WITHOUT THE PRIMARY, TWO COMPLETE WITNESSES CAN STILL SETTLE A BUY. The primary is not promoted and the answer
+  // is incomplete for figures and absence, but the payment itself is agreed by the required operators.
+  const primaryDown = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (body.method === "get_info" && new URL(url).hostname === "a.example") return { ok: false, status: 503 };
+    return rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) } })(url, init);
+  };
+  const witnessOnly = await verifyArrival({
+    ...request(primaryDown, [
+      { url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" },
+      { url: "https://c.example", operator: "C" },
+    ], { amountRule: "at-least", expectedAtomic: ATOMIC_QUOTE }),
+  });
+  okIf(witnessOnly.state === "arrived" && witnessOnly.seen === true
+    && witnessOnly.failed.some((failure) => String(failure.url).includes("a.example")),
+    "at-least settles on two witnesses when the primary is down");
+  // AN UNAGREED EXTRA TRANSFER KEEPS `exact` UNKNOWN. The signed 0.30 is agreed by A and B; C also sees a 0.15 that
+  // nobody agrees with. Paying the exact amount is not enough to call the sale exact while a second transfer exists.
+  const baseAB = rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) } });
+  const baseC = rpc({ blockTxids: [T4], txs: { [T4]: fixture(ATOMIC_SHORT) } });
+  const extraOnC = async (url, init) => (
+    new URL(url).hostname === "c.example" ? baseC(url, init) : baseAB(url, init)
+  );
+  const extra = await verifyArrival({
+    ...request(extraOnC, [
+      { url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" },
+      { url: "https://c.example", operator: "C" },
+    ], { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE }),
+  });
+  okIf(extra.state === "unknown" && extra.seen === false,
+    "exact stays unknown when one operator sees an extra transfer");
+  // A POOL THAT CANNOT BE READ DOES NOT UNDO A MINED PAYMENT the required operators agree on.
+  const poolOnC = async (url, init) => (
+    new URL(url).hostname === "c.example"
+      ? rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) }, poolFails: true })(url, init)
+      : rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) } })(url, init)
+  );
+  const poolFailed = await verifyArrival({
+    ...request(poolOnC, [
+      { url: "https://a.example", operator: "A" }, { url: "https://b.example", operator: "B" },
+      { url: "https://c.example", operator: "C" },
+    ], { amountRule: "at-least", expectedAtomic: ATOMIC_QUOTE }),
+  });
+  okIf(poolFailed.state === "arrived" && poolFailed.seen === true,
+    "at-least keeps a mined payment when one operator's pool fails");
   const oneExact = await verifyArrival({
     ...request(rpc({ blockTxids: [T2], txs: { [T2]: fixture(ATOMIC_QUOTE) } }),
       [{ url: "https://a.example", operator: "A" }], { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE }),
