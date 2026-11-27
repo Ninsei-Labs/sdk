@@ -2552,6 +2552,7 @@ export interface OrderHistoryRequest {
 
 export interface OrderHistoryResult {
   readonly escrows: readonly OrderHistoryEntry[];
+  /** The block the read ended at. A resume replays a short window below it, then continues through the range. */
   readonly checkpoint: { readonly number: number; readonly hash: string } | null;
   readonly replayed: boolean;
   readonly fromBlock: number | string;
