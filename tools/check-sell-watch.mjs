@@ -89,12 +89,40 @@ try {
   };
   const result = await swapsWith(reader, { now: () => (readyBy + 1) * 1000 })
     .sellWatch({ escrow, pollMs: 1, timeoutMs: 2_000 });
-  check(result.state === "claim-open" && result.claimOpen === true && result.ready === false,
-    "a funded order past readyBy reports the open claim");
+  check(result.state === "claim-not-proven" && result.claimOpen === false && result.ready === false,
+    "a funded order past readyBy without proof does not open the claim");
   check(result.t1 === readyBy + 3_600 && result.secondsLeft === 3_599,
-    "the open claim carries t1 and the seconds left");
-  check(calls >= 1, "the open claim needs no extra wait");
-} catch (error) { check(false, "claim-open path failed: " + JSON.stringify(error && (error.code || error.message))); }
+    "the unproven claim carries t1 and the seconds left");
+  check(calls >= 1, "the unproven claim needs no extra wait");
+} catch (error) { check(false, "claim-not-proven path failed: " + JSON.stringify(error && (error.code || error.message))); }
+
+console.log("=== 4aa) EXACT PROOF OPENS THE UNMARKED CLAIM ===");
+{
+  const readyBy = 1_700_000_000;
+  const reader = async ({ data }) => {
+    if (data === engine.evm.ESCROW_METHODS.status) return status(true, false, false, 5n);
+    if (data === engine.evm.ESCROW_METHODS.ready) return word(0n);
+    if (data === engine.evm.ESCROW_METHODS.readyBy) return word(BigInt(readyBy));
+    if (data === engine.evm.ESCROW_METHODS.t1) return word(BigInt(readyBy + 3_600));
+    if (data === engine.evm.ESCROW_METHODS.termsHash) return "0x" + "00".repeat(32);
+    throw new Error("unexpected selector " + data);
+  };
+  const exact = { seen: true, state: "arrived", amountRule: "exact", amountComparison: "exact",
+    txid: "ab".repeat(32), amountAtomic: "1000" };
+  try {
+    const result = await swapsWith(reader, { now: () => (readyBy + 1) * 1000 })
+      .sellWatch({ escrow, pollMs: 1, timeoutMs: 2_000, arrival: exact });
+    check(result.state === "claim-open" && result.claimOpen === true && result.ready === false,
+      "exact proof opens the unmarked claim");
+  } catch (error) { check(false, "exact proof path failed: " + JSON.stringify(error && (error.code || error.message))); }
+  try {
+    const result = await swapsWith(reader, { now: () => (readyBy + 1) * 1000 })
+      .sellWatch({ escrow, pollMs: 1, timeoutMs: 2_000,
+        arrival: { ...exact, amountComparison: "short" } });
+    check(result.state === "claim-not-proven" && result.claimOpen === false,
+      "a short proof does not open the unmarked claim");
+  } catch (error) { check(false, "short proof path failed: " + JSON.stringify(error && (error.code || error.message))); }
+}
 
 console.log("=== 4a) THE CLAIM WINDOW CLOSES AT t1 ===");
 for (const [label, at] of [["at t1", 1_700_003_600], ["inside the last minute", 1_700_003_570]]) {
