@@ -1,6 +1,7 @@
 ## Unreleased — 2026-11-27
 
 - `order.read` fixes the block height before it asks the escrow, then reads `status`, `ready`, `readyBy` and `t1` at that same height; if a reorg replaces the block, it reads the fields again at the same height. A block that answers another height is a named refusal. The deposit's `Ready(address(0))` marker no longer makes `order.history` or `order.lookup` report the locker's ready mark, and a lookup fixes one end height for both its creation and terms reads.
+- `order.history` for a key reads terms and settlement events by topic and filters locally, so the request does not name the key's escrows; the same log and block request shape is used for none, one or two orders. A resume replays a short window below its checkpoint to recover an event that the first answer's logs lagged, and a row whose terms were not read is a named refusal instead of an unfunded order.
 
 ## Unreleased — 2026-11-26
 

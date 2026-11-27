@@ -57,7 +57,7 @@ const b64 = (bytes) => {
 };
 const unb64 = (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
 
-const bad = (field) => new SdkError("bad-input", { field });
+const bad = (field, why = null) => new SdkError("bad-input", why ? { field, why } : { field });
 const failed = (stage) => new SdkError("recovery-failed", { stage });
 
 function normalizeWords(value) {
@@ -533,6 +533,11 @@ function decodeEscrowEvents(logs, allowedEscrows = null) {
 }
 
 const ORDER_TERMS_WORDS = 15;
+// A RESUMED HISTORY REPLAYS A SHORT WINDOW BELOW ITS CHECKPOINT. An RPC can answer logs only up to a block below
+// the head it just named; the checkpoint is at that head. Resuming exactly at checkpoint + 1 would lose an event
+// that was already on chain but not in the earlier answer. Twelve blocks cover the lag the reads are tested with;
+// the common keys deduplicate the replayed events, so a replay is not a duplicate row.
+const HISTORY_REPLAY_BLOCKS = 12;
 const searchStartBlock = (madeBlock, deploymentBlock) => {
   const made = Number(madeBlock);
   const deployment = Number(deploymentBlock);
@@ -613,9 +618,11 @@ function decodeOrderTerms(log) {
  * ONE HISTORY READ FOR A SET OF ESCROWS. The terms and the settlement events come from logs, so a caller does not
  * ask the RPC about each escrow separately. Removed logs are dropped. `checkpoint` is `{ number, hash }`; when the
  * anchored block has changed, the read starts again from `fromBlock` instead of continuing from a moved chain.
+ * With `privateRead`, the log request carries no address filter and the answer is filtered locally; an empty set
+ * still sends the request so a key with no orders is indistinguishable from one with orders.
  */
 export async function readEscrowHistory({ escrows, evmLogs, fromBlock = 0, toBlock = "latest", checkpoint = null,
-  previous = null, evmBlock = null } = {}) {
+  previous = null, evmBlock = null, privateRead = false } = {}) {
   if (!Array.isArray(escrows)) throw bad("escrows");
   const addresses = [...new Set(escrows.map((escrow) => {
     if (typeof escrow !== "string" || !ADDRESS_RE.test(escrow)) throw bad("escrows");
@@ -634,19 +641,27 @@ export async function readEscrowHistory({ escrows, evmLogs, fromBlock = 0, toBlo
         const anchored = await evmBlock(Number(checkpoint.number));
         const expected = String(checkpoint.hash).replace(/^0x/i, "").toLowerCase();
         const got = String(anchored && anchored.hash || "").replace(/^0x/i, "").toLowerCase();
-        if (anchored && got && got === expected) effectiveFrom = Number(checkpoint.number) + 1;
-        else replayed = true;
+        if (anchored && got && got === expected) {
+          // Replay below the checkpoint, not exactly above it: the previous answer may have lagged the block it
+          // anchored. A moved checkpoint still replays the whole caller range.
+          const floor = Number(fromBlock);
+          effectiveFrom = Number.isSafeInteger(floor)
+            ? Math.max(floor, Number(checkpoint.number) - HISTORY_REPLAY_BLOCKS)
+            : Number(checkpoint.number) + 1;
+        } else replayed = true;
       } catch { replayed = true; }
     }
   } else if (checkpoint) replayed = true;
   // An empty set is a valid history: a key with no orders must get an empty answer, not a refusal. It still resolves
-  // and returns a block checkpoint so the caller can resume the next read.
-  const logs = addresses.length ? await readLogs(evmLogs, {
-    address: addresses,
+  // and returns a block checkpoint so the caller can resume the next read. A private key history still sends its
+  // topic-only request when the key has no escrows, so the RPC sees the same sequence for an empty key.
+  const request = {
     topics: [[ORDER_TERMS_TOPIC, ESCROW_EVENT_TOPICS.halfRevealed, ESCROW_EVENT_TOPICS.ready, ESCROW_EVENT_TOPICS.declined]],
     fromBlock: effectiveFrom,
     toBlock,
-  }) : [];
+  };
+  if (!privateRead) request.address = addresses;
+  const logs = privateRead || addresses.length ? await readLogs(evmLogs, request) : [];
   const terms = new Map();
   for (const log of logs) {
     const decoded = decodeOrderTerms(log);
@@ -683,6 +698,12 @@ export async function readEscrowHistory({ escrows, evmLogs, fromBlock = 0, toBlo
     if (row.terms) continue;
     const decoded = terms.get(escrow);
     if (decoded) { row.terms = decoded; row.status.isFunded = true; }
+  }
+  // AN UNREAD ORDER IS NOT AN UNFUNDED ONE. A range above the creation block, a resume without the previous row,
+  // or an answer that omitted OrderTerms leaves the row without terms. Reporting `isFunded: false` there would hide
+  // an order that exists; name the missing read instead.
+  for (const row of byEscrow.values()) {
+    if (!row.terms) throw bad("terms", "unread");
   }
   const settlement = decodeEscrowEvents(logs, new Set(addresses));
   const seen = new Map([...byEscrow].map(([escrow, row]) => [escrow, new Set(row.events.map((event) =>

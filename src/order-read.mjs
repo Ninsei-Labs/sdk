@@ -29,8 +29,9 @@ const blockOf = async (readBlock, tag) => {
 };
 
 /**
- * Read the state and terms of a list of escrows, or of every order made with a key, from logs. A key search first
- * finds the escrows with `findSwaps`, then reads the same terms and settlement events as an explicit list would.
+ * Read the state and terms of a list of escrows, or of every order made with a key, from logs. A key search finds
+ * the escrows with `findSwaps`, then reads terms and settlement events by topic without naming the escrows; an
+ * explicit list keeps its address filter because the caller named the escrows.
  */
 export async function orderHistory(request = {}) {
   if (!request || typeof request !== "object") throw bad("request");
@@ -39,6 +40,7 @@ export async function orderHistory(request = {}) {
   let escrows = request.escrows;
   let found = null;
   let fromBlock = request.fromBlock;
+  let privateRead = false;
   const explicit = escrows !== undefined && escrows !== null;
   if (explicit && (fromBlock === undefined || fromBlock === null)) {
     // AN EXPLICIT LIST HAS NO SEARCH START OF ITS OWN. Starting at genesis would turn one call into a full-chain
@@ -47,22 +49,24 @@ export async function orderHistory(request = {}) {
   }
   if (escrows === undefined || escrows === null) {
     if (typeof request.mnemonic !== "string") throw bad("escrows");
-    found = await findSwaps({ ...request, evmLogs });
-    escrows = found.swaps.map((order) => order.escrow);
-    // A key history starts where its search started, not at block zero. With orders the earliest creation block is
-    // enough (terms and settlement follow it); an empty key uses the same shared start rule as findSwaps.
+    // THE SEARCH START DOES NOT DEPEND ON THE FOUND ORDERS. The same key and chain conditions must send the same
+    // range whether the key has two orders, one or none; deriving it from the earliest creation block would leak
+    // that block through the RPC request and make an empty key look different.
     if (fromBlock === undefined || fromBlock === null) {
-      const blocks = found.swaps.map((order) => Number(order.blockNumber)).filter((value) => Number.isSafeInteger(value) && value >= 0);
-      fromBlock = blocks.length ? Math.min(...blocks)
-        : (await recoveryStartBlock({ madeBlock: request.madeBlock, deploymentBlock: Number(request.deploymentBlock) || 0,
-          startAt: request.startAt, head: request.head, blockAt: request.blockAt })).block;
+      fromBlock = (await recoveryStartBlock({ madeBlock: request.madeBlock,
+        deploymentBlock: Number(request.deploymentBlock) || 0, startAt: request.startAt, head: request.head,
+        blockAt: request.blockAt })).block;
     }
+    found = await findSwaps({ ...request, fromBlock, evmLogs });
+    escrows = found.swaps.map((order) => order.escrow);
+    privateRead = true;
   }
   if (!Array.isArray(escrows)) throw bad("escrows");
   const history = await readEscrowHistory({
     escrows, evmLogs, fromBlock: fromBlock === undefined || fromBlock === null ? 0 : fromBlock,
     toBlock: request.toBlock === undefined ? "latest" : request.toBlock,
     checkpoint: request.checkpoint || null, previous: request.previous || null, evmBlock: request.evmBlock || null,
+    privateRead,
   });
   return { ...history, ...(found ? { swaps: found.swaps } : {}) };
 }
