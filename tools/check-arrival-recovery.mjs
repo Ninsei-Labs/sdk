@@ -445,6 +445,28 @@ console.log("=== 6) THE AMOUNT RULES OVER THE SAME READ ===");
     "a complete exact read is the only one that offers the sale arrival");
 }
 
+console.log("=== 7) SPENT STATUS GOES ONLY TO THE TRUSTED PRIMARY AND CAN BE TURNED OFF ===");
+{
+  const images = ["ab".repeat(32)];
+  const statusCalls = [];
+  const base = rpc();
+  const trackedFetch = async (url, init) => {
+    if (String(url).endsWith("/is_key_image_spent")) statusCalls.push(new URL(url).hostname);
+    return base(url, init);
+  };
+  await verifyArrival({
+    ...request(trackedFetch, undefined, { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE,
+      keyImages: images, spentStatus: false }),
+  });
+  okIf(statusCalls.length === 0, "spentStatus: false sent no key images to any node");
+  await verifyArrival({
+    ...request(trackedFetch, undefined, { amountRule: "exact", expectedAtomic: ATOMIC_QUOTE,
+      keyImages: images, spentStatus: true }),
+  });
+  okIf(statusCalls.length === 1 && statusCalls[0] === "a.example",
+    "spentStatus: true asked only the primary for key images");
+}
+
 return { note: "recovery reads every transfer without the quoted amount", problems: fails, notes: fails.length ? [] : ["short, over, split and pool transfers are returned"] };
 };
 
