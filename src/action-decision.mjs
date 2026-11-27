@@ -10,6 +10,7 @@ export const ACTION_DECISION_DEFAULTS = Object.freeze({
   refundMarginSec: 180,
   claimMarginSec: 60,
   markReadyMarginSec: 60,
+  maxBlockAgeSec: 600,
 });
 
 const bad = (field, why = null) => new SdkError("bad-input", why ? { field, why } : { field });
@@ -41,6 +42,25 @@ function readEscrow(value) {
   return { status: { isFunded, isClaimed, isRefunded }, ready, readyBy, t1, blockTimeSec };
 }
 
+// A TXID WITHOUT AN OUTPUT IS NOT A PAYMENT. The sale's send rule and the buy's confirming rule both need to know
+// whether the address already holds money; the verdict's `outputs` (or its transfers) is what proves that.
+function paymentEvidence(arrival) {
+  if (!arrival || typeof arrival !== "object") return null;
+  const transfers = Array.isArray(arrival.transfers) ? arrival.transfers : [];
+  const outputs = [
+    ...(Array.isArray(arrival.outputs) ? arrival.outputs : []),
+    ...transfers.flatMap((transfer) => (Array.isArray(transfer.outputs) ? transfer.outputs : [])),
+  ];
+  const txid = arrival.txid || transfers.find((transfer) => transfer.txid)?.txid || null;
+  const amount = Number(arrival.amountAtomic);
+  if (!txid || !outputs.length || !Number.isFinite(amount) || amount <= 0) return null;
+  const operators = new Set([
+    ...(Array.isArray(arrival.operators) ? arrival.operators : []),
+    ...transfers.flatMap((transfer) => (Array.isArray(transfer.operators) ? transfer.operators : [])),
+  ]);
+  return { amount, operators: operators.size, comparison: arrival.amountComparison };
+}
+
 // The arrival's kind is the part the decision needs. An error code is kept as the same kind the returned verdict
 // would carry, so a caller that still catches `xmr-underpaid`/`xmr-locked` gets the same rule.
 function arrivalKindOf(arrival, arrivalError) {
@@ -49,8 +69,18 @@ function arrivalKindOf(arrival, arrivalError) {
   if (code === "xmr-locked") return "locked";
   if (code) return "unknown";
   if (!arrival || typeof arrival !== "object") return "unknown";
-  if (arrival.absent === true) return "absent";
   const state = String(arrival.state || "");
+  // AN UNKNOWN READ THAT ALSO CLAIMS ABSENCE IS STILL UNKNOWN (#388 A). The old order let the flag win, so a
+  // partial read was labelled complete and the buy could ask the wallet for a refund.
+  if (state === "unknown") {
+    if (arrival.absent === true) return "unknown";
+    const payment = paymentEvidence(arrival);
+    // Two required operators saw the amount while confirmations accrue. An incomplete third node does not turn
+    // that into a refund offer; a single operator does.
+    if (payment && payment.operators >= 2) return payment.comparison === "short" ? "short" : "seen";
+    return "unknown";
+  }
+  if (arrival.absent === true) return "absent";
   if (state === "arrived") return "arrived";
   // `over` is an at-least payment that passed the signed amount; a buy may mark it ready. An exact sale claim still
   // refuses it through `exactArrival` because the comparison is not `"exact"`.
@@ -60,9 +90,6 @@ function arrivalKindOf(arrival, arrivalError) {
   if (state === "pool") return "pool";
   if (state === "one-node") return "one";
   if (state === "confirming" || state === "pending") {
-    if (arrival.absent === true) return "absent";
-    // Both operators can see the whole amount while its confirmations are still accruing. That is not a missing
-    // payment and it is not a claim yet; it is `seen`.
     const amount = String(arrival.amountAtomic ?? "");
     if (arrival.txid && amount && amount !== "0") {
       if (arrival.amountComparison === "short") return "short";
@@ -73,8 +100,10 @@ function arrivalKindOf(arrival, arrivalError) {
   return "unknown";
 }
 
+// THE UNMARKED CLAIM NEEDS THE EXACT RULE'S OWN COMPARISON. An `at-least` verdict can also sum to the signed amount,
+// and a legacy verdict may carry no comparison at all; neither proves a sale's exact arrival.
 const exactArrival = (arrival, kind) =>
-  kind === "arrived" && (arrival.amountComparison === undefined || arrival.amountComparison === "exact");
+  kind === "arrived" && arrival.amountRule === "exact" && arrival.amountComparison === "exact";
 
 const knownArrival = (kind) => ["arrived", "short", "locked", "absent"].includes(kind);
 
@@ -104,17 +133,17 @@ export function actionDecision(request) {
   const refundMarginSec = optionalInt(request.refundMarginSec, "refundMarginSec", ACTION_DECISION_DEFAULTS.refundMarginSec);
   const claimMarginSec = optionalInt(request.claimMarginSec, "claimMarginSec", ACTION_DECISION_DEFAULTS.claimMarginSec);
   const markReadyMarginSec = optionalInt(request.markReadyMarginSec, "markReadyMarginSec", ACTION_DECISION_DEFAULTS.markReadyMarginSec);
-  // A SALE MUST NAME ITS LEAD. The node's signed window owns this number; a silent 1200 s default would recreate the
-  // disagreement issue #390 removes.
-  const saleLeadSec = request.side === "sale"
-    ? int(request.saleLeadSec, "saleLeadSec")
-    : optionalInt(request.saleLeadSec, "saleLeadSec", 0);
+  // A CLOSING WINDOW MAY NOT REST ON AN OLD BLOCK. The age is measured against the device clock, which can only
+  // narrow a closing window; a refund opened by a block at `t1` is not age-limited.
+  const maxBlockAgeSec = optionalInt(request.maxBlockAgeSec, "maxBlockAgeSec", ACTION_DECISION_DEFAULTS.maxBlockAgeSec);
+  const staleEscrow = deviceTimeSec - blockTimeSec > maxBlockAgeSec;
   const earlyRefundClosesAt = readyBy - refundMarginSec;
   const claimClosesAt = t1 - claimMarginSec;
 
   if (request.side === "buy") {
     // The settlement deadline is a read-block fact. A device clock at or after t1 must not open it.
     if (blockTimeSec >= t1) return answer("refund", "late-refund");
+    if (staleEscrow) return answer("unknown", "escrow-stale");
     if (blockTimeSec >= readyBy) return answer("none", "claim-window");
     if (ready) return answer("none", "ready-marked");
 
@@ -142,12 +171,14 @@ export function actionDecision(request) {
     // A device clock may close the window even when the read block is still early; it may never open one.
     if (closingNow >= earlyRefundClosesAt) return answer("none", "refund-margin");
     if (blockTimeSec < refundOpensAt) return answer("later", "refund-window-opens", refundOpensAt);
-    return answer("refund", "refund-window");
+    return answer("refund", "refund-window", earlyRefundClosesAt);
   }
 
   // Sale: the seller may start sending XMR until the node's lead before readyBy. The same deadline is used when a
   // card is reopened; the decision does not sign or send.
   if (blockTimeSec >= t1) return answer("none", "claim-window-closed");
+  if (staleEscrow) return answer("unknown", "escrow-stale");
+  const payment = paymentEvidence(arrival);
   if (ready) {
     if (closingNow < claimClosesAt) return answer("claim", "claim-ready", claimClosesAt);
     return answer("none", "claim-margin");
@@ -164,10 +195,13 @@ export function actionDecision(request) {
     return answer("none", "claim-not-proven");
   }
 
+  // THE ADDRESS ALREADY HOLDS MONEY. A reopened card must not ask for the same XMR again, whether the read is
+  // full, short, locked, in the pool, seen by one operator or still unknown: wait for the claim window instead.
+  if (payment || kind === "seen" || kind === "arrived") return answer("later", "claim-window-opens", readyBy);
+  // The lead is required only when XMR may still be sent. A marked claim, an exact unmarked one and an expired sale
+  // must answer without it.
+  const saleLeadSec = int(request.saleLeadSec, "saleLeadSec");
   const sendClosesAt = readyBy - saleLeadSec;
-  // The money is already at the joint address. Sending it again would be a second payment; wait for the claim to
-  // open at readyBy instead. An exact amount is the only arrival that can claim without the Ready mark.
-  if (kind === "seen" || kind === "arrived") return answer("later", "claim-window-opens", readyBy);
   if (blockTimeSec < sendClosesAt && closingNow < sendClosesAt) return answer("sendXmr", "send-window", sendClosesAt);
   // The ring is closed, but the claim may still open at readyBy if the exact amount is proven by then.
   return answer("later", "claim-window-opens", readyBy);

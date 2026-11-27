@@ -37,6 +37,9 @@ const pending = () => ({ seen: false, state: "confirming", txid: "dd".repeat(32)
 const unknown = () => ({ seen: false, state: "unknown", txid: null, amountAtomic: "0", amountRule: "exact" });
 const oneNode = () => ({ seen: false, state: "one-node", txid: "ee".repeat(32), amountAtomic: "1000",
   amountRule: "exact", amountComparison: "exact" });
+const paid = (base = arrived(), overrides = {}) => ({ ...base, outputs: [
+  { index: 0, key: "11".repeat(32), amountAtomic: "1000", amountVerified: true, derivation: "22".repeat(32) },
+], ...overrides });
 
 const decide = (request) => actionDecision({
   side: "buy",
@@ -45,6 +48,7 @@ const decide = (request) => actionDecision({
   deviceTimeSec: BLOCK,
   refundLeadSec: 780,
   saleLeadSec: 1_200,
+  maxBlockAgeSec: 604_800,
   ...request,
 });
 
@@ -116,8 +120,9 @@ console.log("=== 4) BUY: AN UNKNOWN OR ABSENT READ WAITS FOR THE REFUND WINDOW =
   equal(offered.action, "refund", "an unknown read in the warning window is offered as a refund");
   equal(offered.reason, "refund-window", "the offer names the unknown read");
   equal(offered.read, "unknown", "the offer keeps the read uncertainty visible");
+  equal(offered.untilSec, READY_BY - 180, "the early refund names when it closes");
   const absentFlag = decide({ escrow: escrow({ block: { ...escrow().block, timestamp: near } }), arrival: { ...absent(), state: "unknown" }, deviceTimeSec: near });
-  equal(absentFlag.read, "complete", "an explicit absent flag stays a complete read");
+  equal(absentFlag.read, "unknown", "an unknown answer that also says absent stays unread");
 }
 
 console.log("=== 5) BUY: THE DEVICE CLOCK ONLY NARROWS THE EARLY WINDOW ===");
@@ -258,6 +263,59 @@ console.log("=== 15) THE BOUNDARIES ARE THE CONTRACT'S, NOT ROUNDED ===");
   equal(at(-1).action, "none", "the last second before readyBy has no early refund");
   equal(at(0).action, "none", "readyBy itself is the claim window");
   equal(at(1).action, "none", "one second after readyBy is the claim window");
+}
+
+console.log("=== 16) REOPENED SALE, EXACT PROOF, STALE BLOCK, LAZY LEAD ===");
+{
+  const beforeSend = READY_BY - 2_000;
+  const sale = (arrival, extra = {}) => decide({ side: "sale",
+    escrow: escrow({ block: { ...escrow().block, timestamp: beforeSend } }), arrival, deviceTimeSec: beforeSend, ...extra });
+  const shortPayment = sale(paid(short()));
+  equal(shortPayment.action, "later", "a short payment at the address is not sent again");
+  equal(shortPayment.reason, "claim-window-opens", "the short payment waits for readyBy");
+  const poolPayment = sale(paid(unknown(), { state: "pool", txid: "ff".repeat(32), amountAtomic: "1000" }));
+  equal(poolPayment.action, "later", "a pool payment at the address is not sent again");
+  const txidOnly = sale({ ...unknown(), txid: "ff".repeat(32), amountAtomic: "1000" });
+  equal(txidOnly.action, "sendXmr", "a txid without an output is not a payment");
+
+  const afterReadyBy = READY_BY + 10;
+  const unmarked = (arrival) => decide({ side: "sale",
+    escrow: escrow({ block: { ...escrow().block, timestamp: afterReadyBy } }), arrival, deviceTimeSec: afterReadyBy });
+  equal(unmarked(arrived({ amountComparison: undefined })).reason, "claim-not-proven",
+    "an arrived verdict without its comparison cannot claim");
+  equal(unmarked(arrived({ amountRule: "at-least" })).reason, "claim-not-proven",
+    "an at-least verdict cannot claim an exact sale");
+
+  const near = READY_BY - 700;
+  const twoOperators = decide({ escrow: escrow({ block: { ...escrow().block, timestamp: near } }),
+    arrival: { state: "unknown", txid: "aa".repeat(32), amountAtomic: "1000", amountRule: "exact",
+      amountComparison: "exact", operators: ["a", "b"], outputs: [{ index: 0, key: "11".repeat(32) }] },
+    deviceTimeSec: near });
+  equal(twoOperators.action, "later", "two required operators seeing the amount are not refunded");
+  equal(twoOperators.reason, "confirmations", "the two-operator payment waits for confirmations");
+
+  const staleDevice = BLOCK + 601;
+  const staleBuy = decide({ escrow: escrow({ block: { ...escrow().block, timestamp: BLOCK } }),
+    arrival: unknown(), deviceTimeSec: staleDevice, maxBlockAgeSec: 600 });
+  equal(staleBuy.action, "unknown", "an old block closes the buy windows");
+  equal(staleBuy.reason, "escrow-stale", "the stale refusal names the age rule");
+  const staleSale = decide({ side: "sale", escrow: escrow({ ready: true, block: { ...escrow().block, timestamp: BLOCK } }),
+    arrival: unknown(), deviceTimeSec: staleDevice, maxBlockAgeSec: 600 });
+  equal(staleSale.action, "unknown", "an old block closes a marked sale claim");
+  equal(staleSale.reason, "escrow-stale", "the sale refusal names the age rule");
+  const late = decide({ escrow: escrow({ block: { ...escrow().block, timestamp: T1 } }),
+    arrival: unknown(), deviceTimeSec: T1 + 3_600, maxBlockAgeSec: 600 });
+  equal(late.action, "refund", "a refund opened at t1 is not age-limited");
+
+  const markedAt = READY_BY - 500;
+  const markedNoLead = decide({ side: "sale", saleLeadSec: null,
+    escrow: escrow({ ready: true, block: { ...escrow().block, timestamp: markedAt } }),
+    arrival: unknown(), deviceTimeSec: markedAt });
+  equal(markedNoLead.action, "claim", "a marked claim does not need the sale lead");
+  const expiredNoLead = decide({ side: "sale", saleLeadSec: undefined,
+    escrow: escrow({ block: { ...escrow().block, timestamp: T1 } }), arrival: unknown(), deviceTimeSec: T1 });
+  equal(expiredNoLead.action, "none", "an expired sale does not need the sale lead");
+  equal(expiredNoLead.reason, "claim-window-closed", "the expired sale names its window");
 }
 
 if (problems.length) {

@@ -2458,7 +2458,9 @@ export interface ActionDecisionRequest {
   readonly claimMarginSec?: number;
   /** The protective margin that closes the ready mark. Default 60 s. */
   readonly markReadyMarginSec?: number;
-  /** The lead before readyBy for sending XMR; required for a sale, supplied by the node's signed window. */
+  /** The oldest escrow block a closing window may rely on, measured against the device clock. Default 600 s. */
+  readonly maxBlockAgeSec?: number;
+  /** The lead before readyBy for sending XMR; required only when XMR may still be sent, supplied by the node's signed window. */
   readonly saleLeadSec?: number;
 }
 
@@ -2483,6 +2485,7 @@ export declare const ACTION_DECISION_DEFAULTS: Readonly<{
   readonly refundMarginSec: number;
   readonly claimMarginSec: number;
   readonly markReadyMarginSec: number;
+  readonly maxBlockAgeSec: number;
 }>;
 
 /** Terms are the on-chain OrderTerms event: the fee and claim tip are not in OrderCreated. */
