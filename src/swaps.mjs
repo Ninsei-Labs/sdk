@@ -39,6 +39,7 @@ import {
 } from "./recovery-key.mjs";
 // THE XMR ARRIVAL CHECK ON TWO NODES - IN THE CORE, from the same mirrored rule and block parser.
 import * as xmrArrival from "./xmr-arrival.mjs";
+import { actionDecision } from "./action-decision.mjs";
 // THE MAKER'S DECLINE: the escrow's `Declined` event is the decision. The node's `declined` +
 // `compliance` status is an observation on the wire, not a second source this file trusts; the detectors and the
 // neutral vocabulary live in one module, so this file names the state instead of re-reading either.
@@ -1038,7 +1039,40 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
       // A TRANSACTION THAT IS THERE BUT NOT YET SETTLED IS NOT AN EMPTY ADDRESS. `pending` with a txid or height,
       // and `one-node`, mean the money was seen; only the explicit absence marker proves there is nothing to wait
       // for. A throw from `verify` above never reaches here and signs nothing either.
-      if (!verdict || verdict.absent !== true) return { refunded: false, state: "arrival-pending", leftSec, verdict };
+      if (!verdict || verdict.absent !== true || verdict.state === "unknown") {
+        return { refunded: false, state: "arrival-pending", leftSec, verdict };
+      }
+      // ONE ESCROW CUT FOR THE DECISION, ONLY AFTER THE ARRIVAL GUARDS. An arrived payment must report `arrived`
+      // even when the EVM read is down; an absent read is the case that needs the cut's margin and age.
+      let escrowCut = null;
+      try {
+        if (typeof deps.orderRead === "function") {
+          escrowCut = await deps.orderRead({ escrow, request });
+        } else {
+          const readBlock = request.readBlock || deps.block || (typeof evmBlock === "function" ? evmBlock : null);
+          if (readBlock) escrowCut = await flow.orderRead(escrow, { call: reader, block: readBlock, blockTag: request.blockTag });
+        }
+      } catch (error) {
+        return { refunded: false, state: "escrow-unread", leftSec, verdict,
+          error: (error && error.params) || null };
+      }
+      // THE ONE DECISION OWNS THE CLOSING WINDOW. An absent read near the 180 s margin, or an escrow cut that is
+      // older than `maxBlockAgeSec`, is not permission to call the wallet.
+      if (escrowCut) {
+        let decision = null;
+        try {
+          decision = actionDecision({ side: "buy", escrow: escrowCut, arrival: verdict,
+            deviceTimeSec: nowSec, refundLeadSec: leadSec, requiredOperators: request.requiredOperators });
+        } catch (error) {
+          return { refunded: false, state: "escrow-unread", leftSec, verdict,
+            error: (error && error.params) || null };
+        }
+        if (decision.action !== "refund") {
+          const state = decision.action === "unknown" ? "escrow-unknown"
+            : decision.reason === "refund-margin" ? "refund-margin" : "no-action";
+          return { refunded: false, state, reason: decision.reason, leftSec, verdict, decision };
+        }
+      }
       const res = await refund({ escrow, halfLocker, expect: request.expect, onStep: request.onStep }, request.wallet);
       return { refunded: true, state: "refunded", hash: (res && res.hash) || null, leftSec, verified: verdict };
     },

@@ -1347,6 +1347,11 @@ export interface AutoRefundRequest {
   readonly leadSec?: number;
   readonly timeoutMs?: number;
   readonly nowSec?: number;
+  /** The EVM block reader used to pin the escrow cut; without it the old time gate is kept. */
+  readonly readBlock?: (tag: number | string) => Promise<{ readonly number: number; readonly timestamp: number; readonly hash: string }>;
+  readonly blockTag?: number | string | null;
+  /** Operators that must agree before an incomplete read may be treated as a payment. */
+  readonly requiredOperators?: number;
   readonly onStep?: (step: string) => void;
 }
 
@@ -1355,18 +1360,24 @@ export interface AutoRefundDeps {
   readonly verify?: (request: unknown) => Promise<{ seen: boolean }>;
   readonly refund?: (request: unknown, wallet: unknown) => Promise<{ hash?: string | null }>;
   readonly now?: () => number;
+  readonly orderRead?: (request: { escrow: string; request: unknown }) => Promise<unknown>;
+  readonly block?: (tag: number | string) => Promise<{ readonly number: number; readonly timestamp: number; readonly hash: string }>;
 }
 
 /** What the client's own refund decided: refunded, waiting, still time, or the XMR is there. */
 export interface AutoRefundVerdict {
   readonly refunded: boolean;
   readonly state: "refunded" | "waiting" | "claim-window" | "arrival-pending" | "arrived" |
-    "arrival-underpaid" | "arrival-locked";
+    "arrival-underpaid" | "arrival-locked" | "escrow-unread" | "escrow-unknown" | "refund-margin" | "no-action";
   readonly hash?: string | null;
   readonly leftSec: number;
   readonly needSec?: number;
   readonly readyBy?: number;
   readonly nowSec?: number;
+  readonly reason?: string;
+  readonly verdict?: unknown;
+  readonly decision?: unknown;
+  readonly error?: unknown;
 }
 
 /**
