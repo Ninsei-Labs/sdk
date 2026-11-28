@@ -817,8 +817,31 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
     const blockTimeSec = Math.max(1, Number(limitOf("xmrBlockTimeSec", 120)));
     const configuredLead = Number(limitOf("sellReadyLeadSec", 0));
     const leadSec = Number.isFinite(configuredLead) && configuredLead > 0 ? configuredLead : confirmations * blockTimeSec;
-    if (chainNow + leadSec >= Number(deadlines.readyBy)) {
-      throw new SdkError("quote-refused", { step: "send-xmr", why: "deadline-too-close" });
+    const deviceNowRaw = typeof now === "function" ? Number(now()) : Date.now();
+    const deviceNow = Number.isFinite(deviceNowRaw) ? Math.floor(deviceNowRaw / 1000) : null;
+    if (!Number.isSafeInteger(deviceNow) || deviceNow <= 0) {
+      throw new SdkError("quote-refused", { step: "send-xmr", why: "clock-unreadable" });
+    }
+    // THE SAME DECISION AS THE CARD. A marked order has nothing to send; otherwise the send window closes by the
+    // later of the chain and device clocks, exactly as `actionDecision` decides it.
+    let ready = false;
+    try {
+      ready = BigInt(await gate.call({ to: escrow, data: engine.escrow.encodeRead("ready"), block: gate.blockTag })) !== 0n;
+    } catch (e) {
+      throw new SdkError("quote-refused", { step: "send-xmr", why: "ready-unreadable" });
+    }
+    let decision = null;
+    try {
+      decision = actionDecision({ side: "sale",
+        escrow: { status, ready, readyBy: Number(deadlines.readyBy), t1: Number(deadlines.t1),
+          block: { timestamp: chainNow } },
+        arrival: null, deviceTimeSec: deviceNow, saleLeadSec: leadSec });
+    } catch (e) {
+      throw new SdkError("quote-refused", { step: "send-xmr", why: "decision-unreadable" });
+    }
+    if (decision.action !== "sendXmr") {
+      const why = ready ? "already-ready" : decision.reason === "escrow-stale" ? "escrow-stale" : "deadline-too-close";
+      throw new SdkError("quote-refused", { step: "send-xmr", why, decision });
     }
     try { await flow.assertOrderSlots(escrow, expect, "send-xmr", gate); }
     catch (e) {

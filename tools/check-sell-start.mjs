@@ -53,6 +53,7 @@ const bytes = (value) => String(value).replace(/^0x/, "").padStart(64, "0");
 const slotReads = {
   [encodeRead("t1")]: word(order.t1),
   [encodeRead("readyBy")]: word(order.readyBy),
+  [encodeRead("ready")]: word(0),
   [encodeRead("termsHash")]: "00".repeat(32),
   [encodeRead("edPointLocker")]: bytes(offer.nodeHalf.edPoint),
   [encodeRead("edPointClaimer")]: bytes(quote.edPointClaimer),
@@ -158,6 +159,30 @@ try {
   }
   check(seenBlocks.length > 0 && seenBlocks.every((block) => block === "0x7b"),
     "status, deadlines and slots were read at one block");
+}
+// A MARKED ORDER HAS NOTHING TO SEND, and a device clock ahead of the chain narrows the same send window.
+{
+  const marked = createSwaps({ config: {}, call: gateRead(1, { [encodeRead("ready")]: word(1) }) });
+  try {
+    await marked.startSell({ offer: { ...gateOffer, escrow: "0x" + "fe".repeat(20),
+      quote: { ...gateOffer.quote, id: "oq_gate_ready" }, jointAddress: "5" + "G".repeat(94) },
+      recoveryKey: mnemonic, onRecoveryKey: accept });
+    check(false, "an already marked order passed the send gate");
+  } catch (error) {
+    check(error && error.code === "quote-refused" && error.params && error.params.why === "already-ready",
+      "an already marked order is refused without a send");
+  }
+  const fastDevice = createSwaps({ config: {}, call: read, now: () => (order.readyBy - 1_000) * 1000,
+    evmBlock: async () => ({ number: 123, timestamp: order.readyBy - 1_500 }) });
+  try {
+    await fastDevice.startSell({ offer: { ...gateOffer, escrow: "0x" + "ff".repeat(20),
+      quote: { ...gateOffer.quote, id: "oq_gate_device" }, jointAddress: "5" + "H".repeat(94) },
+      recoveryKey: mnemonic, onRecoveryKey: accept });
+    check(false, "a fast device clock passed the sale send gate");
+  } catch (error) {
+    check(error && error.code === "quote-refused" && error.params && error.params.why === "deadline-too-close",
+      "a device clock ahead of the chain closes the send window");
+  }
 }
 
 // THE WALLET'S PROVIDER IS THE OTHER PATH TO THE SAME SNAPSHOT. No `evmBlock` seam: the block number comes from
