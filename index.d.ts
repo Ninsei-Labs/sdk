@@ -1547,17 +1547,23 @@ export interface SellWatchRequest {
   readonly pollMs?: number;
   /** The node's window, if the caller does not rely on the record found by `escrow`. */
   readonly readyWindow?: ReadyWindow;
+  /** The exact arrival proof used for an unmarked claim after readyBy. */
+  readonly arrival?: XmrArrivalVerdict | null;
+  /** Reads the arrival for that proof on each poll; takes precedence over `arrival`. */
+  readonly verify?: (request: unknown) => Promise<XmrArrivalVerdict>;
+  /** Operators that must agree on an incomplete arrival. */
+  readonly requiredOperators?: number;
 }
 
 export interface SellWatchResult {
   readonly escrow: string;
-  readonly state: "ready" | "claim-open" | "claim-window-closed" | "claimed" | "refunded";
+  readonly state: "ready" | "claim-open" | "claim-not-proven" | "claim-window-closed" | "claimed" | "refunded";
   readonly funded: boolean;
   readonly claimed: boolean;
   readonly refunded: boolean;
   /** `null` for a terminal claim/refund: the ready mark is not part of that answer. */
   readonly ready: boolean | null;
-  /** True when the escrow's readyBy has passed, t1 has not, and no ready mark or terminal action was seen. */
+  /** True only when the claim is proven, or the node marked the order ready. */
   readonly claimOpen: boolean;
   /** The order's deadline when the answer is about the claim window. */
   readonly t1?: number | null;
@@ -1565,6 +1571,9 @@ export interface SellWatchResult {
   readonly secondsLeft?: number | null;
   readonly balanceWei: string;
   readonly waitedMs: number;
+  readonly reason?: string;
+  readonly verdict?: XmrArrivalVerdict | null;
+  readonly decision?: ActionDecision | null;
 }
 
 export interface SwapWatchRequest {

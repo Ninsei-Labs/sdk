@@ -2411,6 +2411,8 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
         return Number.isFinite(at) ? Math.floor(at / 1000) : null;
       };
       const started = Date.now();
+      const readArrival = typeof request.verify === "function" ? request.verify
+        : (request.arrival && typeof request.arrival === "object" ? async () => request.arrival : null);
       let lastStatus = null;
       let lastError = null;
       for (;;) {
@@ -2456,9 +2458,40 @@ export function createSwaps({ preflight, createRecord, mode = null, xmrNetwork =
                 ready: false, claimOpen: false, balanceWei: String(lastStatus.balance), waitedMs: Date.now() - started,
                 t1, secondsLeft };
             }
-            return { escrow, state: "claim-open", funded: true, claimed: false, refunded: false,
-              ready: false, claimOpen: true, balanceWei: String(lastStatus.balance), waitedMs: Date.now() - started,
-              t1, secondsLeft };
+            // WITHOUT THE NODE'S READY MARK THE CLAIM NEEDS THE EXACT PROOF. The one decision owns the rule; a
+            // missing or non-exact verdict closes the claim instead of opening it on the clock alone.
+            let verdict = null;
+            try {
+              verdict = readArrival ? await readArrival({ escrow, readyBy, t1, nowSec: at }) : null;
+            } catch (error) {
+              lastError = (error && error.code) || "arrival-unread";
+            }
+            let decision = null;
+            let chainTime = at;
+            try {
+              const snapshot = await chainSnapshot();
+              const stamp = Number(snapshot && snapshot.timestamp);
+              if (Number.isSafeInteger(stamp) && stamp > 0) chainTime = stamp;
+            } catch { /* no chain block: the device clock is the only timestamp this host can offer */ }
+            try {
+              decision = actionDecision({ side: "sale",
+                escrow: { status: lastStatus, ready: false, readyBy, t1, block: { timestamp: chainTime } },
+                arrival: verdict, deviceTimeSec: at, requiredOperators: request.requiredOperators });
+            } catch (error) {
+              lastError = (error && error.code) || "decision-unread";
+            }
+            if (decision && decision.action === "claim") {
+              return { escrow, state: "claim-open", funded: true, claimed: false, refunded: false,
+                ready: false, claimOpen: true, balanceWei: String(lastStatus.balance), waitedMs: Date.now() - started,
+                t1, secondsLeft, verdict, decision };
+            }
+            // ONLY A NON-EXACT PROOF ENDS THE WAIT. A verifying/confirming payment and a transient read error keep
+            // polling until the deadline; returning early would flatten a live claim window into a terminal answer.
+            if (decision && decision.action === "none" && decision.reason === "claim-not-proven") {
+              return { escrow, state: "claim-not-proven", funded: true, claimed: false, refunded: false,
+                ready: false, claimOpen: false, balanceWei: String(lastStatus.balance), waitedMs: Date.now() - started,
+                t1, secondsLeft, reason: decision.reason, verdict, decision };
+            }
           }
         }
         if (Date.now() - started >= timeoutMs) {
