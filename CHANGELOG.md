@@ -1,6 +1,7 @@
 ## Unreleased — 2026-11-27
 
 - `startSell` now asks `actionDecision` for the send window: a marked order is refused, the window closes by the later of the chain and device clocks, and a stale escrow is named instead of passing.
+- `sellWatch` no longer opens an unmarked claim on the clock alone: after `readyBy` it needs an exact arrival proof, otherwise it reports `claim-not-proven` with no claim.
 - `refundIfXmrMissing` now asks `actionDecision` when the escrow cut is available: an absent read is refunded only inside the decision window, and an `unknown`+`absent` answer, a stale cut or the 180 s margin never calls the wallet.
 - **BREAKING:** `actionDecision` no longer asks for XMR again when a node read already shows a payment, including an unverified amount or an underpaid/locked refusal, requires the exact rule and comparison for an unmarked sale claim, treats `unknown` plus `absent` as unread, keeps a two-operator confirming payment out of the refund offer, uses the caller's `requiredOperators`, refuses closing windows on an escrow older than `maxBlockAgeSec` (600 s by default), and asks for `saleLeadSec` only when XMR may still be sent. An early refund now names the second it closes.
 - `recoveryEndHeight` treats `get_info.height` as the block count and reads the reachable tip one block below it, so a real monerod no longer refuses the first header request.
