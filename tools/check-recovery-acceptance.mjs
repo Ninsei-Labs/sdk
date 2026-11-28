@@ -164,8 +164,8 @@ if (JSON.stringify(absoluteHeights(resumedWitness.calls)) !== JSON.stringify(exp
 const blockTxs = new Set();
 for (const call of witness.calls) {
   const result = call.payload && call.payload.result;
-  const hashes = result && (Array.isArray(result.tx_hashes) ? result.tx_hashes
-    : (result.json && Array.isArray(result.json.tx_hashes) ? result.json.tx_hashes : []));
+  const hashes = (result && (Array.isArray(result.tx_hashes) ? result.tx_hashes
+    : (result.json && Array.isArray(result.json.tx_hashes) ? result.json.tx_hashes : []))) || [];
   for (const hash of hashes) blockTxs.add(hash);
 }
 if (blockTxs.size) {
