@@ -34,7 +34,13 @@ const walletFor = (failure) => ({
 const chainFor = ({ now, ready }) => {
   const t1 = now + 10_000;
   const readyBy = now + 5_000;
+  const refundWithoutHalf = engine.escrow.encodeRefund("0x" + "00".repeat(32));
   return async ({ data }) => {
+    if (data === refundWithoutHalf) {
+      const error = new Error("execution reverted: BadHalf");
+      error.data = "0x0911bd1c";
+      throw error;
+    }
     if (data === engine.escrow.encodeStatus()) return words(1, 0, 0, 0);
     if (data === engine.escrow.encodeT1()) return words(t1);
     if (data === engine.escrow.encodeTermsHash()) return TERMS;

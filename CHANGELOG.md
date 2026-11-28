@@ -1,5 +1,6 @@
 ## Unreleased — 2026-11-27
 
+- `actions.refund` now simulates `refund(0)` through the same reader before the wallet: only the contract's `BadHalf` answer passes, and the real half never goes into the `eth_call`.
 - `sellWatch` no longer opens an unmarked claim on the clock alone: after `readyBy` it needs an exact arrival proof, otherwise it reports `claim-not-proven` with no claim.
 - `refundIfXmrMissing` now asks `actionDecision` when the escrow cut is available: an absent read is refunded only inside the decision window, and an `unknown`+`absent` answer, a stale cut or the 180 s margin never calls the wallet.
 - **BREAKING:** `actionDecision` no longer asks for XMR again when a node read already shows a payment, including an unverified amount or an underpaid/locked refusal, requires the exact rule and comparison for an unmarked sale claim, treats `unknown` plus `absent` as unread, keeps a two-operator confirming payment out of the refund offer, uses the caller's `requiredOperators`, refuses closing windows on an escrow older than `maxBlockAgeSec` (600 s by default), and asks for `saleLeadSec` only when XMR may still be sent. An early refund now names the second it closes.
