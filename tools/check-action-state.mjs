@@ -10,6 +10,7 @@ import { keccak256, secp256k1 } from "../src/primitives.mjs";
 
 const { encodeStatus, encodeRead, encodeClaim, encodeRefund, encodeMarkReady } = engine.escrow;
 const slot = "0x" + "11".repeat(32);
+const REFUND_WITHOUT_HALF = encodeRefund("0x" + "00".repeat(32));
 // THE HALF AND ITS COMMITMENT ARE ONE PAIR. The escrow compares the low 160 bits of keccak256(x||y) of half*G,
 // so the fixture computes the commitment with the same formula and lets the fake chain answer with it.
 const commit = halfCommitmentHex(BigInt(slot), secp256k1, keccak256);
@@ -18,11 +19,18 @@ const status = (funded, claimed, refunded) => "0x" + [funded, claimed, refunded,
 const expect = { edPointLocker: slot, edPointClaimer: slot, edViewPointLocker: slot, commitHalfLocker: commit, commitHalfClaimer: commit };
 // What every reader of a transaction will see: the half, left-padded to 32 bytes.
 const paddedHalf = slot.replace(/^0x/, "");
-const fake = ({ state = status(1, 0, 0), ready = 1, now = 1000, readyBy = 2000, t1 = 3000, clock = true, revertAction = null } = {}) => {
+const fake = ({ state = status(1, 0, 0), ready = 1, now = 1000, readyBy = 2000, t1 = 3000, clock = true, revertAction = null,
+  refundRevert = "0x0911bd1c", refundNoRevert = false } = {}) => {
   const sent = [];
   const calls = [];
   const call = async ({ data }) => {
     calls.push({ data });
+    if (data === REFUND_WITHOUT_HALF) {
+      if (refundNoRevert) return slot;
+      const error = new Error("execution reverted: BadHalf");
+      error.data = refundRevert;
+      throw error;
+    }
     if (revertAction && data === revertAction) throw new Error("execution reverted: simulation");
     if (data === encodeStatus()) return state;
     if (data === encodeRead("ready")) return "0x" + word(ready);
@@ -135,6 +143,23 @@ export const actionStateCheck = async () => {
     if (f.calls.some((entry) => entry.data === encodeClaim(slot) || entry.data === encodeRefund(slot))) {
       problems.push(`${name} still simulated the action with the half`);
     }
+  }
+
+  // THE REFUND'S DRY RUN CARRIES NO HALF AND ACCEPTS ONLY BadHalf. `refund(0)` reaches the contract's own
+  // state and clock checks without revealing the real half; every other answer refuses before the wallet.
+  {
+    const f = fake({ ready: 0 });
+    const done = await refundOrder({ escrow: "0x" + "aa".repeat(20), halfLocker: slot, expect, deps: f.deps });
+    if (!done || !done.hash) problems.push("a refund with a BadHalf dry run did not send");
+    if (!f.calls.some((entry) => entry.data === REFUND_WITHOUT_HALF)) problems.push("the refund did not dry-run refund(0)");
+  }
+  for (const [name, options] of [
+    ["another revert", { refundRevert: "0x085de625" }],
+    ["no revert", { refundNoRevert: true }],
+  ]) {
+    const f = fake({ ready: 0, ...options });
+    const got = await why(() => refundOrder({ escrow: "0x" + "aa".repeat(20), halfLocker: slot, expect, deps: f.deps }));
+    if (got !== "simulation" || f.sent.length) problems.push(`a refund dry run with ${name} answered ${JSON.stringify(got)} and sent ${f.sent.length}`);
   }
 
   // THE ESCROW'S OWN COMPARISON, RUN LOCALLY: a foreign half and a value that is not a half both stop before the

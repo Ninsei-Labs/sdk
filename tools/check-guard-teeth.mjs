@@ -109,6 +109,12 @@ const cases = [
     wants: "simulation",
   },
   {
+    check: "action-state", source: "src/swap-flow.mjs",
+    name: "the refund dry run is removed",
+    from: "  await simulateRefundWithoutHalf(escrow, deps);\n", to: "",
+    wants: "did not dry-run refund(0)",
+  },
+  {
     check: "sell-start", source: "src/swaps.mjs",
     name: "the full-width commitment check is removed",
     from: "if (!ownCommit || fullHex(ownCommit) !== fullHex(quote.commitHalfClaimer)) {", to: "if (false) {",

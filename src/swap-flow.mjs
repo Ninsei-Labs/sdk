@@ -666,6 +666,38 @@ export async function claimOrder({ escrow, halfClaimer, expect, onStep, deps = {
   return { hash };
 }
 
+// THE REFUND IS DRY-RUN WITHOUT THE HALF. `refund(0)` reaches the contract's own state and clock checks, and a
+// zero word never matches `commitHalfLocker`, so the only acceptable answer is `BadHalf`. Any other revert, a
+// transport failure or no revert at all refuses before the wallet is asked. The real half stays out of `eth_call`.
+const BAD_HALF_SELECTOR = "0x0911bd1c";
+const REFUND_WITHOUT_HALF = encodeRefund("0x" + "00".repeat(32));
+const revertSelectorOf = (error) => {
+  const candidates = [error && error.data, error && error.data && error.data.data,
+    error && error.cause && error.cause.data, error && error.cause && error.cause.data && error.cause.data.data,
+    error && error.info && error.info.error && error.info.error.data, error && error.error && error.error.data];
+  for (const value of candidates) {
+    if (typeof value === "string" && /^0x[0-9a-f]{8}/i.test(value)) return value.slice(0, 10).toLowerCase();
+  }
+  return null;
+};
+const isRevert = (error, selector) => selector !== null
+  || /execution reverted|revert/i.test(String((error && error.message) || ""));
+async function simulateRefundWithoutHalf(escrow, deps) {
+  const call = deps.call;
+  // A direct caller without a reader keeps the old path; the actions facade always brings one.
+  if (typeof call !== "function") return;
+  try {
+    await call({ to: escrow, data: REFUND_WITHOUT_HALF });
+  } catch (error) {
+    const selector = revertSelectorOf(error);
+    if (selector === BAD_HALF_SELECTOR) return;
+    if (!isRevert(error, selector)) throw error;
+    throw new SdkError("contract-reverted", { step: "refund", why: "simulation",
+      detail: selector || String((error && error.message) || "").slice(0, 200) });
+  }
+  throw new SdkError("contract-reverted", { step: "refund", why: "simulation", detail: "no-revert" });
+}
+
 // Refund after the settlement deadline t1. It requires the DEPOSITOR'S half: the contract compares its hash
 // against the commitHalfLocker commitment (:235), publishes it and always sends the money to the depositor
 // (:242). Hence a consequence to be aware of: it is not "anyone" who can refund, but whoever holds the
@@ -687,6 +719,7 @@ export async function refundOrder({ escrow, halfLocker, onStep, expect = null, d
   // THE SAME LOCAL CHECK ON THE DEPOSITOR'S HALF. A refund reveals it exactly as a claim reveals the claimer's,
   // so it is compared with the escrow's `commitHalfLocker` before the signature and never sent to a dry run.
   await assertHalfMatchesCommit(escrow, halfLocker, "commitHalfLocker", "refund", deps);
+  await simulateRefundWithoutHalf(escrow, deps);
   onStep?.("confirm-refund");
   const hash = await (deps.send || sendTransaction)({ to: escrow, data: encodeRefund(halfLocker), gas: 250_000n });
   return { hash };
