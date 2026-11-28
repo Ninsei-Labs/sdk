@@ -130,7 +130,12 @@ const seed = async (overrides = {}) => {
   const request = { offer: made, recoveryKey: mnemonic, onRecoveryKey: accept };
   if (Array.isArray(overrides.claimSenders)) request.claimSenders = overrides.claimSenders;
   else if (!overrides.omitClaimSender) request.claimSenders = [storedSender];
-  return await swaps.startSell(request);
+  // A RECORD IS STARTED BEFORE THE MAKER'S READY MARK. The claim cases below set the mark themselves; keeping it
+  // set here would make the send gate refuse the seed as an order that already has nothing to send.
+  const priorReady = readyMark;
+  readyMark = 0;
+  try { return await swaps.startSell(request); }
+  finally { readyMark = priorReady; }
 };
 
 const answer = (sender, txid, at = escrow) => ({ ok: true, status: 200, json: async () => ({
@@ -191,10 +196,15 @@ export const relayClaimCheck = async () => {
     check(offered && Array.isArray(offered.claimSenders) && offered.claimSenders.length === 1
       && offered.claimSenders[0] === lower(secondSender),
       "an offer-only sender was not stored as the list: " + JSON.stringify({ offered }));
-    const again = await swaps.startSell({ offer: { ...offer,
-      escrow: offered.escrow, quote: { ...quote, id: "oq_offer_only_again" },
-      orderQuote: { ...quote, id: "oq_offer_only_again", signature: "0x" + "55".repeat(65) },
-      jointAddress: offered.address }, recoveryKey: mnemonic, onRecoveryKey: accept });
+    const priorReady = readyMark;
+    readyMark = 0;
+    let again = null;
+    try {
+      again = await swaps.startSell({ offer: { ...offer,
+        escrow: offered.escrow, quote: { ...quote, id: "oq_offer_only_again" },
+        orderQuote: { ...quote, id: "oq_offer_only_again", signature: "0x" + "55".repeat(65) },
+        jointAddress: offered.address }, recoveryKey: mnemonic, onRecoveryKey: accept });
+    } finally { readyMark = priorReady; }
     check(again && again.resumed === true
       && Array.isArray(again.claimSenders) && again.claimSenders[0] === lower(secondSender),
       "a resume replaced the client's stored sender list: " + JSON.stringify({ again }));
@@ -256,9 +266,14 @@ export const relayClaimCheck = async () => {
   // (0c) A RESUMED OFFER MAY NAME ANOTHER SENDER. THE STORED LIST IS NOT A PIN; THE CLIENT'S LIST AT CLAIM TIME
   // IS THE AUTHORITY.
   {
-    const resumed = await swaps.startSell({ offer: { ...offer, escrow, jointAddress: stored.escrow.moneroAddress,
-      quote: { ...stored.quote }, orderQuote: stored.orderQuote },
-      recoveryKey: mnemonic, onRecoveryKey: accept, claimSenders: [secondSender] });
+    const priorReady = readyMark;
+    readyMark = 0;
+    let resumed = null;
+    try {
+      resumed = await swaps.startSell({ offer: { ...offer, escrow, jointAddress: stored.escrow.moneroAddress,
+        quote: { ...stored.quote }, orderQuote: stored.orderQuote },
+        recoveryKey: mnemonic, onRecoveryKey: accept, claimSenders: [secondSender] });
+    } finally { readyMark = priorReady; }
     const after = engine.swap.getSwap(record.id, store);
     check(resumed && resumed.resumed === true && after && Array.isArray(after.claimSenders)
       && after.claimSenders[0] === lower(secondSender),
