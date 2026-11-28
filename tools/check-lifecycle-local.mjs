@@ -59,6 +59,7 @@ const bytes = (value) => String(value).replace(/^0x/, "").padStart(64, "0");
 const slotReads = {
   [encodeRead("t1")]: word(order.t1),
   [encodeRead("readyBy")]: word(order.readyBy),
+  [encodeRead("ready")]: word(0),
   [encodeRead("termsHash")]: "00".repeat(32),
   [encodeRead("edPointLocker")]: bytes(offer.nodeHalf.edPoint),
   [encodeRead("edPointClaimer")]: bytes(quote.edPointClaimer),
@@ -114,7 +115,7 @@ if (first) {
   const traced = createSwaps({ config: {}, call: tracedRead });
   try {
     await traced.startSell({ offer, recoveryKey: mnemonic, onRecoveryKey: accept });
-    const required = [encodeStatus(), encodeRead("t1"), encodeRead("readyBy"), encodeRead("termsHash"),
+    const required = [encodeStatus(), encodeRead("t1"), encodeRead("readyBy"), encodeRead("ready"), encodeRead("termsHash"),
       encodeRead("edPointLocker"), encodeRead("edPointClaimer"), encodeRead("edViewPointLocker"),
       encodeRead("commitHalfLocker"), encodeRead("commitHalfClaimer")];
     const missing = required.filter((data) => !trace.includes(data));
