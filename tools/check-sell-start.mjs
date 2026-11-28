@@ -163,15 +163,11 @@ try {
 // A MARKED ORDER HAS NOTHING TO SEND, and a device clock ahead of the chain narrows the same send window.
 {
   const marked = createSwaps({ config: {}, call: gateRead(1, { [encodeRead("ready")]: word(1) }) });
-  try {
-    await marked.startSell({ offer: { ...gateOffer, escrow: "0x" + "fe".repeat(20),
-      quote: { ...gateOffer.quote, id: "oq_gate_ready" }, jointAddress: "5" + "G".repeat(94) },
-      recoveryKey: mnemonic, onRecoveryKey: accept });
-    check(false, "an already marked order passed the send gate");
-  } catch (error) {
-    check(error && error.code === "quote-refused" && error.params && error.params.why === "already-ready",
-      "an already marked order is refused without a send");
-  }
+  const markedResult = await marked.startSell({ offer: { ...gateOffer, escrow: "0x" + "fe".repeat(20),
+    quote: { ...gateOffer.quote, id: "oq_gate_ready" }, jointAddress: "5" + "G".repeat(94) },
+    recoveryKey: mnemonic, onRecoveryKey: accept });
+  check(markedResult && markedResult.next === "claim",
+    "an already marked order keeps its record and moves to the claim");
   const fastDevice = createSwaps({ config: {}, call: read, now: () => (order.readyBy - 1_000) * 1000,
     evmBlock: async () => ({ number: 123, timestamp: order.readyBy - 1_500 }) });
   try {
